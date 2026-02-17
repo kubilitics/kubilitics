@@ -9,6 +9,11 @@ import { Button } from '@/components/ui/button';
 import { Plus, X } from 'lucide-react';
 import { useCreateK8sResource } from '@/hooks/useKubernetes';
 import { useKubernetesConfigStore } from '@/stores/kubernetesConfigStore';
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
+import { useClusterStore } from '@/stores/clusterStore';
+import { useQueryClient } from '@tanstack/react-query';
+import { applyManifest } from '@/services/backendApiClient';
+import { toast } from 'sonner';
 
 interface ServiceWizardProps {
   onClose: () => void;
@@ -30,6 +35,13 @@ interface SelectorEntry {
 export function ServiceWizard({ onClose, onSubmit }: ServiceWizardProps) {
   const { config } = useKubernetesConfigStore();
   const createResource = useCreateK8sResource('services');
+  const queryClient = useQueryClient();
+  const backendBaseUrl = getEffectiveBackendBaseUrl(useBackendConfigStore((s) => s.backendBaseUrl));
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
+  const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
+  const activeCluster = useClusterStore((s) => s.activeCluster);
+  const clusterId = activeCluster?.id ?? currentClusterId;
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [name, setName] = useState('');
   const [namespace, setNamespace] = useState('default');
@@ -303,11 +315,29 @@ ${portsYaml}`;
   ];
 
   const handleSubmit = async () => {
-    if (config.isConnected) {
-      await createResource.mutateAsync({ yaml, namespace });
-      onClose();
-    } else {
-      onSubmit(yaml);
+    try {
+      if (isBackendConfigured() && clusterId) {
+        setIsSubmitting(true);
+        await applyManifest(backendBaseUrl, clusterId, yaml);
+        queryClient.invalidateQueries({ queryKey: ['k8s', 'services'] });
+        queryClient.invalidateQueries({ queryKey: ['backend', 'resources', clusterId, 'services'] });
+        toast.success('Service created successfully');
+        onClose();
+        onSubmit?.(yaml);
+      } else if (config.isConnected) {
+        await createResource.mutateAsync({ yaml, namespace });
+        onClose();
+        onSubmit?.(yaml);
+      } else {
+        onSubmit?.(yaml);
+        onClose();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to create Service: ${message}`);
+      throw err;
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -319,7 +349,7 @@ ${portsYaml}`;
       yaml={yaml}
       onClose={onClose}
       onSubmit={handleSubmit}
-      isSubmitting={createResource.isPending}
+      isSubmitting={createResource.isPending || isSubmitting}
     />
   );
 }

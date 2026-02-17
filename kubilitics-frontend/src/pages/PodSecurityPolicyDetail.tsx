@@ -1,13 +1,19 @@
-import { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Shield, Clock, Lock, Download, Trash2, AlertTriangle } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Shield, Clock, Lock, Download, Trash2, AlertTriangle, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
 import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs,
-  YamlViewer, EventsSection, ActionsSection,
-  type ResourceStatus, type EventInfo,
+  ResourceDetailLayout,
+  YamlViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  ResourceTopologyView,
+  type ResourceStatus,
+  type EventInfo,
 } from '@/components/resources';
 
 const mockPSP = {
@@ -57,8 +63,20 @@ spec:
 
 export default function PodSecurityPolicyDetail() {
   const { name } = useParams();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const psp = mockPSP;
+
+  const handleDownloadYaml = useCallback(() => {
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${psp.name || 'psp'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [psp.name]);
 
   const statusCards = [
     { label: 'Privileged', value: psp.privileged ? 'Yes' : 'No', icon: Lock, iconColor: psp.privileged ? 'error' as const : 'success' as const },
@@ -153,33 +171,61 @@ export default function PodSecurityPolicyDetail() {
     { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
     { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={psp.name} /> },
     {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('PodSecurityPolicy')}
+          namespace={''}
+          name={name ?? ''}
+          sourceResourceType="PodSecurityPolicy"
+          sourceResourceName={psp.name ?? name ?? ''}
+        />
+      ),
+    },
+    {
       id: 'actions',
       label: 'Actions',
       content: (
         <ActionsSection actions={[
-          { icon: Download, label: 'Download YAML', description: 'Export PSP definition' },
-          { icon: Trash2, label: 'Delete PSP', description: 'Remove this pod security policy', variant: 'destructive' },
+          { icon: Download, label: 'Download YAML', description: 'Export PSP definition', onClick: handleDownloadYaml },
+          { icon: Trash2, label: 'Delete PSP', description: 'Remove this pod security policy', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]} />
       ),
     },
   ];
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="PodSecurityPolicy"
         resourceIcon={Shield}
         name={psp.name}
         status={psp.status}
         backLink="/podsecuritypolicies"
         backLabel="Pod Security Policies"
-        metadata={<span className="flex items-center gap-1.5 ml-2"><Clock className="h-3.5 w-3.5" />Created {psp.age}</span>}
+        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {psp.age}</span>}
         actions={[
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="PodSecurityPolicy"
+        resourceName={psp.name}
+        onConfirm={() => {
+          toast.success(`PodSecurityPolicy ${psp.name} deleted (demo mode)`);
+          navigate('/podsecuritypolicies');
+        }}
+        requireNameConfirmation
+      />
+    </>
   );
 }

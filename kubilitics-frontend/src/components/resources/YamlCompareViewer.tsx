@@ -26,7 +26,7 @@ export interface YamlCompareViewerProps {
   onSelectVersion?: (version: YamlVersion) => void;
 }
 
-function computeDiff(leftYaml: string, rightYaml: string): DiffLine[] {
+export function computeDiff(leftYaml: string, rightYaml: string): DiffLine[] {
   const leftLines = leftYaml.split('\n');
   const rightLines = rightYaml.split('\n');
   const result: DiffLine[] = [];

@@ -390,6 +390,27 @@ spec:
           averageUtilization: 50`
       }
     ]
+  },
+  APIService: {
+    docUrl: 'https://kubernetes.io/docs/tasks/extend-kubernetes/configure-aggregation-layer/',
+    apiRef: 'https://kubernetes.io/docs/reference/kubernetes-api/cluster-resources/api-service-v1/',
+    description: 'APIService defines a way to register extension API servers (e.g. metrics, custom resources) into the cluster API.',
+    examples: [
+      {
+        name: 'APIService pointing to a service',
+        yaml: `apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.metrics.k8s.io
+spec:
+  service:
+    namespace: kube-system
+    name: metrics-server
+  group: metrics.k8s.io
+  version: v1beta1
+  insecureSkipTLSVerify: false`
+      }
+    ]
   }
 };
 

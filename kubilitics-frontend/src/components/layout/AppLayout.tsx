@@ -1,16 +1,95 @@
-import { Outlet } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { useReducedMotion } from 'framer-motion';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
+import { BackendStatusBanner } from './BackendStatusBanner';
+import { ConnectionRequiredBanner } from './ConnectionRequiredBanner';
 import { AIAssistant } from '@/components/ai';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
+import { useRecentlyVisited } from '@/hooks/useRecentlyVisited';
+import { cn } from '@/lib/utils';
 
 export function AppLayout() {
+  useRecentlyVisited();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const reduceMotion = useReducedMotion();
+  const { isConnected } = useConnectionStatus();
+  const gPendingRef = useRef(false);
+  const gTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const inInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      if (inInput) return;
+
+      if (e.key === 'g' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        gPendingRef.current = true;
+        if (gTimeoutRef.current) clearTimeout(gTimeoutRef.current);
+        gTimeoutRef.current = setTimeout(() => {
+          gPendingRef.current = false;
+          gTimeoutRef.current = null;
+        }, 800);
+        return;
+      }
+      if (e.key === 'p' && gPendingRef.current) {
+        e.preventDefault();
+        gPendingRef.current = false;
+        navigate('/pods');
+        return;
+      }
+      if (e.key === 'n' && gPendingRef.current) {
+        e.preventDefault();
+        gPendingRef.current = false;
+        navigate('/nodes');
+        return;
+      }
+      if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('openGlobalSearch'));
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      if (gTimeoutRef.current) clearTimeout(gTimeoutRef.current);
+    };
+  }, [navigate]);
+
   return (
     <div className="min-h-screen bg-background">
+      <a
+        href="#main-content"
+        className="absolute left-0 top-0 -translate-x-full focus:translate-x-0 focus:z-[100] px-4 py-2 bg-primary text-primary-foreground rounded-br focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-transform duration-200"
+      >
+        Skip to main content
+      </a>
       <Header />
       <div className="flex">
         <Sidebar />
-        <main className="flex-1 p-6 overflow-auto">
-          <Outlet />
+        <main id="main-content" className="flex-1 p-6 pb-28 pr-3 overflow-auto flex flex-col gap-4 min-h-0" role="main" aria-label="Main content">
+          <ConnectionRequiredBanner />
+          <BackendStatusBanner />
+          <div
+            className={cn(
+              'flex flex-col gap-4 min-h-0 flex-1 transition-opacity duration-200',
+              !isConnected && 'opacity-50 pointer-events-none select-none'
+            )}
+            aria-hidden={!isConnected}
+          >
+            <motion.div
+              key={location.pathname}
+              initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: reduceMotion ? 0 : 0.25, ease: 'easeOut' }}
+              className="flex flex-col gap-4 min-h-0 flex-1"
+            >
+              <Outlet />
+            </motion.div>
+          </div>
         </main>
       </div>
       <AIAssistant />

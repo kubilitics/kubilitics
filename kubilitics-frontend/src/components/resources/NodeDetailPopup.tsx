@@ -78,7 +78,7 @@ interface NodeDetailPopupProps {
   position?: { x: number; y: number };
   onClose: () => void;
   onViewDetails?: (resource: ResourceDetail) => void;
-  sourceResourceType?: string; // The resource type we're viewing topology from
+  sourceResourceType?: string; // The resource type we're viewing from
   sourceResourceName?: string; // The name of the resource we started from
 }
 
@@ -297,13 +297,11 @@ export function NodeDetailPopup({
         label: sourceResourceName, 
         type: sourceResourceType.replace(/s$/, '') as ResourceType 
       });
-      trail.push({ label: 'Topology' });
     } else if (currentResourceType) {
       // Fallback to current path
       const pathType = currentResourceType.replace(/s$/, '') as ResourceType;
       if (resourceLabels[pathType]) {
         trail.push({ label: resourceLabels[pathType], type: pathType });
-        trail.push({ label: 'Topology' });
       }
     }
     

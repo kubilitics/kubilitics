@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewGraph(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
 	assert.NotNil(t, graph)
 	assert.Equal(t, 0, len(graph.Nodes))
@@ -18,14 +18,11 @@ func TestNewGraph(t *testing.T) {
 }
 
 func TestAddNode(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
 	node := models.TopologyNode{
-		ID:        "pod-123",
-		Type:      "Pod",
-		Namespace: "default",
-		Name:      "nginx",
-		Status:    "Running",
+		ID: "pod-123", Kind: "Pod", Namespace: "default", Name: "nginx", Status: "Running",
+		Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{},
 	}
 	
 	graph.AddNode(node)
@@ -36,12 +33,11 @@ func TestAddNode(t *testing.T) {
 }
 
 func TestAddNodeDuplicate(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
 	node := models.TopologyNode{
-		ID:   "pod-123",
-		Type: "Pod",
-		Name: "nginx",
+		ID: "pod-123", Kind: "Pod", Name: "nginx",
+		Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{},
 	}
 	
 	graph.AddNode(node)
@@ -52,14 +48,11 @@ func TestAddNodeDuplicate(t *testing.T) {
 }
 
 func TestAddEdge(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
 	edge := models.TopologyEdge{
-		ID:     "edge-1",
-		Source: "deploy-1",
-		Target: "pod-1",
-		Type:   "owner",
-		Label:  "owns",
+		ID: "edge-1", Source: "deploy-1", Target: "pod-1", RelationshipType: "owner", Label: "owns",
+		Metadata: models.EdgeMetadata{},
 	}
 	
 	graph.AddEdge(edge)
@@ -69,13 +62,11 @@ func TestAddEdge(t *testing.T) {
 }
 
 func TestAddEdgeDuplicate(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
 	edge := models.TopologyEdge{
-		ID:     "edge-1",
-		Source: "deploy-1",
-		Target: "pod-1",
-		Type:   "owner",
+		ID: "edge-1", Source: "deploy-1", Target: "pod-1", RelationshipType: "owner",
+		Metadata: models.EdgeMetadata{},
 	}
 	
 	graph.AddEdge(edge)
@@ -86,12 +77,11 @@ func TestAddEdgeDuplicate(t *testing.T) {
 }
 
 func TestGetNode(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
 	node := models.TopologyNode{
-		ID:   "pod-123",
-		Type: "Pod",
-		Name: "nginx",
+		ID: "pod-123", Kind: "Pod", Name: "nginx",
+		Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{},
 	}
 	
 	graph.AddNode(node)
@@ -105,11 +95,11 @@ func TestGetNode(t *testing.T) {
 }
 
 func TestGetNodesByType(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
-	graph.AddNode(models.TopologyNode{ID: "pod-1", Type: "Pod", Name: "nginx-1"})
-	graph.AddNode(models.TopologyNode{ID: "pod-2", Type: "Pod", Name: "nginx-2"})
-	graph.AddNode(models.TopologyNode{ID: "svc-1", Type: "Service", Name: "nginx-svc"})
+	graph.AddNode(models.TopologyNode{ID: "pod-1", Kind: "Pod", Name: "nginx-1", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph.AddNode(models.TopologyNode{ID: "pod-2", Kind: "Pod", Name: "nginx-2", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph.AddNode(models.TopologyNode{ID: "svc-1", Kind: "Service", Name: "nginx-svc", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
 	
 	pods := graph.GetNodesByType("Pod")
 	assert.Equal(t, 2, len(pods))
@@ -122,11 +112,11 @@ func TestGetNodesByType(t *testing.T) {
 }
 
 func TestGenerateLayoutSeed(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
-	graph.AddNode(models.TopologyNode{ID: "pod-1", Type: "Pod", Namespace: "default", Name: "nginx"})
-	graph.AddNode(models.TopologyNode{ID: "svc-1", Type: "Service", Namespace: "default", Name: "nginx-svc"})
-	graph.AddEdge(models.TopologyEdge{ID: "edge-1", Source: "svc-1", Target: "pod-1", Type: "selector"})
+	graph.AddNode(models.TopologyNode{ID: "pod-1", Kind: "Pod", Namespace: "default", Name: "nginx", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph.AddNode(models.TopologyNode{ID: "svc-1", Kind: "Service", Namespace: "default", Name: "nginx-svc", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph.AddEdge(models.TopologyEdge{ID: "edge-1", Source: "svc-1", Target: "pod-1", RelationshipType: "selector", Metadata: models.EdgeMetadata{}})
 	
 	seed1 := graph.GenerateLayoutSeed()
 	assert.NotEmpty(t, seed1)
@@ -139,15 +129,15 @@ func TestGenerateLayoutSeed(t *testing.T) {
 
 func TestGenerateLayoutSeedDeterminism(t *testing.T) {
 	// Create two identical graphs
-	graph1 := NewGraph()
-	graph1.AddNode(models.TopologyNode{ID: "pod-1", Type: "Pod", Namespace: "default", Name: "nginx"})
-	graph1.AddNode(models.TopologyNode{ID: "svc-1", Type: "Service", Namespace: "default", Name: "nginx-svc"})
-	graph1.AddEdge(models.TopologyEdge{ID: "edge-1", Source: "svc-1", Target: "pod-1", Type: "selector"})
+	graph1 := NewGraph(0)
+	graph1.AddNode(models.TopologyNode{ID: "pod-1", Kind: "Pod", Namespace: "default", Name: "nginx", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph1.AddNode(models.TopologyNode{ID: "svc-1", Kind: "Service", Namespace: "default", Name: "nginx-svc", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph1.AddEdge(models.TopologyEdge{ID: "edge-1", Source: "svc-1", Target: "pod-1", RelationshipType: "selector", Metadata: models.EdgeMetadata{}})
 	
-	graph2 := NewGraph()
-	graph2.AddNode(models.TopologyNode{ID: "pod-1", Type: "Pod", Namespace: "default", Name: "nginx"})
-	graph2.AddNode(models.TopologyNode{ID: "svc-1", Type: "Service", Namespace: "default", Name: "nginx-svc"})
-	graph2.AddEdge(models.TopologyEdge{ID: "edge-1", Source: "svc-1", Target: "pod-1", Type: "selector"})
+	graph2 := NewGraph(0)
+	graph2.AddNode(models.TopologyNode{ID: "pod-1", Kind: "Pod", Namespace: "default", Name: "nginx", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph2.AddNode(models.TopologyNode{ID: "svc-1", Kind: "Service", Namespace: "default", Name: "nginx-svc", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph2.AddEdge(models.TopologyEdge{ID: "edge-1", Source: "svc-1", Target: "pod-1", RelationshipType: "selector", Metadata: models.EdgeMetadata{}})
 	
 	seed1 := graph1.GenerateLayoutSeed()
 	seed2 := graph2.GenerateLayoutSeed()
@@ -157,12 +147,12 @@ func TestGenerateLayoutSeedDeterminism(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
 	// Add nodes and edges
-	graph.AddNode(models.TopologyNode{ID: "pod-1", Type: "Pod", Name: "nginx"})
-	graph.AddNode(models.TopologyNode{ID: "svc-1", Type: "Service", Name: "nginx-svc"})
-	graph.AddEdge(models.TopologyEdge{ID: "edge-1", Source: "svc-1", Target: "pod-1", Type: "selector"})
+	graph.AddNode(models.TopologyNode{ID: "pod-1", Kind: "Pod", Name: "nginx", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph.AddNode(models.TopologyNode{ID: "svc-1", Kind: "Service", Name: "nginx-svc", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph.AddEdge(models.TopologyEdge{ID: "edge-1", Source: "svc-1", Target: "pod-1", RelationshipType: "selector", Metadata: models.EdgeMetadata{}})
 	
 	// Valid graph should pass
 	err := graph.Validate()
@@ -170,14 +160,12 @@ func TestValidate(t *testing.T) {
 }
 
 func TestValidateOrphanEdge(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
 	// Add edge without nodes
 	graph.AddEdge(models.TopologyEdge{
-		ID:     "edge-1",
-		Source: "nonexistent-1",
-		Target: "nonexistent-2",
-		Type:   "owner",
+		ID: "edge-1", Source: "nonexistent-1", Target: "nonexistent-2", RelationshipType: "owner",
+		Metadata: models.EdgeMetadata{},
 	})
 	
 	// Should fail validation
@@ -187,11 +175,11 @@ func TestValidateOrphanEdge(t *testing.T) {
 }
 
 func TestGetOutgoingEdges(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
-	graph.AddEdge(models.TopologyEdge{ID: "e1", Source: "n1", Target: "n2", Type: "owner"})
-	graph.AddEdge(models.TopologyEdge{ID: "e2", Source: "n1", Target: "n3", Type: "owner"})
-	graph.AddEdge(models.TopologyEdge{ID: "e3", Source: "n2", Target: "n3", Type: "selector"})
+	graph.AddEdge(models.TopologyEdge{ID: "e1", Source: "n1", Target: "n2", RelationshipType: "owner", Metadata: models.EdgeMetadata{}})
+	graph.AddEdge(models.TopologyEdge{ID: "e2", Source: "n1", Target: "n3", RelationshipType: "owner", Metadata: models.EdgeMetadata{}})
+	graph.AddEdge(models.TopologyEdge{ID: "e3", Source: "n2", Target: "n3", RelationshipType: "selector", Metadata: models.EdgeMetadata{}})
 	
 	edges := graph.GetOutgoingEdges("n1")
 	assert.Equal(t, 2, len(edges))
@@ -204,11 +192,11 @@ func TestGetOutgoingEdges(t *testing.T) {
 }
 
 func TestGetIncomingEdges(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
-	graph.AddEdge(models.TopologyEdge{ID: "e1", Source: "n1", Target: "n3", Type: "owner"})
-	graph.AddEdge(models.TopologyEdge{ID: "e2", Source: "n2", Target: "n3", Type: "owner"})
-	graph.AddEdge(models.TopologyEdge{ID: "e3", Source: "n1", Target: "n2", Type: "selector"})
+	graph.AddEdge(models.TopologyEdge{ID: "e1", Source: "n1", Target: "n3", RelationshipType: "owner", Metadata: models.EdgeMetadata{}})
+	graph.AddEdge(models.TopologyEdge{ID: "e2", Source: "n2", Target: "n3", RelationshipType: "owner", Metadata: models.EdgeMetadata{}})
+	graph.AddEdge(models.TopologyEdge{ID: "e3", Source: "n1", Target: "n2", RelationshipType: "selector", Metadata: models.EdgeMetadata{}})
 	
 	edges := graph.GetIncomingEdges("n3")
 	assert.Equal(t, 2, len(edges))
@@ -221,20 +209,20 @@ func TestGetIncomingEdges(t *testing.T) {
 }
 
 func TestToTopologyGraph(t *testing.T) {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
-	graph.AddNode(models.TopologyNode{ID: "pod-1", Type: "Pod", Name: "nginx"})
-	graph.AddNode(models.TopologyNode{ID: "svc-1", Type: "Service", Name: "nginx-svc"})
-	graph.AddEdge(models.TopologyEdge{ID: "edge-1", Source: "svc-1", Target: "pod-1", Type: "selector"})
+	graph.AddNode(models.TopologyNode{ID: "pod-1", Kind: "Pod", Name: "nginx", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph.AddNode(models.TopologyNode{ID: "svc-1", Kind: "Service", Name: "nginx-svc", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}})
+	graph.AddEdge(models.TopologyEdge{ID: "edge-1", Source: "svc-1", Target: "pod-1", RelationshipType: "selector", Metadata: models.EdgeMetadata{}})
 	
 	graph.LayoutSeed = "test-seed-123"
 	
-	topology := graph.ToTopologyGraph()
+	topology := graph.ToTopologyGraph("test-cluster")
 	
-	assert.Equal(t, 2, topology.Meta.NodeCount)
-	assert.Equal(t, 1, topology.Meta.EdgeCount)
-	assert.Equal(t, "test-seed-123", topology.Meta.LayoutSeed)
-	assert.Equal(t, "1.0", topology.Meta.Version)
+	assert.Equal(t, 2, topology.Metadata.NodeCount)
+	assert.Equal(t, 1, topology.Metadata.EdgeCount)
+	assert.Equal(t, "test-seed-123", topology.Metadata.LayoutSeed)
+	assert.Equal(t, "1.0", topology.SchemaVersion)
 	assert.Equal(t, 2, len(topology.Nodes))
 	assert.Equal(t, 1, len(topology.Edges))
 }

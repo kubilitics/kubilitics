@@ -1,18 +1,29 @@
-import { useState } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Folder, Clock, Download, Trash2, Box, Globe, Settings, Layers, Package, Database, Shield, Activity } from 'lucide-react';
+import { Folder, Clock, Download, Trash2, Box, Globe, Settings, Layers, Package, Database, Shield, Activity, Loader2, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Progress } from '@/components/ui/progress';
+import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs, TopologyViewer, MetadataCard, YamlViewer, YamlCompareViewer, EventsSection, ActionsSection,
-  type TopologyNode, type TopologyEdge, type ResourceStatus, type YamlVersion,
+  ResourceDetailLayout,
+  SectionCard,
+  MetadataCard,
+  YamlViewer,
+  YamlCompareViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  ResourceTopologyView,
+  type ResourceStatus,
+  type YamlVersion,
 } from '@/components/resources';
-import { useResourceDetail, useK8sEvents } from '@/hooks/useK8sResourceDetail';
-import { type KubernetesResource } from '@/hooks/useKubernetes';
+import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
+import { useDeleteK8sResource, useK8sResourceList, type KubernetesResource } from '@/hooks/useKubernetes';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
+import { useActiveClusterId } from '@/hooks/useActiveClusterId';
 
 interface NamespaceResource extends KubernetesResource {
   spec?: {
@@ -23,135 +34,94 @@ interface NamespaceResource extends KubernetesResource {
   };
 }
 
-const mockNamespaceResource: NamespaceResource = {
-  apiVersion: 'v1',
-  kind: 'Namespace',
-  metadata: {
-    name: 'production',
-    uid: 'mock-uid',
-    creationTimestamp: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString(),
-    labels: { environment: 'production', team: 'platform' },
-    annotations: { 'kubernetes.io/description': 'Production workloads' },
-  },
-  spec: {
-    finalizers: ['kubernetes'],
-  },
-  status: {
-    phase: 'Active',
-  },
-};
-
-// Mock resource counts in namespace
-const mockResourceCounts = {
-  pods: { running: 42, total: 45 },
-  deployments: { available: 12, total: 12 },
-  services: { total: 8 },
-  configmaps: { total: 24 },
-  secrets: { total: 15 },
-  persistentVolumeClaims: { total: 6 },
-  serviceAccounts: { total: 4 },
-  roles: { total: 3 },
-};
-
-// Mock ResourceQuota
-const mockResourceQuota = {
-  name: 'production-quota',
-  hard: { 'requests.cpu': '16', 'requests.memory': '32Gi', 'limits.cpu': '32', 'limits.memory': '64Gi', pods: '100' },
-  used: { 'requests.cpu': '12', 'requests.memory': '24Gi', 'limits.cpu': '20', 'limits.memory': '40Gi', pods: '45' },
-};
-
-// Mock LimitRange
-const mockLimitRange = {
-  name: 'production-limits',
-  limits: [
-    { type: 'Container', default: { cpu: '500m', memory: '512Mi' }, defaultRequest: { cpu: '100m', memory: '128Mi' } },
-  ],
-};
-
-const topologyNodes: TopologyNode[] = [
-  { id: 'ns', type: 'namespace', name: 'production', status: 'healthy', isCurrent: true },
-  { id: 'deploy1', type: 'deployment', name: 'nginx-deployment', status: 'healthy' },
-  { id: 'deploy2', type: 'deployment', name: 'api-deployment', status: 'healthy' },
-  { id: 'deploy3', type: 'deployment', name: 'worker-deployment', status: 'healthy' },
-  { id: 'svc1', type: 'service', name: 'nginx-svc', status: 'healthy' },
-  { id: 'svc2', type: 'service', name: 'api-svc', status: 'healthy' },
-  { id: 'cm1', type: 'configmap', name: 'app-config', status: 'healthy' },
-  { id: 'secret1', type: 'secret', name: 'app-secrets', status: 'healthy' },
-];
-
-const topologyEdges: TopologyEdge[] = [
-  { from: 'ns', to: 'deploy1', label: 'Contains' },
-  { from: 'ns', to: 'deploy2', label: 'Contains' },
-  { from: 'ns', to: 'deploy3', label: 'Contains' },
-  { from: 'ns', to: 'svc1', label: 'Contains' },
-  { from: 'ns', to: 'svc2', label: 'Contains' },
-  { from: 'ns', to: 'cm1', label: 'Contains' },
-  { from: 'ns', to: 'secret1', label: 'Contains' },
-];
-
 export default function NamespaceDetail() {
   const { name } = useParams();
   const navigate = useNavigate();
+  const { isConnected } = useConnectionStatus();
+  const clusterId = useActiveClusterId();
   const [activeTab, setActiveTab] = useState('overview');
-  
-  const { resource: ns, isLoading, age, yaml, isConnected } = useResourceDetail<NamespaceResource>(
-    'namespaces',
-    name,
-    undefined,
-    mockNamespaceResource
-  );
-  const { events } = useK8sEvents(name);
 
-  const nsName = ns.metadata?.name || '';
-  const labels = ns.metadata?.labels || {};
-  const annotations = ns.metadata?.annotations || {};
-  const phase = ns.status?.phase || 'Active';
+  const { resource: ns, isLoading, error: resourceError, age, yaml, isConnected: resourceConnected, refetch } = useResourceDetail<NamespaceResource>(
+    'namespaces',
+    name ?? undefined,
+    undefined
+  );
+  const { events } = useResourceEvents('Namespace', name ?? undefined, name ?? undefined);
+  const deleteNamespace = useDeleteK8sResource('namespaces');
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  const nsName = ns?.metadata?.name ?? name ?? '';
+  const labels = ns?.metadata?.labels || {};
+  const annotations = ns?.metadata?.annotations || {};
+  const phase = ns?.status?.phase || 'Active';
+  const finalizers = ns?.spec?.finalizers || [];
   const status: ResourceStatus = phase === 'Active' ? 'Healthy' : phase === 'Terminating' ? 'Warning' : 'Unknown';
 
-  // Mock YAML versions for comparison
-  const yamlVersions: YamlVersion[] = [
-    { id: 'current', label: 'Current Version', yaml, timestamp: 'now' },
-    { id: 'previous', label: 'Previous Version', yaml: yaml.replace('environment: production', 'environment: staging'), timestamp: '2 hours ago' },
-    { id: 'initial', label: 'Initial Version', yaml: yaml.replace('team: platform', 'team: backend'), timestamp: '1 day ago' },
-  ];
+  const handleDownloadYaml = useCallback(() => {
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${nsName || 'namespace'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [yaml, nsName]);
 
-  const handleSaveYaml = async (newYaml: string) => {
-    toast.success('Namespace updated successfully');
-    console.log('Saving YAML:', newYaml);
-  };
+  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
+
+  const podsList = useK8sResourceList<KubernetesResource>('pods', nsName, { enabled: !!nsName && isConnected, limit: 5000 });
+  const deploymentsList = useK8sResourceList<KubernetesResource>('deployments', nsName, { enabled: !!nsName && isConnected, limit: 500 });
+  const servicesList = useK8sResourceList<KubernetesResource>('services', nsName, { enabled: !!nsName && isConnected, limit: 500 });
+  const configMapsList = useK8sResourceList<KubernetesResource>('configmaps', nsName, { enabled: !!nsName && isConnected, limit: 500 });
+  const secretsList = useK8sResourceList<KubernetesResource>('secrets', nsName, { enabled: !!nsName && isConnected, limit: 500 });
+  const resourceQuotasList = useK8sResourceList<KubernetesResource>('resourcequotas', nsName, { enabled: !!nsName && isConnected, limit: 100 });
+
+  const resourceCounts = useMemo(() => {
+    if (!isConnected || !nsName) return { pods: '–', deployments: '–', services: '–', configmaps: '–', secrets: '–' };
+    const pods = podsList.data?.items?.length ?? '–';
+    const deployments = deploymentsList.data?.items?.length ?? '–';
+    const services = servicesList.data?.items?.length ?? '–';
+    const configmaps = configMapsList.data?.items?.length ?? '–';
+    const secrets = secretsList.data?.items?.length ?? '–';
+    return { pods, deployments, services, configmaps, secrets };
+  }, [isConnected, nsName, podsList.data?.items?.length, deploymentsList.data?.items?.length, servicesList.data?.items?.length, configMapsList.data?.items?.length, secretsList.data?.items?.length]);
+
+  const resourceQuotas = useMemo(() => resourceQuotasList.data?.items ?? [], [resourceQuotasList.data?.items]);
+  const hasQuota = resourceQuotas.length > 0;
+
 
   if (isLoading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-20 w-full" />
         <div className="grid grid-cols-4 gap-4">
-          {[1,2,3,4].map(i => <Skeleton key={i} className="h-24" />)}
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
         </div>
         <Skeleton className="h-96" />
       </div>
     );
   }
 
+  if (isConnected && (resourceError || !ns?.metadata?.name)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
+        <Folder className="h-12 w-12 text-muted-foreground" />
+        <p className="text-lg font-medium">Namespace not found</p>
+        <p className="text-sm text-muted-foreground">{name ? `No namespace named "${name}".` : 'Missing namespace name.'}</p>
+        <Button variant="outline" onClick={() => navigate('/namespaces')}>Back to Namespaces</Button>
+      </div>
+    );
+  }
+
   const statusCards = [
-    { label: 'Phase', value: phase, icon: Box, iconColor: phase === 'Active' ? 'success' as const : 'warning' as const },
-    { label: 'Pods', value: `${mockResourceCounts.pods.running}/${mockResourceCounts.pods.total}`, icon: Package, iconColor: 'primary' as const },
-    { label: 'Deployments', value: mockResourceCounts.deployments.total, icon: Layers, iconColor: 'info' as const },
+    { label: 'Status', value: phase, icon: Box, iconColor: (phase === 'Active' ? 'success' : 'warning') as const },
+    { label: 'Pods', value: String(resourceCounts.pods), icon: Package, iconColor: 'primary' as const },
+    { label: 'Deployments', value: String(resourceCounts.deployments), icon: Layers, iconColor: 'info' as const },
+    { label: 'Services', value: String(resourceCounts.services), icon: Globe, iconColor: 'success' as const },
     { label: 'Age', value: age, icon: Clock, iconColor: 'muted' as const },
   ];
-
-  const handleNodeClick = (node: TopologyNode) => {
-    if (node.type === 'deployment') navigate(`/deployments/${nsName}/${node.name}`);
-    else if (node.type === 'service') navigate(`/services/${nsName}/${node.name}`);
-    else if (node.type === 'configmap') navigate(`/configmaps/${nsName}/${node.name}`);
-    else if (node.type === 'secret') navigate(`/secrets/${nsName}/${node.name}`);
-  };
-
-  // Calculate quota percentages
-  const getQuotaPercentage = (resource: string) => {
-    const used = parseFloat(mockResourceQuota.used[resource as keyof typeof mockResourceQuota.used] || '0');
-    const hard = parseFloat(mockResourceQuota.hard[resource as keyof typeof mockResourceQuota.hard] || '1');
-    return Math.round((used / hard) * 100);
-  };
 
   const tabs = [
     {
@@ -160,212 +130,113 @@ export default function NamespaceDetail() {
       content: (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Namespace Info */}
-            <Card>
-              <CardHeader><CardTitle className="text-base">Namespace Info</CardTitle></CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground mb-1">Phase</p>
-                    <Badge variant={phase === 'Active' ? 'default' : 'secondary'}>{phase}</Badge>
-                  </div>
-                  <div><p className="text-muted-foreground mb-1">Age</p><p>{age}</p></div>
-                  <div><p className="text-muted-foreground mb-1">Labels</p><p>{Object.keys(labels).length} labels</p></div>
-                  <div><p className="text-muted-foreground mb-1">Annotations</p><p>{Object.keys(annotations).length} annotations</p></div>
+            <SectionCard icon={Folder} title="Namespace Info" tooltip="Phase, finalizers, labels, annotations">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-muted-foreground mb-1">Phase</p>
+                  <Badge variant={phase === 'Active' ? 'default' : 'secondary'}>{phase}</Badge>
                 </div>
-              </CardContent>
-            </Card>
-
-            {/* Labels */}
+                <div><p className="text-muted-foreground mb-1">Age</p><p>{age}</p></div>
+                <div><p className="text-muted-foreground mb-1">Finalizers</p><p>{finalizers.length ? finalizers.join(', ') : 'None'}</p></div>
+                <div><p className="text-muted-foreground mb-1">Labels</p><p>{Object.keys(labels).length} labels</p></div>
+                <div><p className="text-muted-foreground mb-1">Annotations</p><p>{Object.keys(annotations).length} annotations</p></div>
+              </div>
+            </SectionCard>
             <MetadataCard title="Labels" items={labels} variant="badges" />
-
-            {/* Resource Counts */}
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle className="text-base">Resources in Namespace</CardTitle>
-                <CardDescription>Count of resources in this namespace</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div 
+            <SectionCard icon={Package} title="Resource Summary" tooltip="Counts of resources in this namespace" className="lg:col-span-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Pods', value: resourceCounts.pods, icon: Package, path: '/pods' },
+                  { label: 'Deployments', value: resourceCounts.deployments, icon: Layers, path: '/deployments' },
+                  { label: 'Services', value: resourceCounts.services, icon: Globe, path: '/services' },
+                  { label: 'ConfigMaps', value: resourceCounts.configmaps, icon: Database, path: '/configmaps' },
+                  { label: 'Secrets', value: resourceCounts.secrets, icon: Shield, path: '/secrets' },
+                ].map(({ label, value, icon: Icon, path }) => (
+                  <div
+                    key={label}
                     className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted transition-colors"
-                    onClick={() => navigate(`/pods?namespace=${nsName}`)}
+                    onClick={() => navigate(`${path}?namespace=${encodeURIComponent(nsName)}`)}
                   >
                     <div className="flex items-center gap-2 mb-2">
-                      <Package className="h-4 w-4 text-primary" />
-                      <span className="text-sm font-medium">Pods</span>
+                      <Icon className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-medium">{label}</span>
                     </div>
-                    <p className="text-2xl font-bold">{mockResourceCounts.pods.running}</p>
-                    <p className="text-xs text-muted-foreground">{mockResourceCounts.pods.total - mockResourceCounts.pods.running} pending</p>
+                    <p className="text-2xl font-bold">{value}</p>
                   </div>
-                  <div 
-                    className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted transition-colors"
-                    onClick={() => navigate(`/deployments?namespace=${nsName}`)}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Layers className="h-4 w-4 text-info" />
-                      <span className="text-sm font-medium">Deployments</span>
-                    </div>
-                    <p className="text-2xl font-bold">{mockResourceCounts.deployments.total}</p>
-                    <p className="text-xs text-muted-foreground">{mockResourceCounts.deployments.available} available</p>
-                  </div>
-                  <div 
-                    className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted transition-colors"
-                    onClick={() => navigate(`/services?namespace=${nsName}`)}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Globe className="h-4 w-4 text-success" />
-                      <span className="text-sm font-medium">Services</span>
-                    </div>
-                    <p className="text-2xl font-bold">{mockResourceCounts.services.total}</p>
-                  </div>
-                  <div 
-                    className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted transition-colors"
-                    onClick={() => navigate(`/configmaps?namespace=${nsName}`)}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Database className="h-4 w-4 text-warning" />
-                      <span className="text-sm font-medium">ConfigMaps</span>
-                    </div>
-                    <p className="text-2xl font-bold">{mockResourceCounts.configmaps.total}</p>
-                  </div>
-                  <div 
-                    className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted transition-colors"
-                    onClick={() => navigate(`/secrets?namespace=${nsName}`)}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Shield className="h-4 w-4 text-destructive" />
-                      <span className="text-sm font-medium">Secrets</span>
-                    </div>
-                    <p className="text-2xl font-bold">{mockResourceCounts.secrets.total}</p>
-                  </div>
-                  <div 
-                    className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted transition-colors"
-                    onClick={() => navigate(`/persistentvolumeclaims?namespace=${nsName}`)}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Activity className="h-4 w-4 text-accent" />
-                      <span className="text-sm font-medium">PVCs</span>
-                    </div>
-                    <p className="text-2xl font-bold">{mockResourceCounts.persistentVolumeClaims.total}</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-muted/50">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Box className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">ServiceAccounts</span>
-                    </div>
-                    <p className="text-2xl font-bold">{mockResourceCounts.serviceAccounts.total}</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-muted/50">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Shield className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">Roles</span>
-                    </div>
-                    <p className="text-2xl font-bold">{mockResourceCounts.roles.total}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                ))}
+              </div>
+            </SectionCard>
           </div>
         </div>
       ),
     },
     {
       id: 'quotas',
-      label: 'Quotas & Limits',
+      label: 'Quota Status',
       content: (
         <div className="space-y-6">
-          {/* Resource Quota */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Resource Quota: {mockResourceQuota.name}</CardTitle>
-              <CardDescription>Resource usage limits for this namespace</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {Object.entries(mockResourceQuota.hard).map(([resource, limit]) => {
-                  const used = mockResourceQuota.used[resource as keyof typeof mockResourceQuota.used] || '0';
-                  const percentage = getQuotaPercentage(resource);
-                  return (
-                    <div key={resource}>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span className="font-medium">{resource}</span>
-                        <span className="font-mono text-muted-foreground">{used} / {limit}</span>
-                      </div>
-                      <Progress 
-                        value={percentage} 
-                        className={`h-2 ${percentage > 90 ? '[&>div]:bg-destructive' : percentage > 75 ? '[&>div]:bg-warning' : ''}`} 
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Limit Range */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Limit Range: {mockLimitRange.name}</CardTitle>
-              <CardDescription>Default resource limits for containers</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {mockLimitRange.limits.map((limit, i) => (
-                  <div key={i} className="p-4 rounded-lg bg-muted/50">
-                    <Badge variant="outline" className="mb-3">{limit.type}</Badge>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-muted-foreground mb-1">Default Requests</p>
-                        <div className="space-y-1">
-                          <p className="font-mono">CPU: {limit.defaultRequest.cpu}</p>
-                          <p className="font-mono">Memory: {limit.defaultRequest.memory}</p>
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground mb-1">Default Limits</p>
-                        <div className="space-y-1">
-                          <p className="font-mono">CPU: {limit.default.cpu}</p>
-                          <p className="font-mono">Memory: {limit.default.memory}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          {!hasQuota ? (
+            <p className="text-muted-foreground">No resource quotas in this namespace.</p>
+          ) : (
+            resourceQuotas.map((rq: KubernetesResource) => (
+              <Card key={rq.metadata?.uid}>
+                <CardHeader>
+                  <CardTitle className="text-base">Resource Quota: {rq.metadata?.name}</CardTitle>
+                  <CardDescription>Resource usage limits for this namespace</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <pre className="text-xs font-mono bg-muted/50 p-4 rounded-lg overflow-auto">
+                    {JSON.stringify((rq as any).status ?? (rq as any).spec ?? {}, null, 2)}
+                  </pre>
+                </CardContent>
+              </Card>
+            ))
+          )}
         </div>
       ),
     },
     { id: 'events', label: 'Events', content: <EventsSection events={events} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={nsName} editable onSave={handleSaveYaml} /> },
+    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={nsName} editable={false} /> },
     { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={nsName} /> },
-    { id: 'topology', label: 'Topology', content: <TopologyViewer nodes={topologyNodes} edges={topologyEdges} onNodeClick={handleNodeClick} /> },
+    {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('Namespace')}
+          namespace={''}
+          name={name ?? ''}
+          sourceResourceType="Namespace"
+          sourceResourceName={ns?.metadata?.name ?? name ?? ''}
+        />
+      ),
+    },
     {
       id: 'actions',
       label: 'Actions',
       content: (
-        <ActionsSection actions={[
-          { icon: Settings, label: 'Edit Resource Quota', description: 'Modify namespace resource limits' },
-          { icon: Download, label: 'Download YAML', description: 'Export Namespace definition' },
-          { icon: Trash2, label: 'Delete Namespace', description: 'Remove namespace and all resources', variant: 'destructive' },
-        ]} />
+        <ActionsSection
+          actions={[
+            { icon: Download, label: 'Download YAML', description: 'Export Namespace definition', onClick: handleDownloadYaml },
+            { icon: Trash2, label: 'Delete Namespace', description: 'Remove namespace and all resources', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
+          ]}
+        />
       ),
     },
   ];
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="Namespace"
         resourceIcon={Folder}
         name={nsName}
         status={status}
         backLink="/namespaces"
         backLabel="Namespaces"
-        metadata={
-          <span className="flex items-center gap-1.5 ml-2">
+        headerMetadata={
+          <span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground">
             <Clock className="h-3.5 w-3.5" />Created {age}
             <span className="mx-2">•</span>
             <Badge variant={phase === 'Active' ? 'default' : 'secondary'}>{phase}</Badge>
@@ -373,12 +244,30 @@ export default function NamespaceDetail() {
           </span>
         }
         actions={[
-          { label: 'Edit Quota', icon: Settings, variant: 'outline' },
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="Namespace"
+        resourceName={nsName}
+        onConfirm={async () => {
+          if (isConnected && name) {
+            await deleteNamespace.mutateAsync({ name, namespace: undefined });
+            navigate('/namespaces');
+          } else {
+            toast.success(`Namespace ${nsName} deleted`);
+            navigate('/namespaces');
+          }
+        }}
+        requireNameConfirmation
+      />
+    </>
   );
 }

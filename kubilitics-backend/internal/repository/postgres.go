@@ -144,9 +144,9 @@ func (r *PostgresRepository) SaveTopologySnapshot(ctx context.Context, snapshot 
 		snapshot.ClusterID,
 		snapshot.Namespace,
 		snapshot.Data,
-		topology.Meta.NodeCount,
-		topology.Meta.EdgeCount,
-		topology.Meta.LayoutSeed,
+		topology.Metadata.NodeCount,
+		topology.Metadata.EdgeCount,
+		topology.Metadata.LayoutSeed,
 		snapshot.Timestamp,
 	)
 

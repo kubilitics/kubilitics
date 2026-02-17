@@ -48,21 +48,24 @@ jobs:
       run: cargo test
   
   build:
-    name: Build
+    name: Build (${{ matrix.name }})
     needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - os: macos-latest
-            target: universal-apple-darwin
-            artifact: DMG
+            name: macos
+            target: ""
           - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: MSI
+            name: windows
+            target: ""
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: DEB
+            name: linux-x64
+            target: ""
+          - os: ubuntu-latest
+            name: linux-arm64
+            target: aarch64-unknown-linux-gnu
     
     steps:
     - name: Checkout code
@@ -84,23 +87,29 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-    
+
+    - name: Add Rust target (Linux ARM64)
+      if: matrix.target != ''
+      run: rustup target add ${{ matrix.target }}
+
     - name: Install dependencies
       working-directory: kubilitics-desktop
       run: npm ci
-    
-    - name: Build Go backend
-      working-directory: kubilitics-backend
+
+    - name: Build Go backend (sidecar)
       run: |
-        go build -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend cmd/server/main.go
-    
+        mkdir -p kubilitics-desktop/src-tauri/binaries
+        cd kubilitics-backend
+        if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then GOOS=linux GOARCH=arm64 go build -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend ./cmd/server; else go build -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend ./cmd/server; fi
+      working-directory: .
+
     - name: Build Tauri app
       working-directory: kubilitics-desktop
-      run: cargo tauri build
-    
+      run: |
+        if [ -n "${{ matrix.target }}" ]; then cargo tauri build --target ${{ matrix.target }}; else cargo tauri build; fi
+
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: kubilitics-desktop-${{ matrix.os }}
-        path: |
-          kubilitics-desktop/src-tauri/target/release/bundle/**/*
+        name: kubilitics-desktop-${{ matrix.name }}
+        path: kubilitics-desktop/src-tauri/target/**/release/bundle/

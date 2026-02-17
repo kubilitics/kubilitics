@@ -1,377 +1,462 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Bell, Filter, RefreshCw, Clock, AlertTriangle, CheckCircle2, XCircle, ExternalLink, Play, Pause } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Bell, Search, RefreshCw, MoreHorizontal, Loader2, WifiOff, ChevronDown, CheckCircle2, AlertTriangle, XCircle, ExternalLink } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  ResizableTableProvider,
+  ResizableTableHead,
+  ResizableTableCell,
+  type ResizableColumnConfig,
+} from '@/components/ui/resizable-table';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
-import { useK8sResourceList, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
-import { useKubernetesConfigStore } from '@/stores/kubernetesConfigStore';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
+import { useClusterStore } from '@/stores/clusterStore';
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
+import { usePaginatedResourceList } from '@/hooks/useKubernetes';
+import { getEvents, type BackendEvent } from '@/services/backendApiClient';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-
-interface K8sEvent {
-  name: string;
-  namespace: string;
-  type: 'Normal' | 'Warning' | 'Error';
-  reason: string;
-  objectKind: string;
-  objectName: string;
-  objectNamespace: string;
-  message: string;
-  count: number;
-  firstSeen: string;
-  lastSeen: string;
-  source: string;
-}
-
-interface K8sEventResource extends KubernetesResource {
-  type?: string;
-  reason?: string;
-  message?: string;
-  count?: number;
-  firstTimestamp?: string;
-  lastTimestamp?: string;
-  involvedObject?: {
-    kind?: string;
-    name?: string;
-    namespace?: string;
-  };
-  source?: {
-    component?: string;
-  };
-}
-
-const mockEvents: K8sEvent[] = [
-  { name: 'nginx-deployment.17abc1234', namespace: 'production', type: 'Normal', reason: 'ScalingReplicaSet', objectKind: 'Deployment', objectName: 'nginx-deployment', objectNamespace: 'production', message: 'Scaled up replica set nginx-deployment-7fb96c846b to 3', count: 1, firstSeen: '2h ago', lastSeen: '2h ago', source: 'deployment-controller' },
-  { name: 'api-pod.17def5678', namespace: 'production', type: 'Warning', reason: 'FailedScheduling', objectKind: 'Pod', objectName: 'api-pod-abc12', objectNamespace: 'production', message: 'Insufficient memory: 0/3 nodes are available', count: 5, firstSeen: '1h ago', lastSeen: '10m ago', source: 'scheduler' },
-  { name: 'redis.17ghi9012', namespace: 'staging', type: 'Normal', reason: 'Pulled', objectKind: 'Pod', objectName: 'redis-master-0', objectNamespace: 'staging', message: 'Container image "redis:7.0" already present on machine', count: 1, firstSeen: '30m ago', lastSeen: '30m ago', source: 'kubelet' },
-  { name: 'node-1.17jkl3456', namespace: '', type: 'Normal', reason: 'NodeReady', objectKind: 'Node', objectName: 'node-1', objectNamespace: '', message: 'Node node-1 status is now: NodeReady', count: 1, firstSeen: '3h ago', lastSeen: '3h ago', source: 'kubelet' },
-  { name: 'pvc-data.17mno7890', namespace: 'production', type: 'Normal', reason: 'ProvisioningSucceeded', objectKind: 'PersistentVolumeClaim', objectName: 'data-pvc', objectNamespace: 'production', message: 'Successfully provisioned volume pv-data-001', count: 1, firstSeen: '90d ago', lastSeen: '90d ago', source: 'persistent-volume-controller' },
-  { name: 'web-hpa.17pqr1234', namespace: 'production', type: 'Normal', reason: 'SuccessfulRescale', objectKind: 'HorizontalPodAutoscaler', objectName: 'web-hpa', objectNamespace: 'production', message: 'New size: 5; reason: CPU utilization above target', count: 3, firstSeen: '15m ago', lastSeen: '5m ago', source: 'horizontal-pod-autoscaler' },
-  { name: 'ingress.17stu5678', namespace: 'production', type: 'Warning', reason: 'BackendError', objectKind: 'Ingress', objectName: 'main-ingress', objectNamespace: 'production', message: 'Backend service not found', count: 10, firstSeen: '45m ago', lastSeen: '1m ago', source: 'ingress-controller' },
-  { name: 'secret.17vwx9012', namespace: 'kube-system', type: 'Normal', reason: 'Created', objectKind: 'Secret', objectName: 'default-token', objectNamespace: 'kube-system', message: 'Successfully created secret', count: 1, firstSeen: '180d ago', lastSeen: '180d ago', source: 'service-account-controller' },
-];
+import {
+  ResourceCommandBar,
+  ListPagination,
+  ListPageStatCard,
+  TableColumnHeaderWithFilterAndSort,
+  TableFilterCell,
+  resourceTableRowClassName,
+  ROW_MOTION,
+  PAGE_SIZE_OPTIONS,
+  ResourceListTableToolbar,
+} from '@/components/list';
+import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
+import { useColumnVisibility } from '@/hooks/useColumnVisibility';
+import { getDetailPath, normalizeKindForTopology } from '@/utils/resourceKindMapper';
 
 const typeConfig = {
   Normal: { icon: CheckCircle2, color: 'text-muted-foreground', bg: 'bg-muted' },
-  Warning: { icon: AlertTriangle, color: 'text-warning', bg: 'bg-warning/10' },
+  Warning: { icon: AlertTriangle, color: 'text-[hsl(25,95%,53%)]', bg: 'bg-[hsl(25,95%,53%)]/15' },
   Error: { icon: XCircle, color: 'text-destructive', bg: 'bg-destructive/10' },
 };
 
-// Generate object link based on kind
-function getObjectLink(kind: string, name: string, namespace: string): string {
-  const kindMap: Record<string, string> = {
-    Pod: 'pods',
-    Deployment: 'deployments',
-    ReplicaSet: 'replicasets',
-    StatefulSet: 'statefulsets',
-    DaemonSet: 'daemonsets',
-    Job: 'jobs',
-    CronJob: 'cronjobs',
-    Service: 'services',
-    Ingress: 'ingresses',
-    ConfigMap: 'configmaps',
-    Secret: 'secrets',
-    PersistentVolumeClaim: 'persistentvolumeclaims',
-    PersistentVolume: 'persistentvolumes',
-    Node: 'nodes',
-    Namespace: 'namespaces',
-    HorizontalPodAutoscaler: 'horizontalpodautoscalers',
-    ServiceAccount: 'serviceaccounts',
-  };
-  
-  const path = kindMap[kind];
-  if (!path) return '#';
-  
-  if (kind === 'Node' || kind === 'PersistentVolume' || kind === 'Namespace') {
-    return `/${path}/${name}`;
+function formatEventTime(iso: string): string {
+  if (!iso) return '–';
+  try {
+    const d = new Date(iso);
+    const now = Date.now();
+    const diffMs = now - d.getTime();
+    const sec = Math.floor(diffMs / 1000);
+    const min = Math.floor(sec / 60);
+    const h = Math.floor(min / 60);
+    const d_ = Math.floor(h / 24);
+    if (d_ > 0) return `${d_}d ago`;
+    if (h > 0) return `${h}h ago`;
+    if (min > 0) return `${min}m ago`;
+    return `${sec}s ago`;
+  } catch {
+    return iso;
   }
-  return `/${path}/${namespace}/${name}`;
 }
 
+interface EventRow {
+  id: string;
+  name: string;
+  eventNamespace: string;
+  type: 'Normal' | 'Warning' | 'Error';
+  reason: string;
+  message: string;
+  objectKind: string;
+  objectName: string;
+  objectNamespace: string;
+  source: string;
+  count: number;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+function backendEventToRow(ev: BackendEvent): EventRow {
+  return {
+    id: ev.id,
+    name: ev.name || ev.id,
+    eventNamespace: ev.event_namespace ?? ev.namespace ?? '',
+    type: (ev.type === 'Warning' || ev.type === 'Error' ? ev.type : 'Normal') as 'Normal' | 'Warning' | 'Error',
+    reason: ev.reason || '–',
+    message: ev.message || '–',
+    objectKind: ev.resource_kind || '–',
+    objectName: ev.resource_name || '–',
+    objectNamespace: ev.namespace || '',
+    source: ev.source_component || '–',
+    count: typeof ev.count === 'number' ? ev.count : 1,
+    firstSeen: formatEventTime(ev.first_timestamp),
+    lastSeen: formatEventTime(ev.last_timestamp),
+  };
+}
+
+const EVENTS_TABLE_COLUMNS: ResizableColumnConfig[] = [
+  { id: 'type', defaultWidth: 90, minWidth: 70 },
+  { id: 'reason', defaultWidth: 140, minWidth: 80 },
+  { id: 'message', defaultWidth: 220, minWidth: 100 },
+  { id: 'involved', defaultWidth: 180, minWidth: 100 },
+  { id: 'namespace', defaultWidth: 120, minWidth: 80 },
+  { id: 'source', defaultWidth: 120, minWidth: 80 },
+  { id: 'count', defaultWidth: 70, minWidth: 50 },
+  { id: 'firstSeen', defaultWidth: 90, minWidth: 70 },
+  { id: 'lastSeen', defaultWidth: 90, minWidth: 70 },
+];
+
+const EVENTS_COLUMNS_FOR_VISIBILITY = [
+  { id: 'reason', label: 'Reason' },
+  { id: 'message', label: 'Message' },
+  { id: 'involved', label: 'Involved Object' },
+  { id: 'namespace', label: 'Namespace' },
+  { id: 'source', label: 'Source' },
+  { id: 'count', label: 'Count' },
+  { id: 'firstSeen', label: 'First Seen' },
+  { id: 'lastSeen', label: 'Last Seen' },
+];
+
 export default function Events() {
-  const { config } = useKubernetesConfigStore();
-  const { data, isLoading, refetch } = useK8sResourceList<K8sEventResource>('events');
-  
+  const navigate = useNavigate();
+  const { isConnected } = useConnectionStatus();
+  const storedUrl = useBackendConfigStore((s) => s.backendBaseUrl);
+  const backendBaseUrl = getEffectiveBackendBaseUrl(storedUrl);
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
+  const activeCluster = useClusterStore((s) => s.activeCluster);
+  const clusterId = activeCluster?.id;
+  const useBackend = isBackendConfigured() && !!clusterId;
+
+  const [namespaceFilter, setNamespaceFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'Normal' | 'Warning' | 'Error'>('all');
-  const [namespaceFilter, setNamespaceFilter] = useState('all');
-  const [sourceFilter, setSourceFilter] = useState('all');
-  const [timeRange, setTimeRange] = useState<'1h' | '6h' | '24h' | '7d' | 'all'>('all');
+  const [showTableFilters, setShowTableFilters] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
-  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
+  const [pageSize, setPageSize] = useState(20);
+  const [pageIndex, setPageIndex] = useState(0);
 
-  const rawEvents: K8sEvent[] = config.isConnected && data?.items
-    ? data.items.map((ev) => ({
-        name: ev.metadata.name,
-        namespace: ev.metadata.namespace || '',
-        type: (ev.type || 'Normal') as 'Normal' | 'Warning' | 'Error',
-        reason: ev.reason || '-',
-        objectKind: ev.involvedObject?.kind || '-',
-        objectName: ev.involvedObject?.name || '-',
-        objectNamespace: ev.involvedObject?.namespace || '',
-        message: ev.message || '-',
-        count: ev.count || 1,
-        firstSeen: ev.firstTimestamp ? calculateAge(ev.firstTimestamp) + ' ago' : '-',
-        lastSeen: ev.lastTimestamp ? calculateAge(ev.lastTimestamp) + ' ago' : '-',
-        source: ev.source?.component || '-',
-      }))
-    : mockEvents;
-
-  // Get unique values for filters
-  const namespaces = ['all', ...Array.from(new Set(rawEvents.map(e => e.namespace).filter(Boolean)))];
-  const sources = ['all', ...Array.from(new Set(rawEvents.map(e => e.source).filter(s => s !== '-')))];
-
-  // Filter events
-  const events = rawEvents.filter(event => {
-    const matchesSearch = searchQuery === '' || 
-      event.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      event.reason.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      event.objectName.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesType = typeFilter === 'all' || event.type === typeFilter;
-    const matchesNamespace = namespaceFilter === 'all' || event.namespace === namespaceFilter;
-    const matchesSource = sourceFilter === 'all' || event.source === sourceFilter;
-    
-    return matchesSearch && matchesType && matchesNamespace && matchesSource;
+  const nsParam = namespaceFilter === 'all' ? '*' : namespaceFilter;
+  const eventsQuery = useQuery({
+    queryKey: ['events', clusterId, nsParam],
+    queryFn: () => getEvents(backendBaseUrl, clusterId!, { namespace: nsParam, limit: 300 }),
+    enabled: useBackend && !!clusterId,
+    refetchInterval: autoRefresh ? 10_000 : false,
   });
 
-  // Count by type
-  const normalCount = rawEvents.filter(e => e.type === 'Normal').length;
-  const warningCount = rawEvents.filter(e => e.type === 'Warning').length;
-  const errorCount = rawEvents.filter(e => e.type === 'Error').length;
+  const { data: namespacesData } = usePaginatedResourceList('namespaces');
+  const namespaceOptions = useMemo(() => {
+    const items = (namespacesData?.allItems ?? []) as Array<{ metadata: { name: string } }>;
+    return ['all', ...items.map((r) => r.metadata.name).filter(Boolean)];
+  }, [namespacesData?.allItems]);
 
-  // Auto-refresh logic
+  const rawRows: EventRow[] = useMemo(() => (eventsQuery.data ?? []).map(backendEventToRow), [eventsQuery.data]);
+
+  const searchFiltered = useMemo(() => {
+    if (!searchQuery.trim()) return rawRows;
+    const q = searchQuery.toLowerCase();
+    return rawRows.filter(
+      (e) =>
+        e.reason.toLowerCase().includes(q) ||
+        e.message.toLowerCase().includes(q) ||
+        e.objectName.toLowerCase().includes(q) ||
+        e.objectKind.toLowerCase().includes(q)
+    );
+  }, [rawRows, searchQuery]);
+
+  const tableConfig: ColumnConfig<EventRow>[] = useMemo(
+    () => [
+      { columnId: 'type', getValue: (i) => i.type, sortable: true, filterable: true },
+      { columnId: 'reason', getValue: (i) => i.reason, sortable: true, filterable: true },
+      { columnId: 'message', getValue: (i) => i.message, sortable: true, filterable: false },
+      { columnId: 'involved', getValue: (i) => `${i.objectKind}/${i.objectNamespace}/${i.objectName}`, sortable: true, filterable: false },
+      { columnId: 'namespace', getValue: (i) => i.eventNamespace, sortable: true, filterable: false },
+      { columnId: 'source', getValue: (i) => i.source, sortable: true, filterable: false },
+      { columnId: 'count', getValue: (i) => i.count, sortable: true, filterable: false, compare: (a, b) => a.count - b.count },
+      { columnId: 'firstSeen', getValue: (i) => i.firstSeen, sortable: true, filterable: false },
+      { columnId: 'lastSeen', getValue: (i) => i.lastSeen, sortable: true, filterable: false },
+    ],
+    []
+  );
+
+  const { filteredAndSortedItems: filteredRows, distinctValuesByColumn, valueCountsByColumn, columnFilters, setColumnFilter, sortKey, sortOrder, setSort, clearAllFilters, hasActiveFilters } = useTableFiltersAndSort(searchFiltered, { columns: tableConfig, defaultSortKey: 'lastSeen', defaultSortOrder: 'desc' });
+  const columnVisibility = useColumnVisibility({ tableId: 'events', columns: EVENTS_COLUMNS_FOR_VISIBILITY, alwaysVisible: ['type'] });
+
+  const typeFilterActive = columnFilters.type != null && columnFilters.type.size > 0;
+  const typeFilterValue = typeFilterActive && columnFilters.type!.size === 1 ? Array.from(columnFilters.type!)[0] as 'Normal' | 'Warning' | 'Error' : 'all';
+  const reasonFilterActive = columnFilters.reason != null && columnFilters.reason.size > 0;
+
+  const stats = useMemo(() => {
+    const total = rawRows.length;
+    const warning = rawRows.filter((e) => e.type === 'Warning').length;
+    const errors = rawRows.filter((e) => e.type === 'Error').length;
+    const resourcesAffected = new Set(rawRows.map((e) => `${e.objectKind}/${e.objectNamespace}/${e.objectName}`)).size;
+    return { total, warning, errors, resourcesAffected };
+  }, [rawRows]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const start = pageIndex * pageSize;
+  const itemsOnPage = filteredRows.slice(start, start + pageSize);
+
   useEffect(() => {
-    if (autoRefresh) {
-      const interval = setInterval(() => {
-        refetch();
-      }, 5000);
-      setRefreshInterval(interval);
-      return () => clearInterval(interval);
-    } else if (refreshInterval) {
-      clearInterval(refreshInterval);
-      setRefreshInterval(null);
-    }
-  }, [autoRefresh, refetch]);
+    if (pageIndex >= totalPages && totalPages > 0) setPageIndex(totalPages - 1);
+  }, [pageIndex, totalPages]);
+
+  const pagination = {
+    rangeLabel: filteredRows.length > 0 ? `Showing ${start + 1}–${Math.min(start + pageSize, filteredRows.length)} of ${filteredRows.length}` : 'No events',
+    hasPrev: pageIndex > 0,
+    hasNext: start + pageSize < filteredRows.length,
+    onPrev: () => setPageIndex((i) => Math.max(0, i - 1)),
+    onNext: () => setPageIndex((i) => Math.min(totalPages - 1, i + 1)),
+    currentPage: pageIndex + 1,
+    totalPages,
+    onPageChange: (p: number) => setPageIndex(Math.max(0, Math.min(p - 1, totalPages - 1))),
+    dataUpdatedAt: eventsQuery.dataUpdatedAt,
+    isFetching: eventsQuery.isFetching,
+  };
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Bell className="h-6 w-6" />
-            Events
-          </h1>
-          <p className="text-muted-foreground">Cluster events from all namespaces</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Switch
-              id="auto-refresh"
-              checked={autoRefresh}
-              onCheckedChange={setAutoRefresh}
-            />
-            <Label htmlFor="auto-refresh" className="text-sm">
-              {autoRefresh ? (
-                <span className="flex items-center gap-1">
-                  <Play className="h-3 w-3" /> Live
-                </span>
-              ) : (
-                <span className="flex items-center gap-1">
-                  <Pause className="h-3 w-3" /> Paused
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="p-2.5 rounded-xl bg-primary/10">
+            <Bell className="h-6 w-6 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Events</h1>
+            <p className="text-sm text-muted-foreground">
+              Cluster events from all namespaces
+              {!isConnected && (
+                <span className="ml-2 inline-flex items-center gap-1 text-[hsl(45,93%,47%)]">
+                  <WifiOff className="h-3 w-3" /> Connect cluster
                 </span>
               )}
-            </Label>
+            </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
-            <RefreshCw className={cn("h-4 w-4 mr-2", isLoading && "animate-spin")} />
-            Refresh
-          </Button>
         </div>
+        <Button
+          variant={autoRefresh ? 'default' : 'outline'}
+          size="sm"
+          className="h-9 gap-2"
+          onClick={() => setAutoRefresh((v) => !v)}
+          title={autoRefresh ? 'Live updates on (every 10s) — click to disable' : 'Enable live updates (poll every 10s)'}
+        >
+          <RefreshCw className={cn('h-4 w-4', autoRefresh && 'animate-spin')} />
+          {autoRefresh ? 'Live (10s)' : 'Live Updates'}
+        </Button>
+        <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => eventsQuery.refetch()} disabled={eventsQuery.isLoading}>
+          {eventsQuery.isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+        </Button>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => setTypeFilter('all')}>
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Events</p>
-                <p className="text-2xl font-bold">{rawEvents.length}</p>
-              </div>
-              <Bell className="h-8 w-8 text-muted-foreground" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => setTypeFilter('Normal')}>
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Normal</p>
-                <p className="text-2xl font-bold text-muted-foreground">{normalCount}</p>
-              </div>
-              <CheckCircle2 className="h-8 w-8 text-muted-foreground" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-warning/50 transition-colors" onClick={() => setTypeFilter('Warning')}>
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Warnings</p>
-                <p className="text-2xl font-bold text-warning">{warningCount}</p>
-              </div>
-              <AlertTriangle className="h-8 w-8 text-warning" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-destructive/50 transition-colors" onClick={() => setTypeFilter('Error')}>
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Errors</p>
-                <p className="text-2xl font-bold text-destructive">{errorCount}</p>
-              </div>
-              <XCircle className="h-8 w-8 text-destructive" />
-            </div>
-          </CardContent>
-        </Card>
+      <div className={cn('grid grid-cols-2 sm:grid-cols-4 gap-4', !isConnected && 'opacity-60')}>
+        <ListPageStatCard label="Total" value={stats.total} icon={Bell} iconColor="text-primary" selected={!typeFilterActive} onClick={() => setColumnFilter('type', null)} className={cn(!typeFilterActive && 'ring-2 ring-primary')} />
+        <ListPageStatCard label="Warnings" value={stats.warning} icon={AlertTriangle} iconColor="text-[hsl(25,95%,53%)]" valueClassName="text-[hsl(25,95%,53%)]" selected={typeFilterValue === 'Warning'} onClick={() => setColumnFilter('type', typeFilterValue === 'Warning' ? null : new Set(['Warning']))} className={cn(typeFilterValue === 'Warning' && 'ring-2 ring-[hsl(25,95%,53%)]')} />
+        <ListPageStatCard label="Errors" value={stats.errors} icon={XCircle} iconColor="text-destructive" valueClassName="text-destructive" selected={typeFilterValue === 'Error'} onClick={() => setColumnFilter('type', typeFilterValue === 'Error' ? null : new Set(['Error']))} className={cn(typeFilterValue === 'Error' && 'ring-2 ring-destructive')} />
+        <ListPageStatCard label="Resources Affected" value={stats.resourcesAffected} icon={Bell} iconColor="text-muted-foreground" selected={!typeFilterActive && !reasonFilterActive} onClick={() => { setColumnFilter('type', null); setColumnFilter('reason', null); }} className={cn(!typeFilterActive && !reasonFilterActive && 'ring-2 ring-primary')} />
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-4">
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex-1 min-w-64">
-              <Input
-                placeholder="Search events..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full"
-              />
-            </div>
-            <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as typeof typeFilter)}>
-              <SelectTrigger className="w-32">
-                <SelectValue placeholder="Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="Normal">Normal</SelectItem>
-                <SelectItem value="Warning">Warning</SelectItem>
-                <SelectItem value="Error">Error</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={namespaceFilter} onValueChange={setNamespaceFilter}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Namespace" />
-              </SelectTrigger>
-              <SelectContent>
-                {namespaces.map(ns => (
-                  <SelectItem key={ns} value={ns}>{ns === 'all' ? 'All Namespaces' : ns}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={sourceFilter} onValueChange={setSourceFilter}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Source" />
-              </SelectTrigger>
-              <SelectContent>
-                {sources.map(src => (
-                  <SelectItem key={src} value={src}>{src === 'all' ? 'All Sources' : src}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={timeRange} onValueChange={(v) => setTimeRange(v as typeof timeRange)}>
-              <SelectTrigger className="w-32">
-                <SelectValue placeholder="Time Range" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1h">Last 1h</SelectItem>
-                <SelectItem value="6h">Last 6h</SelectItem>
-                <SelectItem value="24h">Last 24h</SelectItem>
-                <SelectItem value="7d">Last 7d</SelectItem>
-                <SelectItem value="all">All Time</SelectItem>
-              </SelectContent>
-            </Select>
+      <ResourceListTableToolbar
+        globalFilterBar={
+        <>
+          <ResourceCommandBar
+            scope={
+              <Select value={namespaceFilter} onValueChange={setNamespaceFilter}>
+                <SelectTrigger className="w-[180px] h-10 rounded-lg border border-border bg-background text-sm font-medium shadow-sm">
+                  <SelectValue placeholder="Namespace" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All namespaces</SelectItem>
+                  {namespaceOptions.filter((n) => n !== 'all').map((ns) => (
+                    <SelectItem key={ns} value={ns}>{ns}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+            search={
+              <div className="relative w-full min-w-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search events..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full h-10 pl-9 rounded-lg border border-border bg-background text-sm font-medium shadow-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/20"
+                  aria-label="Search events"
+                />
+              </div>
+            }
+          />
+          <div className="flex flex-wrap gap-2 items-center px-4 py-2">
+            <span className="text-sm text-muted-foreground">Type:</span>
+            <Button variant={!typeFilterActive ? 'secondary' : 'ghost'} size="sm" onClick={() => setColumnFilter('type', null)}>All</Button>
+            <Button variant={typeFilterValue === 'Normal' ? 'secondary' : 'ghost'} size="sm" onClick={() => setColumnFilter('type', typeFilterValue === 'Normal' ? null : new Set(['Normal']))}>Normal</Button>
+            <Button variant={typeFilterValue === 'Warning' ? 'secondary' : 'ghost'} size="sm" onClick={() => setColumnFilter('type', typeFilterValue === 'Warning' ? null : new Set(['Warning']))}>Warning</Button>
+            <Button variant={typeFilterValue === 'Error' ? 'secondary' : 'ghost'} size="sm" onClick={() => setColumnFilter('type', typeFilterValue === 'Error' ? null : new Set(['Error']))}>Error</Button>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Events List */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Events ({events.length})</CardTitle>
-          <CardDescription>
-            {autoRefresh && <span className="text-success">● Live updates enabled</span>}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {events.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Bell className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No events match your filters</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {events.map((event) => {
-                const config = typeConfig[event.type];
-                const EventIcon = config.icon;
-                const objectLink = getObjectLink(event.objectKind, event.objectName, event.objectNamespace);
-                
-                return (
-                  <div key={event.name} className="flex items-start gap-4 p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
-                    <div className={cn('p-2 rounded-full mt-0.5', config.bg)}>
-                      <EventIcon className={cn('h-4 w-4', config.color)} />
+        </>
+        }
+        hasActiveFilters={hasActiveFilters}
+        onClearAllFilters={clearAllFilters}
+        showTableFilters={showTableFilters}
+        onToggleTableFilters={() => setShowTableFilters((v) => !v)}
+        columns={EVENTS_COLUMNS_FOR_VISIBILITY}
+        visibleColumns={columnVisibility.visibleColumns}
+        onColumnToggle={columnVisibility.setColumnVisible}
+        footer={
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">{pagination.rangeLabel}</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  {pageSize} per page
+                  <ChevronDown className="h-4 w-4 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {PAGE_SIZE_OPTIONS.filter((s) => s <= 100).map((size) => (
+                  <DropdownMenuItem key={size} onClick={() => { setPageSize(size); setPageIndex(0); }} className={cn(pageSize === size && 'bg-accent')}>
+                    {size} per page
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <ListPagination hasPrev={pagination.hasPrev} hasNext={pagination.hasNext} onPrev={pagination.onPrev} onNext={pagination.onNext} rangeLabel={undefined} currentPage={pagination.currentPage} totalPages={pagination.totalPages} onPageChange={pagination.onPageChange} dataUpdatedAt={pagination.dataUpdatedAt} isFetching={pagination.isFetching} />
+        </div>
+        }
+      >
+        <ResizableTableProvider tableId="events" columnConfig={EVENTS_TABLE_COLUMNS}>
+          <Table className="table-fixed" style={{ minWidth: 1000 }}>
+            <TableHeader>
+              <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
+                <ResizableTableHead columnId="type"><TableColumnHeaderWithFilterAndSort columnId="type" label="Type" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
+                <ResizableTableHead columnId="reason"><TableColumnHeaderWithFilterAndSort columnId="reason" label="Reason" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
+                <ResizableTableHead columnId="message"><TableColumnHeaderWithFilterAndSort columnId="message" label="Message" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
+                <ResizableTableHead columnId="involved"><TableColumnHeaderWithFilterAndSort columnId="involved" label="Involved Object" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
+                <ResizableTableHead columnId="namespace"><TableColumnHeaderWithFilterAndSort columnId="namespace" label="Namespace" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
+                <ResizableTableHead columnId="source"><TableColumnHeaderWithFilterAndSort columnId="source" label="Source" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
+                <ResizableTableHead columnId="count"><TableColumnHeaderWithFilterAndSort columnId="count" label="Count" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
+                <ResizableTableHead columnId="firstSeen"><TableColumnHeaderWithFilterAndSort columnId="firstSeen" label="First Seen" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
+                <ResizableTableHead columnId="lastSeen"><TableColumnHeaderWithFilterAndSort columnId="lastSeen" label="Last Seen" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
+                <TableHead className="w-12 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>
+              </TableRow>
+              {showTableFilters && (
+                <TableRow className="bg-muted/30 hover:bg-muted/30 border-b-2 border-border">
+                  <ResizableTableCell columnId="type" className="p-1.5"><TableFilterCell columnId="type" label="Type" distinctValues={distinctValuesByColumn.type ?? []} selectedFilterValues={columnFilters.type ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.type} /></ResizableTableCell>
+                  <ResizableTableCell columnId="reason" className="p-1.5"><TableFilterCell columnId="reason" label="Reason" distinctValues={distinctValuesByColumn.reason ?? []} selectedFilterValues={columnFilters.reason ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.reason} /></ResizableTableCell>
+                  <ResizableTableCell columnId="message" className="p-1.5" />
+                  <ResizableTableCell columnId="involved" className="p-1.5" />
+                  <ResizableTableCell columnId="namespace" className="p-1.5" />
+                  <ResizableTableCell columnId="source" className="p-1.5" />
+                  <ResizableTableCell columnId="count" className="p-1.5" />
+                  <ResizableTableCell columnId="firstSeen" className="p-1.5" />
+                  <ResizableTableCell columnId="lastSeen" className="p-1.5" />
+                  <TableCell className="w-12 p-1.5" />
+                </TableRow>
+              )}
+            </TableHeader>
+            <TableBody>
+              {!useBackend || !clusterId ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
+                    Connect a cluster to view events.
+                  </TableCell>
+                </TableRow>
+              ) : eventsQuery.isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="h-32 text-center">
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">Loading events...</p>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <Badge variant={event.type === 'Normal' ? 'secondary' : event.type === 'Warning' ? 'outline' : 'destructive'}>
-                          {event.reason}
-                        </Badge>
-                        {objectLink !== '#' ? (
-                          <Link 
-                            to={objectLink}
-                            className="font-mono text-sm text-primary hover:underline flex items-center gap-1"
-                          >
-                            {event.objectKind}/{event.objectName}
-                            <ExternalLink className="h-3 w-3" />
+                  </TableCell>
+                </TableRow>
+              ) : filteredRows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
+                    <div className="flex flex-col items-center gap-2">
+                      <Bell className="h-8 w-8 opacity-50" />
+                      <p>No events match your filters.</p>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                itemsOnPage.map((ev, idx) => {
+                  const config = typeConfig[ev.type];
+                  const EventIcon = config.icon;
+                  const canonicalKind = ev.objectKind && ev.objectKind !== '–' ? normalizeKindForTopology(ev.objectKind) : '';
+                  const detailPath = canonicalKind ? getDetailPath(canonicalKind, ev.objectName, ev.objectNamespace) : null;
+                  return (
+                    <motion.tr
+                      key={ev.id}
+                      initial={ROW_MOTION.initial}
+                      animate={ROW_MOTION.animate}
+                      transition={ROW_MOTION.transition(idx)}
+                      className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5')}
+                    >
+                      <ResizableTableCell columnId="type">
+                        <Link to={`/events/${encodeURIComponent(ev.eventNamespace)}/${encodeURIComponent(ev.name)}`} className={cn('inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 hover:opacity-90', config.bg)}>
+                          <EventIcon className={cn('h-3.5 w-3.5', config.color)} />
+                          <span className="text-xs font-medium">{ev.type}</span>
+                        </Link>
+                      </ResizableTableCell>
+                      <ResizableTableCell columnId="reason" className="font-medium">{ev.reason}</ResizableTableCell>
+                      <ResizableTableCell columnId="message" className="text-muted-foreground truncate max-w-[200px]" title={ev.message}>{ev.message}</ResizableTableCell>
+                      <ResizableTableCell columnId="involved">
+                        {detailPath ? (
+                          <Link to={detailPath} className="font-mono text-sm text-primary hover:underline flex items-center gap-1 truncate">
+                            {ev.objectKind}/{ev.objectName}
+                            <ExternalLink className="h-3 w-3 flex-shrink-0" />
                           </Link>
                         ) : (
-                          <span className="font-mono text-sm text-muted-foreground">
-                            {event.objectKind}/{event.objectName}
-                          </span>
+                          <span className="font-mono text-sm text-muted-foreground">{ev.objectKind}/{ev.objectName}</span>
                         )}
-                        {event.namespace && (
-                          <Badge variant="outline" className="text-xs">{event.namespace}</Badge>
-                        )}
-                        {event.count > 1 && (
-                          <Badge variant="secondary" className="text-xs">×{event.count}</Badge>
-                        )}
-                      </div>
-                      <p className="text-sm text-muted-foreground">{event.message}</p>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          Last seen: {event.lastSeen}
-                        </span>
-                        <span>First seen: {event.firstSeen}</span>
-                        <span>Source: {event.source}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                      </ResizableTableCell>
+                      <ResizableTableCell columnId="namespace" className="text-muted-foreground">{ev.eventNamespace || '–'}</ResizableTableCell>
+                      <ResizableTableCell columnId="source" className="text-muted-foreground">{ev.source}</ResizableTableCell>
+                      <ResizableTableCell columnId="count" className="font-mono text-sm">{ev.count}</ResizableTableCell>
+                      <ResizableTableCell columnId="firstSeen" className="text-muted-foreground whitespace-nowrap">{ev.firstSeen}</ResizableTableCell>
+                      <ResizableTableCell columnId="lastSeen" className="text-muted-foreground whitespace-nowrap">{ev.lastSeen}</ResizableTableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60" aria-label="Event actions">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuItem onClick={() => navigate(`/events/${encodeURIComponent(ev.eventNamespace)}/${encodeURIComponent(ev.name)}`)} className="gap-2">
+                              View Details
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => navigate(`/events/${encodeURIComponent(ev.eventNamespace)}/${encodeURIComponent(ev.name)}?tab=yaml`)} className="gap-2">
+                              Download YAML
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </motion.tr>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </ResizableTableProvider>
+      </ResourceListTableToolbar>
     </motion.div>
   );
 }

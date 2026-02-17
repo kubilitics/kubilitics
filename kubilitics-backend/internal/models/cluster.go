@@ -10,7 +10,11 @@ type Cluster struct {
 	KubeconfigPath string    `json:"kubeconfig_path" db:"kubeconfig_path"`
 	ServerURL      string    `json:"server_url" db:"server_url"`
 	Version        string    `json:"version" db:"version"`
-	Status         string    `json:"status" db:"status"` // connected, disconnected, error
+	Status         string    `json:"status" db:"status"`     // connected, disconnected, error
+	Provider       string    `json:"provider" db:"provider"` // EKS, GKE, AKS, OpenShift, Rancher, k3s, Kind, Minikube, Docker Desktop, on-prem
+	IsCurrent      bool      `json:"is_current" db:"is_current"`
+	NodeCount      int       `json:"node_count" db:"-"`
+	NamespaceCount int       `json:"namespace_count" db:"-"`
 	LastConnected  time.Time `json:"last_connected" db:"last_connected"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`

@@ -9,8 +9,14 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { useKubernetesConfigStore } from '@/stores/kubernetesConfigStore';
 import { useTestK8sConnection } from '@/hooks/useKubernetes';
+import { cn } from '@/lib/utils';
 
-export function K8sConnectionDialog() {
+interface K8sConnectionDialogProps {
+  /** Optional class for the trigger to match header action buttons (e.g. uniform height/size) */
+  triggerClassName?: string;
+}
+
+export function K8sConnectionDialog({ triggerClassName }: K8sConnectionDialogProps) {
   const { config, setApiUrl, setToken, disconnect } = useKubernetesConfigStore();
   const testConnection = useTestK8sConnection();
   const [open, setOpen] = useState(false);
@@ -32,24 +38,29 @@ export function K8sConnectionDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
-          <Server className="h-4 w-4" />
+        <button
+          className={cn(
+            triggerClassName,
+            config.isConnected
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+              : 'bg-primary text-primary-foreground border-primary hover:bg-primary/90'
+          )}
+        >
           {config.isConnected ? (
             <>
-              <span className="hidden sm:inline">Connected</span>
-              <Badge variant="default" className="h-5 px-1.5">
-                <CheckCircle2 className="h-3 w-3" />
-              </Badge>
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-60" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              </span>
+              <span>Connected</span>
             </>
           ) : (
             <>
-              <span className="hidden sm:inline">Connect Cluster</span>
-              <Badge variant="secondary" className="h-5 px-1.5">
-                <XCircle className="h-3 w-3" />
-              </Badge>
+              <Server className="h-4 w-4" />
+              <span>Connect</span>
             </>
           )}
-        </Button>
+        </button>
       </DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>

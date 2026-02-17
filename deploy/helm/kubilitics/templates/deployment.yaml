@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubilitics.fullname" . }}
+  labels:
+    {{- include "kubilitics.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kubilitics.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kubilitics.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.serviceAccount }}
+      serviceAccountName: {{ .name | default (printf "%s" (include "kubilitics.serviceAccountName" $)) }}
+      {{- end }}
+      containers:
+        - name: backend
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.port }}
+              protocol: TCP
+          env:
+            - name: KUBILITICS_PORT
+              value: {{ .Values.config.port | quote }}
+            - name: KUBILITICS_DATABASE_PATH
+              value: {{ .Values.config.databasePath | quote }}
+            - name: KUBILITICS_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: KUBILITICS_ALLOWED_ORIGINS
+              value: {{ .Values.config.allowedOrigins | quote }}
+            - name: KUBILITICS_REQUEST_TIMEOUT_SEC
+              value: {{ .Values.config.requestTimeoutSec | quote }}
+            - name: KUBILITICS_TOPOLOGY_TIMEOUT_SEC
+              value: {{ .Values.config.topologyTimeoutSec | quote }}
+            - name: KUBILITICS_SHUTDOWN_TIMEOUT_SEC
+              value: {{ .Values.config.shutdownTimeoutSec | quote }}
+            - name: KUBILITICS_MAX_CLUSTERS
+              value: {{ .Values.config.maxClusters | quote }}
+            - name: KUBILITICS_K8S_TIMEOUT_SEC
+              value: {{ .Values.config.k8sTimeoutSec | quote }}
+            - name: KUBILITICS_TOPOLOGY_CACHE_TTL_SEC
+              value: {{ .Values.config.topologyCacheTtlSec | quote }}
+            - name: KUBILITICS_TOPOLOGY_MAX_NODES
+              value: {{ .Values.config.topologyMaxNodes | quote }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "kubilitics.fullname" . }}-pvc
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

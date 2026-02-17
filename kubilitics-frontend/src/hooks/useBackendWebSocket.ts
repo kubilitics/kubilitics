@@ -1,0 +1,133 @@
+/**
+ * WebSocket connection to Kubilitics backend with exponential backoff and max retries (B2.4).
+ * Primary for real-time updates (topology, resources); polling is fallback when disconnected.
+ */
+import { useEffect, useRef, useCallback, useState } from 'react';
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
+
+const DEFAULT_MAX_RETRIES = 10;
+const INITIAL_RECONNECT_MS = 1000;
+const MAX_RECONNECT_MS = 30_000;
+const BACKOFF_MULTIPLIER = 2;
+
+export interface BackendWebSocketMessage {
+  type?: string;
+  event?: string;
+  resource?: Record<string, unknown>;
+  timestamp?: string;
+}
+
+export interface UseBackendWebSocketOptions {
+  clusterId?: string | null;
+  maxRetries?: number;
+  onMessage?: (data: BackendWebSocketMessage) => void;
+  enabled?: boolean;
+}
+
+export function useBackendWebSocket(options: UseBackendWebSocketOptions = {}) {
+  const {
+    clusterId = null,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    onMessage,
+    enabled = true,
+  } = options;
+
+  const stored = useBackendConfigStore((s) => s.backendBaseUrl);
+  const backendBaseUrl = getEffectiveBackendBaseUrl(stored);
+  const isConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
+
+  const [connected, setConnected] = useState(false);
+  const [lastMessage, setLastMessage] = useState<BackendWebSocketMessage | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const retryCountRef = useRef(0);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const connect = useCallback(() => {
+    if (!isConfigured() || !enabled) return;
+
+    const protocol = backendBaseUrl?.startsWith('https') ? 'wss' : 'ws';
+    const host = backendBaseUrl
+      ? backendBaseUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+      : (typeof window !== 'undefined' ? window.location.host : '');
+    if (!host) return;
+    const url = new URL('/ws/resources', `${protocol}//${host}`);
+    if (clusterId) url.searchParams.set('cluster_id', clusterId);
+
+    const ws = new WebSocket(url.toString());
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      retryCountRef.current = 0;
+      setConnected(true);
+      setError(null);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as BackendWebSocketMessage;
+        setLastMessage(data);
+        onMessage?.(data);
+      } catch {
+        // ignore non-JSON
+      }
+    };
+
+    ws.onclose = () => {
+      wsRef.current = null;
+      setConnected(false);
+
+      if (!enabled) return;
+      if (retryCountRef.current >= maxRetries) {
+        setError(`WebSocket disconnected after ${maxRetries} retries`);
+        return;
+      }
+
+      const delay = Math.min(
+        INITIAL_RECONNECT_MS * Math.pow(BACKOFF_MULTIPLIER, retryCountRef.current),
+        MAX_RECONNECT_MS
+      );
+      retryCountRef.current += 1;
+      setError(`Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${retryCountRef.current}/${maxRetries})…`);
+
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        connect();
+      }, delay);
+    };
+
+    ws.onerror = () => {
+      setError('WebSocket error');
+    };
+  }, [backendBaseUrl, clusterId, enabled, isConfigured, maxRetries, onMessage]);
+
+  const disconnect = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    retryCountRef.current = maxRetries;
+    setConnected(false);
+    setError(null);
+  }, [maxRetries]);
+
+  useEffect(() => {
+    if (enabled && isConfigured() && backendBaseUrl) {
+      connect();
+    }
+    return () => disconnect();
+  }, [enabled, backendBaseUrl, clusterId, isConfigured]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return {
+    connected,
+    lastMessage,
+    error,
+    reconnect: connect,
+    disconnect,
+  };
+}

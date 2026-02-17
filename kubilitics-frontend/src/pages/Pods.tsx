@@ -21,10 +21,16 @@ import {
   RotateCcw,
   ArrowUpDown,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   GitCompare,
   CheckSquare,
   Square,
   Minus,
+  List,
+  Layers,
+  Boxes,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,29 +44,59 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  ResizableTableProvider,
+  ResizableTableHead,
+  ResizableTableCell,
+  type ResizableColumnConfig,
+} from '@/components/ui/resizable-table';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueries } from '@tanstack/react-query';
 import { useK8sResourceList, useDeleteK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
-import { useKubernetesConfigStore } from '@/stores/kubernetesConfigStore';
-import { DeleteConfirmDialog, PortForwardDialog, Sparkline, PodComparisonView } from '@/components/resources';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
+import { useClusterStore } from '@/stores/clusterStore';
+import { getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
+import { useBackendConfigStore } from '@/stores/backendConfigStore';
+import { getPodMetrics } from '@/services/backendApiClient';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { DeleteConfirmDialog, PortForwardDialog, UsageBar, PodComparisonView, calculatePodResourceMax } from '@/components/resources';
+import { NamespaceFilter, ResourceCommandBar, StatusPill, resourceTableRowClassName, ROW_MOTION, ListPagination, ListViewSegmentedControl, ListPageStatCard, ListPageHeader, TableColumnHeaderWithFilterAndSort, TableFilterCell, AgeCell, TableEmptyState, TableSkeletonRows, CopyNameDropdownItem, NamespaceBadge, ResourceListTableToolbar, type StatusPillVariant } from '@/components/list';
+import { PodIcon } from '@/components/icons/KubernetesIcons';
+import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
+import { useColumnVisibility } from '@/hooks/useColumnVisibility';
+import { useTableKeyboardNav } from '@/hooks/useTableKeyboardNav';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
 import { toast } from 'sonner';
-import { Card, CardContent } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 
 interface PodResource extends KubernetesResource {
   spec: {
     nodeName?: string;
-    containers: Array<{ name: string; image: string; ports?: Array<{ containerPort: number; name?: string; protocol?: string }> }>;
+    hostNetwork?: boolean;
+    containers: Array<{ 
+      name: string; 
+      image: string; 
+      ports?: Array<{ containerPort: number; name?: string; protocol?: string }>;
+      resources?: {
+        requests?: { cpu?: string; memory?: string };
+        limits?: { cpu?: string; memory?: string };
+      };
+    }>;
   };
   status: {
     phase: string;
+    podIP?: string;
+    podIPs?: Array<{ ip?: string }>;
+    hostIP?: string;
     containerStatuses?: Array<{
       name: string;
       ready: boolean;
@@ -76,26 +112,44 @@ interface Pod {
   ready: string;
   restarts: number;
   age: string;
+  creationTimestamp?: string;
   node: string;
+  /** Internal pod IP (podIP / podIPs). */
+  internalIP: string;
+  /** External IP: hostIP when hostNetwork, else "-". */
+  externalIP: string;
   cpu: string;
   memory: string;
   containers: Array<{ name: string; ports?: Array<{ containerPort: number; name?: string; protocol?: string }> }>;
-  // Live metrics data
   cpuData?: number[];
   memoryData?: number[];
 }
 
-const mockPods: Pod[] = [
-  { name: 'nginx-deployment-7fb96c846b-abc12', namespace: 'production', status: 'Running', ready: '1/1', restarts: 0, age: '2d', node: 'worker-node-1', cpu: '10m', memory: '32Mi', containers: [{ name: 'nginx', ports: [{ containerPort: 80, name: 'http' }] }], cpuData: [12, 15, 10, 18, 14, 11, 13, 16, 12, 14, 10, 15, 13, 11, 14, 12, 15, 10, 13, 11], memoryData: [30, 32, 35, 31, 33, 34, 32, 30, 35, 33, 31, 32, 34, 30, 33, 35, 32, 31, 34, 32] },
-  { name: 'nginx-deployment-7fb96c846b-def34', namespace: 'production', status: 'Running', ready: '1/1', restarts: 0, age: '2d', node: 'worker-node-2', cpu: '12m', memory: '28Mi', containers: [{ name: 'nginx', ports: [{ containerPort: 80, name: 'http' }] }], cpuData: [14, 12, 16, 13, 15, 11, 14, 12, 18, 15, 13, 11, 16, 14, 12, 15, 13, 17, 14, 12], memoryData: [28, 26, 30, 27, 29, 25, 28, 30, 26, 28, 27, 29, 25, 28, 30, 27, 26, 29, 28, 28] },
-  { name: 'api-gateway-5f8f9c7d6-jkl78', namespace: 'production', status: 'Running', ready: '2/2', restarts: 1, age: '5d', node: 'worker-node-3', cpu: '45m', memory: '128Mi', containers: [{ name: 'gateway', ports: [{ containerPort: 8080, name: 'http' }, { containerPort: 8443, name: 'https' }] }], cpuData: [40, 45, 50, 42, 48, 55, 45, 40, 52, 47, 43, 50, 45, 48, 42, 55, 47, 43, 50, 45], memoryData: [120, 125, 130, 128, 135, 140, 130, 125, 138, 132, 128, 135, 130, 140, 125, 132, 138, 128, 135, 128] },
-  { name: 'redis-master-0', namespace: 'production', status: 'Running', ready: '1/1', restarts: 0, age: '14d', node: 'worker-node-2', cpu: '25m', memory: '64Mi', containers: [{ name: 'redis', ports: [{ containerPort: 6379, name: 'redis' }] }], cpuData: [20, 25, 22, 28, 24, 21, 26, 23, 27, 24, 22, 25, 28, 21, 24, 26, 23, 25, 22, 25], memoryData: [60, 62, 65, 64, 68, 63, 66, 62, 64, 67, 63, 65, 68, 62, 64, 66, 63, 65, 62, 64] },
-  { name: 'flaky-service-8f7g6h5-mno90', namespace: 'staging', status: 'CrashLoopBackOff', ready: '0/1', restarts: 15, age: '3h', node: 'worker-node-3', cpu: '0m', memory: '0Mi', containers: [{ name: 'app', ports: [{ containerPort: 3000 }] }], cpuData: [0, 5, 0, 3, 0, 0, 2, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0], memoryData: [0, 10, 0, 5, 0, 0, 8, 0, 0, 3, 0, 0, 0, 5, 0, 0, 0, 2, 0, 0] },
-  { name: 'new-deployment-pending-pqr12', namespace: 'staging', status: 'Pending', ready: '0/1', restarts: 0, age: '5m', node: '-', cpu: '-', memory: '-', containers: [{ name: 'app', ports: [{ containerPort: 8080 }] }] },
-  { name: 'etcd-0', namespace: 'kube-system', status: 'Running', ready: '1/1', restarts: 0, age: '90d', node: 'control-plane-1', cpu: '50m', memory: '256Mi', containers: [{ name: 'etcd', ports: [{ containerPort: 2379, name: 'client' }, { containerPort: 2380, name: 'peer' }] }], cpuData: [45, 50, 55, 48, 52, 58, 50, 45, 55, 52, 48, 50, 55, 48, 52, 58, 50, 45, 55, 50], memoryData: [250, 255, 260, 258, 262, 255, 258, 252, 260, 256, 254, 258, 262, 255, 258, 260, 254, 256, 260, 256] },
-  { name: 'coredns-6d4b75cb6d-stu34', namespace: 'kube-system', status: 'Running', ready: '1/1', restarts: 0, age: '60d', node: 'control-plane-1', cpu: '5m', memory: '32Mi', containers: [{ name: 'coredns', ports: [{ containerPort: 53, name: 'dns' }] }], cpuData: [4, 5, 6, 5, 4, 6, 5, 4, 5, 6, 5, 4, 6, 5, 4, 5, 6, 5, 4, 5], memoryData: [30, 32, 34, 31, 33, 32, 30, 34, 31, 33, 32, 30, 34, 31, 33, 32, 30, 34, 31, 32] },
-  { name: 'kube-proxy-xyz45', namespace: 'kube-system', status: 'Running', ready: '1/1', restarts: 0, age: '90d', node: 'worker-node-1', cpu: '10m', memory: '48Mi', containers: [{ name: 'kube-proxy' }], cpuData: [8, 10, 12, 9, 11, 10, 8, 12, 10, 9, 11, 8, 10, 12, 9, 11, 10, 8, 12, 10], memoryData: [45, 48, 50, 47, 49, 48, 45, 50, 48, 47, 49, 45, 48, 50, 47, 49, 48, 45, 50, 48] },
-  { name: 'metrics-server-abc67', namespace: 'kube-system', status: 'Running', ready: '1/1', restarts: 2, age: '30d', node: 'control-plane-1', cpu: '15m', memory: '64Mi', containers: [{ name: 'metrics-server', ports: [{ containerPort: 443, name: 'https' }] }], cpuData: [12, 15, 18, 14, 16, 15, 12, 18, 15, 14, 16, 12, 15, 18, 14, 16, 15, 12, 18, 15], memoryData: [60, 64, 68, 62, 66, 64, 60, 68, 64, 62, 66, 60, 64, 68, 62, 66, 64, 60, 68, 64] },
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+
+const PODS_COLUMNS_FOR_VISIBILITY = [
+  { id: 'namespace', label: 'Namespace' },
+  { id: 'status', label: 'Status' },
+  { id: 'ready', label: 'Ready' },
+  { id: 'restarts', label: 'Restarts' },
+  { id: 'ip', label: 'IP' },
+  { id: 'cpu', label: 'CPU' },
+  { id: 'memory', label: 'Memory' },
+  { id: 'age', label: 'Age' },
+  { id: 'node', label: 'Node' },
+];
+
+const PODS_TABLE_COLUMNS: ResizableColumnConfig[] = [
+  { id: 'name', defaultWidth: 260, minWidth: 120 },
+  { id: 'namespace', defaultWidth: 140, minWidth: 80 },
+  { id: 'status', defaultWidth: 120, minWidth: 82 },
+  { id: 'ready', defaultWidth: 88, minWidth: 76 },
+  { id: 'restarts', defaultWidth: 100, minWidth: 88 },
+  { id: 'ip', defaultWidth: 200, minWidth: 140 },
+  { id: 'cpu', defaultWidth: 110, minWidth: 70 },
+  { id: 'memory', defaultWidth: 120, minWidth: 78 },
+  { id: 'age', defaultWidth: 90, minWidth: 56 },
+  { id: 'node', defaultWidth: 160, minWidth: 90 },
 ];
 
 const statusConfig = {
@@ -105,6 +159,23 @@ const statusConfig = {
   Succeeded: { icon: CheckCircle2, color: 'text-muted-foreground', bg: 'bg-muted' },
   CrashLoopBackOff: { icon: AlertTriangle, color: 'text-[hsl(0,72%,51%)]', bg: 'bg-[hsl(0,72%,51%)]/10' },
 };
+
+const statusToPillVariant: Record<Pod['status'], StatusPillVariant> = {
+  Running: 'success',
+  Pending: 'warning',
+  Failed: 'error',
+  Succeeded: 'neutral',
+  CrashLoopBackOff: 'error',
+};
+
+/** Parse "1/1" or "0/2" to percentage for ready progress bar. */
+function parseReadyFraction(ready: string): number {
+  const m = ready.match(/^(\d+)\/(\d+)$/);
+  if (!m) return 100;
+  const num = parseInt(m[1], 10);
+  const den = parseInt(m[2], 10);
+  return den > 0 ? Math.round((num / den) * 100) : 0;
+}
 
 function transformPodResource(resource: PodResource): Pod {
   const containerStatuses = resource.status?.containerStatuses || [];
@@ -121,6 +192,12 @@ function transformPodResource(resource: PodResource): Pod {
     status = 'CrashLoopBackOff';
   }
 
+  const internalIP = resource.status?.podIPs?.[0]?.ip ?? resource.status?.podIP ?? '-';
+  const externalIP =
+    resource.spec?.hostNetwork && resource.status?.hostIP
+      ? resource.status.hostIP
+      : '-';
+
   return {
     name: resource.metadata.name,
     namespace: resource.metadata.namespace || 'default',
@@ -128,103 +205,292 @@ function transformPodResource(resource: PodResource): Pod {
     ready: `${readyCount}/${totalCount}`,
     restarts,
     age: calculateAge(resource.metadata.creationTimestamp),
+    creationTimestamp: resource.metadata?.creationTimestamp,
     node: resource.spec?.nodeName || '-',
+    internalIP,
+    externalIP,
     cpu: '-',
     memory: '-',
     containers: resource.spec?.containers || [],
   };
 }
 
-type SortKey = 'name' | 'namespace' | 'status' | 'restarts' | 'age';
-type ViewMode = 'all' | 'running' | 'pending' | 'failed';
+/** Parse CPU string to millicores for sorting (e.g. "200m" -> 200, "0.01" cores -> 10, "-" -> -1). */
+function parseCpuForSort(value: string): number {
+  if (!value || value === '-') return -1;
+  const s = value.trim();
+  const last = s.slice(-1).toLowerCase();
+  if (last === 'm') {
+    const n = parseFloat(s.slice(0, -1));
+    return Number.isFinite(n) ? n : -1;
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n * 1000 : -1;
+}
+
+/** Parse memory string to Mi for sorting (e.g. "256Mi" -> 256, "-" -> -1). */
+function parseMemoryForSort(value: string): number {
+  if (!value || value === '-') return -1;
+  const s = value.trim();
+  if (s.endsWith('Ki')) {
+    const n = parseFloat(s.slice(0, -2));
+    return Number.isFinite(n) ? n / 1024 : -1;
+  }
+  if (s.endsWith('Mi')) {
+    const n = parseFloat(s.slice(0, -2));
+    return Number.isFinite(n) ? n : -1;
+  }
+  if (s.endsWith('Gi')) {
+    const n = parseFloat(s.slice(0, -2));
+    return Number.isFinite(n) ? n * 1024 : -1;
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : -1;
+}
+
+type ListView = 'flat' | 'byNamespace' | 'byNode';
 
 export default function Pods() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const namespaceFromUrl = searchParams.get('namespace');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedNamespace, setSelectedNamespace] = useState<string>('all');
+  const [selectedNamespaces, setSelectedNamespaces] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (namespaceFromUrl) setSelectedNamespaces(new Set([namespaceFromUrl]));
+  }, [namespaceFromUrl]);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; pod: Pod | null; bulk?: boolean }>({ open: false, pod: null });
   const [portForwardDialog, setPortForwardDialog] = useState<{ open: boolean; pod: Pod | null }>({ open: false, pod: null });
   const [showCreateWizard, setShowCreateWizard] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>('name');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [selectedPods, setSelectedPods] = useState<Set<string>>(new Set());
   const [showComparison, setShowComparison] = useState(false);
-  
-  const { config } = useKubernetesConfigStore();
-  const { data, isLoading, refetch } = useK8sResourceList<PodResource>('pods');
+  const [pageSize, setPageSize] = useState(10);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [listView, setListView] = useState<ListView>('flat');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [showTableFilters, setShowTableFilters] = useState(false);
+
+  const { isConnected } = useConnectionStatus();
+  const activeCluster = useClusterStore((s) => s.activeCluster);
+  const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
+  const storedUrl = useBackendConfigStore((s) => s.backendBaseUrl);
+  const backendBaseUrl = getEffectiveBackendBaseUrl(storedUrl);
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
+  // Cluster ID for backend API (metrics, etc.). In dev backendBaseUrl can be '' (proxy); still enable when configured.
+  const clusterId = currentClusterId ?? activeCluster?.id;
+
+  // Single full-list fetch (limit 5000 when backend); pagination is frontend-only
+  const { data, isLoading, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<PodResource>('pods', undefined, {
+    enabled: isConnected,
+    refetchInterval: 30000,
+    limit: 5000,
+  });
   const deletePod = useDeleteK8sResource('pods');
-  
-  // Transform API data or use mock data
-  const pods: Pod[] = config.isConnected && data?.items
+
+  // Full list of pods (all loaded); stats and pagination derived from this
+  const fullPods: Pod[] = isConnected && data?.items
     ? data.items.map(transformPodResource)
-    : mockPods;
+    : [];
 
-  // Calculate stats
+  // Stats from full list so top counter matches footer total
   const stats = useMemo(() => ({
-    total: pods.length,
-    running: pods.filter(p => p.status === 'Running').length,
-    pending: pods.filter(p => p.status === 'Pending').length,
-    failed: pods.filter(p => p.status === 'Failed' || p.status === 'CrashLoopBackOff').length,
-  }), [pods]);
+    total: fullPods.length,
+    running: fullPods.filter(p => p.status === 'Running').length,
+    pending: fullPods.filter(p => p.status === 'Pending').length,
+    failed: fullPods.filter(p => p.status === 'Failed' || p.status === 'CrashLoopBackOff').length,
+  }), [fullPods]);
 
-  const namespaces = useMemo(() => {
-    return ['all', ...Array.from(new Set(pods.map((p) => p.namespace)))];
-  }, [pods]);
+  const namespaceList = useMemo(() => Array.from(new Set(fullPods.map((p) => p.namespace))), [fullPods]);
 
-  const filteredPods = useMemo(() => {
-    let result = pods.filter((pod) => {
+  // Filter by search and namespace only; column filters and sort are handled by useTableFiltersAndSort
+  const filteredUnsorted = useMemo(() => {
+    return fullPods.filter((pod) => {
       const matchesSearch = pod.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            pod.namespace.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesNamespace = selectedNamespace === 'all' || pod.namespace === selectedNamespace;
-      
-      let matchesView = true;
-      if (viewMode === 'running') matchesView = pod.status === 'Running';
-      else if (viewMode === 'pending') matchesView = pod.status === 'Pending';
-      else if (viewMode === 'failed') matchesView = pod.status === 'Failed' || pod.status === 'CrashLoopBackOff';
-      
-      return matchesSearch && matchesNamespace && matchesView;
+      const matchesNamespace = selectedNamespaces.size === 0 || selectedNamespaces.has(pod.namespace);
+      return matchesSearch && matchesNamespace;
     });
+  }, [fullPods, searchQuery, selectedNamespaces]);
 
-    // Sort
-    result.sort((a, b) => {
-      let comparison = 0;
-      switch (sortKey) {
-        case 'name':
-          comparison = a.name.localeCompare(b.name);
-          break;
-        case 'namespace':
-          comparison = a.namespace.localeCompare(b.namespace);
-          break;
-        case 'status':
-          comparison = a.status.localeCompare(b.status);
-          break;
-        case 'restarts':
-          comparison = a.restarts - b.restarts;
-          break;
-        case 'age':
-          comparison = a.age.localeCompare(b.age);
-          break;
+  // CPU/Memory sort: fetch metrics for first N pods so the sorted order is correct when user sorts by CPU/Memory.
+  const SORT_METRICS_BATCH = 80;
+  const podsForSortMetrics = useMemo(
+    () => filteredUnsorted.slice(0, SORT_METRICS_BATCH),
+    [filteredUnsorted]
+  );
+  const sortMetricsQueries = useQueries({
+    queries: podsForSortMetrics.map((pod) => ({
+      queryKey: ['pod-metrics-sort', clusterId, pod.namespace, pod.name],
+      queryFn: () => getPodMetrics(backendBaseUrl, clusterId!, pod.namespace, pod.name),
+      enabled: !!(isBackendConfigured() && clusterId && podsForSortMetrics.length > 0),
+      staleTime: 30_000,
+    })),
+  });
+  const sortMetricsMap = useMemo(() => {
+    const m: Record<string, { cpu: string; memory: string }> = {};
+    sortMetricsQueries.forEach((q, i) => {
+      if (q.data && podsForSortMetrics[i]) {
+        const key = `${podsForSortMetrics[i].namespace}/${podsForSortMetrics[i].name}`;
+        const d = q.data as { CPU?: string; Memory?: string };
+        m[key] = { cpu: d.CPU ?? '-', memory: d.Memory ?? '-' };
       }
-      return sortOrder === 'asc' ? comparison : -comparison;
     });
+    return m;
+  }, [sortMetricsQueries, podsForSortMetrics]);
 
-    return result;
-  }, [pods, searchQuery, selectedNamespace, viewMode, sortKey, sortOrder]);
+  const podKey = (p: Pod) => `${p.namespace}/${p.name}`;
+  const getCpuForSort = (p: Pod) => sortMetricsMap[podKey(p)]?.cpu ?? p.cpu;
+  const getMemoryForSort = (p: Pod) => sortMetricsMap[podKey(p)]?.memory ?? p.memory;
 
-  const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortKey(key);
-      setSortOrder('asc');
+  const podsTableConfig = useMemo((): { columns: ColumnConfig<Pod>[]; defaultSortKey: string; defaultSortOrder: 'asc' } => ({
+    defaultSortKey: 'name',
+    defaultSortOrder: 'asc',
+    columns: [
+      { columnId: 'name', getValue: (p) => p.name, sortable: true, filterable: true },
+      { columnId: 'namespace', getValue: (p) => p.namespace, sortable: true, filterable: true },
+      { columnId: 'status', getValue: (p) => p.status, sortable: true, filterable: true },
+      { columnId: 'restarts', getValue: (p) => p.restarts, sortable: true, filterable: false },
+      { columnId: 'ip', getValue: (p) => p.internalIP || '-', sortable: true, filterable: true },
+      {
+        columnId: 'cpu',
+        getValue: (p) => getCpuForSort(p),
+        sortable: true,
+        filterable: false,
+        compare: (a, b) => parseCpuForSort(getCpuForSort(a)) - parseCpuForSort(getCpuForSort(b)),
+      },
+      {
+        columnId: 'memory',
+        getValue: (p) => getMemoryForSort(p),
+        sortable: true,
+        filterable: false,
+        compare: (a, b) => parseMemoryForSort(getMemoryForSort(a)) - parseMemoryForSort(getMemoryForSort(b)),
+      },
+      { columnId: 'age', getValue: (p) => p.age, sortable: true, filterable: false },
+      { columnId: 'node', getValue: (p) => p.node || '-', sortable: true, filterable: true },
+    ],
+  }), [sortMetricsMap]);
+
+  const {
+    filteredAndSortedItems: filteredPods,
+    distinctValuesByColumn,
+    valueCountsByColumn,
+    columnFilters,
+    setColumnFilter,
+    sortKey,
+    sortOrder,
+    setSort,
+    clearAllFilters,
+    hasActiveFilters,
+  } = useTableFiltersAndSort(filteredUnsorted, podsTableConfig);
+
+  const columnVisibility = useColumnVisibility({
+    tableId: 'pods',
+    columns: PODS_COLUMNS_FOR_VISIBILITY,
+    alwaysVisible: ['name'],
+  });
+
+  // Client-side pagination: one page of filtered list
+  const totalFiltered = filteredPods.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+  const safePageIndex = Math.min(pageIndex, totalPages - 1);
+  const start = safePageIndex * pageSize;
+  const itemsOnPage = filteredPods.slice(start, start + pageSize);
+
+  // Clamp page when filters change
+  useEffect(() => {
+    if (safePageIndex !== pageIndex) setPageIndex(safePageIndex);
+  }, [safePageIndex, pageIndex]);
+
+  // Group current page by namespace or node when in grouped view
+  const groupedOnPage = useMemo(() => {
+    if (listView === 'flat' || itemsOnPage.length === 0) return [];
+    const isByNs = listView === 'byNamespace';
+    const map = new Map<string, Pod[]>();
+    for (const pod of itemsOnPage) {
+      const key = isByNs ? pod.namespace : pod.node;
+      const list = map.get(key) ?? [];
+      list.push(pod);
+      map.set(key, list);
     }
+    const prefix = isByNs ? 'ns:' : 'node:';
+    const entries = Array.from(map.entries())
+      .map(([key, pods]) => ({ groupKey: prefix + key, label: key, pods }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return entries;
+  }, [listView, itemsOnPage]);
+
+  const toggleGroup = (groupKey: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
   };
 
+  // Pagination bar (frontend-only)
+  const pagination = {
+    rangeLabel: totalFiltered > 0
+      ? `Showing ${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered}`
+      : 'No pods',
+    hasPrev: safePageIndex > 0,
+    hasNext: start + pageSize < totalFiltered,
+    onPrev: () => setPageIndex((i) => Math.max(0, i - 1)),
+    onNext: () => setPageIndex((i) => Math.min(totalPages - 1, i + 1)),
+    currentPage: safePageIndex + 1,
+    totalPages: Math.max(1, totalPages),
+    onPageChange: (p: number) => setPageIndex(Math.max(0, Math.min(p - 1, totalPages - 1))),
+  };
+
+  // Pod metrics from backend (when configured); limit to first 40 on current page
+  const podsToFetch = useMemo(() => itemsOnPage.slice(0, 40), [itemsOnPage]);
+  const metricsQueries = useQueries({
+    queries: podsToFetch.map((pod) => ({
+      queryKey: ['pod-metrics', clusterId, pod.namespace, pod.name],
+      queryFn: () => getPodMetrics(backendBaseUrl, clusterId!, pod.namespace, pod.name),
+      enabled: !!(isBackendConfigured() && clusterId),
+      staleTime: 30_000,
+      refetchInterval: 30_000,
+    })),
+  });
+  const metricsMap = useMemo(() => {
+    const m: Record<string, { cpu: string; memory: string }> = {};
+    metricsQueries.forEach((q, i) => {
+      if (q.data && podsToFetch[i]) {
+        const key = `${podsToFetch[i].namespace}/${podsToFetch[i].name}`;
+        const d = q.data as { CPU?: string; Memory?: string; cpu?: string; memory?: string };
+        m[key] = {
+          cpu: d.CPU ?? d.cpu ?? '-',
+          memory: d.Memory ?? d.memory ?? '-',
+        };
+      }
+    });
+    return m;
+  }, [metricsQueries, podsToFetch]);
+
+  // Calculate resource max values from pod container limits/requests
+  const podResourceMaxMap = useMemo(() => {
+    const m: Record<string, { cpuMax?: number; memoryMax?: number }> = {};
+    if (data?.items) {
+      data.items.forEach((podResource) => {
+        const key = `${podResource.metadata.namespace}/${podResource.metadata.name}`;
+        const containers = podResource.spec?.containers || [];
+        const cpuMax = calculatePodResourceMax(containers, 'cpu');
+        const memoryMax = calculatePodResourceMax(containers, 'memory');
+        if (cpuMax !== undefined || memoryMax !== undefined) {
+          m[key] = { cpuMax, memoryMax };
+        }
+      });
+    }
+    return m;
+  }, [data?.items]);
+
+  
   const handleDelete = async () => {
     if (deleteDialog.bulk && selectedPods.size > 0) {
       // Bulk delete
-      if (config.isConnected) {
+      if (isConnected) {
         for (const podKey of selectedPods) {
           const [namespace, name] = podKey.split('/');
           await deletePod.mutateAsync({ name, namespace });
@@ -235,7 +501,7 @@ export default function Pods() {
       setSelectedPods(new Set());
     } else if (deleteDialog.pod) {
       // Single delete
-      if (config.isConnected) {
+      if (isConnected) {
         await deletePod.mutateAsync({
           name: deleteDialog.pod.name,
           namespace: deleteDialog.pod.namespace,
@@ -299,6 +565,93 @@ ${pod.containers.map(c => `  - name: ${c.name}
     toast.success(`Exported ${podsToExport.length} pods`);
   };
 
+  const yamlValue = (v: string | number): string => {
+    if (typeof v === 'number') return String(v);
+    const s = String(v);
+    const needsQuotes = s === '' || s.includes('\n') || s.includes(':') || s.includes('#') || /^[\s\-\[\]{}&*!|>'%@`]/.test(s);
+    if (!needsQuotes) return s;
+    return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  };
+
+  const handleExportAsYaml = () => {
+    const podsToExport = selectedPods.size > 0
+      ? filteredPods.filter(p => selectedPods.has(`${p.namespace}/${p.name}`))
+      : filteredPods;
+    if (podsToExport.length === 0) {
+      toast.info('No pods to export');
+      return;
+    }
+    const exportData = podsToExport.map(p => ({
+      name: p.name,
+      namespace: p.namespace,
+      status: p.status,
+      ready: p.ready,
+      restarts: p.restarts,
+      age: p.age,
+      node: p.node,
+    }));
+    const lines: string[] = [];
+    for (const obj of exportData) {
+      const entries = Object.entries(obj);
+      lines.push(`- ${entries[0][0]}: ${yamlValue(entries[0][1])}`);
+      for (let i = 1; i < entries.length; i++) {
+        lines.push(`  ${entries[i][0]}: ${yamlValue(entries[i][1])}`);
+      }
+    }
+    const yaml = lines.join('\n');
+    const blob = new Blob([yaml], { type: 'text/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'pods-export.yaml';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${podsToExport.length} pods as YAML`);
+  };
+
+  const escapeCsvCell = (value: string | number): string => {
+    const s = String(value);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+
+  const handleBulkExportCsv = () => {
+    const podsToExport = selectedPods.size > 0
+      ? filteredPods.filter(p => selectedPods.has(`${p.namespace}/${p.name}`))
+      : filteredPods;
+    if (podsToExport.length === 0) {
+      toast.info('No pods to export');
+      return;
+    }
+    const prefix = activeCluster?.name ? `${activeCluster.name.replace(/[^a-zA-Z0-9_-]/g, '-')}-` : '';
+    const headers = ['S.No', 'Name', 'Namespace', 'Status', 'Ready', 'Restarts', 'Internal IP', 'External IP', 'CPU', 'Memory', 'Age', 'Node'];
+    const rows = podsToExport.map((p, i) => [
+      escapeCsvCell(i + 1),
+      escapeCsvCell(p.name),
+      escapeCsvCell(p.namespace),
+      escapeCsvCell(p.status),
+      escapeCsvCell(p.ready),
+      escapeCsvCell(p.restarts),
+      escapeCsvCell(p.internalIP),
+      escapeCsvCell(p.externalIP),
+      escapeCsvCell(p.cpu),
+      escapeCsvCell(p.memory),
+      escapeCsvCell(p.age),
+      escapeCsvCell(p.node),
+    ].join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${prefix}pods-export.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${podsToExport.length} pods as CSV`);
+  };
+
   // Bulk actions
   const togglePodSelection = (pod: Pod) => {
     const key = `${pod.namespace}/${pod.name}`;
@@ -312,10 +665,16 @@ ${pod.containers.map(c => `  - name: ${c.name}
   };
 
   const toggleAllSelection = () => {
-    if (selectedPods.size === filteredPods.length) {
-      setSelectedPods(new Set());
+    const keys = itemsOnPage.map((p) => `${p.namespace}/${p.name}`);
+    const allSelected = keys.every((k) => selectedPods.has(k));
+    if (allSelected) {
+      const next = new Set(selectedPods);
+      keys.forEach((k) => next.delete(k));
+      setSelectedPods(next);
     } else {
-      setSelectedPods(new Set(filteredPods.map(p => `${p.namespace}/${p.name}`)));
+      const next = new Set(selectedPods);
+      keys.forEach((k) => next.add(k));
+      setSelectedPods(next);
     }
   };
 
@@ -326,7 +685,13 @@ ${pod.containers.map(c => `  - name: ${c.name}
   };
 
   const handleBulkExportYaml = () => {
-    const podsToExport = filteredPods.filter(p => selectedPods.has(`${p.namespace}/${p.name}`));
+    const podsToExport = selectedPods.size > 0
+      ? filteredPods.filter(p => selectedPods.has(`${p.namespace}/${p.name}`))
+      : filteredPods;
+    if (podsToExport.length === 0) {
+      toast.info('No pods to export');
+      return;
+    }
     const yamls = podsToExport.map(pod => `---
 apiVersion: v1
 kind: Pod
@@ -338,7 +703,6 @@ spec:
 ${pod.containers.map(c => `  - name: ${c.name}
     image: nginx:latest`).join('\n')}
 `).join('\n');
-    
     const blob = new Blob([yamls], { type: 'text/yaml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -349,8 +713,31 @@ ${pod.containers.map(c => `  - name: ${c.name}
     toast.success(`Exported ${podsToExport.length} pod YAMLs`);
   };
 
-  const isAllSelected = filteredPods.length > 0 && selectedPods.size === filteredPods.length;
-  const isSomeSelected = selectedPods.size > 0 && selectedPods.size < filteredPods.length;
+  const isAllSelected = itemsOnPage.length > 0 && itemsOnPage.every((p) => selectedPods.has(`${p.namespace}/${p.name}`));
+  const isSomeSelected = itemsOnPage.some((p) => selectedPods.has(`${p.namespace}/${p.name}`)) && !isAllSelected;
+
+  const keyboardNav = useTableKeyboardNav({
+    rowCount: itemsOnPage.length,
+    onOpenRow: (index) => {
+      const pod = itemsOnPage[index];
+      if (pod) navigate(`/pods/${pod.namespace}/${pod.name}`);
+    },
+    getRowKeyAt: (index) => {
+      const pod = itemsOnPage[index];
+      return pod ? `${pod.namespace}/${pod.name}` : '';
+    },
+    selectedKeys: selectedPods,
+    onToggleSelect: (key) => {
+      const pod = itemsOnPage.find((p) => `${p.namespace}/${p.name}` === key);
+      if (pod) togglePodSelection(pod);
+    },
+    enabled: listView === 'flat' && itemsOnPage.length > 0,
+  });
+
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size);
+    setPageIndex(0);
+  };
 
   return (
     <motion.div
@@ -358,300 +745,540 @@ ${pod.containers.map(c => `  - name: ${c.name}
       animate={{ opacity: 1 }}
       className="space-y-6"
     >
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-primary/10">
-            <Box className="h-6 w-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Pods</h1>
-            <p className="text-sm text-muted-foreground">
-              {filteredPods.length} pods across {namespaces.length - 1} namespaces
-              {!config.isConnected && (
-                <span className="ml-2 inline-flex items-center gap-1 text-[hsl(45,93%,47%)]">
-                  <WifiOff className="h-3 w-3" /> Demo mode
-                </span>
-              )}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowComparison(true)}>
-            <GitCompare className="h-4 w-4" />
-            Compare
-          </Button>
-          <Button variant="outline" size="sm" className="gap-2" onClick={handleExportAll}>
-            <Download className="h-4 w-4" />
-            {selectedPods.size > 0 ? `Export (${selectedPods.size})` : 'Export'}
-          </Button>
-          <Button 
-            variant="outline" 
-            size="icon" 
-            className="h-9 w-9"
-            onClick={() => refetch()}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-          </Button>
-          <Button className="gap-2" onClick={() => setShowCreateWizard(true)}>
-            <Plus className="h-4 w-4" />
-            Create Pod
-          </Button>
-        </div>
-      </div>
-
-      {/* Bulk Actions Bar */}
-      {selectedPods.size > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg"
-        >
-          <div className="flex items-center gap-3">
-            <Badge variant="secondary" className="gap-1.5">
-              <CheckSquare className="h-3.5 w-3.5" />
-              {selectedPods.size} selected
-            </Badge>
-            <Button variant="ghost" size="sm" onClick={() => setSelectedPods(new Set())}>
-              Clear selection
-            </Button>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleBulkRestart}>
-              <RotateCcw className="h-4 w-4" />
-              Restart
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleBulkExportYaml}>
-              <Download className="h-4 w-4" />
-              Export YAML
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowComparison(true)}>
+      <ListPageHeader
+        icon={<PodIcon className="h-6 w-6 text-primary" />}
+        title="Pods"
+        resourceCount={filteredPods.length}
+        subtitle={namespaceList.length > 0 ? `across ${namespaceList.length} namespaces` : undefined}
+        demoMode={!isConnected}
+        isLoading={isLoading}
+        onRefresh={() => refetch()}
+        createLabel="Create Pod"
+        onCreate={() => setShowCreateWizard(true)}
+        actions={
+          <>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Download className="h-4 w-4" />
+                  {selectedPods.size > 0 ? `Export (${selectedPods.size})` : 'Export'}
+                  <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <DropdownMenuLabel className="text-muted-foreground font-normal text-xs">
+                  {selectedPods.size > 0 ? 'Selected pods' : 'All visible pods'}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleExportAll} className="gap-2 cursor-pointer">
+                  <Download className="h-4 w-4 shrink-0" />
+                  Export as JSON — for reports or automation
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleExportAsYaml} className="gap-2 cursor-pointer">
+                  <FileText className="h-4 w-4 shrink-0" />
+                  Export as YAML — for reports or automation
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleBulkExportCsv} className="gap-2 cursor-pointer">
+                  <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                  Export as CSV — for spreadsheets
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleBulkExportYaml} className="gap-2 cursor-pointer">
+                  <FileText className="h-4 w-4 shrink-0" />
+                  Download as YAML — Kubernetes manifests
+                </DropdownMenuItem>
+                {selectedPods.size > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleBulkRestart} className="gap-2 cursor-pointer">
+                      <RotateCcw className="h-4 w-4" />
+                      Restart selected
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowComparison(true)}>
               <GitCompare className="h-4 w-4" />
               Compare
             </Button>
-            <Button 
-              variant="destructive" 
-              size="sm" 
-              className="gap-1.5"
-              onClick={() => setDeleteDialog({ open: true, pod: null, bulk: true })}
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete
-            </Button>
+            {selectedPods.size > 0 && (
+              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, pod: null, bulk: true })}>
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </Button>
+            )}
+          </>
+        }
+        leftExtra={selectedPods.size > 0 ? (
+          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
+            <span className="text-sm text-muted-foreground">{selectedPods.size} selected</span>
+            <Button variant="ghost" size="sm" className="h-8" onClick={() => setSelectedPods(new Set())}>Clear</Button>
           </div>
-        </motion.div>
-      )}
+        ) : undefined}
+      />
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <Card className={cn('cursor-pointer transition-all', viewMode === 'all' && 'ring-2 ring-primary')} onClick={() => setViewMode('all')}>
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Pods</p>
-                <p className="text-2xl font-bold">{stats.total}</p>
-              </div>
-              <Box className="h-8 w-8 text-primary opacity-50" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className={cn('cursor-pointer transition-all', viewMode === 'running' && 'ring-2 ring-[hsl(142,76%,36%)]')} onClick={() => setViewMode('running')}>
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Running</p>
-                <p className="text-2xl font-bold text-[hsl(142,76%,36%)]">{stats.running}</p>
-              </div>
-              <CheckCircle2 className="h-8 w-8 text-[hsl(142,76%,36%)] opacity-50" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className={cn('cursor-pointer transition-all', viewMode === 'pending' && 'ring-2 ring-[hsl(45,93%,47%)]')} onClick={() => setViewMode('pending')}>
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Pending</p>
-                <p className="text-2xl font-bold text-[hsl(45,93%,47%)]">{stats.pending}</p>
-              </div>
-              <Clock className="h-8 w-8 text-[hsl(45,93%,47%)] opacity-50" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className={cn('cursor-pointer transition-all', viewMode === 'failed' && 'ring-2 ring-[hsl(0,72%,51%)]')} onClick={() => setViewMode('failed')}>
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Failed</p>
-                <p className="text-2xl font-bold text-[hsl(0,72%,51%)]">{stats.failed}</p>
-              </div>
-              <XCircle className="h-8 w-8 text-[hsl(0,72%,51%)] opacity-50" />
-            </div>
-          </CardContent>
-        </Card>
+      {/* Stats Cards — quick filters for Status column */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <ListPageStatCard
+          label="Total Pods"
+          value={stats.total}
+          icon={Box}
+          iconColor="text-primary"
+          selected={!columnFilters.status?.size}
+          onClick={() => setColumnFilter('status', null)}
+          className={cn(!columnFilters.status?.size && 'ring-2 ring-primary')}
+        />
+        <ListPageStatCard
+          label="Running"
+          value={stats.running}
+          icon={CheckCircle2}
+          iconColor="text-[hsl(142,76%,36%)]"
+          valueClassName="text-[hsl(142,76%,36%)]"
+          selected={columnFilters.status?.size === 1 && columnFilters.status.has('Running')}
+          onClick={() => setColumnFilter('status', new Set(['Running']))}
+          className={cn(columnFilters.status?.size === 1 && columnFilters.status.has('Running') && 'ring-2 ring-[hsl(142,76%,36%)]')}
+        />
+        <ListPageStatCard
+          label="Pending"
+          value={stats.pending}
+          icon={Clock}
+          iconColor="text-[hsl(45,93%,47%)]"
+          valueClassName="text-[hsl(45,93%,47%)]"
+          selected={columnFilters.status?.size === 1 && columnFilters.status.has('Pending')}
+          onClick={() => setColumnFilter('status', new Set(['Pending']))}
+          className={cn(columnFilters.status?.size === 1 && columnFilters.status.has('Pending') && 'ring-2 ring-[hsl(45,93%,47%)]')}
+        />
+        <ListPageStatCard
+          label="Failed"
+          value={stats.failed}
+          icon={XCircle}
+          iconColor="text-[hsl(0,72%,51%)]"
+          valueClassName="text-[hsl(0,72%,51%)]"
+          selected={columnFilters.status?.size !== undefined && columnFilters.status?.size > 0 && ['Failed', 'CrashLoopBackOff'].every((s) => columnFilters.status?.has(s)) && columnFilters.status.size === 2}
+          onClick={() => setColumnFilter('status', new Set(['Failed', 'CrashLoopBackOff']))}
+          className={cn(columnFilters.status?.size === 2 && columnFilters.status?.has('Failed') && columnFilters.status?.has('CrashLoopBackOff') && 'ring-2 ring-[hsl(0,72%,51%)]')}
+        />
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search pods by name or namespace..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="gap-2">
-              <Filter className="h-4 w-4" />
-              {selectedNamespace === 'all' ? 'All Namespaces' : selectedNamespace}
-              <ChevronDown className="h-4 w-4 opacity-50" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            {namespaces.map((ns) => (
-              <DropdownMenuItem 
-                key={ns} 
-                onClick={() => setSelectedNamespace(ns)}
-                className={cn(selectedNamespace === ns && 'bg-accent')}
-              >
-                {ns === 'all' ? 'All Namespaces' : ns}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      {/* Table */}
-      <div className="border border-border rounded-xl overflow-hidden bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/50 hover:bg-muted/50">
-              <TableHead className="w-10">
-                <Checkbox
-                  checked={isAllSelected}
-                  onCheckedChange={toggleAllSelection}
-                  aria-label="Select all"
-                  className={cn(isSomeSelected && 'data-[state=checked]:bg-primary/50')}
+      <ResourceListTableToolbar
+        globalFilterBar={
+          <ResourceCommandBar
+            scope={
+              <NamespaceFilter
+                namespaces={namespaceList}
+                selected={selectedNamespaces}
+                onSelectionChange={setSelectedNamespaces}
+                triggerVariant="bar"
+              />
+            }
+            search={
+              <div className="relative w-full min-w-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  placeholder="Search pods..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full h-10 pl-9 pr-3 rounded-lg border border-border bg-background text-sm font-medium shadow-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary/50 transition-all"
+                  aria-label="Search pods by name or namespace"
                 />
-              </TableHead>
-              <TableHead className="font-semibold">
-                <Button variant="ghost" className="gap-1 -ml-2 h-auto p-1" onClick={() => handleSort('name')}>
-                  Name
-                  <ArrowUpDown className="h-3.5 w-3.5" />
-                </Button>
-              </TableHead>
-              <TableHead className="font-semibold">
-                <Button variant="ghost" className="gap-1 -ml-2 h-auto p-1" onClick={() => handleSort('namespace')}>
-                  Namespace
-                  <ArrowUpDown className="h-3.5 w-3.5" />
-                </Button>
-              </TableHead>
-              <TableHead className="font-semibold">
-                <Button variant="ghost" className="gap-1 -ml-2 h-auto p-1" onClick={() => handleSort('status')}>
-                  Status
-                  <ArrowUpDown className="h-3.5 w-3.5" />
-                </Button>
-              </TableHead>
-              <TableHead className="font-semibold">Ready</TableHead>
-              <TableHead className="font-semibold">
-                <Button variant="ghost" className="gap-1 -ml-2 h-auto p-1" onClick={() => handleSort('restarts')}>
-                  Restarts
-                  <ArrowUpDown className="h-3.5 w-3.5" />
-                </Button>
-              </TableHead>
-              <TableHead className="font-semibold">CPU</TableHead>
-              <TableHead className="font-semibold">Memory</TableHead>
-              <TableHead className="font-semibold">
-                <Button variant="ghost" className="gap-1 -ml-2 h-auto p-1" onClick={() => handleSort('age')}>
-                  Age
-                  <ArrowUpDown className="h-3.5 w-3.5" />
-                </Button>
-              </TableHead>
-              <TableHead className="w-12"></TableHead>
-            </TableRow>
-          </TableHeader>
+              </div>
+            }
+            structure={
+              <ListViewSegmentedControl
+                value={listView}
+                onChange={(v) => setListView(v as ListView)}
+                options={[
+                  { id: 'flat', label: 'Flat', icon: List },
+                  { id: 'byNamespace', label: 'By Namespace', icon: Layers },
+                  { id: 'byNode', label: 'By Node', icon: Boxes },
+                ]}
+                ariaLabel="List structure"
+              />
+            }
+            footer={
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {filteredPods.length} pods
+                {' · '}
+                {selectedNamespaces.size === 0 ? 'all namespaces' : `${selectedNamespaces.size} namespace${selectedNamespaces.size === 1 ? '' : 's'}`}
+                {' · '}
+                {listView === 'flat' ? 'flat list' : listView === 'byNamespace' ? 'grouped by namespace' : 'grouped by node'}
+              </p>
+            }
+          />
+        }
+        showTableFilters={showTableFilters}
+        onToggleTableFilters={() => setShowTableFilters((v) => !v)}
+        hasActiveFilters={hasActiveFilters}
+        onClearAllFilters={clearAllFilters}
+        columns={PODS_COLUMNS_FOR_VISIBILITY}
+        visibleColumns={columnVisibility.visibleColumns}
+        onColumnToggle={columnVisibility.setColumnVisible}
+        tableContainerProps={keyboardNav.tableContainerProps}
+        footer={
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">{pagination.rangeLabel}</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2">
+                    {pageSize} per page
+                    <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <DropdownMenuItem
+                      key={size}
+                      onClick={() => handlePageSizeChange(size)}
+                      className={cn(pageSize === size && 'bg-accent')}
+                    >
+                      {size} per page
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <ListPagination
+              hasPrev={pagination.hasPrev}
+              hasNext={pagination.hasNext}
+              onPrev={pagination.onPrev}
+              onNext={pagination.onNext}
+              rangeLabel={undefined}
+              currentPage={pagination.currentPage}
+              totalPages={pagination.totalPages}
+              onPageChange={pagination.onPageChange}
+              dataUpdatedAt={dataUpdatedAt}
+              isFetching={isFetching}
+            />
+          </div>
+        }
+      >
+        <ResizableTableProvider tableId="pods" columnConfig={PODS_TABLE_COLUMNS}>
+          <Table className="table-fixed">
+            <TableHeader>
+              <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={isAllSelected}
+                    onCheckedChange={toggleAllSelection}
+                    aria-label="Select all"
+                    className={cn(isSomeSelected && 'data-[state=checked]:bg-primary/50')}
+                  />
+                </TableHead>
+                {columnVisibility.isColumnVisible('name') && (
+                <ResizableTableHead columnId="name" className="font-semibold">
+                  <TableColumnHeaderWithFilterAndSort
+                    columnId="name"
+                    label="Name"
+                    sortKey={sortKey}
+                    sortOrder={sortOrder}
+                    onSort={setSort}
+                    filterable={false}
+                    distinctValues={[]}
+                    selectedFilterValues={new Set()}
+                    onFilterChange={() => {}}
+                  />
+                </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('namespace') && (
+                <ResizableTableHead columnId="namespace" className="font-semibold">
+                  <TableColumnHeaderWithFilterAndSort
+                    columnId="namespace"
+                    label="Namespace"
+                    sortKey={sortKey}
+                    sortOrder={sortOrder}
+                    onSort={setSort}
+                    filterable
+                    distinctValues={distinctValuesByColumn.namespace ?? []}
+                    selectedFilterValues={columnFilters.namespace ?? new Set()}
+                    onFilterChange={setColumnFilter}
+                  />
+                </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('status') && (
+                <ResizableTableHead columnId="status" className="font-semibold">
+                  <TableColumnHeaderWithFilterAndSort
+                    columnId="status"
+                    label="Status"
+                    sortKey={sortKey}
+                    sortOrder={sortOrder}
+                    onSort={setSort}
+                    filterable
+                    distinctValues={distinctValuesByColumn.status ?? []}
+                    selectedFilterValues={columnFilters.status ?? new Set()}
+                    onFilterChange={setColumnFilter}
+                  />
+                </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('ready') && (
+                <ResizableTableHead columnId="ready" className="font-semibold">
+                  <span className="truncate block">Ready</span>
+                </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('restarts') && (
+                <ResizableTableHead columnId="restarts" className="font-semibold">
+                  <TableColumnHeaderWithFilterAndSort
+                    columnId="restarts"
+                    label="Restarts"
+                    sortKey={sortKey}
+                    sortOrder={sortOrder}
+                    onSort={setSort}
+                    filterable={false}
+                    distinctValues={[]}
+                    selectedFilterValues={new Set()}
+                    onFilterChange={() => {}}
+                  />
+                </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('ip') && (
+                <ResizableTableHead columnId="ip" className="font-semibold">
+                  <TableColumnHeaderWithFilterAndSort
+                    columnId="ip"
+                    label="Internal IP / External IP"
+                    sortKey={sortKey}
+                    sortOrder={sortOrder}
+                    onSort={setSort}
+                    filterable={false}
+                    distinctValues={[]}
+                    selectedFilterValues={new Set()}
+                    onFilterChange={() => {}}
+                  />
+                </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('cpu') && (
+                <ResizableTableHead columnId="cpu" className="font-semibold">
+                  <TableColumnHeaderWithFilterAndSort
+                    columnId="cpu"
+                    label="CPU"
+                    sortKey={sortKey}
+                    sortOrder={sortOrder}
+                    onSort={setSort}
+                    filterable={false}
+                    distinctValues={[]}
+                    selectedFilterValues={new Set()}
+                    onFilterChange={() => {}}
+                  />
+                </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('memory') && (
+                <ResizableTableHead columnId="memory" className="font-semibold">
+                  <TableColumnHeaderWithFilterAndSort
+                    columnId="memory"
+                    label="Memory"
+                    sortKey={sortKey}
+                    sortOrder={sortOrder}
+                    onSort={setSort}
+                    filterable={false}
+                    distinctValues={[]}
+                    selectedFilterValues={new Set()}
+                    onFilterChange={() => {}}
+                  />
+                </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('age') && (
+                <ResizableTableHead columnId="age" className="font-semibold">
+                  <TableColumnHeaderWithFilterAndSort
+                    columnId="age"
+                    label="Age"
+                    sortKey={sortKey}
+                    sortOrder={sortOrder}
+                    onSort={setSort}
+                    filterable={false}
+                    distinctValues={[]}
+                    selectedFilterValues={new Set()}
+                    onFilterChange={() => {}}
+                  />
+                </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('node') && (
+                <ResizableTableHead columnId="node" className="font-semibold">
+                  <TableColumnHeaderWithFilterAndSort
+                    columnId="node"
+                    label="Node"
+                    sortKey={sortKey}
+                    sortOrder={sortOrder}
+                    onSort={setSort}
+                    filterable
+                    distinctValues={distinctValuesByColumn.node ?? []}
+                    selectedFilterValues={columnFilters.node ?? new Set()}
+                    onFilterChange={setColumnFilter}
+                  />
+                </ResizableTableHead>
+                )}
+                <TableHead className="w-12 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>
+              </TableRow>
+              {/* Filter row - appears under headers when Show filters is on */}
+              {showTableFilters && (
+                <TableRow className="bg-muted/30 hover:bg-muted/30 border-b-2 border-border">
+                  <TableCell className="w-10 p-1.5" />
+                  {columnVisibility.isColumnVisible('name') && (
+                    <ResizableTableCell columnId="name" className="p-1.5">
+                      <TableFilterCell
+                        columnId="name"
+                        label="Name"
+                        distinctValues={distinctValuesByColumn.name ?? []}
+                        selectedFilterValues={columnFilters.name ?? new Set()}
+                        onFilterChange={setColumnFilter}
+                        valueCounts={valueCountsByColumn.name}
+                      />
+                    </ResizableTableCell>
+                  )}
+                  {columnVisibility.isColumnVisible('namespace') && (
+                    <ResizableTableCell columnId="namespace" className="p-1.5">
+                      <TableFilterCell
+                        columnId="namespace"
+                        label="Namespace"
+                        distinctValues={distinctValuesByColumn.namespace ?? []}
+                        selectedFilterValues={columnFilters.namespace ?? new Set()}
+                        onFilterChange={setColumnFilter}
+                        valueCounts={valueCountsByColumn.namespace}
+                      />
+                    </ResizableTableCell>
+                  )}
+                  {columnVisibility.isColumnVisible('status') && (
+                    <ResizableTableCell columnId="status" className="p-1.5">
+                      <TableFilterCell
+                        columnId="status"
+                        label="Status"
+                        distinctValues={distinctValuesByColumn.status ?? []}
+                        selectedFilterValues={columnFilters.status ?? new Set()}
+                        onFilterChange={setColumnFilter}
+                        valueCounts={valueCountsByColumn.status}
+                      />
+                    </ResizableTableCell>
+                  )}
+                  {columnVisibility.isColumnVisible('ready') && (
+                    <ResizableTableCell columnId="ready" className="p-1.5" />
+                  )}
+                  {columnVisibility.isColumnVisible('restarts') && (
+                    <ResizableTableCell columnId="restarts" className="p-1.5" />
+                  )}
+                  {columnVisibility.isColumnVisible('ip') && (
+                    <ResizableTableCell columnId="ip" className="p-1.5">
+                      <TableFilterCell
+                        columnId="ip"
+                        label="IP"
+                        distinctValues={distinctValuesByColumn.ip ?? []}
+                        selectedFilterValues={columnFilters.ip ?? new Set()}
+                        onFilterChange={setColumnFilter}
+                        valueCounts={valueCountsByColumn.ip}
+                      />
+                    </ResizableTableCell>
+                  )}
+                  {columnVisibility.isColumnVisible('cpu') && (
+                    <ResizableTableCell columnId="cpu" className="p-1.5" />
+                  )}
+                  {columnVisibility.isColumnVisible('memory') && (
+                    <ResizableTableCell columnId="memory" className="p-1.5" />
+                  )}
+                  {columnVisibility.isColumnVisible('age') && (
+                    <ResizableTableCell columnId="age" className="p-1.5" />
+                  )}
+                  {columnVisibility.isColumnVisible('node') && (
+                    <ResizableTableCell columnId="node" className="p-1.5">
+                      <TableFilterCell
+                        columnId="node"
+                        label="Node"
+                        distinctValues={distinctValuesByColumn.node ?? []}
+                        selectedFilterValues={columnFilters.node ?? new Set()}
+                        onFilterChange={setColumnFilter}
+                        valueCounts={valueCountsByColumn.node}
+                      />
+                    </ResizableTableCell>
+                  )}
+                  <TableCell className="w-12 p-1.5" />
+                </TableRow>
+              )}
+            </TableHeader>
           <TableBody>
-            {isLoading && config.isConnected ? (
+            {isLoading && isConnected ? (
+              <TableSkeletonRows columnCount={12} />
+            ) : totalFiltered === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="h-32 text-center">
-                  <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading pods...</p>
-                  </div>
+                <TableCell colSpan={12} className="h-40 text-center">
+                  <TableEmptyState
+                    icon={<Box className="h-8 w-8" />}
+                    title="No Pods found"
+                    subtitle={searchQuery || hasActiveFilters ? 'Clear filters to see resources.' : 'Pods are usually created by Deployments, StatefulSets, or Jobs; create one manually if needed.'}
+                    hasActiveFilters={!!(searchQuery || hasActiveFilters)}
+                    onClearFilters={() => { setSearchQuery(''); clearAllFilters(); }}
+                    createLabel="Create Pod"
+                    onCreate={() => setShowCreateWizard(true)}
+                  />
                 </TableCell>
               </TableRow>
-            ) : filteredPods.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
-                  <div className="flex flex-col items-center gap-2">
-                    <Box className="h-8 w-8 opacity-50" />
-                    <p>No pods found</p>
-                    {(searchQuery || viewMode !== 'all') && (
-                      <Button variant="link" size="sm" onClick={() => { setSearchQuery(''); setViewMode('all'); }}>
-                        Clear filters
-                      </Button>
-                    )}
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : (
-              filteredPods.map((pod, index) => {
+            ) : listView === 'flat' ? (
+              itemsOnPage.map((pod, index) => {
                 const StatusIcon = statusConfig[pod.status]?.icon || Clock;
                 const statusStyle = statusConfig[pod.status] || statusConfig.Pending;
                 const podKey = `${pod.namespace}/${pod.name}`;
                 const isSelected = selectedPods.has(podKey);
+                const cpuVal = sortKey === 'cpu' ? (sortMetricsMap[podKey]?.cpu ?? metricsMap[podKey]?.cpu ?? pod.cpu) : (metricsMap[podKey]?.cpu ?? sortMetricsMap[podKey]?.cpu ?? pod.cpu);
+                const memVal = sortKey === 'memory' ? (sortMetricsMap[podKey]?.memory ?? metricsMap[podKey]?.memory ?? pod.memory) : (metricsMap[podKey]?.memory ?? sortMetricsMap[podKey]?.memory ?? pod.memory);
+                const cpuDataPoints = (() => { const n = parseCpuForSort(cpuVal); return n >= 0 ? Array(12).fill(n) : undefined; })();
+                const memDataPoints = (() => { const n = parseMemoryForSort(memVal); return n >= 0 ? Array(12).fill(n) : undefined; })();
                 return (
                   <motion.tr
                     key={podKey}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.02 }}
+                    initial={ROW_MOTION.initial}
+                    animate={ROW_MOTION.animate}
+                    transition={ROW_MOTION.transition(index)}
+                    {...keyboardNav.getRowProps(index)}
                     className={cn(
-                      'group cursor-pointer border-b border-border hover:bg-muted/50',
-                      isSelected && 'bg-primary/5'
+                      resourceTableRowClassName,
+                      index % 2 === 1 && 'bg-muted/5',
+                      isSelected && 'bg-primary/5',
+                      keyboardNav.getRowProps(index).className
                     )}
                   >
-                    <TableCell>
+                    <TableCell className="w-10">
                       <Checkbox
                         checked={isSelected}
                         onCheckedChange={() => togglePodSelection(pod)}
                         aria-label={`Select ${pod.name}`}
                       />
                     </TableCell>
-                    <TableCell>
-                      <Link 
-                        to={`/pods/${pod.namespace}/${pod.name}`}
-                        className="font-medium text-primary hover:underline flex items-center gap-2"
-                      >
-                        <Box className="h-4 w-4 text-muted-foreground" />
-                        <span className="truncate max-w-[200px]">{pod.name}</span>
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="font-normal">
+                    {columnVisibility.isColumnVisible('name') && (
+                    <ResizableTableCell columnId="name">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Link
+                            to={`/pods/${pod.namespace}/${pod.name}`}
+                            className="font-medium text-primary hover:underline flex items-center gap-2 min-w-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Box className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            <span className="truncate">{pod.name}</span>
+                          </Link>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-md">
+                          {pod.name}
+                        </TooltipContent>
+                      </Tooltip>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('namespace') && (
+                    <ResizableTableCell columnId="namespace">
+                      <Badge variant="outline" className="font-normal truncate max-w-full inline-block">
                         {pod.namespace}
                       </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className={cn(
-                        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium',
-                        statusStyle.bg,
-                        statusStyle.color
-                      )}>
-                        <StatusIcon className="h-3.5 w-3.5" />
-                        {pod.status}
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('status') && (
+                    <ResizableTableCell columnId="status">
+                      <StatusPill label={pod.status} variant={statusToPillVariant[pod.status]} icon={StatusIcon} />
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('ready') && (
+                    <ResizableTableCell columnId="ready" className="font-mono text-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Progress value={parseReadyFraction(pod.ready)} className="h-1.5 w-12 flex-shrink-0" />
+                        <span className="tabular-nums">{pod.ready}</span>
                       </div>
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">{pod.ready}</TableCell>
-                    <TableCell>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('restarts') && (
+                    <ResizableTableCell columnId="restarts">
                       <span className={cn(
                         'font-medium',
                         pod.restarts > 5 && 'text-[hsl(0,72%,51%)]',
@@ -659,40 +1286,93 @@ ${pod.containers.map(c => `  - name: ${c.name}
                       )}>
                         {pod.restarts}
                       </span>
-                    </TableCell>
-                    <TableCell>
-                      {pod.cpuData ? (
-                        <div className="flex items-center gap-2">
-                          <Sparkline data={pod.cpuData} width={50} height={18} color="hsl(var(--primary))" showLive />
-                          <span className="text-xs font-medium">{pod.cpu}</span>
-                        </div>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('ip') && (
+                    <ResizableTableCell columnId="ip" className="font-mono text-sm">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1 truncate block"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const text = `${pod.internalIP} / ${pod.externalIP}`;
+                              navigator.clipboard?.writeText(text);
+                            }}
+                          >
+                            {pod.internalIP} / {pod.externalIP}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          Internal and external IP. Click to copy.
+                        </TooltipContent>
+                      </Tooltip>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('cpu') && (
+                    <ResizableTableCell columnId="cpu">
+                      <div className="min-w-0 overflow-hidden">
+                        <UsageBar
+                          variant="sparkline"
+                          value={cpuVal}
+                          kind="cpu"
+                          displayFormat="compact"
+                          width={56}
+                          max={podResourceMaxMap[podKey]?.cpuMax}
+                        />
+                      </div>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('memory') && (
+                    <ResizableTableCell columnId="memory">
+                      <div className="min-w-0 overflow-hidden">
+                        <UsageBar
+                          variant="sparkline"
+                          value={memVal}
+                          kind="memory"
+                          displayFormat="compact"
+                          width={56}
+                          max={podResourceMaxMap[podKey]?.memoryMax}
+                        />
+                      </div>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('age') && (
+                    <ResizableTableCell columnId="age" className="text-muted-foreground whitespace-nowrap"><AgeCell age={pod.age} timestamp={pod.creationTimestamp} /></ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('node') && (
+                    <ResizableTableCell columnId="node" className="text-muted-foreground">
+                      {pod.node !== '-' ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Link to={`/nodes/${encodeURIComponent(pod.node)}`} className="text-primary hover:underline truncate block">
+                              {pod.node}
+                            </Link>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">{pod.node}</TooltipContent>
+                        </Tooltip>
                       ) : (
-                        <span className="text-muted-foreground">-</span>
+                        <span className="truncate block">{pod.node}</span>
                       )}
-                    </TableCell>
-                    <TableCell>
-                      {pod.memoryData ? (
-                        <div className="flex items-center gap-2">
-                          <Sparkline data={pod.memoryData} width={50} height={18} color="hsl(142, 76%, 36%)" showLive />
-                          <span className="text-xs font-medium">{pod.memory}</span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{pod.age}</TableCell>
-                    <TableCell>
+                    </ResizableTableCell>
+                    )}
+                    <TableCell className="w-12">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button 
                             variant="ghost" 
                             size="icon" 
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                            aria-label="Pod actions"
                           >
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
+                          <CopyNameDropdownItem name={pod.name} namespace={pod.namespace} />
+                          <DropdownMenuItem onClick={() => navigate(`/pods/${pod.namespace}/${pod.name}`)} className="gap-2">
+                            View Details
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleViewLogs(pod)} className="gap-2">
                             <FileText className="h-4 w-4" />
                             View Logs
@@ -712,11 +1392,11 @@ ${pod.containers.map(c => `  - name: ${c.name}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem 
-                            className="gap-2 text-[hsl(0,72%,51%)]"
+                            className="gap-2 text-destructive"
                             onClick={() => setDeleteDialog({ open: true, pod })}
                           >
                             <Trash2 className="h-4 w-4" />
-                            Delete Pod
+                            Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -724,10 +1404,226 @@ ${pod.containers.map(c => `  - name: ${c.name}
                   </motion.tr>
                 );
               })
+            ) : (
+              groupedOnPage.flatMap((group) => {
+                const isCollapsed = collapsedGroups.has(group.groupKey);
+                const groupLabel = listView === 'byNamespace' ? `Namespace: ${group.label}` : `Node: ${group.label}`;
+                return [
+                  <TableRow
+                    key={group.groupKey}
+                    className="bg-muted/30 hover:bg-muted/40 cursor-pointer border-b border-border/60 transition-all duration-200"
+                    onClick={() => toggleGroup(group.groupKey)}
+                  >
+                    <TableCell colSpan={12} className="py-2">
+                      <div className="flex items-center gap-2 font-medium">
+                        {isCollapsed ? (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                        )}
+                        {groupLabel}
+                        <span className="text-muted-foreground font-normal">({group.pods.length})</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>,
+                  ...(isCollapsed ? [] : group.pods.map((pod, index) => {
+                    const StatusIcon = statusConfig[pod.status]?.icon || Clock;
+                    const statusStyle = statusConfig[pod.status] || statusConfig.Pending;
+                    const podKey = `${pod.namespace}/${pod.name}`;
+                    const isSelected = selectedPods.has(podKey);
+                    const cpuVal = sortKey === 'cpu' ? (sortMetricsMap[podKey]?.cpu ?? metricsMap[podKey]?.cpu ?? pod.cpu) : (metricsMap[podKey]?.cpu ?? sortMetricsMap[podKey]?.cpu ?? pod.cpu);
+                    const memVal = sortKey === 'memory' ? (sortMetricsMap[podKey]?.memory ?? metricsMap[podKey]?.memory ?? pod.memory) : (metricsMap[podKey]?.memory ?? sortMetricsMap[podKey]?.memory ?? pod.memory);
+                    const cpuDataPoints = (() => { const n = parseCpuForSort(cpuVal); return n >= 0 ? Array(12).fill(n) : undefined; })();
+                    const memDataPoints = (() => { const n = parseMemoryForSort(memVal); return n >= 0 ? Array(12).fill(n) : undefined; })();
+                    return (
+                      <motion.tr
+                        key={podKey}
+                        initial={ROW_MOTION.initial}
+                        animate={ROW_MOTION.animate}
+                        transition={ROW_MOTION.transition(index)}
+                        className={cn(
+                          resourceTableRowClassName,
+                          index % 2 === 1 && 'bg-muted/5',
+                          isSelected && 'bg-primary/5'
+                        )}
+                      >
+                    <TableCell className="w-10">
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={() => togglePodSelection(pod)}
+                        aria-label={`Select ${pod.name}`}
+                      />
+                    </TableCell>
+                    {columnVisibility.isColumnVisible('name') && (
+                    <ResizableTableCell columnId="name">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Link
+                            to={`/pods/${pod.namespace}/${pod.name}`}
+                            className="font-medium text-primary hover:underline flex items-center gap-2 min-w-0 truncate"
+                          >
+                            <Box className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            <span className="truncate">{pod.name}</span>
+                          </Link>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-md">{pod.name}</TooltipContent>
+                      </Tooltip>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('namespace') && (
+                    <ResizableTableCell columnId="namespace">
+                      <Badge variant="outline" className="font-normal truncate block w-fit max-w-full">
+                        {pod.namespace}
+                      </Badge>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('status') && (
+                    <ResizableTableCell columnId="status">
+                      <StatusPill label={pod.status} variant={statusToPillVariant[pod.status]} icon={StatusIcon} />
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('ready') && (
+                    <ResizableTableCell columnId="ready" className="font-mono text-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Progress value={parseReadyFraction(pod.ready)} className="h-1.5 w-12 flex-shrink-0" />
+                        <span className="tabular-nums">{pod.ready}</span>
+                      </div>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('restarts') && (
+                    <ResizableTableCell columnId="restarts">
+                      <span className={cn(
+                        'font-medium',
+                        pod.restarts > 5 && 'text-[hsl(0,72%,51%)]',
+                        pod.restarts > 0 && pod.restarts <= 5 && 'text-[hsl(45,93%,47%)]'
+                      )}>
+                        {pod.restarts}
+                      </span>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('ip') && (
+                    <ResizableTableCell columnId="ip" className="font-mono text-sm">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1 truncate block"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const text = `${pod.internalIP} / ${pod.externalIP}`;
+                              navigator.clipboard?.writeText(text);
+                            }}
+                          >
+                            {pod.internalIP} / {pod.externalIP}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          Internal and external IP. Click to copy.
+                        </TooltipContent>
+                      </Tooltip>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('cpu') && (
+                    <ResizableTableCell columnId="cpu">
+                      <div className="min-w-0 overflow-hidden">
+                        <UsageBar
+                          variant="sparkline"
+                          value={cpuVal}
+                          kind="cpu"
+                          displayFormat="compact"
+                          width={56}
+                          max={podResourceMaxMap[podKey]?.cpuMax}
+                        />
+                      </div>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('memory') && (
+                    <ResizableTableCell columnId="memory">
+                      <div className="min-w-0 overflow-hidden">
+                        <UsageBar
+                          variant="sparkline"
+                          value={memVal}
+                          kind="memory"
+                          displayFormat="compact"
+                          width={56}
+                          max={podResourceMaxMap[podKey]?.memoryMax}
+                        />
+                      </div>
+                    </ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('age') && (
+                    <ResizableTableCell columnId="age" className="text-muted-foreground whitespace-nowrap"><AgeCell age={pod.age} timestamp={pod.creationTimestamp} /></ResizableTableCell>
+                    )}
+                    {columnVisibility.isColumnVisible('node') && (
+                    <ResizableTableCell columnId="node" className="text-muted-foreground">
+                      {pod.node !== '-' ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Link to={`/nodes/${encodeURIComponent(pod.node)}`} className="text-primary hover:underline truncate block">
+                              {pod.node}
+                            </Link>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">{pod.node}</TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <span className="truncate block">{pod.node}</span>
+                      )}
+                    </ResizableTableCell>
+                    )}
+                    <TableCell className="w-12">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                                aria-label="Pod actions"
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <CopyNameDropdownItem name={pod.name} namespace={pod.namespace} />
+                              <DropdownMenuItem onClick={() => navigate(`/pods/${pod.namespace}/${pod.name}`)} className="gap-2">
+                                View Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleViewLogs(pod)} className="gap-2">
+                                <FileText className="h-4 w-4" />
+                                View Logs
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleExecShell(pod)} className="gap-2">
+                                <Terminal className="h-4 w-4" />
+                                Exec Shell
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setPortForwardDialog({ open: true, pod })} className="gap-2">
+                                <ExternalLink className="h-4 w-4" />
+                                Port Forward
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => handleDownloadYaml(pod)} className="gap-2">
+                                <Download className="h-4 w-4" />
+                                Download YAML
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem 
+                                className="gap-2 text-destructive"
+                                onClick={() => setDeleteDialog({ open: true, pod })}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </motion.tr>
+                    );
+                  }))
+                ];
+              })
             )}
           </TableBody>
         </Table>
-      </div>
+        </ResizableTableProvider>
+      </ResourceListTableToolbar>
 
       {/* Create Pod */}
       {showCreateWizard && (
@@ -771,6 +1667,9 @@ ${pod.containers.map(c => `  - name: ${c.name}
         open={showComparison}
         onClose={() => setShowComparison(false)}
         availablePods={filteredPods.map(p => ({ name: p.name, namespace: p.namespace, status: p.status }))}
+        clusterId={clusterId ?? undefined}
+        backendBaseUrl={backendBaseUrl ?? ''}
+        isConnected={isConnected}
       />
     </motion.div>
   );

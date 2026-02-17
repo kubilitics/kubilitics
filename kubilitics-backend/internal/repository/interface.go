@@ -32,9 +32,25 @@ type HistoryRepository interface {
 	GetDiff(ctx context.Context, id string) (string, error)
 }
 
+// ProjectRepository defines project data access methods for multi-cluster, multi-tenancy
+type ProjectRepository interface {
+	CreateProject(ctx context.Context, p *models.Project) error
+	GetProject(ctx context.Context, id string) (*models.Project, error)
+	ListProjects(ctx context.Context) ([]*models.ProjectListItem, error)
+	UpdateProject(ctx context.Context, p *models.Project) error
+	DeleteProject(ctx context.Context, id string) error
+	AddClusterToProject(ctx context.Context, pc *models.ProjectCluster) error
+	RemoveClusterFromProject(ctx context.Context, projectID, clusterID string) error
+	ListProjectClusters(ctx context.Context, projectID string) ([]*models.ProjectCluster, error)
+	AddNamespaceToProject(ctx context.Context, pn *models.ProjectNamespace) error
+	RemoveNamespaceFromProject(ctx context.Context, projectID, clusterID, namespaceName string) error
+	ListProjectNamespaces(ctx context.Context, projectID string) ([]*models.ProjectNamespace, error)
+}
+
 // Repository aggregates all repositories
 type Repository struct {
 	Cluster  ClusterRepository
 	Topology TopologyRepository
 	History  HistoryRepository
+	Project  ProjectRepository
 }

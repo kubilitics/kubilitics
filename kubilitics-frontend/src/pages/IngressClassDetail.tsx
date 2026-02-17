@@ -1,68 +1,145 @@
-import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Route, Clock, Download, Trash2, Star, Server } from 'lucide-react';
+import { useState, useCallback, useMemo } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { Route, Clock, Download, Trash2, Star, Server, Activity, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs, TopologyViewer, MetadataCard, YamlViewer, EventsSection, ActionsSection,
-  type TopologyNode, type TopologyEdge, type ResourceStatus,
+  ResourceDetailLayout,
+  MetadataCard,
+  YamlViewer,
+  YamlCompareViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  SectionCard,
+  DetailRow,
+  ResourceTopologyView,
+  type ResourceStatus,
+  type YamlVersion,
+  type EventInfo,
 } from '@/components/resources';
+import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
+import { useDeleteK8sResource, useUpdateK8sResource, useK8sResourceList, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
+import { toast } from 'sonner';
 
-const mockIngressClass = {
-  name: 'nginx',
-  status: 'Healthy' as ResourceStatus,
-  controller: 'k8s.io/ingress-nginx',
-  isDefault: true,
-  age: '180d',
-  labels: { 'app.kubernetes.io/name': 'ingress-nginx' },
-  parameters: { apiGroup: 'k8s.nginx.org', kind: 'IngressConfiguration', name: 'nginx-config' },
-};
+interface IngressClassResource extends KubernetesResource {
+  spec?: {
+    controller: string;
+    parameters?: { apiGroup?: string; kind?: string; name?: string };
+  };
+}
 
-const topologyNodes: TopologyNode[] = [
-  { id: 'ic', type: 'ingressclass', name: 'nginx', status: 'healthy', isCurrent: true },
-  { id: 'ing1', type: 'ingress', name: 'app-ingress', status: 'healthy' },
-  { id: 'ing2', type: 'ingress', name: 'api-ingress', status: 'healthy' },
-  { id: 'controller', type: 'deployment', name: 'ingress-nginx-controller', status: 'healthy' },
-];
 
-const topologyEdges: TopologyEdge[] = [
-  { from: 'ing1', to: 'ic', label: 'Uses' },
-  { from: 'ing2', to: 'ic', label: 'Uses' },
-  { from: 'controller', to: 'ic', label: 'Implements' },
-];
-
-const yaml = `apiVersion: networking.k8s.io/v1
-kind: IngressClass
-metadata:
-  name: nginx
-  annotations:
-    ingressclass.kubernetes.io/is-default-class: "true"
-  labels:
-    app.kubernetes.io/name: ingress-nginx
-spec:
-  controller: k8s.io/ingress-nginx
-  parameters:
-    apiGroup: k8s.nginx.org
-    kind: IngressConfiguration
-    name: nginx-config`;
 
 export default function IngressClassDetail() {
   const { name } = useParams();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
-  const ic = mockIngressClass;
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const baseUrl = getEffectiveBackendBaseUrl();
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
+  const clusterId = useBackendConfigStore((s) => s.currentClusterId);
+
+  const { resource: icResource, isLoading, error, age, yaml, isConnected, refetch } = useResourceDetail<IngressClassResource>(
+    'ingressclasses',
+    name,
+    undefined,
+    undefined
+  );
+  const resourceEvents = useResourceEvents('IngressClass', '', name ?? undefined);
+  const events = resourceEvents.events;
+
+  const deleteIngressClass = useDeleteK8sResource('ingressclasses');
+  const updateIngressClass = useUpdateK8sResource('ingressclasses');
+
+  const ingressesList = useK8sResourceList<KubernetesResource & { spec?: { ingressClassName?: string } }>('ingresses', undefined, { enabled: !!name });
+  const ingressesUsingThisClass = useMemo(() => {
+    if (!name || !ingressesList.data?.items?.length) return [];
+    return (ingressesList.data.items as Array<{ metadata?: { name?: string; namespace?: string }; spec?: { ingressClassName?: string } }>).filter(
+      (ing) => ing.spec?.ingressClassName === name
+    );
+  }, [name, ingressesList.data?.items]);
+
+  const icName = icResource.metadata?.name || '';
+  const controller = icResource.spec?.controller ?? '—';
+  const isDefault = icResource.metadata?.annotations?.['ingressclass.kubernetes.io/is-default-class'] === 'true';
+  const params = icResource.spec?.parameters;
+  const labels = icResource.metadata?.labels ?? {};
+  const status: ResourceStatus = 'Healthy';
+
+  const handleDownloadYaml = useCallback(() => {
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${icName || 'ingressclass'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [yaml, icName]);
+
+  const handleSaveYaml = useCallback(async (newYaml: string) => {
+    if (!isConnected || !name) {
+      toast.error('Connect cluster to update IngressClass');
+      throw new Error('Not connected');
+    }
+    try {
+      await updateIngressClass.mutateAsync({ name, yaml: newYaml });
+      toast.success('IngressClass updated successfully');
+      refetch();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to update: ${message}`);
+      throw err;
+    }
+  }, [isConnected, name, updateIngressClass, refetch]);
+
+  const handleSetDefault = () => {
+    toast.info('Set as default: patch annotation ingressclass.kubernetes.io/is-default-class');
+  };
+
+
+  const yamlVersions: YamlVersion[] = useMemo(() => [
+    { id: 'current', label: 'Current Version', yaml, timestamp: 'now' },
+  ], [yaml]);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24" />)}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  if (!icResource?.metadata?.name || error) {
+    return (
+      <div className="space-y-4 p-6">
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-muted-foreground">{error ? 'Failed to load resource.' : 'IngressClass not found.'}</p>
+            {error && <p className="text-sm text-destructive mt-2">{String(error)}</p>}
+            <Button variant="outline" className="mt-4" onClick={() => navigate('/ingressclasses')}>
+              Back to IngressClasses
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const statusCards = [
-    { label: 'Controller', value: 'ingress-nginx', icon: Server, iconColor: 'primary' as const },
-    { label: 'Default', value: ic.isDefault ? 'Yes' : 'No', icon: Star, iconColor: ic.isDefault ? 'success' as const : 'muted' as const },
-    { label: 'Age', value: ic.age, icon: Clock, iconColor: 'muted' as const },
+    { label: 'Controller', value: controller, icon: Server, iconColor: 'primary' as const },
+    { label: 'Default', value: isDefault ? 'Yes' : 'No', icon: Star, iconColor: isDefault ? 'success' as const : 'muted' as const },
+    { label: 'Ingresses Using', value: String(ingressesUsingThisClass.length), icon: Route, iconColor: 'info' as const },
+    { label: 'Parameters', value: params ? `${params.kind ?? ''} ${params.name ?? ''}`.trim() || '—' : '—', icon: Server, iconColor: 'muted' as const },
   ];
-
-  const handleNodeClick = (node: TopologyNode) => {
-    if (node.type === 'ingress') navigate(`/ingresses/production/${node.name}`);
-    else if (node.type === 'deployment') navigate(`/deployments/ingress-nginx/${node.name}`);
-  };
 
   const tabs = [
     {
@@ -70,84 +147,126 @@ export default function IngressClassDetail() {
       label: 'Overview',
       content: (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader><CardTitle className="text-base">Ingress Class Info</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 text-sm">
-                <div className="p-3 rounded-lg bg-muted/50">
-                  <p className="text-muted-foreground mb-1">Controller</p>
-                  <p className="font-mono">{ic.controller}</p>
-                </div>
-                <div className="flex justify-between p-3 rounded-lg bg-muted/50">
-                  <span>Default Class</span>
-                  <Badge variant={ic.isDefault ? 'default' : 'secondary'}>{ic.isDefault ? 'Yes' : 'No'}</Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          {ic.parameters && (
+          <SectionCard title="Ingress Class Info" icon={Route}>
+            <DetailRow label="Controller" value={<span className="font-mono">{controller}</span>} />
+            <DetailRow label="Default Class" value={<Badge variant={isDefault ? 'default' : 'secondary'}>{isDefault ? 'Yes' : 'No'}</Badge>} />
+            <DetailRow label="Age" value={age} />
+          </SectionCard>
+          {params && (
             <Card>
               <CardHeader><CardTitle className="text-base">Parameters</CardTitle></CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  <div className="flex justify-between p-2 rounded-lg bg-muted/50">
-                    <span className="text-muted-foreground">API Group</span>
-                    <span className="font-mono text-sm">{ic.parameters.apiGroup}</span>
-                  </div>
-                  <div className="flex justify-between p-2 rounded-lg bg-muted/50">
-                    <span className="text-muted-foreground">Kind</span>
-                    <Badge variant="secondary">{ic.parameters.kind}</Badge>
-                  </div>
-                  <div className="flex justify-between p-2 rounded-lg bg-muted/50">
-                    <span className="text-muted-foreground">Name</span>
-                    <span className="font-mono text-sm">{ic.parameters.name}</span>
-                  </div>
+                  <DetailRow label="API Group" value={params.apiGroup ?? '—'} />
+                  <DetailRow label="Kind" value={params.kind ?? '—'} />
+                  <DetailRow label="Name" value={params.name ?? '—'} />
                 </div>
               </CardContent>
             </Card>
           )}
-          <MetadataCard title="Labels" items={ic.labels} variant="badges" />
+          <MetadataCard title="Labels" items={labels} variant="badges" />
         </div>
       ),
     },
-    { id: 'events', label: 'Events', content: <EventsSection events={[]} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={ic.name} /> },
-    { id: 'topology', label: 'Topology', content: <TopologyViewer nodes={topologyNodes} edges={topologyEdges} onNodeClick={handleNodeClick} /> },
+    {
+      id: 'ingresses',
+      label: 'Ingresses Using This Class',
+      content: (
+        <SectionCard title="Ingresses using this class" icon={Route}>
+          {ingressesUsingThisClass.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No ingresses use this class.</p>
+          ) : (
+            <div className="rounded-md border overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b bg-muted/40"><th className="text-left p-2">Name</th><th className="text-left p-2">Namespace</th><th className="text-left p-2">Actions</th></tr></thead>
+                <tbody>
+                  {ingressesUsingThisClass.map((ing) => (
+                    <tr key={`${ing.metadata?.namespace}-${ing.metadata?.name}`} className="border-b">
+                      <td className="p-2 font-mono">{ing.metadata?.name}</td>
+                      <td className="p-2">{ing.metadata?.namespace}</td>
+                      <td className="p-2"><Link to={`/ingresses/${ing.metadata?.namespace}/${ing.metadata?.name}`} className="text-primary text-sm hover:underline">View</Link></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SectionCard>
+      ),
+    },
+    { id: 'controller', label: 'Controller Details', content: <SectionCard title="Controller details" icon={Server}><p className="text-muted-foreground text-sm">Controller: {controller}. Version placeholder.</p></SectionCard> },
+    { id: 'events', label: 'Events', content: <EventsSection events={events} /> },
+    { id: 'metrics', label: 'Metrics', content: <SectionCard title="Metrics" icon={Activity}><p className="text-muted-foreground text-sm">Placeholder until metrics pipeline.</p></SectionCard> },
+    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={icName} editable onSave={handleSaveYaml} /> },
+    { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={icName} /> },
+    {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('IngressClass')}
+          namespace={''}
+          name={name ?? ''}
+          sourceResourceType="IngressClass"
+          sourceResourceName={icResource?.metadata?.name ?? name ?? ''}
+        />
+      ),
+    },
     {
       id: 'actions',
       label: 'Actions',
       content: (
         <ActionsSection actions={[
-          { icon: Star, label: 'Set as Default', description: 'Make this the default ingress class' },
-          { icon: Download, label: 'Download YAML', description: 'Export IngressClass definition' },
-          { icon: Trash2, label: 'Delete IngressClass', description: 'Remove this ingress class', variant: 'destructive' },
+          { icon: Star, label: 'Set as Default', description: 'Make this the default ingress class', onClick: handleSetDefault },
+          { icon: Download, label: 'Download YAML', description: 'Export IngressClass definition', onClick: handleDownloadYaml },
+          { icon: Trash2, label: 'Delete IngressClass', description: 'Remove this ingress class', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]} />
       ),
     },
   ];
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="IngressClass"
         resourceIcon={Route}
-        name={ic.name}
-        status={ic.status}
+        name={icName}
+        status={status}
         backLink="/ingressclasses"
         backLabel="Ingress Classes"
-        metadata={
-          <span className="flex items-center gap-1.5 ml-2">
-            <Clock className="h-3.5 w-3.5" />Created {ic.age}
-            {ic.isDefault && <><span className="mx-2">•</span><Star className="h-3.5 w-3.5 text-[hsl(var(--warning))]" />Default</>}
+        headerMetadata={
+          <span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground">
+            <Clock className="h-3.5 w-3.5" />Created {age}
+            {isConnected && <Badge variant="outline" className="ml-2 text-xs">Live</Badge>}
+            {isDefault && <><span className="mx-2">•</span><Star className="h-3.5 w-3.5 inline" />Default</>}
           </span>
         }
         actions={[
-          { label: 'Download YAML', icon: Download, variant: 'outline' },
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="IngressClass"
+        resourceName={icName}
+        onConfirm={async () => {
+          if (isConnected && name) {
+            await deleteIngressClass.mutateAsync({ name });
+            navigate('/ingressclasses');
+          } else {
+            toast.success(`IngressClass ${icName} deleted (demo mode)`);
+            navigate('/ingressclasses');
+          }
+        }}
+        requireNameConfirmation
+      />
+    </>
   );
 }

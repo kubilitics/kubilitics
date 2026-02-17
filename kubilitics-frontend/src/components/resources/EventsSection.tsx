@@ -1,5 +1,6 @@
-import { CheckCircle2, AlertTriangle, XCircle, Info } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { CheckCircle2, AlertTriangle, XCircle, Info, CalendarClock } from 'lucide-react';
+import { SectionCard } from './SectionCard';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 export interface EventInfo {
@@ -12,6 +13,7 @@ export interface EventInfo {
 
 export interface EventsSectionProps {
   events: EventInfo[];
+  isLoading?: boolean;
 }
 
 const eventConfig = {
@@ -20,14 +22,31 @@ const eventConfig = {
   Error: { icon: XCircle, color: 'text-[hsl(var(--error))]', bg: 'bg-[hsl(var(--error)/0.1)]' },
 };
 
-export function EventsSection({ events }: EventsSectionProps) {
+export function EventsSection({ events, isLoading }: EventsSectionProps) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Events</CardTitle>
-        <CardDescription>Recent events for this resource</CardDescription>
-      </CardHeader>
-      <CardContent>
+    <SectionCard
+      icon={CalendarClock}
+      title="Events"
+      tooltip={
+        <>
+          <p className="font-medium">Events</p>
+          <p className="mt-1 text-muted-foreground text-xs">Recent events for this resource</p>
+        </>
+      }
+    >
+      {isLoading ? (
+          <div className="space-y-4 py-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-start gap-4">
+                <Skeleton className="h-8 w-8 rounded-full shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
         <div className="space-y-4">
           {events.map((event, i) => {
             const config = eventConfig[event.type];
@@ -60,7 +79,7 @@ export function EventsSection({ events }: EventsSectionProps) {
             </div>
           )}
         </div>
-      </CardContent>
-    </Card>
+        )}
+    </SectionCard>
   );
 }

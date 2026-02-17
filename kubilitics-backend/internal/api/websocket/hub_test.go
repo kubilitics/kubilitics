@@ -88,7 +88,7 @@ func TestHubBroadcastResourceEvent(t *testing.T) {
 		"namespace": "default",
 	}
 	
-	err := hub.BroadcastResourceEvent("ADDED", "Pod", resource)
+	err := hub.BroadcastResourceEvent("", "", "ADDED", "Pod", resource)
 	assert.NoError(t, err)
 }
 
@@ -99,13 +99,18 @@ func TestHubBroadcastTopologyUpdate(t *testing.T) {
 	defer hub.Stop()
 	
 	topology := &models.TopologyGraph{
+		SchemaVersion: "1.0",
 		Nodes: []models.TopologyNode{
-			{ID: "pod-1", Type: "Pod", Name: "nginx"},
+			{ID: "pod-1", Kind: "Pod", Name: "nginx", Metadata: models.NodeMetadata{}, Computed: models.NodeComputed{}},
 		},
 		Edges: []models.TopologyEdge{},
-		Meta: models.TopologyMeta{
-			NodeCount: 1,
-			EdgeCount: 0,
+		Metadata: models.TopologyGraphMetadata{
+			ClusterId:   "test",
+			GeneratedAt: "",
+			LayoutSeed:  "",
+			IsComplete:  true,
+			NodeCount:   1,
+			EdgeCount:   0,
 		},
 	}
 	

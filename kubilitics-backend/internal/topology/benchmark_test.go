@@ -78,7 +78,7 @@ func BenchmarkGraphToTopology(b *testing.B) {
 			b.ReportAllocs()
 			
 			for i := 0; i < b.N; i++ {
-				_ = graph.ToTopologyGraph()
+				_ = graph.ToTopologyGraph("bench")
 			}
 		})
 	}
@@ -121,10 +121,11 @@ func BenchmarkEdgeOperations(b *testing.B) {
 		
 		for i := 0; i < b.N; i++ {
 			edge := models.TopologyEdge{
-				ID:     fmt.Sprintf("edge-bench-%d", i),
+				ID: fmt.Sprintf("edge-bench-%d", i),
 				Source: fmt.Sprintf("node-%d", i%1000),
 				Target: fmt.Sprintf("node-%d", (i+1)%1000),
-				Type:   "owner",
+				RelationshipType: "owner",
+				Metadata: models.EdgeMetadata{},
 			}
 			graph.AddEdge(edge)
 		}
@@ -155,16 +156,16 @@ func BenchmarkEdgeOperations(b *testing.B) {
 
 // Helper: generateLargeGraph creates a graph with specified node count
 func generateLargeGraph(nodeCount int) *Graph {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
 	for i := 0; i < nodeCount; i++ {
 		node := models.TopologyNode{
-			ID:        fmt.Sprintf("node-%d", i),
-			Type:      "Pod",
-			Name:      fmt.Sprintf("pod-%d", i),
+			ID: fmt.Sprintf("node-%d", i),
+			Kind: "Pod",
+			Name: fmt.Sprintf("pod-%d", i),
 			Namespace: "default",
-			Labels:    map[string]string{"app": "test"},
-			Metadata:  map[string]interface{}{"index": i},
+			Metadata: models.NodeMetadata{Labels: map[string]string{"app": "test"}},
+			Computed: models.NodeComputed{},
 		}
 		graph.AddNode(node)
 	}
@@ -174,16 +175,18 @@ func generateLargeGraph(nodeCount int) *Graph {
 
 // Helper: generateMixedTypeGraph creates graph with multiple resource types
 func generateMixedTypeGraph(nodeCount int) *Graph {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	types := []string{"Pod", "Service", "Deployment", "ReplicaSet", "ConfigMap"}
 	
 	for i := 0; i < nodeCount; i++ {
 		nodeType := types[i%len(types)]
 		node := models.TopologyNode{
-			ID:        fmt.Sprintf("node-%d", i),
-			Type:      nodeType,
-			Name:      fmt.Sprintf("%s-%d", nodeType, i),
+			ID: fmt.Sprintf("node-%d", i),
+			Kind: nodeType,
+			Name: fmt.Sprintf("%s-%d", nodeType, i),
 			Namespace: "default",
+			Metadata: models.NodeMetadata{},
+			Computed: models.NodeComputed{},
 		}
 		graph.AddNode(node)
 	}
@@ -193,60 +196,52 @@ func generateMixedTypeGraph(nodeCount int) *Graph {
 
 // Helper: generateGraphWithOwnerRefs creates graph with owner references
 func generateGraphWithOwnerRefs(nodeCount int) *Graph {
-	graph := NewGraph()
+	graph := NewGraph(0)
 	
 	// Create deployments
 	for i := 0; i < nodeCount/3; i++ {
+		uid := fmt.Sprintf("deployment-uid-%d", i)
 		deployment := models.TopologyNode{
-			ID:        fmt.Sprintf("deployment-%d", i),
-			Type:      "Deployment",
-			Name:      fmt.Sprintf("deployment-%d", i),
+			ID: fmt.Sprintf("deployment-%d", i),
+			Kind: "Deployment",
+			Name: fmt.Sprintf("deployment-%d", i),
 			Namespace: "default",
-			Metadata: map[string]interface{}{
-				"uid": fmt.Sprintf("deployment-uid-%d", i),
-			},
+			Metadata: models.NodeMetadata{UID: uid},
+			Computed: models.NodeComputed{},
 		}
 		graph.AddNode(deployment)
 	}
 	
 	// Create replicasets owned by deployments
 	for i := 0; i < nodeCount/3; i++ {
+		uid := fmt.Sprintf("rs-uid-%d", i)
 		rs := models.TopologyNode{
-			ID:        fmt.Sprintf("rs-%d", i),
-			Type:      "ReplicaSet",
-			Name:      fmt.Sprintf("rs-%d", i),
+			ID: fmt.Sprintf("rs-%d", i),
+			Kind: "ReplicaSet",
+			Name: fmt.Sprintf("rs-%d", i),
 			Namespace: "default",
-			Metadata: map[string]interface{}{
-				"uid": fmt.Sprintf("rs-uid-%d", i),
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"uid":  fmt.Sprintf("deployment-uid-%d", i%(nodeCount/3)),
-						"kind": "Deployment",
-					},
-				},
-			},
+			Metadata: models.NodeMetadata{UID: uid},
+			Computed: models.NodeComputed{},
 		}
 		graph.AddNode(rs)
+		depUID := fmt.Sprintf("deployment-uid-%d", i%(nodeCount/3))
+		graph.SetOwnerRefs(rs.ID, []OwnerRef{{UID: depUID, Kind: "Deployment"}})
 	}
 	
 	// Create pods owned by replicasets
 	for i := 0; i < nodeCount/3; i++ {
+		uid := fmt.Sprintf("pod-uid-%d", i)
 		pod := models.TopologyNode{
-			ID:        fmt.Sprintf("pod-%d", i),
-			Type:      "Pod",
-			Name:      fmt.Sprintf("pod-%d", i),
+			ID: fmt.Sprintf("pod-%d", i),
+			Kind: "Pod",
+			Name: fmt.Sprintf("pod-%d", i),
 			Namespace: "default",
-			Metadata: map[string]interface{}{
-				"uid": fmt.Sprintf("pod-uid-%d", i),
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"uid":  fmt.Sprintf("rs-uid-%d", i%(nodeCount/3)),
-						"kind": "ReplicaSet",
-					},
-				},
-			},
+			Metadata: models.NodeMetadata{UID: uid},
+			Computed: models.NodeComputed{},
 		}
 		graph.AddNode(pod)
+		rsUID := fmt.Sprintf("rs-uid-%d", i%(nodeCount/3))
+		graph.SetOwnerRefs(pod.ID, []OwnerRef{{UID: rsUID, Kind: "ReplicaSet"}})
 	}
 	
 	return graph
@@ -258,11 +253,12 @@ func generateGraphWithEdges(nodeCount, edgeCount int) *Graph {
 	
 	for i := 0; i < edgeCount; i++ {
 		edge := models.TopologyEdge{
-			ID:     fmt.Sprintf("edge-%d", i),
+			ID: fmt.Sprintf("edge-%d", i),
 			Source: fmt.Sprintf("node-%d", i%nodeCount),
 			Target: fmt.Sprintf("node-%d", (i+1)%nodeCount),
-			Type:   "owner",
-			Label:  "owns",
+			RelationshipType: "owner",
+			Label: "owns",
+			Metadata: models.EdgeMetadata{},
 		}
 		graph.AddEdge(edge)
 	}
@@ -305,13 +301,13 @@ func TestGraphMemoryEfficiency(t *testing.T) {
 		_ = ctx // Use context if needed for future operations
 		
 		// Convert to topology
-		topology := graph.ToTopologyGraph()
+		topology := graph.ToTopologyGraph("test")
 		
 		// Basic sanity check
-		if topology.Meta.NodeCount != size {
-			t.Errorf("Expected %d nodes, got %d", size, topology.Meta.NodeCount)
+		if topology.Metadata.NodeCount != size {
+			t.Errorf("Expected %d nodes, got %d", size, topology.Metadata.NodeCount)
 		}
 		
-		t.Logf("Graph with %d nodes: %d edges, memory efficient", size, topology.Meta.EdgeCount)
+		t.Logf("Graph with %d nodes: %d edges, memory efficient", size, topology.Metadata.EdgeCount)
 	}
 }

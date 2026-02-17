@@ -1,82 +1,148 @@
-import { useState } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Shield, Clock, Download, Trash2, Edit, Users } from 'lucide-react';
+import { Shield, Clock, Download, Trash2, Edit, Users, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs, TopologyViewer, MetadataCard, YamlViewer, YamlCompareViewer, EventsSection, ActionsSection,
-  type TopologyNode, type TopologyEdge, type ResourceStatus, type EventInfo, type YamlVersion,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  ResourceDetailLayout,
+  
+  MetadataCard,
+  YamlViewer,
+  YamlCompareViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  ResourceTopologyView,
+  
+  
+  type ResourceStatus,
+  type YamlVersion,
 } from '@/components/resources';
+import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
+import { useDeleteK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { toast } from 'sonner';
 
-const mockEvents: EventInfo[] = [];
+interface RoleRule {
+  apiGroups?: string[];
+  resources?: string[];
+  resourceNames?: string[];
+  verbs?: string[];
+}
 
-const mockRole = {
-  name: 'pod-reader',
-  namespace: 'production',
-  status: 'Healthy' as ResourceStatus,
-  age: '90d',
-  labels: { 'rbac.authorization.k8s.io/aggregate-to-view': 'true' },
-  rules: [
-    { apiGroups: [''], resources: ['pods'], verbs: ['get', 'list', 'watch'] },
-    { apiGroups: [''], resources: ['pods/log'], verbs: ['get'] },
-  ],
-};
+interface RoleResource extends KubernetesResource {
+  rules?: RoleRule[];
+}
 
-const topologyNodes: TopologyNode[] = [
-  { id: 'role', type: 'role', name: 'pod-reader', status: 'healthy', isCurrent: true },
-  { id: 'rb1', type: 'rolebinding', name: 'pod-reader-binding', status: 'healthy' },
-  { id: 'sa', type: 'serviceaccount', name: 'nginx-sa', status: 'healthy' },
-];
+const VERBS_ORDER = ['get', 'list', 'watch', 'create', 'update', 'patch', 'delete', 'deletecollection'];
 
-const topologyEdges: TopologyEdge[] = [
-  { from: 'rb1', to: 'role', label: 'References' },
-  { from: 'rb1', to: 'sa', label: 'Binds To' },
-];
-
-const yaml = `apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: pod-reader
-  namespace: production
-  labels:
-    rbac.authorization.k8s.io/aggregate-to-view: "true"
-rules:
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: [""]
-  resources: ["pods/log"]
-  verbs: ["get"]`;
+function buildPermissionMatrix(rules: RoleRule[]): Map<string, Set<string>> {
+  const matrix = new Map<string, Set<string>>();
+  for (const rule of rules || []) {
+    const apiGroup = (rule.apiGroups || ['']).join(',') || 'core';
+    for (const res of rule.resources || []) {
+      const key = apiGroup ? `${res} (${apiGroup})` : res;
+      if (!matrix.has(key)) matrix.set(key, new Set());
+      for (const v of rule.verbs || []) matrix.get(key)!.add(v);
+    }
+  }
+  return matrix;
+}
 
 export default function RoleDetail() {
-  const { namespace, name } = useParams();
+  const { namespace, name } = useParams<{ namespace: string; name: string }>();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
-  const role = mockRole;
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const { isConnected } = useConnectionStatus();
 
-  // Mock YAML versions for comparison
-  const yamlVersions: YamlVersion[] = [
-    { id: 'current', label: 'Current Version', yaml, timestamp: 'now' },
-    { id: 'previous', label: 'Previous Version', yaml: yaml.replace('watch', 'create'), timestamp: '2 hours ago' },
-    { id: 'initial', label: 'Initial Version', yaml: yaml.replace('pods/log', 'pods/status'), timestamp: '1 day ago' },
-  ];
+  const { resource, isLoading, error: resourceError, age, yaml, refetch } = useResourceDetail<RoleResource>(
+    'roles',
+    name ?? undefined,
+    namespace ?? undefined,
+    undefined as unknown as RoleResource
+  );
+  const { events, refetch: refetchEvents } = useResourceEvents('Role', namespace ?? undefined, name ?? undefined);
+  const deleteResource = useDeleteK8sResource('roles');
 
-  const handleSaveYaml = async (newYaml: string) => {
-    toast.success('Role updated successfully');
-    console.log('Saving YAML:', newYaml);
-  };
+  const roleName = resource?.metadata?.name ?? name ?? '';
+  const roleNamespace = resource?.metadata?.namespace ?? namespace ?? '';
+  const rules = resource?.rules ?? [];
+  const labels = resource?.metadata?.labels ?? {};
+  const annotations = resource?.metadata?.annotations ?? {};
+
+  const apiGroupsSet = useMemo(() => {
+    const set = new Set<string>();
+    rules.forEach((r) => (r.apiGroups ?? []).forEach((g) => set.add(g || 'core')));
+    return Array.from(set);
+  }, [rules]);
+
+  const resourcesCovered = useMemo(() => {
+    const set = new Set<string>();
+    rules.forEach((r) => (r.resources ?? []).forEach((res) => set.add(res)));
+    return Array.from(set).slice(0, 5).join(', ') + (rules.reduce((acc, r) => acc + (r.resources?.length ?? 0), 0) > 5 ? '…' : '');
+  }, [rules]);
+
+  const permissionMatrix = useMemo(() => buildPermissionMatrix(rules), [rules]);
+
+  const handleDownloadYaml = useCallback(() => {
+    if (!yaml) return;
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${roleName || 'role'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [yaml, roleName]);
+
+  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
 
   const statusCards = [
-    { label: 'Rules', value: role.rules.length, icon: Shield, iconColor: 'primary' as const },
-    { label: 'Age', value: role.age, icon: Clock, iconColor: 'muted' as const },
+    { label: 'Rules Count', value: rules.length, icon: Shield, iconColor: 'primary' as const },
+    { label: 'API Groups', value: apiGroupsSet.length || '–', icon: Shield, iconColor: 'muted' as const },
+    { label: 'Resources Covered', value: resourcesCovered || '–', icon: Shield, iconColor: 'muted' as const },
+    { label: 'Bindings Count', value: '–', icon: Shield, iconColor: 'muted' as const },
   ];
 
-  const handleNodeClick = (node: TopologyNode) => {
-    if (node.type === 'rolebinding') navigate(`/rolebindings/${namespace}/${node.name}`);
-    else if (node.type === 'serviceaccount') navigate(`/serviceaccounts/${namespace}/${node.name}`);
-  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  if (isConnected && (resourceError || !resource?.metadata?.name)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
+        <Shield className="h-12 w-12 text-muted-foreground" />
+        <p className="text-lg font-medium">Role not found</p>
+        <p className="text-sm text-muted-foreground">
+          {namespace && name ? `No role "${name}" in namespace "${namespace}".` : 'Missing namespace or name.'}
+        </p>
+        <Button variant="outline" onClick={() => navigate('/roles')}>Back to Roles</Button>
+      </div>
+    );
+  }
 
   const tabs = [
     {
@@ -88,73 +154,180 @@ export default function RoleDetail() {
             <CardHeader><CardTitle className="text-base">Rules</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {role.rules.map((rule, i) => (
-                  <div key={i} className="p-4 rounded-lg bg-muted/50">
-                    <div className="grid grid-cols-3 gap-4 text-sm">
-                      <div>
-                        <p className="text-muted-foreground mb-2">API Groups</p>
-                        <div className="flex flex-wrap gap-1">
-                          {rule.apiGroups.map((g, j) => <Badge key={j} variant="secondary" className="font-mono">{g || 'core'}</Badge>)}
+                {rules.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">No rules</p>
+                ) : (
+                  rules.map((rule, i) => (
+                    <div key={i} className="p-4 rounded-lg bg-muted/50">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <p className="text-muted-foreground mb-2">API Groups</p>
+                          <div className="flex flex-wrap gap-1">
+                            {(rule.apiGroups ?? ['']).map((g, j) => (
+                              <Badge key={j} variant="secondary" className="font-mono">{g || 'core'}</Badge>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground mb-2">Resources</p>
-                        <div className="flex flex-wrap gap-1">
-                          {rule.resources.map((r, j) => <Badge key={j} variant="outline" className="font-mono">{r}</Badge>)}
+                        <div>
+                          <p className="text-muted-foreground mb-2">Resources</p>
+                          <div className="flex flex-wrap gap-1">
+                            {(rule.resources ?? []).map((r, j) => (
+                              <Badge key={j} variant="outline" className="font-mono">{r}</Badge>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground mb-2">Verbs</p>
-                        <div className="flex flex-wrap gap-1">
-                          {rule.verbs.map((v, j) => <Badge key={j} variant="default" className="font-mono text-xs">{v}</Badge>)}
+                        <div>
+                          <p className="text-muted-foreground mb-2">Verbs</p>
+                          <div className="flex flex-wrap gap-1">
+                            {(rule.verbs ?? []).map((v, j) => (
+                              <Badge key={j} variant="default" className="font-mono text-xs">{v}</Badge>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
-          <MetadataCard title="Labels" items={role.labels} variant="badges" />
+          <MetadataCard title="Labels" items={labels} variant="badges" />
+          {Object.keys(annotations).length > 0 && <MetadataCard title="Annotations" items={annotations} variant="badges" />}
         </div>
       ),
     },
-    { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={role.name} editable onSave={handleSaveYaml} /> },
-    { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={role.name} /> },
-    { id: 'topology', label: 'Topology', content: <TopologyViewer nodes={topologyNodes} edges={topologyEdges} onNodeClick={handleNodeClick} /> },
+    {
+      id: 'permission-matrix',
+      label: 'Permission Matrix',
+      content: (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Resources × Verbs</CardTitle></CardHeader>
+          <CardContent>
+            {permissionMatrix.size === 0 ? (
+              <p className="text-muted-foreground text-sm">No rules to display.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-48">Resource</TableHead>
+                      {VERBS_ORDER.map((v) => (
+                        <TableHead key={v} className="text-center w-20">{v}</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {Array.from(permissionMatrix.entries()).map(([res, verbs]) => (
+                      <TableRow key={res}>
+                        <TableCell className="font-mono text-sm">{res}</TableCell>
+                        {VERBS_ORDER.map((v) => (
+                          <TableCell key={v} className="text-center">
+                            {verbs.has(v) ? <span className="inline-block w-4 h-4 rounded bg-green-500/80" title={v} /> : <span className="inline-block w-4 h-4 rounded bg-muted" />}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: 'bindings',
+      label: 'Bindings',
+      content: (
+        <Card>
+          <CardHeader><CardTitle className="text-base">RoleBindings</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm">RoleBindings that reference this Role can be listed by viewing RoleBindings in this namespace and filtering by role.</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => navigate(`/rolebindings?namespace=${roleNamespace}`)}>View RoleBindings in {roleNamespace}</Button>
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: 'effective-subjects',
+      label: 'Effective Subjects',
+      content: (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Subjects</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm">Subjects are derived from RoleBindings that reference this Role. View Bindings tab and open each RoleBinding to see subjects.</p>
+          </CardContent>
+        </Card>
+      ),
+    },
+    { id: 'events', label: 'Events', content: <EventsSection events={events} /> },
+    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={roleName} /> },
+    { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={roleName} /> },
+    {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('Role')}
+          namespace={roleNamespace ?? ''}
+          name={name ?? ''}
+          sourceResourceType="Role"
+          sourceResourceName={resource?.metadata?.name ?? name ?? ''}
+        />
+      ),
+    },
     {
       id: 'actions',
       label: 'Actions',
       content: (
-        <ActionsSection actions={[
-          { icon: Edit, label: 'Edit Role', description: 'Modify role permissions' },
-          { icon: Users, label: 'View Bindings', description: 'See all role bindings using this role' },
-          { icon: Download, label: 'Download YAML', description: 'Export Role definition' },
-          { icon: Trash2, label: 'Delete Role', description: 'Remove this role', variant: 'destructive' },
-        ]} />
+        <ActionsSection
+          actions={[
+            { icon: Edit, label: 'Edit Role', description: 'Modify role permissions', onClick: () => toast.info('Edit not implemented') },
+            { icon: Users, label: 'View Bindings', description: 'See all role bindings using this role', onClick: () => navigate(`/rolebindings?namespace=${roleNamespace}`) },
+            { icon: Download, label: 'Download YAML', description: 'Export Role definition', onClick: handleDownloadYaml },
+            { icon: Trash2, label: 'Delete Role', description: 'Remove this role', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
+          ]}
+        />
       ),
     },
   ];
 
+  const status: ResourceStatus = 'Healthy';
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="Role"
         resourceIcon={Shield}
-        name={role.name}
-        namespace={role.namespace}
-        status={role.status}
+        name={roleName}
+        namespace={roleNamespace}
+        status={status}
         backLink="/roles"
         backLabel="Roles"
-        metadata={<span className="flex items-center gap-1.5 ml-2"><Clock className="h-3.5 w-3.5" />Created {role.age}</span>}
+        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {age}</span>}
         actions={[
-          { label: 'Edit', icon: Edit, variant: 'outline' },
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Edit', icon: Edit, variant: 'outline', onClick: () => toast.info('Edit not implemented') },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="Role"
+        resourceName={roleName}
+        namespace={roleNamespace}
+        onConfirm={async () => {
+          await deleteResource.mutateAsync({ name: roleName, namespace: roleNamespace });
+          navigate('/roles');
+        }}
+        requireNameConfirmation
+      />
+    </>
   );
 }

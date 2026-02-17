@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   Search, 
@@ -10,10 +10,15 @@ import {
   WifiOff,
   Plus,
   Trash2,
-  ArrowUpDown,
   CheckSquare,
   ExternalLink,
   Star,
+  ChevronDown,
+  ChevronRight,
+  List,
+  Layers,
+  FileText,
+  CheckCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,6 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { ResizableTableProvider, ResizableTableHead, ResizableTableCell, type ResizableColumnConfig } from '@/components/ui/resizable-table';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,99 +43,158 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
 import { useK8sResourceList, useDeleteK8sResource, calculateAge } from '@/hooks/useKubernetes';
-import { useKubernetesConfigStore } from '@/stores/kubernetesConfigStore';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { DeleteConfirmDialog } from '@/components/resources';
-import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
+import { IngressClassWizard } from '@/components/wizards';
+import { ResourceExportDropdown, ListPageStatCard, ListPageHeader, TableColumnHeaderWithFilterAndSort, TableFilterCell, resourceTableRowClassName, ResourceCommandBar, ClusterScopedScope, ListPagination, PAGE_SIZE_OPTIONS, ListViewSegmentedControl, ROW_MOTION, AgeCell, TableEmptyState, CopyNameDropdownItem, ResourceListTableToolbar } from '@/components/list';
+import { IngressIcon } from '@/components/icons/KubernetesIcons';
+import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
+import { useColumnVisibility } from '@/hooks/useColumnVisibility';
 import { toast } from 'sonner';
-import { Card, CardContent } from '@/components/ui/card';
 
 interface IngressClass {
   name: string;
   controller: string;
   isDefault: boolean;
+  ingressesCount: number;
   parameters: string;
   age: string;
+  creationTimestamp?: string;
 }
 
-const mockIngressClasses: IngressClass[] = [
-  { name: 'nginx', controller: 'k8s.io/ingress-nginx', isDefault: true, parameters: '-', age: '180d' },
-  { name: 'traefik', controller: 'traefik.io/ingress-controller', isDefault: false, parameters: '-', age: '90d' },
-  { name: 'haproxy', controller: 'haproxy.org/ingress-controller', isDefault: false, parameters: '-', age: '60d' },
-  { name: 'kong', controller: 'ingress-controllers.konghq.com/kong', isDefault: false, parameters: 'kong-config', age: '45d' },
-  { name: 'istio', controller: 'istio.io/ingress-controller', isDefault: false, parameters: '-', age: '30d' },
-  { name: 'contour', controller: 'projectcontour.io/contour', isDefault: false, parameters: '-', age: '15d' },
+const INGRESSCLASSES_TABLE_COLUMNS: ResizableColumnConfig[] = [
+  { id: 'name', defaultWidth: 180, minWidth: 100 },
+  { id: 'controller', defaultWidth: 220, minWidth: 140 },
+  { id: 'default', defaultWidth: 90, minWidth: 70 },
+  { id: 'ingresses', defaultWidth: 100, minWidth: 70 },
+  { id: 'parameters', defaultWidth: 140, minWidth: 90 },
+  { id: 'age', defaultWidth: 90, minWidth: 60 },
 ];
 
-type SortKey = 'name' | 'controller' | 'age';
+const INGRESSCLASSES_COLUMNS_FOR_VISIBILITY = [
+  { id: 'controller', label: 'Controller' },
+  { id: 'default', label: 'Default' },
+  { id: 'ingresses', label: 'Ingresses' },
+  { id: 'parameters', label: 'Parameters' },
+  { id: 'age', label: 'Age' },
+];
+
+type ListView = 'flat' | 'byController';
 
 export default function IngressClasses() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: IngressClass | null; bulk?: boolean }>({ open: false, item: null });
-  const [sortKey, setSortKey] = useState<SortKey>('name');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [showCreateWizard, setShowCreateWizard] = useState(false);
+  const [showTableFilters, setShowTableFilters] = useState(false);
+  const [pageSize, setPageSize] = useState(10);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [listView, setListView] = useState<ListView>('flat');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
-  const { config } = useKubernetesConfigStore();
-  const { data, isLoading, refetch } = useK8sResourceList('ingressclasses');
+  const { isConnected } = useConnectionStatus();
+  const { data, isLoading, isFetching, dataUpdatedAt, refetch } = useK8sResourceList('ingressclasses', undefined, { limit: 5000 });
+  const { data: ingressesData } = useK8sResourceList<{ spec?: { ingressClassName?: string }; metadata?: { name: string } }>('ingresses', undefined, { limit: 5000 });
   const deleteResource = useDeleteK8sResource('ingressclasses');
 
-  const ingressClasses: IngressClass[] = config.isConnected && data?.items
-    ? data.items.map((item: any) => ({
+  const ingressCountByClass = useMemo(() => {
+    const map = new Map<string, number>();
+    (ingressesData?.items ?? []).forEach((ing: { spec?: { ingressClassName?: string }; metadata?: { name: string } }) => {
+      const className = ing.spec?.ingressClassName ?? '';
+      if (className) map.set(className, (map.get(className) ?? 0) + 1);
+    });
+    return map;
+  }, [ingressesData?.items]);
+
+  const ingressClasses: IngressClass[] = isConnected && data?.items
+    ? (data.items as { metadata: { name: string; annotations?: Record<string, string>; creationTimestamp?: string }; spec?: { controller?: string; parameters?: { name?: string } } }[]).map((item) => ({
         name: item.metadata.name,
-        controller: item.spec?.controller || '-',
+        controller: item.spec?.controller ?? '-',
         isDefault: item.metadata.annotations?.['ingressclass.kubernetes.io/is-default-class'] === 'true',
-        parameters: item.spec?.parameters?.name || '-',
+        ingressesCount: ingressCountByClass.get(item.metadata.name) ?? 0,
+        parameters: item.spec?.parameters?.name ?? '-',
         age: calculateAge(item.metadata.creationTimestamp),
+        creationTimestamp: item.metadata?.creationTimestamp,
       }))
-    : mockIngressClasses;
+    : [];
 
-  const stats = useMemo(() => ({
-    total: ingressClasses.length,
-    withDefault: ingressClasses.filter(ic => ic.isDefault).length,
-    controllers: new Set(ingressClasses.map(ic => ic.controller.split('/')[0])).size,
-  }), [ingressClasses]);
+  const stats = useMemo(() => {
+    const defaultClasses = ingressClasses.filter((ic) => ic.isDefault);
+    const defaultCount = defaultClasses.length;
+    const defaultLabel = defaultCount === 1 ? defaultClasses[0].name : String(defaultCount);
+    return {
+      total: ingressClasses.length,
+      default: defaultLabel,
+      active: ingressClasses.filter((ic) => ic.ingressesCount > 0).length,
+      controllers: new Set(ingressClasses.map((ic) => ic.controller.split('/')[0])).size,
+    };
+  }, [ingressClasses]);
 
-  const filteredClasses = useMemo(() => {
-    let result = ingressClasses.filter(ic => {
-      return ic.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-             ic.controller.toLowerCase().includes(searchQuery.toLowerCase());
-    });
+  const itemsAfterSearch = useMemo(() => {
+    return ingressClasses.filter(ic =>
+      ic.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      ic.controller.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [ingressClasses, searchQuery]);
 
-    result.sort((a, b) => {
-      let comparison = 0;
-      switch (sortKey) {
-        case 'name': comparison = a.name.localeCompare(b.name); break;
-        case 'controller': comparison = a.controller.localeCompare(b.controller); break;
-        case 'age': comparison = a.age.localeCompare(b.age); break;
-      }
-      return sortOrder === 'asc' ? comparison : -comparison;
-    });
+  const ingressClassesTableConfig: ColumnConfig<IngressClass>[] = useMemo(() => [
+    { columnId: 'name', getValue: (i) => i.name, sortable: true, filterable: false },
+    { columnId: 'controller', getValue: (i) => i.controller, sortable: true, filterable: true },
+    { columnId: 'default', getValue: (i) => (i.isDefault ? 'Yes' : 'No'), sortable: true, filterable: true },
+    { columnId: 'hasIngresses', getValue: (i) => i.ingressesCount > 0 ? 'Yes' : 'No', sortable: true, filterable: true },
+    { columnId: 'ingresses', getValue: (i) => i.ingressesCount, sortable: true, filterable: false },
+    { columnId: 'parameters', getValue: (i) => i.parameters, sortable: true, filterable: false },
+    { columnId: 'age', getValue: (i) => i.age, sortable: true, filterable: false },
+  ], []);
 
-    return result;
-  }, [ingressClasses, searchQuery, sortKey, sortOrder]);
+  const { filteredAndSortedItems: filteredClasses, distinctValuesByColumn, valueCountsByColumn, columnFilters, setColumnFilter, sortKey, sortOrder, setSort, clearAllFilters, hasActiveFilters } = useTableFiltersAndSort(itemsAfterSearch, { columns: ingressClassesTableConfig, defaultSortKey: 'name', defaultSortOrder: 'asc' });
+  const columnVisibility = useColumnVisibility({ tableId: 'ingressclasses', columns: INGRESSCLASSES_COLUMNS_FOR_VISIBILITY, alwaysVisible: ['name'] });
 
-  const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortKey(key);
-      setSortOrder('asc');
+  const totalFiltered = filteredClasses.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+  const safePageIndex = Math.min(pageIndex, totalPages - 1);
+  const start = safePageIndex * pageSize;
+  const itemsOnPage = filteredClasses.slice(start, start + pageSize);
+
+  useEffect(() => {
+    if (safePageIndex !== pageIndex) setPageIndex(safePageIndex);
+  }, [safePageIndex, pageIndex]);
+
+  const groupedOnPage = useMemo(() => {
+    if (listView !== 'byController' || itemsOnPage.length === 0) return [];
+    const map = new Map<string, IngressClass[]>();
+    for (const ic of itemsOnPage) {
+      const controllerKey = ic.controller?.split('/')[0] ?? '-';
+      const list = map.get(controllerKey) ?? [];
+      list.push(ic);
+      map.set(controllerKey, list);
     }
+    return Array.from(map.entries())
+      .map(([label, classes]) => ({ groupKey: `ctrl:${label}`, label, classes }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [listView, itemsOnPage]);
+
+  const toggleGroup = (groupKey: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
   };
 
   const handleDelete = async () => {
     if (deleteDialog.bulk && selectedItems.size > 0) {
       for (const name of selectedItems) {
-        if (config.isConnected) {
+        if (isConnected) {
           await deleteResource.mutateAsync({ name, namespace: '' });
         }
       }
       toast.success(`Deleted ${selectedItems.size} ingress classes`);
       setSelectedItems(new Set());
     } else if (deleteDialog.item) {
-      if (config.isConnected) {
+      if (isConnected) {
         await deleteResource.mutateAsync({ name: deleteDialog.item.name, namespace: '' });
       } else {
         toast.success(`IngressClass ${deleteDialog.item.name} deleted (demo mode)`);
@@ -138,18 +203,25 @@ export default function IngressClasses() {
     setDeleteDialog({ open: false, item: null });
   };
 
-  const handleExportAll = () => {
-    const itemsToExport = selectedItems.size > 0 
-      ? filteredClasses.filter(ic => selectedItems.has(ic.name))
-      : filteredClasses;
-    const blob = new Blob([JSON.stringify(itemsToExport, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'ingressclasses-export.json';
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`Exported ${itemsToExport.length} ingress classes`);
+  const ingressClassExportConfig = {
+    filenamePrefix: 'ingressclasses',
+    resourceLabel: 'ingress classes',
+    getExportData: (ic: IngressClass) => ({ name: ic.name, controller: ic.controller, isDefault: ic.isDefault, ingressesCount: ic.ingressesCount, parameters: ic.parameters, age: ic.age }),
+    csvColumns: [
+      { label: 'Name', getValue: (ic: IngressClass) => ic.name },
+      { label: 'Controller', getValue: (ic: IngressClass) => ic.controller },
+      { label: 'Default', getValue: (ic: IngressClass) => (ic.isDefault ? 'Yes' : 'No') },
+      { label: 'Parameters', getValue: (ic: IngressClass) => ic.parameters },
+      { label: 'Age', getValue: (ic: IngressClass) => ic.age },
+    ],
+    toK8sYaml: (ic: IngressClass) => `---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: ${ic.name}
+spec:
+  controller: ${ic.controller}
+`,
   };
 
   const toggleSelection = (item: IngressClass) => {
@@ -163,50 +235,72 @@ export default function IngressClasses() {
   };
 
   const toggleAllSelection = () => {
-    if (selectedItems.size === filteredClasses.length) {
-      setSelectedItems(new Set());
+    const names = itemsOnPage.map((ic) => ic.name);
+    const allSelected = names.length > 0 && names.every((n) => selectedItems.has(n));
+    if (allSelected) {
+      const next = new Set(selectedItems);
+      names.forEach((n) => next.delete(n));
+      setSelectedItems(next);
     } else {
-      setSelectedItems(new Set(filteredClasses.map(ic => ic.name)));
+      const next = new Set(selectedItems);
+      names.forEach((n) => next.add(n));
+      setSelectedItems(next);
     }
   };
 
-  const isAllSelected = filteredClasses.length > 0 && selectedItems.size === filteredClasses.length;
-  const isSomeSelected = selectedItems.size > 0 && selectedItems.size < filteredClasses.length;
+  const isAllSelected = itemsOnPage.length > 0 && itemsOnPage.every((ic) => selectedItems.has(ic.name));
+  const isSomeSelected = selectedItems.size > 0 && !isAllSelected;
+
+  const pagination = {
+    rangeLabel: totalFiltered > 0 ? `Showing ${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered}` : 'No ingress classes',
+    hasPrev: safePageIndex > 0,
+    hasNext: start + pageSize < totalFiltered,
+    onPrev: () => setPageIndex((i) => Math.max(0, i - 1)),
+    onNext: () => setPageIndex((i) => Math.min(totalPages - 1, i + 1)),
+    currentPage: safePageIndex + 1,
+    totalPages: Math.max(1, totalPages),
+    onPageChange: (p: number) => setPageIndex(Math.max(0, Math.min(p - 1, totalPages - 1))),
+    dataUpdatedAt,
+    isFetching,
+  };
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-primary/10">
-            <Route className="h-6 w-6 text-primary" />
+      <ListPageHeader
+        icon={<IngressIcon className="h-6 w-6 text-primary" />}
+        title="Ingress Classes"
+        resourceCount={filteredClasses.length}
+        subtitle="Cluster-scoped"
+        demoMode={!isConnected}
+        isLoading={isLoading}
+        onRefresh={() => refetch()}
+        createLabel="Create Class"
+        onCreate={() => setShowCreateWizard(true)}
+        actions={
+          <>
+            <ResourceExportDropdown
+              items={filteredClasses}
+              selectedKeys={selectedItems}
+              getKey={(ic) => ic.name}
+              config={ingressClassExportConfig}
+              selectionLabel={selectedItems.size > 0 ? 'Selected ingress classes' : 'All visible ingress classes'}
+              onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
+            />
+            {selectedItems.size > 0 && (
+              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}>
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </Button>
+            )}
+          </>
+        }
+        leftExtra={selectedItems.size > 0 ? (
+          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
+            <span className="text-sm text-muted-foreground">{selectedItems.size} selected</span>
+            <Button variant="ghost" size="sm" className="h-8" onClick={() => setSelectedItems(new Set())}>Clear</Button>
           </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Ingress Classes</h1>
-            <p className="text-sm text-muted-foreground">
-              {filteredClasses.length} ingress classes (cluster-scoped)
-              {!config.isConnected && (
-                <span className="ml-2 inline-flex items-center gap-1 text-[hsl(45,93%,47%)]">
-                  <WifiOff className="h-3 w-3" /> Demo mode
-                </span>
-              )}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-2" onClick={handleExportAll}>
-            <Download className="h-4 w-4" />
-            {selectedItems.size > 0 ? `Export (${selectedItems.size})` : 'Export'}
-          </Button>
-          <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => refetch()} disabled={isLoading}>
-            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          </Button>
-          <Button className="gap-2" onClick={() => setShowCreateWizard(true)}>
-            <Plus className="h-4 w-4" />
-            Create Class
-          </Button>
-        </div>
-      </div>
+        ) : undefined}
+      />
 
       {/* Bulk Actions Bar */}
       {selectedItems.size > 0 && (
@@ -220,10 +314,15 @@ export default function IngressClasses() {
             {selectedItems.size} selected
           </Badge>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleExportAll}>
-              <Download className="h-3.5 w-3.5" />
-              Export YAML
-            </Button>
+            <ResourceExportDropdown
+              items={filteredClasses}
+              selectedKeys={selectedItems}
+              getKey={(ic) => ic.name}
+              config={ingressClassExportConfig}
+              selectionLabel={selectedItems.size > 0 ? 'Selected ingress classes' : 'All visible ingress classes'}
+              onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
+              triggerLabel={selectedItems.size > 0 ? `Export (${selectedItems.size})` : 'Export'}
+            />
             <Button 
               variant="destructive" 
               size="sm" 
@@ -240,134 +339,232 @@ export default function IngressClasses() {
         </motion.div>
       )}
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <Card className="cursor-pointer hover:border-primary/50 transition-colors">
-          <CardContent className="p-4">
-            <div className="text-2xl font-bold">{stats.total}</div>
-            <div className="text-xs text-muted-foreground">Total Classes</div>
-          </CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-primary/50 transition-colors">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2">
-              <div className="text-2xl font-bold text-[hsl(45,93%,47%)]">{stats.withDefault}</div>
-              <Star className="h-4 w-4 text-[hsl(45,93%,47%)]" />
-            </div>
-            <div className="text-xs text-muted-foreground">Default Classes</div>
-          </CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-primary/50 transition-colors">
-          <CardContent className="p-4">
-            <div className="text-2xl font-bold text-blue-600">{stats.controllers}</div>
-            <div className="text-xs text-muted-foreground">Unique Controllers</div>
-          </CardContent>
-        </Card>
+      {/* Stats Cards - with icons and click-to-filter like Ingresses */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <ListPageStatCard label="Total Classes" value={stats.total} icon={Route} iconColor="text-primary" selected={!hasActiveFilters} onClick={clearAllFilters} className={cn(!hasActiveFilters && 'ring-2 ring-primary')} />
+        <ListPageStatCard label="Default" value={stats.default} icon={Star} iconColor="text-[hsl(45,93%,47%)]" valueClassName="text-[hsl(45,93%,47%)]" selected={columnFilters.default?.size === 1 && columnFilters.default.has('Yes')} onClick={() => setColumnFilter('default', new Set(['Yes']))} className={cn(columnFilters.default?.size === 1 && columnFilters.default.has('Yes') && 'ring-2 ring-[hsl(45,93%,47%)]')} />
+        <ListPageStatCard label="Active" value={stats.active} icon={CheckCircle2} iconColor="text-[hsl(142,76%,36%)]" valueClassName="text-[hsl(142,76%,36%)]" selected={columnFilters.hasIngresses?.size === 1 && columnFilters.hasIngresses.has('Yes')} onClick={() => setColumnFilter('hasIngresses', new Set(['Yes']))} className={cn(columnFilters.hasIngresses?.size === 1 && columnFilters.hasIngresses.has('Yes') && 'ring-2 ring-[hsl(142,76%,36%)]')} />
+        <ListPageStatCard label="Controllers" value={stats.controllers} valueClassName="text-blue-600" />
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search ingress classes..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
+      <ResourceListTableToolbar
+        globalFilterBar={
+      <ResourceCommandBar
+        scope={<ClusterScopedScope />}
+        search={
+          <div className="relative w-full min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search ingress classes by name or controller..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full h-10 pl-9 rounded-lg border border-border bg-background text-sm font-medium shadow-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/20"
+              aria-label="Search ingress classes"
+            />
+          </div>
+        }
+        structure={
+          <ListViewSegmentedControl
+            value={listView}
+            onChange={(v) => setListView(v as ListView)}
+            options={[
+              { id: 'flat', label: 'Flat', icon: List },
+              { id: 'byController', label: 'By Controller', icon: Layers },
+            ]}
+            label=""
+            ariaLabel="List structure"
           />
+        }
+        footer={hasActiveFilters || searchQuery ? (
+          <Button variant="link" size="sm" className="text-muted-foreground h-auto p-0" onClick={() => { setSearchQuery(''); clearAllFilters(); }}>Clear filters</Button>
+        ) : undefined}
+      />
+        }
+        hasActiveFilters={hasActiveFilters}
+        onClearAllFilters={clearAllFilters}
+        showTableFilters={showTableFilters}
+        onToggleTableFilters={() => setShowTableFilters((v) => !v)}
+        columns={INGRESSCLASSES_COLUMNS_FOR_VISIBILITY}
+        visibleColumns={columnVisibility.visibleColumns}
+        onColumnToggle={columnVisibility.setColumnVisible}
+        footer={
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">{pagination.rangeLabel}</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  {pageSize} per page
+                  <ChevronDown className="h-4 w-4 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <DropdownMenuItem key={size} onClick={() => { setPageSize(size); setPageIndex(0); }} className={cn(pageSize === size && 'bg-accent')}>
+                    {size} per page
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <ListPagination hasPrev={pagination.hasPrev} hasNext={pagination.hasNext} onPrev={pagination.onPrev} onNext={pagination.onNext} rangeLabel={undefined} currentPage={pagination.currentPage} totalPages={pagination.totalPages} onPageChange={pagination.onPageChange} dataUpdatedAt={pagination.dataUpdatedAt} isFetching={pagination.isFetching} />
         </div>
-      </div>
-
-      {/* Table */}
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-12">
-                <Checkbox
-                  checked={isAllSelected}
-                  onCheckedChange={toggleAllSelection}
-                  aria-label="Select all"
-                  className={isSomeSelected ? 'opacity-50' : ''}
-                />
-              </TableHead>
-              <TableHead className="cursor-pointer hover:text-foreground" onClick={() => handleSort('name')}>
-                <div className="flex items-center gap-1">Name <ArrowUpDown className="h-3 w-3" /></div>
-              </TableHead>
-              <TableHead className="cursor-pointer hover:text-foreground" onClick={() => handleSort('controller')}>
-                <div className="flex items-center gap-1">Controller <ArrowUpDown className="h-3 w-3" /></div>
-              </TableHead>
-              <TableHead>Parameters</TableHead>
-              <TableHead className="cursor-pointer hover:text-foreground" onClick={() => handleSort('age')}>
-                <div className="flex items-center gap-1">Age <ArrowUpDown className="h-3 w-3" /></div>
-              </TableHead>
-              <TableHead className="w-12"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredClasses.map((ic) => {
-              const isSelected = selectedItems.has(ic.name);
-              return (
-                <TableRow key={ic.name} className={cn(isSelected && "bg-primary/5")}>
-                  <TableCell>
+        }
+      >
+        <ResizableTableProvider tableId="kubilitics-resizable-table-ingressclasses" columnConfig={INGRESSCLASSES_TABLE_COLUMNS}>
+            <Table className="table-fixed" style={{ minWidth: 1020 }}>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
+                  <TableHead className="w-12">
                     <Checkbox
-                      checked={isSelected}
-                      onCheckedChange={() => toggleSelection(ic)}
-                      aria-label={`Select ${ic.name}`}
+                      checked={isAllSelected}
+                      onCheckedChange={toggleAllSelection}
+                      aria-label="Select all"
+                      className={isSomeSelected ? 'opacity-50' : ''}
                     />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Link 
-                        to={`/ingressclasses/${ic.name}`}
-                        className="font-medium text-primary hover:underline"
-                      >
-                        {ic.name}
-                      </Link>
-                      {ic.isDefault && (
-                        <Badge variant="default" className="text-xs gap-1">
-                          <Star className="h-3 w-3" />
-                          Default
-                        </Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell><span className="font-mono text-sm">{ic.controller}</span></TableCell>
-                  <TableCell><span className="text-muted-foreground">{ic.parameters}</span></TableCell>
-                  <TableCell><span className="text-muted-foreground">{ic.age}</span></TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => navigate(`/ingressclasses/${ic.name}`)}>
-                          <ExternalLink className="h-4 w-4 mr-2" />
-                          View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Download className="h-4 w-4 mr-2" />
-                          Download YAML
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem 
-                          className="text-destructive"
-                          onClick={() => setDeleteDialog({ open: true, item: ic })}
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
+                  </TableHead>
+                  <ResizableTableHead columnId="name">
+                    <TableColumnHeaderWithFilterAndSort columnId="name" label="Name" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+                  </ResizableTableHead>
+                  <ResizableTableHead columnId="controller">
+                    <TableColumnHeaderWithFilterAndSort columnId="controller" label="Controller" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+                  </ResizableTableHead>
+                  <ResizableTableHead columnId="default">Default</ResizableTableHead>
+                  <ResizableTableHead columnId="ingresses">Ingresses</ResizableTableHead>
+                  <ResizableTableHead columnId="parameters">Parameters</ResizableTableHead>
+                  <ResizableTableHead columnId="age">
+                    <TableColumnHeaderWithFilterAndSort columnId="age" label="Age" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+                  </ResizableTableHead>
+                  <TableHead className="w-12 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>
                 </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </Card>
+                {showTableFilters && (
+                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-b-2 border-border">
+                    <TableCell className="w-12 p-1.5" />
+                    <ResizableTableCell columnId="name" className="p-1.5" />
+                    <ResizableTableCell columnId="controller" className="p-1.5">
+                      <TableFilterCell columnId="controller" label="Controller" distinctValues={distinctValuesByColumn.controller ?? []} selectedFilterValues={columnFilters.controller ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.controller} />
+                    </ResizableTableCell>
+                    <ResizableTableCell columnId="default" className="p-1.5">
+                      <TableFilterCell columnId="default" label="Default" distinctValues={distinctValuesByColumn.default ?? []} selectedFilterValues={columnFilters.default ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.default} />
+                    </ResizableTableCell>
+                    <ResizableTableCell columnId="ingresses" className="p-1.5">
+                      <TableFilterCell columnId="hasIngresses" label="Has Ingresses" distinctValues={distinctValuesByColumn.hasIngresses ?? []} selectedFilterValues={columnFilters.hasIngresses ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.hasIngresses} />
+                    </ResizableTableCell>
+                    <ResizableTableCell columnId="parameters" className="p-1.5" />
+                    <ResizableTableCell columnId="age" className="p-1.5" />
+                    <TableCell className="w-12 p-1.5" />
+                  </TableRow>
+                )}
+              </TableHeader>
+              <TableBody>
+                {isLoading && isConnected ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="h-32 text-center">
+                      <div className="flex flex-col items-center gap-2">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">Loading...</p>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : filteredClasses.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="h-40 text-center">
+                      <TableEmptyState
+                        icon={<Route className="h-8 w-8" />}
+                        title="No IngressClasses found"
+                        subtitle={searchQuery || hasActiveFilters ? 'Clear filters to see resources.' : 'Define IngressClasses to configure ingress controllers.'}
+                        hasActiveFilters={!!(searchQuery || hasActiveFilters)}
+                        onClearFilters={() => { setSearchQuery(''); clearAllFilters(); }}
+                        createLabel="Create IngressClass"
+                        onCreate={() => setShowCreateWizard(true)}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ) : listView === 'flat' ? (
+                  itemsOnPage.map((ic, idx) => {
+                    const isSelected = selectedItems.has(ic.name);
+                    return (
+                      <motion.tr
+                        key={ic.name}
+                        initial={ROW_MOTION.initial}
+                        animate={ROW_MOTION.animate}
+                        transition={ROW_MOTION.transition(idx)}
+                        className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', isSelected && 'bg-primary/5')}
+                      >
+                        <TableCell><Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(ic)} aria-label={`Select ${ic.name}`} /></TableCell>
+                        <ResizableTableCell columnId="name">
+                          <Link to={`/ingressclasses/${ic.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate"><Route className="h-4 w-4 text-muted-foreground flex-shrink-0" /><span className="truncate">{ic.name}</span></Link>
+                        </ResizableTableCell>
+                        <ResizableTableCell columnId="controller"><span className="font-mono text-sm truncate block">{ic.controller}</span></ResizableTableCell>
+                        <ResizableTableCell columnId="default">{ic.isDefault ? <Badge variant="default" className="text-xs">Yes</Badge> : <span className="text-muted-foreground">No</span>}</ResizableTableCell>
+                        <ResizableTableCell columnId="ingresses" className="font-mono text-sm">{ic.ingressesCount}</ResizableTableCell>
+                        <ResizableTableCell columnId="parameters"><span className="text-muted-foreground truncate block">{ic.parameters}</span></ResizableTableCell>
+                        <ResizableTableCell columnId="age" className="text-muted-foreground whitespace-nowrap"><AgeCell age={ic.age} timestamp={ic.creationTimestamp} /></ResizableTableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors" aria-label="IngressClass actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-52">
+                              <CopyNameDropdownItem name={ic.name} />
+                              <DropdownMenuItem onClick={() => navigate(`/ingressclasses/${ic.name}`)} className="gap-2">View Details</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => navigate(`/ingresses?class=${ic.name}`)} className="gap-2"><ExternalLink className="h-4 w-4" />View Ingresses</DropdownMenuItem>
+                              {!ic.isDefault && <DropdownMenuItem onClick={() => toast.info('Set as Default: requires cluster-admin or patch IngressClass')} className="gap-2"><Star className="h-4 w-4" />Set as Default</DropdownMenuItem>}
+                              <DropdownMenuItem onClick={() => navigate(`/ingressclasses/${ic.name}?tab=yaml`)} className="gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="gap-2 text-[hsl(0,72%,51%)]" onClick={() => setDeleteDialog({ open: true, item: ic })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </motion.tr>
+                    );
+                  })
+                ) : (
+                  groupedOnPage.flatMap((group) => {
+                    const isCollapsed = collapsedGroups.has(group.groupKey);
+                    return [
+                      <TableRow key={group.groupKey} className="bg-muted/30 hover:bg-muted/40 cursor-pointer border-b border-border/60 transition-all duration-200" onClick={() => toggleGroup(group.groupKey)}>
+                        <TableCell colSpan={8} className="py-2">
+                          <div className="flex items-center gap-2 font-medium">
+                            {isCollapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
+                            Controller: {group.label}
+                            <span className="text-muted-foreground font-normal">({group.classes.length})</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>,
+                      ...(isCollapsed ? [] : group.classes.map((ic, idx) => {
+                        const isSelected = selectedItems.has(ic.name);
+                        return (
+                          <motion.tr key={ic.name} initial={ROW_MOTION.initial} animate={ROW_MOTION.animate} transition={ROW_MOTION.transition(idx)} className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', isSelected && 'bg-primary/5')}>
+                            <TableCell><Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(ic)} aria-label={`Select ${ic.name}`} /></TableCell>
+                            <ResizableTableCell columnId="name"><Link to={`/ingressclasses/${ic.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate"><Route className="h-4 w-4 text-muted-foreground flex-shrink-0" /><span className="truncate">{ic.name}</span></Link></ResizableTableCell>
+                            <ResizableTableCell columnId="controller"><span className="font-mono text-sm truncate block">{ic.controller}</span></ResizableTableCell>
+                            <ResizableTableCell columnId="default">{ic.isDefault ? <Badge variant="default" className="text-xs">Yes</Badge> : <span className="text-muted-foreground">No</span>}</ResizableTableCell>
+                            <ResizableTableCell columnId="ingresses" className="font-mono text-sm">{ic.ingressesCount}</ResizableTableCell>
+                            <ResizableTableCell columnId="parameters"><span className="text-muted-foreground truncate block">{ic.parameters}</span></ResizableTableCell>
+                            <ResizableTableCell columnId="age" className="text-muted-foreground whitespace-nowrap"><AgeCell age={ic.age} timestamp={ic.creationTimestamp} /></ResizableTableCell>
+                            <TableCell>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60" aria-label="IngressClass actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-52">
+                                  <CopyNameDropdownItem name={ic.name} />
+                                  <DropdownMenuItem onClick={() => navigate(`/ingressclasses/${ic.name}`)} className="gap-2">View Details</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => navigate(`/ingresses?class=${ic.name}`)} className="gap-2"><ExternalLink className="h-4 w-4" />View Ingresses</DropdownMenuItem>
+                                  {!ic.isDefault && <DropdownMenuItem onClick={() => toast.info('Set as Default: requires cluster-admin or patch IngressClass')} className="gap-2"><Star className="h-4 w-4" />Set as Default</DropdownMenuItem>}
+                                  <DropdownMenuItem onClick={() => navigate(`/ingressclasses/${ic.name}?tab=yaml`)} className="gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem className="gap-2 text-[hsl(0,72%,51%)]" onClick={() => setDeleteDialog({ open: true, item: ic })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </motion.tr>
+                        );
+                      })),
+                    ];
+                  })
+                )}
+              </TableBody>
+            </Table>
+        </ResizableTableProvider>
+      </ResourceListTableToolbar>
 
       {/* Delete Dialog */}
       <DeleteConfirmDialog
@@ -379,11 +576,9 @@ export default function IngressClasses() {
       />
 
       {showCreateWizard && (
-        <ResourceCreator
-          resourceKind="IngressClass"
-          defaultYaml={DEFAULT_YAMLS.IngressClass}
+        <IngressClassWizard
           onClose={() => setShowCreateWizard(false)}
-          onApply={() => { toast.success('IngressClass created successfully (demo mode)'); setShowCreateWizard(false); refetch(); }}
+          onSubmit={() => { setShowCreateWizard(false); refetch(); }}
         />
       )}
     </motion.div>

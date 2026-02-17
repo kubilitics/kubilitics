@@ -1,17 +1,12 @@
 import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useClusterStore } from '@/stores/clusterStore';
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
+import { useK8sResourceList } from './useKubernetes';
+import { useClusterSummary } from './useClusterSummary';
+import { getEvents } from '@/services/backendApiClient';
 
-interface HealthMetrics {
-  podsRunning: number;
-  podsPending: number;
-  podsFailed: number;
-  nodeHealth: number;
-  restartCount: number;
-  warningEvents: number;
-  errorEvents: number;
-}
-
-interface HealthScore {
+export interface HealthScore {
   score: number;
   grade: 'A' | 'B' | 'C' | 'D' | 'F';
   status: 'excellent' | 'good' | 'fair' | 'poor' | 'critical';
@@ -22,10 +17,46 @@ interface HealthScore {
     eventHealth: number;
   };
   details: string[];
+  insight: string;
+}
+
+function isNodeReady(node: { status?: { conditions?: Array<{ type: string; status: string }> } }): boolean {
+  const conditions = node?.status?.conditions ?? [];
+  const ready = conditions.find((c) => c.type === 'Ready');
+  return ready?.status === 'True';
+}
+
+function getRestartCount(pod: { status?: { containerStatuses?: Array<{ restartCount?: number }> } }): number {
+  const statuses = pod?.status?.containerStatuses ?? [];
+  return statuses.reduce((sum, s) => sum + (s.restartCount ?? 0), 0);
 }
 
 export function useHealthScore(): HealthScore {
   const { activeCluster } = useClusterStore();
+  const storedUrl = useBackendConfigStore((s) => s.backendBaseUrl);
+  const backendBaseUrl = getEffectiveBackendBaseUrl(storedUrl);
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
+  const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
+  const clusterId = activeCluster?.id ?? currentClusterId;
+  const summaryQuery = useClusterSummary(clusterId ?? undefined);
+
+  const podsList = useK8sResourceList('pods', undefined, {
+    enabled: !!activeCluster,
+    limit: 5000,
+    refetchInterval: 60000,
+  });
+  const nodesList = useK8sResourceList('nodes', undefined, {
+    enabled: !!activeCluster,
+    limit: 5000,
+    refetchInterval: 60000,
+  });
+
+  const eventsQuery = useQuery({
+    queryKey: ['backend', 'events', activeCluster?.id, 'health'],
+    queryFn: () => getEvents(backendBaseUrl, activeCluster!.id, { namespace: 'default', limit: 100 }),
+    enabled: !!activeCluster?.id && isBackendConfigured,
+    staleTime: 15000,
+  });
 
   return useMemo(() => {
     if (!activeCluster) {
@@ -35,92 +66,88 @@ export function useHealthScore(): HealthScore {
         status: 'critical',
         breakdown: { podHealth: 0, nodeHealth: 0, stability: 0, eventHealth: 0 },
         details: ['No cluster connected'],
+        insight: 'No cluster connected. Connect a cluster to begin monitoring.',
       };
     }
 
-    // Mock metrics - in real app these would come from the Kubernetes API
-    const metrics: HealthMetrics = {
-      podsRunning: activeCluster.pods.running,
-      podsPending: activeCluster.pods.pending,
-      podsFailed: activeCluster.pods.failed,
-      nodeHealth: 95, // percentage of healthy nodes
-      restartCount: 3, // total restarts in last hour
-      warningEvents: 5,
-      errorEvents: 1,
-    };
+    const items = podsList.data?.items ?? [];
+    let podsRunning = 0;
+    let podsPending = 0;
+    let podsSucceeded = 0;
+    let podsFailed = 0;
+    let restartCount = 0;
+    for (const pod of items) {
+      const p = pod as { status?: { phase?: string; containerStatuses?: Array<{ restartCount?: number }> } };
+      const phase = (p?.status?.phase ?? '').trim();
+      if (phase === 'Running') podsRunning++;
+      else if (phase === 'Pending') podsPending++;
+      else if (phase === 'Succeeded') podsSucceeded++;
+      else if (phase === 'Failed' || phase === 'Unknown') podsFailed++;
+      restartCount += getRestartCount(p);
+    }
+    // Prefer backend summary for totals when available
+    const totalPods = typeof summaryQuery.data?.pod_count === 'number' ? summaryQuery.data.pod_count : items.length;
 
-    const totalPods = metrics.podsRunning + metrics.podsPending + metrics.podsFailed;
+    const nodeItems = nodesList.data?.items ?? [];
+    const totalNodes = typeof summaryQuery.data?.node_count === 'number' ? summaryQuery.data.node_count : nodeItems.length;
+    const readyNodes = nodeItems.length === 0 ? (totalNodes > 0 ? totalNodes : 0) : nodeItems.filter((n) => isNodeReady(n as Parameters<typeof isNodeReady>[0])).length;
+    const nodeHealthPct = totalNodes > 0 ? Math.round((readyNodes / totalNodes) * 100) : 100;
+
+    const events = eventsQuery.data ?? [];
+    let warningEvents = 0;
+    let errorEvents = 0;
+    for (const e of events) {
+      const type = (e as { type?: string }).type ?? 'Normal';
+      if (type === 'Warning') warningEvents++;
+      else if (type !== 'Normal') errorEvents++;
+    }
+
     const details: string[] = [];
 
-    // Calculate Pod Health (40% weight)
-    const podHealthRatio = totalPods > 0 
-      ? (metrics.podsRunning / totalPods) * 100 
-      : 100;
-    
-    // Penalize for pending pods
-    const pendingPenalty = metrics.podsPending > 0 ? (metrics.podsPending / totalPods) * 20 : 0;
-    // Penalize heavily for failed pods
-    const failedPenalty = metrics.podsFailed > 0 ? (metrics.podsFailed / totalPods) * 50 : 0;
-    
+    // Pod Health (40% weight) — Running + Succeeded count as healthy; only Failed/Unknown and Pending penalize
+    const podsHealthy = podsRunning + podsSucceeded;
+    const podHealthRatio = totalPods > 0 ? (podsHealthy / totalPods) * 100 : 100;
+    const pendingPenalty = totalPods > 0 && podsPending > 0 ? (podsPending / totalPods) * 20 : 0;
+    const failedPenalty = totalPods > 0 && podsFailed > 0 ? (podsFailed / totalPods) * 50 : 0;
     const podHealth = Math.max(0, Math.min(100, podHealthRatio - pendingPenalty - failedPenalty));
 
-    if (metrics.podsFailed > 0) {
-      details.push(`${metrics.podsFailed} pod(s) in failed state`);
-    }
-    if (metrics.podsPending > 2) {
-      details.push(`${metrics.podsPending} pod(s) pending - possible resource constraints`);
-    }
+    if (podsFailed > 0) details.push(`${podsFailed} pod(s) in failed state`);
+    if (podsPending > 2) details.push(`${podsPending} pod(s) pending - possible resource constraints`);
 
-    // Calculate Node Health (30% weight)
-    const nodeHealth = metrics.nodeHealth;
-    
-    if (nodeHealth < 100) {
+    // Node Health (30% weight)
+    const nodeHealth = nodeHealthPct;
+    if (totalNodes > 0 && nodeHealth < 100) {
       details.push(`${100 - nodeHealth}% of nodes reporting issues`);
     }
 
-    // Calculate Stability Score (20% weight)
-    // Based on restart count - fewer restarts = higher stability
+    // Stability (20% weight) — fewer restarts = higher
     let stability = 100;
-    if (metrics.restartCount > 0) {
-      stability = Math.max(0, 100 - (metrics.restartCount * 10));
+    if (restartCount > 0) {
+      stability = Math.max(0, 100 - restartCount * 10);
     }
-    
-    if (metrics.restartCount > 5) {
-      details.push(`High restart count: ${metrics.restartCount} restarts in the last hour`);
+    if (restartCount > 5) {
+      details.push(`High restart count: ${restartCount} restarts across pods`);
     }
 
-    // Calculate Event Health (10% weight)
-    // Based on warning/error events
+    // Event Health (10% weight)
     let eventHealth = 100;
-    eventHealth -= metrics.warningEvents * 2;
-    eventHealth -= metrics.errorEvents * 10;
+    eventHealth -= warningEvents * 2;
+    eventHealth -= errorEvents * 10;
     eventHealth = Math.max(0, eventHealth);
 
-    if (metrics.errorEvents > 0) {
-      details.push(`${metrics.errorEvents} error event(s) detected`);
-    }
-    if (metrics.warningEvents > 3) {
-      details.push(`${metrics.warningEvents} warning events in cluster`);
-    }
+    if (errorEvents > 0) details.push(`${errorEvents} error event(s) detected`);
+    if (warningEvents > 3) details.push(`${warningEvents} warning events in cluster`);
 
-    // Calculate weighted overall score
     const score = Math.round(
-      (podHealth * 0.4) +
-      (nodeHealth * 0.3) +
-      (stability * 0.2) +
-      (eventHealth * 0.1)
+      podHealth * 0.4 + nodeHealth * 0.3 + stability * 0.2 + eventHealth * 0.1
     );
 
-    // Determine grade and status
     let grade: HealthScore['grade'];
     let status: HealthScore['status'];
-
     if (score >= 90) {
       grade = 'A';
       status = 'excellent';
-      if (details.length === 0) {
-        details.push('All systems operating normally');
-      }
+      if (details.length === 0) details.push('All systems operating normally');
     } else if (score >= 80) {
       grade = 'B';
       status = 'good';
@@ -135,6 +162,18 @@ export function useHealthScore(): HealthScore {
       status = 'critical';
     }
 
+    // Generate a concise insight sentence
+    let insight: string;
+    if (score >= 90) {
+      insight = details.length > 0 ? details[0] : 'All systems operating normally. No issues detected.';
+    } else if (score >= 80) {
+      insight = details.length > 0 ? details.join('. ') + '.' : 'Cluster is healthy with minor items to monitor.';
+    } else if (score >= 70) {
+      insight = details.length > 0 ? details.slice(0, 2).join('. ') + '. Investigate before these escalate.' : 'Some components need attention.';
+    } else {
+      insight = details.length > 0 ? details.slice(0, 2).join('. ') + '. Immediate action recommended.' : 'Cluster health is degraded. Investigate immediately.';
+    }
+
     return {
       score,
       grade,
@@ -146,6 +185,14 @@ export function useHealthScore(): HealthScore {
         eventHealth: Math.round(eventHealth),
       },
       details,
+      insight,
     };
-  }, [activeCluster]);
+  }, [
+    activeCluster,
+    podsList.data?.items,
+    nodesList.data?.items,
+    eventsQuery.data,
+    summaryQuery.data?.pod_count,
+    summaryQuery.data?.node_count,
+  ]);
 }

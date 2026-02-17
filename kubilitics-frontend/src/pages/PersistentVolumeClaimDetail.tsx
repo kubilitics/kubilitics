@@ -1,175 +1,269 @@
-import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Database, Clock, Download, Trash2, HardDrive, Server, Expand } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Database, Clock, Download, Trash2, HardDrive, Server, Expand, Info, Network, Loader2, Edit, FileCode, GitCompare } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs, TopologyViewer, MetadataCard, YamlViewer, YamlCompareViewer, EventsSection, ActionsSection,
-  type TopologyNode, type TopologyEdge, type ResourceStatus, type EventInfo, type YamlVersion,
-} from '@/components/resources';
+import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
+import {
+  ResourceDetailLayout,
+  SectionCard,
+  MetadataCard,
+  YamlViewer,
+  YamlCompareViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  ResourceTopologyView,
+  type ResourceStatus,
+  type YamlVersion,
+} from '@/components/resources';
+import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
+import { useDeleteK8sResource, useUpdateK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { Breadcrumbs, useDetailBreadcrumbs } from '@/components/layout/Breadcrumbs';
+import { useClusterStore } from '@/stores/clusterStore';
+import { useBackendConfigStore } from '@/stores/backendConfigStore';
+import { useActiveClusterId } from '@/hooks/useActiveClusterId';
+import { Button } from '@/components/ui/button';
 
-const mockPVC = {
-  name: 'data-pvc',
-  namespace: 'production',
-  status: 'Healthy' as ResourceStatus,
-  volume: 'pv-data-001',
-  capacity: '10Gi',
-  requestedCapacity: '10Gi',
-  accessModes: ['ReadWriteOnce'],
-  storageClass: 'standard',
-  volumeMode: 'Filesystem',
-  age: '90d',
-  labels: { app: 'data-store', environment: 'production' },
-};
-
-const mockEvents: EventInfo[] = [
-  { type: 'Normal', reason: 'ProvisioningSucceeded', message: 'Successfully provisioned volume pv-data-001', time: '90d ago' },
-];
-
-const topologyNodes: TopologyNode[] = [
-  { id: 'pvc', type: 'pvc', name: 'data-pvc', status: 'healthy', isCurrent: true },
-  { id: 'pv', type: 'pv', name: 'pv-data-001', status: 'healthy' },
-  { id: 'pod', type: 'pod', name: 'app-pod-abc12', status: 'healthy' },
-  { id: 'sc', type: 'storageclass', name: 'standard', status: 'healthy' },
-];
-
-const topologyEdges: TopologyEdge[] = [
-  { from: 'pvc', to: 'pv', label: 'Binds' },
-  { from: 'pod', to: 'pvc', label: 'Uses' },
-  { from: 'sc', to: 'pvc', label: 'Provisions' },
-];
-
-const yaml = `apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: data-pvc
-  namespace: production
-  labels:
-    app: data-store
-    environment: production
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: standard
-  volumeMode: Filesystem
-  resources:
-    requests:
-      storage: 10Gi
-status:
-  phase: Bound
-  accessModes:
-    - ReadWriteOnce
-  capacity:
-    storage: 10Gi`;
+interface K8sPVC extends KubernetesResource {
+  spec?: {
+    volumeName?: string;
+    storageClassName?: string;
+    accessModes?: string[];
+    volumeMode?: string;
+    resources?: { requests?: { storage?: string } };
+  };
+  status?: {
+    phase?: string;
+    capacity?: { storage?: string };
+    accessModes?: string[];
+  };
+}
 
 export default function PersistentVolumeClaimDetail() {
   const { namespace, name } = useParams();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview');
-  const pvc = mockPVC;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') || 'overview';
+  const [activeTab, setActiveTab] = useState(initialTab);
+  const { activeCluster } = useClusterStore();
+  const breadcrumbSegments = useDetailBreadcrumbs('PersistentVolumeClaim', name ?? undefined, namespace ?? undefined, activeCluster?.name);
+  const clusterId = useActiveClusterId();
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  // Mock YAML versions for comparison
-  const yamlVersions: YamlVersion[] = [
-    { id: 'current', label: 'Current Version', yaml, timestamp: 'now' },
-    { id: 'previous', label: 'Previous Version', yaml: yaml.replace('storage: 10Gi', 'storage: 5Gi'), timestamp: '2 hours ago' },
-    { id: 'initial', label: 'Initial Version', yaml: yaml.replace('ReadWriteOnce', 'ReadOnlyMany'), timestamp: '1 day ago' },
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
+  const { resource: pvc, isLoading, age, yaml, isConnected, refetch } = useResourceDetail<K8sPVC>(
+    'persistentvolumeclaims',
+    name ?? '',
+    namespace ?? undefined,
+    undefined as unknown as K8sPVC
+  );
+  const { events, refetch: refetchEvents } = useResourceEvents('PersistentVolumeClaim', namespace, name ?? undefined);
+  const deletePVC = useDeleteK8sResource('persistentvolumeclaims');
+  const updatePVC = useUpdateK8sResource('persistentvolumeclaims');
+
+  const handleDownloadYaml = useCallback(() => {
+    if (!yaml) return;
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${pvc?.metadata?.name || 'pvc'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [yaml, pvc?.metadata?.name]);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <div className="grid grid-cols-2 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  if (isConnected && name && !pvc?.metadata?.name) {
+    return (
+      <div className="space-y-4 p-6">
+        <Breadcrumbs segments={breadcrumbSegments} className="mb-2" />
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-muted-foreground">PersistentVolumeClaim not found.</p>
+            <Button variant="outline" className="mt-4" onClick={() => navigate('/persistentvolumeclaims')}>
+              Back to Persistent Volume Claims
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const pvcName = pvc?.metadata?.name ?? '';
+  const pvcNamespace = pvc?.metadata?.namespace ?? namespace ?? '';
+  const status = (pvc?.status?.phase ?? 'Unknown') as ResourceStatus;
+  const capacity = pvc?.status?.capacity?.storage ?? pvc?.spec?.resources?.requests?.storage ?? '—';
+  const accessModes = pvc?.spec?.accessModes ?? [];
+  const storageClass = pvc?.spec?.storageClassName ?? '—';
+  const volumeMode = pvc?.spec?.volumeMode ?? 'Filesystem';
+  const volumeName = pvc?.spec?.volumeName ?? '—';
+  const labels = pvc?.metadata?.labels ?? {};
+
+  const requestedCapacity = pvc?.spec?.resources?.requests?.storage ?? '—';
+  const usedCapacity = pvc?.status?.capacity?.storage ?? '—';
+  const statusCards = [
+    { label: 'Status', value: pvc?.status?.phase ?? '—', icon: Database, iconColor: 'primary' as const },
+    { label: 'Capacity', value: requestedCapacity, icon: HardDrive, iconColor: 'info' as const },
+    { label: 'Used', value: usedCapacity, icon: HardDrive, iconColor: 'muted' as const },
+    { label: 'Volume', value: volumeName, icon: Server, iconColor: 'muted' as const },
+    { label: 'Used By', value: '—', icon: Database, iconColor: 'muted' as const },
   ];
+
+  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
 
   const handleSaveYaml = async (newYaml: string) => {
-    toast.success('PersistentVolumeClaim updated successfully');
-    console.log('Saving YAML:', newYaml);
+    if (!name || !pvcNamespace) return;
+    try {
+      await updatePVC.mutateAsync({ name, namespace: pvcNamespace, yaml: newYaml });
+      toast.success('PersistentVolumeClaim updated successfully');
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update PersistentVolumeClaim');
+      throw e;
+    }
   };
 
-  const statusCards = [
-    { label: 'Capacity', value: pvc.capacity, icon: Database, iconColor: 'primary' as const },
-    { label: 'Access Mode', value: pvc.accessModes[0], icon: HardDrive, iconColor: 'info' as const },
-    { label: 'Storage Class', value: pvc.storageClass, icon: Server, iconColor: 'muted' as const },
-    { label: 'Age', value: pvc.age, icon: Clock, iconColor: 'muted' as const },
-  ];
-
-  const handleNodeClick = (node: TopologyNode) => {
-    if (node.type === 'pv') navigate(`/persistentvolumes/${node.name}`);
-    else if (node.type === 'pod') navigate(`/pods/${namespace}/${node.name}`);
-    else if (node.type === 'storageclass') navigate(`/storageclasses/${node.name}`);
-  };
 
   const tabs = [
     {
       id: 'overview',
       label: 'Overview',
+      icon: Info,
       content: (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader><CardTitle className="text-base">Claim Info</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><p className="text-muted-foreground mb-1">Capacity</p><Badge variant="secondary" className="font-mono">{pvc.capacity}</Badge></div>
-                <div><p className="text-muted-foreground mb-1">Requested</p><p className="font-mono">{pvc.requestedCapacity}</p></div>
-                <div><p className="text-muted-foreground mb-1">Volume Mode</p><p>{pvc.volumeMode}</p></div>
-                <div><p className="text-muted-foreground mb-1">Storage Class</p><Badge variant="outline">{pvc.storageClass}</Badge></div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle className="text-base">Bound Volume</CardTitle></CardHeader>
-            <CardContent>
-              <div className="p-3 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted transition-colors" onClick={() => navigate(`/persistentvolumes/${pvc.volume}`)}>
-                <p className="font-mono text-sm">{pvc.volume}</p>
-                <p className="text-xs text-muted-foreground mt-1">Click to view volume details</p>
-              </div>
-            </CardContent>
-          </Card>
-          <MetadataCard title="Labels" items={pvc.labels} variant="badges" />
-          <Card>
-            <CardHeader><CardTitle className="text-base">Access Modes</CardTitle></CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {pvc.accessModes.map((mode) => (
-                  <Badge key={mode} variant="secondary" className="font-mono">{mode}</Badge>
+        <div className="space-y-6">
+          <SectionCard icon={Database} title="PVC information" tooltip={<p className="text-xs text-muted-foreground">Capacity, storage class, and access</p>}>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+              <div><p className="text-muted-foreground mb-1">Status</p><Badge variant="outline">{pvc?.status?.phase ?? '—'}</Badge></div>
+              <div><p className="text-muted-foreground mb-1">Capacity</p><Badge variant="secondary" className="font-mono">{capacity}</Badge></div>
+              <div><p className="text-muted-foreground mb-1">Volume Mode</p><p>{volumeMode}</p></div>
+              <div><p className="text-muted-foreground mb-1">Storage Class</p><Badge variant="outline">{storageClass}</Badge></div>
+              <div><p className="text-muted-foreground mb-1">Access Modes</p><p className="font-mono">{accessModes.join(', ') || '—'}</p></div>
+              <div><p className="text-muted-foreground mb-1">Age</p><p>{age}</p></div>
+            </div>
+          </SectionCard>
+          {volumeName !== '—' && (
+            <SectionCard icon={HardDrive} title="Bound Volume" tooltip={<p className="text-xs text-muted-foreground">PersistentVolume bound to this claim</p>}>
+              <button type="button" className="p-3 rounded-lg bg-muted/50 hover:bg-muted font-mono text-sm text-primary hover:underline w-full text-left" onClick={() => navigate(`/persistentvolumes/${volumeName}`)}>
+                {volumeName}
+              </button>
+            </SectionCard>
+          )}
+          <SectionCard icon={Info} title="Labels" tooltip={<p className="text-xs text-muted-foreground">Kubernetes labels</p>}>
+            {Object.keys(labels).length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(labels).map(([k, v]) => (
+                  <Badge key={k} variant="secondary" className="font-mono text-xs">{k}={v}</Badge>
                 ))}
               </div>
-            </CardContent>
-          </Card>
+            ) : (
+              <p className="text-muted-foreground text-sm">No labels</p>
+            )}
+          </SectionCard>
         </div>
       ),
     },
-    { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={pvc.name} editable onSave={handleSaveYaml} /> },
-    { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={pvc.name} /> },
-    { id: 'topology', label: 'Topology', content: <TopologyViewer nodes={topologyNodes} edges={topologyEdges} onNodeClick={handleNodeClick} /> },
+    { id: 'events', label: 'Events', icon: Clock, content: <EventsSection events={events} /> },
+    { id: 'yaml', label: 'YAML', icon: FileCode, content: <YamlViewer yaml={yaml} resourceName={pvcName} editable onSave={handleSaveYaml} /> },
+    { id: 'compare', label: 'Compare', icon: GitCompare, content: <YamlCompareViewer versions={yamlVersions} resourceName={pvcName} /> },
+    {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('PersistentVolumeClaim')}
+          namespace={namespace ?? ''}
+          name={name ?? ''}
+          sourceResourceType="PersistentVolumeClaim"
+          sourceResourceName={pvc?.metadata?.name ?? name ?? ''}
+        />
+      ),
+    },
     {
       id: 'actions',
       label: 'Actions',
+      icon: Edit,
       content: (
         <ActionsSection actions={[
-          { icon: Expand, label: 'Expand Volume', description: 'Increase the storage capacity' },
-          { icon: Download, label: 'Download YAML', description: 'Export PVC definition' },
-          { icon: Trash2, label: 'Delete PVC', description: 'Remove this Persistent Volume Claim', variant: 'destructive' },
+          { icon: Expand, label: 'Expand Volume', description: 'Increase the storage capacity', onClick: () => toast.info('Expand requires backend support') },
+          { icon: Download, label: 'Download YAML', description: 'Export PVC definition', onClick: handleDownloadYaml },
+          { icon: Trash2, label: 'Delete PVC', description: 'Remove this Persistent Volume Claim', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]} />
       ),
     },
   ];
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="PersistentVolumeClaim"
         resourceIcon={Database}
-        name={pvc.name}
-        namespace={pvc.namespace}
-        status={pvc.status}
+        name={pvcName}
+        namespace={pvcNamespace}
+        status={status}
         backLink="/persistentvolumeclaims"
         backLabel="Persistent Volume Claims"
-        metadata={<span className="flex items-center gap-1.5 ml-2"><Clock className="h-3.5 w-3.5" />Created {pvc.age}</span>}
+        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {age}{isConnected && <Badge variant="outline" className="ml-2 text-xs">Live</Badge>}</span>}
         actions={[
-          { label: 'Expand', icon: Expand, variant: 'outline' },
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Edit', icon: Edit, variant: 'outline', onClick: () => { setActiveTab('yaml'); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'yaml'); return n; }, { replace: true }); } },
+          { label: 'Expand', icon: Expand, variant: 'outline', onClick: () => toast.info('Expand requires backend support') },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={(tabId) => {
+          setActiveTab(tabId);
+          setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            if (tabId === 'overview') next.delete('tab');
+            else next.set('tab', tabId);
+            return next;
+          }, { replace: true });
+        }}
+      >
+        {breadcrumbSegments.length > 0 && (
+          <Breadcrumbs segments={breadcrumbSegments} className="mb-2" />
+        )}
+      </ResourceDetailLayout>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="PersistentVolumeClaim"
+        resourceName={pvcName}
+        namespace={pvcNamespace}
+        onConfirm={async () => {
+          if (isConnected && name && pvcNamespace) {
+            await deletePVC.mutateAsync({ name, namespace: pvcNamespace });
+            navigate('/persistentvolumeclaims');
+          } else {
+            toast.success(`PersistentVolumeClaim ${pvcName} deleted (demo mode)`);
+            navigate('/persistentvolumeclaims');
+          }
+        }}
+        requireNameConfirmation
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+    </>
   );
 }

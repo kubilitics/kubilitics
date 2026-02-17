@@ -23,4 +23,14 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  // Topology engine: PRD allows `any` in Cytoscape style callbacks; barrel files export components + constants
+  {
+    files: ["src/topology-engine/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "no-prototype-builtins": "off",
+      "react-refresh/only-export-components": "off",
+      "react-hooks/exhaustive-deps": "off",
+    },
+  },
 );

@@ -1,71 +1,107 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Link, Clock, Download, Trash2, Edit, ShieldCheck, UserCircle } from 'lucide-react';
+import { Link2, Clock, Download, Trash2, Edit, ShieldCheck, UserCircle, Globe, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs, TopologyViewer, YamlViewer, EventsSection, ActionsSection,
-  type TopologyNode, type TopologyEdge, type ResourceStatus, type EventInfo,
+  ResourceDetailLayout,
+  YamlViewer,
+  YamlCompareViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  ResourceTopologyView,
+  type ResourceStatus,
+  type YamlVersion,
 } from '@/components/resources';
+import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
+import { useDeleteK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
+import { toast } from 'sonner';
 
-const mockEvents: EventInfo[] = [];
+interface Subject {
+  kind: string;
+  name: string;
+  namespace?: string;
+  apiGroup?: string;
+}
 
-const mockClusterRoleBinding = {
-  name: 'view-binding',
-  status: 'Healthy' as ResourceStatus,
-  age: '180d',
-  roleRef: { kind: 'ClusterRole', name: 'view', apiGroup: 'rbac.authorization.k8s.io' },
-  subjects: [
-    { kind: 'Group', name: 'developers', namespace: '' },
-    { kind: 'ServiceAccount', name: 'prometheus', namespace: 'monitoring' },
-  ],
-};
-
-const topologyNodes: TopologyNode[] = [
-  { id: 'crb', type: 'clusterrolebinding', name: 'view-binding', status: 'healthy', isCurrent: true },
-  { id: 'cr', type: 'clusterrole', name: 'view', status: 'healthy' },
-  { id: 'group', type: 'group', name: 'developers', status: 'healthy' },
-  { id: 'sa', type: 'serviceaccount', name: 'prometheus', status: 'healthy' },
-];
-
-const topologyEdges: TopologyEdge[] = [
-  { from: 'crb', to: 'cr', label: 'References' },
-  { from: 'crb', to: 'group', label: 'Binds To' },
-  { from: 'crb', to: 'sa', label: 'Binds To' },
-];
-
-const yaml = `apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: view-binding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: view
-subjects:
-- kind: Group
-  name: developers
-- kind: ServiceAccount
-  name: prometheus
-  namespace: monitoring`;
+interface ClusterRoleBindingResource extends KubernetesResource {
+  roleRef?: { kind?: string; name?: string; apiGroup?: string };
+  subjects?: Subject[];
+}
 
 export default function ClusterRoleBindingDetail() {
-  const { name } = useParams();
+  const { name } = useParams<{ name: string }>();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
-  const crb = mockClusterRoleBinding;
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const { isConnected } = useConnectionStatus();
+
+  const { resource, isLoading, error: resourceError, age, yaml, refetch } = useResourceDetail<ClusterRoleBindingResource>(
+    'clusterrolebindings',
+    name ?? undefined,
+    undefined,
+    undefined as unknown as ClusterRoleBindingResource
+  );
+  const { events, refetch: refetchEvents } = useResourceEvents('ClusterRoleBinding', undefined, name ?? undefined);
+  const deleteResource = useDeleteK8sResource('clusterrolebindings');
+
+  const crbName = resource?.metadata?.name ?? name ?? '';
+  const roleRef = resource?.roleRef ?? {};
+  const subjects = resource?.subjects ?? [];
+  const clusterRoleName = roleRef.name ?? '–';
+  const subjectKinds = [...new Set(subjects.map((s) => s.kind))];
+
+  const handleDownloadYaml = useCallback(() => {
+    if (!yaml) return;
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${crbName || 'clusterrolebinding'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [yaml, crbName]);
+
+  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
 
   const statusCards = [
-    { label: 'Cluster Role', value: crb.roleRef.name, icon: ShieldCheck, iconColor: 'primary' as const },
-    { label: 'Subjects', value: crb.subjects.length, icon: UserCircle, iconColor: 'info' as const },
-    { label: 'Age', value: crb.age, icon: Clock, iconColor: 'muted' as const },
+    { label: 'ClusterRole', value: clusterRoleName, icon: ShieldCheck, iconColor: 'primary' as const },
+    { label: 'Subject Count', value: subjects.length, icon: UserCircle, iconColor: 'info' as const },
+    { label: 'Subject Types', value: subjectKinds.join(', ') || '–', icon: UserCircle, iconColor: 'muted' as const },
+    { label: 'Scope', value: 'Cluster-wide', icon: Globe, iconColor: 'muted' as const },
   ];
 
-  const handleNodeClick = (node: TopologyNode) => {
-    if (node.type === 'clusterrole') navigate(`/clusterroles/${node.name}`);
-    else if (node.type === 'serviceaccount') navigate(`/serviceaccounts/monitoring/${node.name}`);
-  };
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  if (isConnected && (resourceError || !resource?.metadata?.name)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
+        <Link2 className="h-12 w-12 text-muted-foreground" />
+        <p className="text-lg font-medium">Cluster Role Binding not found</p>
+        <p className="text-sm text-muted-foreground">
+          {name ? `No cluster role binding "${name}".` : 'Missing name.'}
+        </p>
+        <Button variant="outline" onClick={() => navigate('/clusterrolebindings')}>Back to Cluster Role Bindings</Button>
+      </div>
+    );
+  }
 
   const tabs = [
     {
@@ -76,12 +112,15 @@ export default function ClusterRoleBindingDetail() {
           <Card>
             <CardHeader><CardTitle className="text-base">Cluster Role Reference</CardTitle></CardHeader>
             <CardContent>
-              <div className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted" onClick={() => navigate(`/clusterroles/${crb.roleRef.name}`)}>
+              <div
+                className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted"
+                onClick={() => clusterRoleName !== '–' && navigate(`/clusterroles/${clusterRoleName}`)}
+              >
                 <div className="flex items-center gap-2 mb-2">
-                  <Badge variant="secondary">{crb.roleRef.kind}</Badge>
-                  <span className="font-medium">{crb.roleRef.name}</span>
+                  <Badge variant="secondary">ClusterRole</Badge>
+                  <span className="font-medium">{clusterRoleName}</span>
                 </div>
-                <p className="text-xs text-muted-foreground font-mono">{crb.roleRef.apiGroup}</p>
+                <p className="text-xs text-muted-foreground font-mono">{roleRef.apiGroup ?? 'rbac.authorization.k8s.io'}</p>
               </div>
             </CardContent>
           </Card>
@@ -89,54 +128,136 @@ export default function ClusterRoleBindingDetail() {
             <CardHeader><CardTitle className="text-base">Subjects</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {crb.subjects.map((subject, i) => (
-                  <div key={i} className="p-3 rounded-lg bg-muted/50">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant="outline">{subject.kind}</Badge>
-                      <span className="font-medium">{subject.name}</span>
+                {subjects.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">No subjects</p>
+                ) : (
+                  subjects.map((subject, i) => (
+                    <div key={i} className="p-3 rounded-lg bg-muted/50">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Badge variant="outline">{subject.kind}</Badge>
+                        <span className="font-medium">{subject.name}</span>
+                      </div>
+                      {subject.namespace && <p className="text-xs text-muted-foreground">Namespace: {subject.namespace}</p>}
                     </div>
-                    {subject.namespace && <p className="text-xs text-muted-foreground">Namespace: {subject.namespace}</p>}
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
         </div>
       ),
     },
-    { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={crb.name} /> },
-    { id: 'topology', label: 'Topology', content: <TopologyViewer nodes={topologyNodes} edges={topologyEdges} onNodeClick={handleNodeClick} /> },
+    {
+      id: 'subjects',
+      label: 'Subjects',
+      content: (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Subject Details</CardTitle></CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {subjects.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No subjects</p>
+              ) : (
+                subjects.map((subject, i) => (
+                  <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                    <div>
+                      <Badge variant="outline" className="mr-2">{subject.kind}</Badge>
+                      <span className="font-mono">{subject.name}</span>
+                      {subject.namespace && <span className="text-muted-foreground text-sm ml-2">({subject.namespace})</span>}
+                    </div>
+                    {subject.kind === 'ServiceAccount' && subject.namespace && (
+                      <Button variant="link" size="sm" onClick={() => navigate(`/serviceaccounts/${subject.namespace}/${subject.name}`)}>
+                        View Service Account
+                      </Button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: 'clusterrole-details',
+      label: 'ClusterRole Details',
+      content: (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Referenced ClusterRole</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm mb-2">This binding references the following ClusterRole.</p>
+            <Button variant="outline" onClick={() => clusterRoleName !== '–' && navigate(`/clusterroles/${clusterRoleName}`)}>
+              View ClusterRole: {clusterRoleName}
+            </Button>
+          </CardContent>
+        </Card>
+      ),
+    },
+    { id: 'events', label: 'Events', content: <EventsSection events={events} /> },
+    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={crbName} /> },
+    { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={crbName} /> },
+    {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('ClusterRoleBinding')}
+          namespace={''}
+          name={name ?? ''}
+          sourceResourceType="ClusterRoleBinding"
+          sourceResourceName={resource?.metadata?.name ?? name ?? ''}
+        />
+      ),
+    },
     {
       id: 'actions',
       label: 'Actions',
       content: (
-        <ActionsSection actions={[
-          { icon: Edit, label: 'Edit Binding', description: 'Modify subjects or role reference' },
-          { icon: Download, label: 'Download YAML', description: 'Export ClusterRoleBinding definition' },
-          { icon: Trash2, label: 'Delete ClusterRoleBinding', description: 'Remove this cluster role binding', variant: 'destructive' },
-        ]} />
+        <ActionsSection
+          actions={[
+            { icon: Edit, label: 'Edit Binding', description: 'Modify subjects or role reference', onClick: () => toast.info('Edit not implemented') },
+            { icon: Download, label: 'Download YAML', description: 'Export ClusterRoleBinding definition', onClick: handleDownloadYaml },
+            { icon: Trash2, label: 'Delete ClusterRoleBinding', description: 'Remove this cluster role binding', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
+          ]}
+        />
       ),
     },
   ];
 
+  const status: ResourceStatus = 'Healthy';
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="ClusterRoleBinding"
-        resourceIcon={Link}
-        name={crb.name}
-        status={crb.status}
+        resourceIcon={Link2}
+        name={crbName}
+        status={status}
         backLink="/clusterrolebindings"
         backLabel="Cluster Role Bindings"
-        metadata={<span className="flex items-center gap-1.5 ml-2"><Clock className="h-3.5 w-3.5" />Created {crb.age}</span>}
+        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {age}</span>}
         actions={[
-          { label: 'Edit', icon: Edit, variant: 'outline' },
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Edit', icon: Edit, variant: 'outline', onClick: () => toast.info('Edit not implemented') },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="ClusterRoleBinding"
+        resourceName={crbName}
+        onConfirm={async () => {
+          await deleteResource.mutateAsync({ name: crbName });
+          navigate('/clusterrolebindings');
+        }}
+        requireNameConfirmation
+      />
+    </>
   );
 }

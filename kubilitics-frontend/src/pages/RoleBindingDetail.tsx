@@ -1,73 +1,110 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Link2, Clock, Download, Trash2, Edit, Shield, UserCircle } from 'lucide-react';
+import { Link2, Clock, Download, Trash2, Edit, Shield, UserCircle, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs, TopologyViewer, YamlViewer, EventsSection, ActionsSection,
-  type TopologyNode, type TopologyEdge, type ResourceStatus, type EventInfo,
+  ResourceDetailLayout,
+  YamlViewer,
+  YamlCompareViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  ResourceTopologyView,
+  type ResourceStatus,
+  type YamlVersion,
 } from '@/components/resources';
+import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
+import { useDeleteK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
+import { toast } from 'sonner';
 
-const mockEvents: EventInfo[] = [];
+interface Subject {
+  kind: string;
+  name: string;
+  namespace?: string;
+  apiGroup?: string;
+}
 
-const mockRoleBinding = {
-  name: 'pod-reader-binding',
-  namespace: 'production',
-  status: 'Healthy' as ResourceStatus,
-  age: '90d',
-  roleRef: { kind: 'Role', name: 'pod-reader', apiGroup: 'rbac.authorization.k8s.io' },
-  subjects: [
-    { kind: 'ServiceAccount', name: 'nginx-sa', namespace: 'production' },
-    { kind: 'User', name: 'developer@example.com', namespace: '' },
-  ],
-};
-
-const topologyNodes: TopologyNode[] = [
-  { id: 'rb', type: 'rolebinding', name: 'pod-reader-binding', status: 'healthy', isCurrent: true },
-  { id: 'role', type: 'role', name: 'pod-reader', status: 'healthy' },
-  { id: 'sa', type: 'serviceaccount', name: 'nginx-sa', status: 'healthy' },
-  { id: 'user', type: 'user', name: 'developer@example.com', status: 'healthy' },
-];
-
-const topologyEdges: TopologyEdge[] = [
-  { from: 'rb', to: 'role', label: 'References' },
-  { from: 'rb', to: 'sa', label: 'Binds To' },
-  { from: 'rb', to: 'user', label: 'Binds To' },
-];
-
-const yaml = `apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: pod-reader-binding
-  namespace: production
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: pod-reader
-subjects:
-- kind: ServiceAccount
-  name: nginx-sa
-  namespace: production
-- kind: User
-  name: developer@example.com`;
+interface RoleBindingResource extends KubernetesResource {
+  roleRef?: { kind?: string; name?: string; apiGroup?: string };
+  subjects?: Subject[];
+}
 
 export default function RoleBindingDetail() {
-  const { namespace, name } = useParams();
+  const { namespace, name } = useParams<{ namespace: string; name: string }>();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
-  const rb = mockRoleBinding;
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const { isConnected } = useConnectionStatus();
+
+  const { resource, isLoading, error: resourceError, age, yaml, refetch } = useResourceDetail<RoleBindingResource>(
+    'rolebindings',
+    name ?? undefined,
+    namespace ?? undefined,
+    undefined as unknown as RoleBindingResource
+  );
+  const { events, refetch: refetchEvents } = useResourceEvents('RoleBinding', namespace ?? undefined, name ?? undefined);
+  const deleteResource = useDeleteK8sResource('rolebindings');
+
+  const rbName = resource?.metadata?.name ?? name ?? '';
+  const rbNamespace = resource?.metadata?.namespace ?? namespace ?? '';
+  const roleRef = resource?.roleRef ?? {};
+  const subjects = resource?.subjects ?? [];
+  const roleKind = roleRef.kind === 'ClusterRole' ? 'ClusterRole' : 'Role';
+  const roleName = roleRef.name ?? '–';
+  const roleLink = roleKind === 'ClusterRole' ? `/clusterroles/${roleName}` : `/roles/${rbNamespace}/${roleName}`;
+  const subjectKinds = [...new Set(subjects.map((s) => s.kind))];
+
+  const handleDownloadYaml = useCallback(() => {
+    if (!yaml) return;
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${rbName || 'rolebinding'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [yaml, rbName]);
+
+  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
 
   const statusCards = [
-    { label: 'Role', value: rb.roleRef.name, icon: Shield, iconColor: 'primary' as const },
-    { label: 'Subjects', value: rb.subjects.length, icon: UserCircle, iconColor: 'info' as const },
-    { label: 'Age', value: rb.age, icon: Clock, iconColor: 'muted' as const },
+    { label: 'Role Reference', value: roleName, icon: Shield, iconColor: 'primary' as const },
+    { label: 'Subject Count', value: subjects.length, icon: UserCircle, iconColor: 'info' as const },
+    { label: 'Subject Types', value: subjectKinds.join(', ') || '–', icon: UserCircle, iconColor: 'muted' as const },
+    { label: 'Namespace Scope', value: rbNamespace, icon: Link2, iconColor: 'muted' as const },
   ];
 
-  const handleNodeClick = (node: TopologyNode) => {
-    if (node.type === 'role') navigate(`/roles/${namespace}/${node.name}`);
-    else if (node.type === 'serviceaccount') navigate(`/serviceaccounts/${namespace}/${node.name}`);
-  };
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  if (isConnected && (resourceError || !resource?.metadata?.name)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
+        <Link2 className="h-12 w-12 text-muted-foreground" />
+        <p className="text-lg font-medium">Role Binding not found</p>
+        <p className="text-sm text-muted-foreground">
+          {namespace && name ? `No role binding "${name}" in namespace "${namespace}".` : 'Missing namespace or name.'}
+        </p>
+        <Button variant="outline" onClick={() => navigate('/rolebindings')}>Back to Role Bindings</Button>
+      </div>
+    );
+  }
 
   const tabs = [
     {
@@ -78,12 +115,15 @@ export default function RoleBindingDetail() {
           <Card>
             <CardHeader><CardTitle className="text-base">Role Reference</CardTitle></CardHeader>
             <CardContent>
-              <div className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted" onClick={() => navigate(`/roles/${namespace}/${rb.roleRef.name}`)}>
+              <div
+                className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted"
+                onClick={() => roleName !== '–' && navigate(roleLink)}
+              >
                 <div className="flex items-center gap-2 mb-2">
-                  <Badge variant="secondary">{rb.roleRef.kind}</Badge>
-                  <span className="font-medium">{rb.roleRef.name}</span>
+                  <Badge variant="secondary">{roleKind}</Badge>
+                  <span className="font-medium">{roleName}</span>
                 </div>
-                <p className="text-xs text-muted-foreground font-mono">{rb.roleRef.apiGroup}</p>
+                <p className="text-xs text-muted-foreground font-mono">{roleRef.apiGroup ?? 'rbac.authorization.k8s.io'}</p>
               </div>
             </CardContent>
           </Card>
@@ -91,55 +131,138 @@ export default function RoleBindingDetail() {
             <CardHeader><CardTitle className="text-base">Subjects</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {rb.subjects.map((subject, i) => (
-                  <div key={i} className="p-3 rounded-lg bg-muted/50">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant="outline">{subject.kind}</Badge>
-                      <span className="font-medium">{subject.name}</span>
+                {subjects.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">No subjects</p>
+                ) : (
+                  subjects.map((subject, i) => (
+                    <div key={i} className="p-3 rounded-lg bg-muted/50">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Badge variant="outline">{subject.kind}</Badge>
+                        <span className="font-medium">{subject.name}</span>
+                      </div>
+                      {subject.namespace && <p className="text-xs text-muted-foreground">Namespace: {subject.namespace}</p>}
                     </div>
-                    {subject.namespace && <p className="text-xs text-muted-foreground">Namespace: {subject.namespace}</p>}
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
         </div>
       ),
     },
-    { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={rb.name} /> },
-    { id: 'topology', label: 'Topology', content: <TopologyViewer nodes={topologyNodes} edges={topologyEdges} onNodeClick={handleNodeClick} /> },
+    {
+      id: 'subjects',
+      label: 'Subjects',
+      content: (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Subject Details</CardTitle></CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {subjects.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No subjects</p>
+              ) : (
+                subjects.map((subject, i) => (
+                  <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                    <div>
+                      <Badge variant="outline" className="mr-2">{subject.kind}</Badge>
+                      <span className="font-mono">{subject.name}</span>
+                      {subject.namespace && <span className="text-muted-foreground text-sm ml-2">({subject.namespace})</span>}
+                    </div>
+                    {subject.kind === 'ServiceAccount' && subject.namespace && (
+                      <Button variant="link" size="sm" onClick={() => navigate(`/serviceaccounts/${subject.namespace}/${subject.name}`)}>
+                        View Service Account
+                      </Button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: 'role-details',
+      label: 'Role Details',
+      content: (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Referenced {roleKind}</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm mb-2">This binding references the following {roleKind.toLowerCase()}.</p>
+            <Button variant="outline" onClick={() => roleName !== '–' && navigate(roleLink)}>
+              View {roleKind}: {roleName}
+            </Button>
+          </CardContent>
+        </Card>
+      ),
+    },
+    { id: 'events', label: 'Events', content: <EventsSection events={events} /> },
+    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={rbName} /> },
+    { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={rbName} /> },
+    {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('RoleBinding')}
+          namespace={namespace ?? ''}
+          name={name ?? ''}
+          sourceResourceType="RoleBinding"
+          sourceResourceName={resource?.metadata?.name ?? name ?? ''}
+        />
+      ),
+    },
     {
       id: 'actions',
       label: 'Actions',
       content: (
-        <ActionsSection actions={[
-          { icon: Edit, label: 'Edit Binding', description: 'Modify subjects or role reference' },
-          { icon: Download, label: 'Download YAML', description: 'Export RoleBinding definition' },
-          { icon: Trash2, label: 'Delete RoleBinding', description: 'Remove this role binding', variant: 'destructive' },
-        ]} />
+        <ActionsSection
+          actions={[
+            { icon: Edit, label: 'Edit Binding', description: 'Modify subjects or role reference', onClick: () => toast.info('Edit not implemented') },
+            { icon: Download, label: 'Download YAML', description: 'Export RoleBinding definition', onClick: handleDownloadYaml },
+            { icon: Trash2, label: 'Delete RoleBinding', description: 'Remove this role binding', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
+          ]}
+        />
       ),
     },
   ];
 
+  const status: ResourceStatus = 'Healthy';
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="RoleBinding"
         resourceIcon={Link2}
-        name={rb.name}
-        namespace={rb.namespace}
-        status={rb.status}
+        name={rbName}
+        namespace={rbNamespace}
+        status={status}
         backLink="/rolebindings"
         backLabel="Role Bindings"
-        metadata={<span className="flex items-center gap-1.5 ml-2"><Clock className="h-3.5 w-3.5" />Created {rb.age}</span>}
+        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {age}</span>}
         actions={[
-          { label: 'Edit', icon: Edit, variant: 'outline' },
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Edit', icon: Edit, variant: 'outline', onClick: () => toast.info('Edit not implemented') },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="RoleBinding"
+        resourceName={rbName}
+        namespace={rbNamespace}
+        onConfirm={async () => {
+          await deleteResource.mutateAsync({ name: rbName, namespace: rbNamespace });
+          navigate('/rolebindings');
+        }}
+        requireNameConfirmation
+      />
+    </>
   );
 }

@@ -32,15 +32,17 @@ export function ResourceStatusCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       className={cn(
-        'flex items-center justify-between p-4 rounded-xl bg-card',
-        variant === 'bordered' && 'border border-border'
+        'flex items-center justify-between p-4 rounded-xl bg-card transition-colors',
+        variant === 'bordered' && 'border border-border hover:border-primary/30 hover:shadow-sm',
+        'focus-within:ring-2 focus-within:ring-primary/20'
       )}
     >
-      <div className="space-y-1">
-        <p className="text-sm text-muted-foreground">{label}</p>
-        <p className="text-2xl font-semibold tracking-tight">{value}</p>
+      <div className="space-y-1 min-w-0 flex-1">
+        {/* Label: dark and visible for world-class UX (was text-muted-foreground) */}
+        <p className="text-sm font-medium text-foreground truncate">{label}</p>
+        <p className="text-2xl font-semibold tracking-tight tabular-nums text-foreground">{value}</p>
       </div>
-      <Icon className={cn('h-8 w-8', iconColorClasses[iconColor])} />
+      <Icon className={cn('h-8 w-8 shrink-0 opacity-80', iconColorClasses[iconColor])} aria-hidden />
     </motion.div>
   );
 }
@@ -51,7 +53,7 @@ export interface ResourceStatusCardsProps {
 
 export function ResourceStatusCards({ cards }: ResourceStatusCardsProps) {
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 rounded-xl border border-border/50 bg-muted/20 p-3">
       {cards.map((card, index) => (
         <motion.div
           key={card.label}

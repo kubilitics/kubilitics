@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import tailwindcssAnimate from "tailwindcss-animate";
 
 export default {
   darkMode: ["class"],
@@ -15,6 +16,7 @@ export default {
     extend: {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -53,45 +55,35 @@ export default {
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
-          primary: "hsl(var(--sidebar-primary))",
-          "primary-foreground": "hsl(var(--sidebar-primary-foreground))",
-          accent: "hsl(var(--sidebar-accent))",
-          "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
-          ring: "hsl(var(--sidebar-ring))",
         },
-        // Kubilitics Blue System
-        kube: {
-          blue: {
-            900: "hsl(var(--blue-900))",
-            700: "hsl(var(--blue-700))",
-            500: "hsl(var(--blue-500))",
-            300: "hsl(var(--blue-300))",
-            100: "hsl(var(--blue-100))",
-          },
-          surface: "hsl(var(--kube-surface))",
-          elevated: "hsl(var(--kube-surface-elevated))",
-          divider: "hsl(var(--kube-divider))",
+        // Old Legacy / Backward Compat (Mapped to new variables or kept specific)
+        deep: {
+          DEFAULT: "#0A0E27",
+          stage: "#0D1B3E",
+          toolbar: "#1A237E",
         },
-        // Status Colors
+        cosmic: {
+          purple: "#7C4DFF",
+          cyan: "#00E5FF",
+          blue: "#2979FF",
+        },
         success: "hsl(var(--success))",
         warning: "hsl(var(--warning))",
         error: "hsl(var(--error))",
         info: "hsl(var(--info))",
+        "cosmic-purple": "hsl(var(--cosmic-purple))",
+        signal: {
+          success: "hsl(var(--success))",
+          warning: "hsl(var(--warning))",
+          error: "hsl(var(--error))",
+          info: "hsl(var(--info))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
-        xl: "calc(var(--radius) + 4px)",
-        "2xl": "calc(var(--radius) + 8px)",
-      },
-      boxShadow: {
-        'kube-sm': 'var(--shadow-sm)',
-        'kube-md': 'var(--shadow-md)',
-        'kube-lg': 'var(--shadow-lg)',
-        'kube-xl': 'var(--shadow-xl)',
-        'kube-glow': 'var(--shadow-glow)',
       },
       keyframes: {
         "accordion-down": {
@@ -103,46 +95,16 @@ export default {
           to: { height: "0" },
         },
         "fade-in": {
-          "0%": { opacity: "0", transform: "translateY(8px)" },
+          "0%": { opacity: "0", transform: "translateY(4px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
-        },
-        "fade-out": {
-          "0%": { opacity: "1", transform: "translateY(0)" },
-          "100%": { opacity: "0", transform: "translateY(8px)" },
-        },
-        "scale-in": {
-          "0%": { transform: "scale(0.95)", opacity: "0" },
-          "100%": { transform: "scale(1)", opacity: "1" },
-        },
-        "slide-in-right": {
-          "0%": { transform: "translateX(100%)" },
-          "100%": { transform: "translateX(0)" },
-        },
-        "pulse-soft": {
-          "0%, 100%": { opacity: "1" },
-          "50%": { opacity: "0.6" },
-        },
-        "shimmer": {
-          "0%": { backgroundPosition: "-200% 0" },
-          "100%": { backgroundPosition: "200% 0" },
         },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-        "fade-in": "fade-in 0.3s ease-out",
-        "fade-out": "fade-out 0.3s ease-out",
-        "scale-in": "scale-in 0.2s ease-out",
-        "slide-in-right": "slide-in-right 0.3s ease-out",
-        "pulse-soft": "pulse-soft 2s ease-in-out infinite",
-        "shimmer": "shimmer 2s infinite linear",
-      },
-      spacing: {
-        '18': '4.5rem',
-        '88': '22rem',
-        '128': '32rem',
+        "fade-in": "fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [tailwindcssAnimate],
 } satisfies Config;

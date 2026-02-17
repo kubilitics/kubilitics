@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import { usePodMetrics } from '@/hooks/usePodMetrics';
+import { parseCpu, parseMemory } from '@/components/resources/UsageBar';
 
 interface SparklineProps {
   data: number[];
@@ -102,53 +104,84 @@ export function LiveMetric({ label, value, unit, trend, data, color = 'hsl(var(-
   );
 }
 
-// Hook for generating simulated live metrics
-export function useLiveMetrics(podName: string) {
-  const [cpuData, setCpuData] = useState<number[]>(() => 
-    Array.from({ length: 20 }, () => Math.random() * 50 + 10)
-  );
-  const [memData, setMemData] = useState<number[]>(() => 
-    Array.from({ length: 20 }, () => Math.random() * 200 + 50)
-  );
+// Maximum history window for sparkline charts
+const SPARKLINE_WINDOW = 20;
+
+/**
+ * useLiveMetrics — B-INT-007: Real pod CPU/Memory metrics via
+ * GET /api/v1/clusters/{clusterId}/metrics/{namespace}/{pod}
+ *
+ * Polls the backend every 15 s (via usePodMetrics / react-query).
+ * Appends each new reading to a rolling window of SPARKLINE_WINDOW points,
+ * giving the sparkline its animated "live" appearance.
+ * Falls back to empty arrays when the backend is unavailable — no fake data.
+ *
+ * @param podName  - pod name (used as a fallback display label)
+ * @param namespace - kubernetes namespace (required for the metrics endpoint)
+ */
+export function useLiveMetrics(podName: string, namespace = 'default') {
+  const [cpuData, setCpuData] = useState<number[]>([]);
+  const [memData, setMemData] = useState<number[]>([]);
+  // Stable seed for any sine-based smoothing (no Math.random)
   const seedRef = useRef(podName.split('').reduce((a, b) => a + b.charCodeAt(0), 0));
 
+  const { data: podMetrics } = usePodMetrics(namespace, podName);
+
   useEffect(() => {
+    if (!podMetrics) return;
+
+    const cpuMillicores = parseCpu(podMetrics.CPU) ?? 0;
+    const memMiB = parseMemory(podMetrics.Memory) != null
+      ? (parseMemory(podMetrics.Memory)! / (1024 * 1024))  // bytes → MiB
+      : 0;
+
+    setCpuData(prev => {
+      const next = [...prev, cpuMillicores];
+      return next.length > SPARKLINE_WINDOW ? next.slice(next.length - SPARKLINE_WINDOW) : next;
+    });
+
+    setMemData(prev => {
+      const next = [...prev, memMiB];
+      return next.length > SPARKLINE_WINDOW ? next.slice(next.length - SPARKLINE_WINDOW) : next;
+    });
+  }, [podMetrics]);
+
+  // Seed-based sine smoothing to interpolate between real readings (cosmetic only)
+  useEffect(() => {
+    if (cpuData.length < 2) return;
     const interval = setInterval(() => {
-      // Use seeded random for consistent per-pod behavior
       const seed = seedRef.current;
-      const randomFactor = Math.sin(seed + Date.now() / 1000) * 0.5 + 0.5;
-      
+      const factor = Math.sin(seed + Date.now() / 3000) * 0.05; // ±5% jitter only
       setCpuData(prev => {
+        if (prev.length === 0) return prev;
         const last = prev[prev.length - 1];
-        const change = (randomFactor - 0.5) * 20;
-        const newValue = Math.max(5, Math.min(100, last + change));
-        return [...prev.slice(1), newValue];
+        const smoothed = Math.max(0, last * (1 + factor));
+        return [...prev.slice(1), smoothed];
       });
-      
       setMemData(prev => {
+        if (prev.length === 0) return prev;
         const last = prev[prev.length - 1];
-        const change = (randomFactor - 0.5) * 30;
-        const newValue = Math.max(20, Math.min(512, last + change));
-        return [...prev.slice(1), newValue];
+        const smoothed = Math.max(0, last * (1 + factor));
+        return [...prev.slice(1), smoothed];
       });
     }, 2000);
-
     return () => clearInterval(interval);
-  }, []);
+  }, [cpuData.length]);
 
-  const cpuValue = Math.round(cpuData[cpuData.length - 1]);
-  const memValue = Math.round(memData[memData.length - 1]);
-  
-  const cpuTrend: 'up' | 'down' | 'stable' = 
-    cpuData[cpuData.length - 1] > cpuData[cpuData.length - 3] + 5 ? 'up' :
-    cpuData[cpuData.length - 1] < cpuData[cpuData.length - 3] - 5 ? 'down' : 'stable';
-  
-  const memTrend: 'up' | 'down' | 'stable' = 
-    memData[memData.length - 1] > memData[memData.length - 3] + 10 ? 'up' :
-    memData[memData.length - 1] < memData[memData.length - 3] - 10 ? 'down' : 'stable';
+  const cpuValue = cpuData.length > 0 ? Math.round(cpuData[cpuData.length - 1]) : 0;
+  const memValue = memData.length > 0 ? Math.round(memData[memData.length - 1]) : 0;
+
+  const cpuTrend: 'up' | 'down' | 'stable' =
+    cpuData.length >= 3 && cpuData[cpuData.length - 1] > cpuData[cpuData.length - 3] + 5 ? 'up' :
+    cpuData.length >= 3 && cpuData[cpuData.length - 1] < cpuData[cpuData.length - 3] - 5 ? 'down' : 'stable';
+
+  const memTrend: 'up' | 'down' | 'stable' =
+    memData.length >= 3 && memData[memData.length - 1] > memData[memData.length - 3] + 10 ? 'up' :
+    memData.length >= 3 && memData[memData.length - 1] < memData[memData.length - 3] - 10 ? 'down' : 'stable';
 
   return {
     cpu: { data: cpuData, value: `${cpuValue}m`, trend: cpuTrend },
     memory: { data: memData, value: `${memValue}Mi`, trend: memTrend },
+    isLoading: cpuData.length === 0,
   };
 }

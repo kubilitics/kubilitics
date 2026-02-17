@@ -72,8 +72,27 @@ This is a native application that connects directly to your Kubernetes clusters.
 │
 └── docs/                       Project documentation
     ├── ARCHITECTURE.md
+    ├── INTEGRATION-MODEL.md    How frontend connects (backend vs direct K8s)
+    ├── TOPOLOGY-API-CONTRACT.md  Canonical topology API response shape (nodes/edges/metadata)
     └── PHASE1_COMPLETION_REPORT.md
 ```
+
+---
+
+## 📖 Documentation
+
+- **[Architecture](docs/ARCHITECTURE.md)** — System and component architecture.
+- **[Integration model](docs/INTEGRATION-MODEL.md)** — How the frontend connects to the backend (gateway) vs direct Kubernetes API. **Canonical:** use backend when present; optional direct K8s URL when backend is not used.
+- **[Topology API contract](docs/TOPOLOGY-API-CONTRACT.md)** — Canonical topology response shape: nodes (`kind`, `id`, `metadata`, `computed`), edges (`relationshipType`, `source`, `target`), `metadata.layoutSeed`, `metadata.isComplete`. OpenAPI: `kubilitics-backend/api/swagger.yaml`.
+- **[Observability](docs/OBSERVABILITY.md)** — Structured logging (request ID, JSON), Prometheus metrics (`/metrics`), graceful shutdown and timeouts.
+- **[Isolation model](docs/ISOLATION-MODEL.md)** — Data isolation: cluster as boundary, single-tenant deployment, API enforcement (D1.1).
+- **[Secure defaults](docs/SECURE-DEFAULTS.md)** — Input validation, secure headers, destructive-action confirmation (X-Confirm-Destructive), apply size limit (D1.2).
+- **[Retention](docs/RETENTION.md)** — Retention strategies for audit logs, topology snapshots, metrics (D1.3).
+- **[SSO design](docs/SSO-DESIGN.md)** — Optional SSO integration (SAML/OIDC), group-based access (D2.1).
+- **[Distribution](docs/DISTRIBUTION.md)** — Desktop build pipeline, code signing, installers, Helm chart, CI/CD, release automation (Phase R).
+- **[Release process](docs/RELEASE-PROCESS.md)** — Versioning, tagging, changelog, GitHub releases (O1.3).
+- **[Pre-push and live E2E checklist](docs/PRE-PUSH-AND-LIVE-E2E.md)** — Local verification, push checklist, and live app E2E steps.
+- **Implementation guides** — See [project-docs/](project-docs/) for backend, frontend, and Tauri blueprints.
 
 ---
 
@@ -113,6 +132,20 @@ This is a native application that connects directly to your Kubernetes clusters.
 - **Rust** 1.75+
 - **Node.js** 20+
 - **Kubernetes cluster** (kind/k3s/minikube/EKS/GKE/etc.)
+
+### One-command dev (backend + frontend)
+
+From the repo root:
+
+```bash
+# Copy env template (KUBILITICS_*, VITE_API_URL)
+cp .env.example .env   # optional; edit as needed
+
+# Start backend then frontend (single command)
+make dev
+```
+
+Or run in two terminals: `make backend-dev` and `make frontend-dev`. Backend: http://localhost:8080. Frontend: http://localhost:5173 (Vite; port 5173 avoids conflict with backend). Metrics: http://localhost:8080/metrics.
 
 ### 1. Backend
 

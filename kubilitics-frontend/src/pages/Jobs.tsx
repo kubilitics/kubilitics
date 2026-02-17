@@ -1,27 +1,53 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
-  Search, Filter, RefreshCw, MoreHorizontal, CheckCircle2, XCircle, Clock, Download, Loader2, WifiOff, Plus,
-  ArrowUpDown, ChevronDown, CheckSquare, Trash2, FileText, Briefcase,
+  Search, Filter, RefreshCw, RotateCw, MoreHorizontal, CheckCircle2, XCircle, Clock, Loader2, WifiOff, Plus,
+  ChevronDown, ChevronRight, CheckSquare, Trash2, Briefcase, FileText, List, Layers, Box, Gauge,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ResizableTableProvider, ResizableTableHead, ResizableTableCell, type ResizableColumnConfig } from '@/components/ui/resizable-table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
-import { useK8sResourceList, useDeleteK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
-import { useKubernetesConfigStore } from '@/stores/kubernetesConfigStore';
-import { DeleteConfirmDialog } from '@/components/resources';
+import { useK8sResourceList, useDeleteK8sResource, useCreateK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
+import { useClusterStore } from '@/stores/clusterStore';
+import { postJobRetry } from '@/services/backendApiClient';
+import { DeleteConfirmDialog, UsageBar, parseCpu, parseMemory, calculatePodResourceMax } from '@/components/resources';
+import { ResourceExportDropdown, ListViewSegmentedControl, ListPagination, PAGE_SIZE_OPTIONS, ResourceCommandBar, resourceTableRowClassName, ROW_MOTION, StatusPill, ListPageStatCard, ListPageHeader, TableColumnHeaderWithFilterAndSort, TableFilterCell, AgeCell, TableEmptyState, TableSkeletonRows, CopyNameDropdownItem, NamespaceBadge, ResourceListTableToolbar } from '@/components/list';
+import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
+import { useColumnVisibility } from '@/hooks/useColumnVisibility';
+import { useWorkloadMetricsMap } from '@/hooks/useWorkloadMetricsMap';
+import type { StatusPillVariant } from '@/components/list';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
 import { toast } from 'sonner';
-import { Card, CardContent } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 import { JobIcon } from '@/components/icons/KubernetesIcons';
 
 interface JobResource extends KubernetesResource {
-  spec: { completions?: number; parallelism?: number; backoffLimit?: number };
+  metadata: KubernetesResource['metadata'] & { ownerReferences?: Array<{ kind: string; name: string }> };
+  spec: { 
+    completions?: number; 
+    parallelism?: number; 
+    backoffLimit?: number;
+    template?: { 
+      spec?: { 
+        containers?: Array<{ 
+          name: string; 
+          image: string;
+          resources?: {
+            requests?: { cpu?: string; memory?: string };
+            limits?: { cpu?: string; memory?: string };
+          };
+        }> 
+      } 
+    };
+  };
   status: { succeeded?: number; failed?: number; active?: number; startTime?: string; completionTime?: string };
 }
 
@@ -30,20 +56,20 @@ interface Job {
   namespace: string;
   status: 'Complete' | 'Running' | 'Failed';
   completions: string;
+  completionsNum: number;
+  completionsDesired: number;
+  parallelism: number;
+  active: number;
+  succeeded: number;
+  failed: number;
   duration: string;
+  backoffLimit: number;
+  owner: string;
   age: string;
+  creationTimestamp?: string;
+  cpu: string;
+  memory: string;
 }
-
-const mockJobs: Job[] = [
-  { name: 'db-migration-v1.2.0', namespace: 'production', status: 'Complete', completions: '1/1', duration: '45s', age: '2d' },
-  { name: 'backup-daily-20240115', namespace: 'production', status: 'Complete', completions: '1/1', duration: '5m', age: '1d' },
-  { name: 'data-sync-batch', namespace: 'production', status: 'Running', completions: '3/5', duration: '10m', age: '30m' },
-  { name: 'report-generator', namespace: 'staging', status: 'Failed', completions: '0/1', duration: '2m', age: '4h' },
-  { name: 'cleanup-old-logs', namespace: 'kube-system', status: 'Complete', completions: '1/1', duration: '15s', age: '12h' },
-  { name: 'index-rebuild', namespace: 'production', status: 'Complete', completions: '10/10', duration: '30m', age: '3d' },
-  { name: 'ml-training-job', namespace: 'ml-platform', status: 'Running', completions: '2/4', duration: '2h', age: '2h' },
-  { name: 'failed-migration', namespace: 'staging', status: 'Failed', completions: '0/1', duration: '5m', age: '6h' },
-];
 
 const statusConfig = {
   Complete: { icon: CheckCircle2, color: 'text-[hsl(142,76%,36%)]', bg: 'bg-[hsl(142,76%,36%)]/10' },
@@ -51,15 +77,54 @@ const statusConfig = {
   Failed: { icon: XCircle, color: 'text-[hsl(0,72%,51%)]', bg: 'bg-[hsl(0,72%,51%)]/10' },
 };
 
+const JOBS_TABLE_COLUMNS: ResizableColumnConfig[] = [
+  { id: 'name', defaultWidth: 200, minWidth: 120 },
+  { id: 'namespace', defaultWidth: 140, minWidth: 100 },
+  { id: 'status', defaultWidth: 120, minWidth: 90 },
+  { id: 'completions', defaultWidth: 140, minWidth: 115 },
+  { id: 'parallelism', defaultWidth: 130, minWidth: 105 },
+  { id: 'active', defaultWidth: 100, minWidth: 75 },
+  { id: 'succeeded', defaultWidth: 130, minWidth: 100 },
+  { id: 'failed', defaultWidth: 100, minWidth: 80 },
+  { id: 'duration', defaultWidth: 130, minWidth: 100 },
+  { id: 'backoffLimit', defaultWidth: 150, minWidth: 120 },
+  { id: 'owner', defaultWidth: 140, minWidth: 95 },
+  { id: 'cpu', defaultWidth: 120, minWidth: 85 },
+  { id: 'memory', defaultWidth: 130, minWidth: 90 },
+  { id: 'age', defaultWidth: 100, minWidth: 65 },
+];
+
+const JOBS_COLUMNS_FOR_VISIBILITY = [
+  { id: 'namespace', label: 'Namespace' },
+  { id: 'status', label: 'Status' },
+  { id: 'completions', label: 'Completions' },
+  { id: 'parallelism', label: 'Parallelism' },
+  { id: 'active', label: 'Active' },
+  { id: 'succeeded', label: 'Succeeded' },
+  { id: 'failed', label: 'Failed' },
+  { id: 'duration', label: 'Duration' },
+  { id: 'backoffLimit', label: 'Backoff Limit' },
+  { id: 'owner', label: 'Owner' },
+  { id: 'cpu', label: 'CPU' },
+  { id: 'memory', label: 'Memory' },
+  { id: 'age', label: 'Age' },
+];
+
+const jobStatusToVariant: Record<Job['status'], StatusPillVariant> = {
+  Complete: 'success',
+  Running: 'warning',
+  Failed: 'destructive',
+};
+
 function transformResource(resource: JobResource): Job {
   const spec = resource.spec || {};
   const status = resource.status || {};
-  const completions = spec.completions || 1;
+  const completionsDesired = spec.completions ?? 1;
   const succeeded = status.succeeded || 0;
   const active = status.active || 0;
   const failed = status.failed || 0;
   let jobStatus: Job['status'] = 'Running';
-  if (succeeded >= completions) jobStatus = 'Complete';
+  if (succeeded >= completionsDesired) jobStatus = 'Complete';
   else if (failed > 0 && active === 0) jobStatus = 'Failed';
   let duration = '-';
   if (status.startTime) {
@@ -70,11 +135,30 @@ function transformResource(resource: JobResource): Job {
     else if (diffSec < 3600) duration = `${Math.floor(diffSec / 60)}m`;
     else duration = `${Math.floor(diffSec / 3600)}h`;
   }
-  return { name: resource.metadata.name, namespace: resource.metadata.namespace || 'default', status: jobStatus, completions: `${succeeded}/${completions}`, duration, age: calculateAge(resource.metadata.creationTimestamp) };
+  const ownerRef = resource.metadata?.ownerReferences?.find((r) => r.kind === 'CronJob');
+  const owner = ownerRef?.name ?? '-';
+  return {
+    name: resource.metadata.name,
+    namespace: resource.metadata.namespace || 'default',
+    status: jobStatus,
+    completions: `${succeeded}/${completionsDesired}`,
+    completionsNum: succeeded,
+    completionsDesired,
+    parallelism: spec.parallelism ?? 1,
+    active,
+    succeeded,
+    failed,
+    duration,
+    backoffLimit: spec.backoffLimit ?? 6,
+    owner,
+    age: calculateAge(resource.metadata.creationTimestamp),
+    creationTimestamp: resource.metadata?.creationTimestamp,
+    cpu: '-',
+    memory: '-',
+  };
 }
 
-type SortKey = 'name' | 'namespace' | 'status' | 'age';
-type ViewMode = 'all' | 'complete' | 'running' | 'failed';
+type ListView = 'flat' | 'byNamespace';
 
 export default function Jobs() {
   const navigate = useNavigate();
@@ -82,132 +166,619 @@ export default function Jobs() {
   const [selectedNamespace, setSelectedNamespace] = useState<string>('all');
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: Job | null; bulk?: boolean }>({ open: false, item: null });
   const [showCreateWizard, setShowCreateWizard] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>('name');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [viewMode, setViewMode] = useState<ViewMode>('all');
+  const [listView, setListView] = useState<ListView>('flat');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [showTableFilters, setShowTableFilters] = useState(false);
+  const [pageSize, setPageSize] = useState(10);
+  const [pageIndex, setPageIndex] = useState(0);
 
-  const { config } = useKubernetesConfigStore();
-  const { data, isLoading, refetch } = useK8sResourceList<JobResource>('jobs');
+  const { isConnected } = useConnectionStatus();
+  const backendBaseUrl = getEffectiveBackendBaseUrl(useBackendConfigStore((s) => s.backendBaseUrl));
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
+  const activeCluster = useClusterStore((s) => s.activeCluster);
+  const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
+  const clusterId = activeCluster?.id ?? currentClusterId;
+  const { data, isLoading, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<JobResource>('jobs', undefined, { limit: 5000 });
   const deleteResource = useDeleteK8sResource('jobs');
+  const createResource = useCreateK8sResource('jobs');
 
-  const items: Job[] = config.isConnected && data?.items ? data.items.map(transformResource) : mockJobs;
+  const items: Job[] = isConnected && data ? (data.items ?? []).map(transformResource) : [];
 
-  const stats = useMemo(() => ({ total: items.length, complete: items.filter(i => i.status === 'Complete').length, running: items.filter(i => i.status === 'Running').length, failed: items.filter(i => i.status === 'Failed').length }), [items]);
+  const stats = useMemo(() => {
+    const succeeded = items.filter((i) => i.status === 'Complete').length;
+    const total = items.length;
+    const completionRatePct = total > 0 ? Math.round((succeeded / total) * 100) : 0;
+    return {
+      total,
+      running: items.filter((i) => i.status === 'Running').length,
+      succeeded,
+      failed: items.filter((i) => i.status === 'Failed').length,
+      completionRatePct,
+    };
+  }, [items]);
   const namespaces = useMemo(() => ['all', ...Array.from(new Set(items.map(i => i.namespace)))], [items]);
 
-  const filteredItems = useMemo(() => {
-    let result = items.filter((item) => {
+  const itemsAfterSearchAndNs = useMemo(() => {
+    return items.filter((item) => {
       const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) || item.namespace.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesNamespace = selectedNamespace === 'all' || item.namespace === selectedNamespace;
-      let matchesView = true;
-      if (viewMode === 'complete') matchesView = item.status === 'Complete';
-      else if (viewMode === 'running') matchesView = item.status === 'Running';
-      else if (viewMode === 'failed') matchesView = item.status === 'Failed';
-      return matchesSearch && matchesNamespace && matchesView;
+      return matchesSearch && matchesNamespace;
     });
-    result.sort((a, b) => { let cmp = 0; if (sortKey === 'name') cmp = a.name.localeCompare(b.name); else if (sortKey === 'namespace') cmp = a.namespace.localeCompare(b.namespace); else if (sortKey === 'status') cmp = a.status.localeCompare(b.status); else if (sortKey === 'age') cmp = a.age.localeCompare(b.age); return sortOrder === 'asc' ? cmp : -cmp; });
-    return result;
-  }, [items, searchQuery, selectedNamespace, viewMode, sortKey, sortOrder]);
+  }, [items, searchQuery, selectedNamespace]);
 
-  const handleSort = (key: SortKey) => { if (sortKey === key) setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc'); else { setSortKey(key); setSortOrder('asc'); } };
+  const jobsTableConfig = useMemo(() => {
+    const parseDurationSec = (d: string): number => {
+      if (!d || d === '-') return -1;
+      const m = d.match(/^(\d+)(s|m|h)$/);
+      if (!m) return 0;
+      const n = parseInt(m[1], 10);
+      if (m[2] === 's') return n;
+      if (m[2] === 'm') return n * 60;
+      return n * 3600;
+    };
+    return {
+      defaultSortKey: 'name' as const,
+      defaultSortOrder: 'asc' as const,
+      columns: [
+        { columnId: 'name', getValue: (j: Job) => j.name, sortable: true, filterable: true },
+        { columnId: 'namespace', getValue: (j: Job) => j.namespace, sortable: true, filterable: true },
+        { columnId: 'status', getValue: (j: Job) => j.status, sortable: true, filterable: true },
+        { columnId: 'completions', getValue: (j: Job) => j.completions, sortable: true, filterable: false },
+        { columnId: 'parallelism', getValue: (j: Job) => j.parallelism, sortable: true, filterable: false },
+        { columnId: 'active', getValue: (j: Job) => j.active, sortable: true, filterable: false },
+        { columnId: 'succeeded', getValue: (j: Job) => j.succeeded, sortable: true, filterable: false },
+        { columnId: 'failed', getValue: (j: Job) => j.failed, sortable: true, filterable: false },
+        { columnId: 'duration', getValue: (j: Job) => j.duration, sortable: true, filterable: false, compare: (a, b) => parseDurationSec(a.duration) - parseDurationSec(b.duration) },
+        { columnId: 'backoffLimit', getValue: (j: Job) => j.backoffLimit, sortable: true, filterable: false },
+        { columnId: 'owner', getValue: (j: Job) => j.owner, sortable: true, filterable: true },
+        { columnId: 'cpu', getValue: (j: Job) => j.cpu, sortable: true, filterable: false },
+        { columnId: 'memory', getValue: (j: Job) => j.memory, sortable: true, filterable: false },
+        { columnId: 'age', getValue: (j: Job) => j.age, sortable: true, filterable: false },
+      ] as ColumnConfig<Job>[],
+    };
+  }, []);
+
+  const {
+    filteredAndSortedItems: filteredItems,
+    distinctValuesByColumn,
+    valueCountsByColumn,
+    columnFilters,
+    setColumnFilter,
+    sortKey,
+    sortOrder,
+    setSort,
+    clearAllFilters,
+    hasActiveFilters,
+  } = useTableFiltersAndSort(itemsAfterSearchAndNs, jobsTableConfig);
+
+  const columnVisibility = useColumnVisibility({
+    tableId: 'jobs',
+    columns: JOBS_COLUMNS_FOR_VISIBILITY,
+    alwaysVisible: ['name'],
+  });
+
+  const totalFiltered = filteredItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+  const safePageIndex = Math.min(pageIndex, totalPages - 1);
+  const start = safePageIndex * pageSize;
+  const itemsOnPage = filteredItems.slice(start, start + pageSize);
+
+  const metricsEntries = useMemo(
+    () => itemsOnPage.map((i) => ({ namespace: i.namespace, name: i.name })),
+    [itemsOnPage]
+  );
+  const { metricsMap } = useWorkloadMetricsMap('job', metricsEntries);
+
+  // Calculate resource max values from job pod template container limits/requests
+  const jobResourceMaxMap = useMemo(() => {
+    const m: Record<string, { cpuMax?: number; memoryMax?: number }> = {};
+    if (data?.items) {
+      data.items.forEach((jobResource) => {
+        const key = `${jobResource.metadata.namespace}/${jobResource.metadata.name}`;
+        const containers = jobResource.spec?.template?.spec?.containers || [];
+        const cpuMax = calculatePodResourceMax(containers, 'cpu');
+        const memoryMax = calculatePodResourceMax(containers, 'memory');
+        if (cpuMax !== undefined || memoryMax !== undefined) {
+          m[key] = { cpuMax, memoryMax };
+        }
+      });
+    }
+    return m;
+  }, [data?.items]);
+
+  const groupedOnPage = useMemo(() => {
+    if (listView !== 'byNamespace' || itemsOnPage.length === 0) return [];
+    const map = new Map<string, Job[]>();
+    for (const item of itemsOnPage) {
+      const list = map.get(item.namespace) ?? [];
+      list.push(item);
+      map.set(item.namespace, list);
+    }
+    return Array.from(map.entries())
+      .map(([label, list]) => ({ groupKey: `ns:${label}`, label, list }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [listView, itemsOnPage]);
+
+  useEffect(() => {
+    if (safePageIndex !== pageIndex) setPageIndex(safePageIndex);
+  }, [safePageIndex, pageIndex]);
+
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size);
+    setPageIndex(0);
+  };
+
+  const pagination = {
+    rangeLabel: totalFiltered > 0
+      ? `Showing ${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered}`
+      : 'No jobs',
+    hasPrev: safePageIndex > 0,
+    hasNext: start + pageSize < totalFiltered,
+    onPrev: () => setPageIndex((i) => Math.max(0, i - 1)),
+    onNext: () => setPageIndex((i) => Math.min(totalPages - 1, i + 1)),
+    currentPage: safePageIndex + 1,
+    totalPages: Math.max(1, totalPages),
+    onPageChange: (p: number) => setPageIndex(Math.max(0, Math.min(p - 1, totalPages - 1))),
+  };
+
+  const toggleGroup = (groupKey: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  };
+
+  const handleRetry = async (item: Job) => {
+    if (!isConnected) {
+      toast.error('Connect cluster to retry Job');
+      return;
+    }
+    if (!isBackendConfigured()) {
+      toast.error('Connect to Kubilitics backend in Settings to retry Job.');
+      return;
+    }
+    if (!clusterId) {
+      toast.error('Select a cluster from the cluster list to perform this action.');
+      return;
+    }
+    try {
+      await postJobRetry(backendBaseUrl, clusterId, item.namespace, item.name);
+      toast.success(`Created new Job from ${item.name} (retry)`);
+      refetch();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(msg ?? 'Retry failed');
+    }
+  };
 
   const handleDelete = async () => {
-    if (deleteDialog.bulk && selectedItems.size > 0) { toast.success(`Deleted ${selectedItems.size} jobs (demo mode)`); setSelectedItems(new Set()); }
-    else if (deleteDialog.item) { if (config.isConnected) await deleteResource.mutateAsync({ name: deleteDialog.item.name, namespace: deleteDialog.item.namespace }); else toast.success(`Job ${deleteDialog.item.name} deleted (demo mode)`); }
+    if (!isConnected) {
+      toast.error('Connect cluster to delete jobs');
+      setDeleteDialog({ open: false, item: null });
+      return;
+    }
+    if (deleteDialog.bulk && selectedItems.size > 0) {
+      for (const key of selectedItems) {
+        const [ns, n] = key.split('/');
+        if (n && ns) await deleteResource.mutateAsync({ name: n, namespace: ns });
+      }
+      toast.success(`Deleted ${selectedItems.size} job(s)`);
+      setSelectedItems(new Set());
+    } else if (deleteDialog.item) {
+      await deleteResource.mutateAsync({ name: deleteDialog.item.name, namespace: deleteDialog.item.namespace });
+      toast.success(`Job ${deleteDialog.item.name} deleted`);
+    }
     setDeleteDialog({ open: false, item: null });
   };
 
-  const handleExport = () => { const toExport = selectedItems.size > 0 ? filteredItems.filter(i => selectedItems.has(`${i.namespace}/${i.name}`)) : filteredItems; const blob = new Blob([JSON.stringify(toExport, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'jobs-export.json'; a.click(); URL.revokeObjectURL(url); toast.success(`Exported ${toExport.length} jobs`); };
+  const jobExportConfig = {
+    filenamePrefix: 'jobs',
+    resourceLabel: 'jobs',
+    getExportData: (j: Job) => ({ name: j.name, namespace: j.namespace, status: j.status, completions: j.completions, parallelism: j.parallelism, active: j.active, succeeded: j.succeeded, failed: j.failed, duration: j.duration, backoffLimit: j.backoffLimit, owner: j.owner, age: j.age }),
+    csvColumns: [
+      { label: 'Name', getValue: (j: Job) => j.name },
+      { label: 'Namespace', getValue: (j: Job) => j.namespace },
+      { label: 'Status', getValue: (j: Job) => j.status },
+      { label: 'Completions', getValue: (j: Job) => j.completions },
+      { label: 'Duration', getValue: (j: Job) => j.duration },
+      { label: 'Age', getValue: (j: Job) => j.age },
+    ],
+    toK8sYaml: (j: Job) => `---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${j.name}
+  namespace: ${j.namespace}
+spec:
+  template:
+    spec:
+      containers: []
+      restartPolicy: Never
+`,
+  };
 
   const toggleSelection = (item: Job) => { const key = `${item.namespace}/${item.name}`; const newSel = new Set(selectedItems); if (newSel.has(key)) newSel.delete(key); else newSel.add(key); setSelectedItems(newSel); };
-  const toggleAll = () => { if (selectedItems.size === filteredItems.length) setSelectedItems(new Set()); else setSelectedItems(new Set(filteredItems.map(i => `${i.namespace}/${i.name}`))); };
+  const toggleAll = () => { if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set()); else setSelectedItems(new Set(itemsOnPage.map(i => `${i.namespace}/${i.name}`))); };
 
-  const isAllSelected = filteredItems.length > 0 && selectedItems.size === filteredItems.length;
-  const isSomeSelected = selectedItems.size > 0 && selectedItems.size < filteredItems.length;
+  const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
+  const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-primary/10"><JobIcon className="h-6 w-6 text-primary" /></div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
-            <p className="text-sm text-muted-foreground">{filteredItems.length} jobs across {namespaces.length - 1} namespaces{!config.isConnected && <span className="ml-2 inline-flex items-center gap-1 text-[hsl(45,93%,47%)]"><WifiOff className="h-3 w-3" /> Demo mode</span>}</p>
+      <ListPageHeader
+        icon={<JobIcon className="h-6 w-6 text-primary" />}
+        title="Jobs"
+        resourceCount={filteredItems.length}
+        subtitle={namespaces.length > 1 ? `across ${namespaces.length - 1} namespaces` : undefined}
+        demoMode={!isConnected}
+        isLoading={isLoading}
+        onRefresh={() => refetch()}
+        createLabel="Create Job"
+        onCreate={() => setShowCreateWizard(true)}
+        actions={
+          <>
+            <ResourceExportDropdown
+              items={filteredItems}
+              selectedKeys={selectedItems}
+              getKey={(i) => `${i.namespace}/${i.name}`}
+              config={jobExportConfig}
+              selectionLabel={selectedItems.size > 0 ? 'Selected jobs' : 'All visible jobs'}
+              onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
+            />
+            {selectedItems.size > 0 && (
+              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}><Trash2 className="h-4 w-4" />Delete</Button>
+            )}
+          </>
+        }
+        leftExtra={selectedItems.size > 0 ? (
+          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
+            <span className="text-sm text-muted-foreground">{selectedItems.size} selected</span>
+            <Button variant="ghost" size="sm" className="h-8" onClick={() => setSelectedItems(new Set())}>Clear</Button>
           </div>
+        ) : undefined}
+      />
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <ListPageStatCard label="Total" value={stats.total} icon={JobIcon} iconColor="text-primary" selected={!columnFilters.status?.size} onClick={() => setColumnFilter('status', null)} className={cn(!columnFilters.status?.size && 'ring-2 ring-primary')} />
+        <ListPageStatCard label="Running" value={stats.running} icon={Clock} iconColor="text-[hsl(45,93%,47%)]" valueClassName="text-[hsl(45,93%,47%)]" selected={columnFilters.status?.size === 1 && columnFilters.status.has('Running')} onClick={() => setColumnFilter('status', new Set(['Running']))} className={cn(columnFilters.status?.size === 1 && columnFilters.status.has('Running') && 'ring-2 ring-[hsl(45,93%,47%)]')} />
+        <ListPageStatCard label="Succeeded" value={stats.succeeded} icon={CheckCircle2} iconColor="text-[hsl(142,76%,36%)]" valueClassName="text-[hsl(142,76%,36%)]" selected={columnFilters.status?.size === 1 && columnFilters.status.has('Complete')} onClick={() => setColumnFilter('status', new Set(['Complete']))} className={cn(columnFilters.status?.size === 1 && columnFilters.status.has('Complete') && 'ring-2 ring-[hsl(142,76%,36%)]')} />
+        <ListPageStatCard label="Failed" value={stats.failed} icon={XCircle} iconColor="text-[hsl(0,72%,51%)]" valueClassName="text-[hsl(0,72%,51%)]" selected={columnFilters.status?.size === 1 && columnFilters.status.has('Failed')} onClick={() => setColumnFilter('status', new Set(['Failed']))} className={cn(columnFilters.status?.size === 1 && columnFilters.status.has('Failed') && 'ring-2 ring-[hsl(0,72%,51%)]')} />
+        <ListPageStatCard label="Completion Rate" value={stats.completionRatePct + '%'} icon={Gauge} iconColor="text-cyan-500" valueClassName="text-cyan-600" />
+      </div>
+
+      <ResourceListTableToolbar
+        globalFilterBar={
+      <ResourceCommandBar
+        scope={
+          <div className="w-full min-w-0">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="w-full min-w-0 justify-between h-10 gap-2 rounded-lg border border-border bg-background font-medium shadow-sm hover:bg-muted/50 hover:border-primary/30 focus-visible:ring-2 focus-visible:ring-primary/20">
+                  <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{selectedNamespace === 'all' ? 'All Namespaces' : selectedNamespace}</span>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48">
+                {namespaces.map((ns) => (
+                  <DropdownMenuItem key={ns} onClick={() => setSelectedNamespace(ns)} className={cn(selectedNamespace === ns && 'bg-accent')}>
+                    {ns === 'all' ? 'All Namespaces' : ns}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        }
+        search={
+          <div className="relative w-full min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Search jobs..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full h-10 pl-9 rounded-lg border border-border bg-background text-sm font-medium shadow-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary/50 transition-all" aria-label="Search jobs" />
+          </div>
+        }
+        structure={<ListViewSegmentedControl value={listView} onChange={(v) => setListView(v as ListView)} options={[{ id: 'flat', label: 'Flat', icon: List }, { id: 'byNamespace', label: 'By Namespace', icon: Layers }]} label="" ariaLabel="List structure" />}
+        className="mb-0"
+      />
+        }
+        hasActiveFilters={hasActiveFilters}
+        onClearAllFilters={clearAllFilters}
+        showTableFilters={showTableFilters}
+        onToggleTableFilters={() => setShowTableFilters((v) => !v)}
+        columns={JOBS_COLUMNS_FOR_VISIBILITY}
+        visibleColumns={columnVisibility.visibleColumns}
+        onColumnToggle={columnVisibility.setColumnVisible}
+        footer={
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">{pagination.rangeLabel}</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  {pageSize} per page
+                  <ChevronDown className="h-4 w-4 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <DropdownMenuItem key={size} onClick={() => handlePageSizeChange(size)} className={cn(pageSize === size && 'bg-accent')}>
+                    {size} per page
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <ListPagination
+            hasPrev={pagination.hasPrev}
+            hasNext={pagination.hasNext}
+            onPrev={pagination.onPrev}
+            onNext={pagination.onNext}
+            rangeLabel={undefined}
+            currentPage={pagination.currentPage}
+            totalPages={pagination.totalPages}
+            onPageChange={pagination.onPageChange}
+            dataUpdatedAt={dataUpdatedAt}
+            isFetching={isFetching}
+          />
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-2" onClick={handleExport}><Download className="h-4 w-4" />{selectedItems.size > 0 ? `Export (${selectedItems.size})` : 'Export'}</Button>
-          <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => refetch()} disabled={isLoading}>{isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}</Button>
-          <Button className="gap-2" onClick={() => setShowCreateWizard(true)}><Plus className="h-4 w-4" />Create Job</Button>
-        </div>
-      </div>
-
-      {selectedItems.size > 0 && (
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg">
-          <div className="flex items-center gap-3"><Badge variant="secondary" className="gap-1.5"><CheckSquare className="h-3.5 w-3.5" />{selectedItems.size} selected</Badge><Button variant="ghost" size="sm" onClick={() => setSelectedItems(new Set())}>Clear</Button></div>
-          <Button variant="destructive" size="sm" className="gap-1.5" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}><Trash2 className="h-4 w-4" />Delete</Button>
-        </motion.div>
-      )}
-
-      <div className="grid grid-cols-4 gap-4">
-        <Card className={cn('cursor-pointer transition-all', viewMode === 'all' && 'ring-2 ring-primary')} onClick={() => setViewMode('all')}><CardContent className="pt-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total</p><p className="text-2xl font-bold">{stats.total}</p></div><JobIcon className="h-8 w-8 text-primary opacity-50" /></div></CardContent></Card>
-        <Card className={cn('cursor-pointer transition-all', viewMode === 'complete' && 'ring-2 ring-[hsl(142,76%,36%)]')} onClick={() => setViewMode('complete')}><CardContent className="pt-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Complete</p><p className="text-2xl font-bold text-[hsl(142,76%,36%)]">{stats.complete}</p></div><CheckCircle2 className="h-8 w-8 text-[hsl(142,76%,36%)] opacity-50" /></div></CardContent></Card>
-        <Card className={cn('cursor-pointer transition-all', viewMode === 'running' && 'ring-2 ring-[hsl(45,93%,47%)]')} onClick={() => setViewMode('running')}><CardContent className="pt-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Running</p><p className="text-2xl font-bold text-[hsl(45,93%,47%)]">{stats.running}</p></div><Clock className="h-8 w-8 text-[hsl(45,93%,47%)] opacity-50" /></div></CardContent></Card>
-        <Card className={cn('cursor-pointer transition-all', viewMode === 'failed' && 'ring-2 ring-[hsl(0,72%,51%)]')} onClick={() => setViewMode('failed')}><CardContent className="pt-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Failed</p><p className="text-2xl font-bold text-[hsl(0,72%,51%)]">{stats.failed}</p></div><XCircle className="h-8 w-8 text-[hsl(0,72%,51%)] opacity-50" /></div></CardContent></Card>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-md"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" /><Input placeholder="Search jobs..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9" /></div>
-        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="gap-2"><Filter className="h-4 w-4" />{selectedNamespace === 'all' ? 'All Namespaces' : selectedNamespace}<ChevronDown className="h-4 w-4 opacity-50" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-48">{namespaces.map(ns => <DropdownMenuItem key={ns} onClick={() => setSelectedNamespace(ns)} className={cn(selectedNamespace === ns && 'bg-accent')}>{ns === 'all' ? 'All Namespaces' : ns}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>
-      </div>
-
-      <div className="border border-border rounded-xl overflow-hidden bg-card">
-        <Table>
-          <TableHeader><TableRow className="bg-muted/50 hover:bg-muted/50">
+        }
+      >
+        <ResizableTableProvider tableId="jobs" columnConfig={JOBS_TABLE_COLUMNS}>
+        <Table className="table-fixed" style={{ minWidth: 1850 }}>
+          <TableHeader><TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
             <TableHead className="w-10"><Checkbox checked={isAllSelected} onCheckedChange={toggleAll} className={cn(isSomeSelected && 'data-[state=checked]:bg-primary/50')} /></TableHead>
-            <TableHead><Button variant="ghost" className="gap-1 -ml-2 h-auto p-1" onClick={() => handleSort('name')}>Name <ArrowUpDown className="h-3.5 w-3.5" /></Button></TableHead>
-            <TableHead><Button variant="ghost" className="gap-1 -ml-2 h-auto p-1" onClick={() => handleSort('namespace')}>Namespace <ArrowUpDown className="h-3.5 w-3.5" /></Button></TableHead>
-            <TableHead><Button variant="ghost" className="gap-1 -ml-2 h-auto p-1" onClick={() => handleSort('status')}>Status <ArrowUpDown className="h-3.5 w-3.5" /></Button></TableHead>
-            <TableHead>Completions</TableHead><TableHead>Duration</TableHead>
-            <TableHead><Button variant="ghost" className="gap-1 -ml-2 h-auto p-1" onClick={() => handleSort('age')}>Age <ArrowUpDown className="h-3.5 w-3.5" /></Button></TableHead>
-            <TableHead className="w-12"></TableHead>
-          </TableRow></TableHeader>
+            <ResizableTableHead columnId="name">
+              <TableColumnHeaderWithFilterAndSort columnId="name" label="Name" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="namespace">
+              <TableColumnHeaderWithFilterAndSort columnId="namespace" label="Namespace" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="status">
+              <TableColumnHeaderWithFilterAndSort columnId="status" label="Status" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="completions">
+              <TableColumnHeaderWithFilterAndSort columnId="completions" label="Completions" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="parallelism">
+              <TableColumnHeaderWithFilterAndSort columnId="parallelism" label="Parallelism" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="active">
+              <TableColumnHeaderWithFilterAndSort columnId="active" label="Active" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="succeeded">
+              <TableColumnHeaderWithFilterAndSort columnId="succeeded" label="Succeeded" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="failed">
+              <TableColumnHeaderWithFilterAndSort columnId="failed" label="Failed" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="duration">
+              <TableColumnHeaderWithFilterAndSort columnId="duration" label="Duration" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="backoffLimit">
+              <TableColumnHeaderWithFilterAndSort columnId="backoffLimit" label="Backoff Limit" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="owner">
+              <TableColumnHeaderWithFilterAndSort columnId="owner" label="Owner" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="cpu" title="CPU">
+              <TableColumnHeaderWithFilterAndSort columnId="cpu" label="CPU" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="memory" title="Memory">
+              <TableColumnHeaderWithFilterAndSort columnId="memory" label="Memory" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <ResizableTableHead columnId="age">
+              <TableColumnHeaderWithFilterAndSort columnId="age" label="Age" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} />
+            </ResizableTableHead>
+            <TableHead className="w-12 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>
+          </TableRow>
+          {showTableFilters && (
+            <TableRow className="bg-muted/30 hover:bg-muted/30 border-b-2 border-border">
+              <TableCell className="w-10 p-1.5" />
+              <ResizableTableCell columnId="name" className="p-1.5">
+                <TableFilterCell columnId="name" label="Name" distinctValues={distinctValuesByColumn.name ?? []} selectedFilterValues={columnFilters.name ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.name} />
+              </ResizableTableCell>
+              <ResizableTableCell columnId="namespace" className="p-1.5">
+                <TableFilterCell columnId="namespace" label="Namespace" distinctValues={distinctValuesByColumn.namespace ?? []} selectedFilterValues={columnFilters.namespace ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.namespace} />
+              </ResizableTableCell>
+              <ResizableTableCell columnId="status" className="p-1.5">
+                <TableFilterCell columnId="status" label="Status" distinctValues={distinctValuesByColumn.status ?? []} selectedFilterValues={columnFilters.status ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.status} />
+              </ResizableTableCell>
+              <ResizableTableCell columnId="completions" className="p-1.5" />
+              <ResizableTableCell columnId="parallelism" className="p-1.5" />
+              <ResizableTableCell columnId="active" className="p-1.5" />
+              <ResizableTableCell columnId="succeeded" className="p-1.5" />
+              <ResizableTableCell columnId="failed" className="p-1.5" />
+              <ResizableTableCell columnId="duration" className="p-1.5" />
+              <ResizableTableCell columnId="backoffLimit" className="p-1.5" />
+              <ResizableTableCell columnId="owner" className="p-1.5">
+                <TableFilterCell columnId="owner" label="Owner" distinctValues={distinctValuesByColumn.owner ?? []} selectedFilterValues={columnFilters.owner ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.owner} />
+              </ResizableTableCell>
+              <ResizableTableCell columnId="cpu" className="p-1.5" />
+              <ResizableTableCell columnId="memory" className="p-1.5" />
+              <ResizableTableCell columnId="age" className="p-1.5" />
+              <TableCell className="w-12 p-1.5" />
+            </TableRow>
+          )}
+          </TableHeader>
           <TableBody>
-            {isLoading && config.isConnected ? <TableRow><TableCell colSpan={8} className="h-32 text-center"><div className="flex flex-col items-center gap-2"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /><p className="text-sm text-muted-foreground">Loading...</p></div></TableCell></TableRow>
-            : filteredItems.length === 0 ? <TableRow><TableCell colSpan={8} className="h-32 text-center text-muted-foreground"><div className="flex flex-col items-center gap-2"><Briefcase className="h-8 w-8 opacity-50" /><p>No jobs found</p></div></TableCell></TableRow>
-            : filteredItems.map((item, idx) => {
-              const StatusIcon = statusConfig[item.status]?.icon || Clock; const style = statusConfig[item.status]; const key = `${item.namespace}/${item.name}`; const isSelected = selectedItems.has(key);
+            {isLoading && isConnected ? (
+              <TableSkeletonRows columnCount={16} />
+            ) : itemsOnPage.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={16} className="h-40 text-center">
+                  <TableEmptyState
+                    icon={<Briefcase className="h-8 w-8" />}
+                    title="No Jobs found"
+                    subtitle={searchQuery || hasActiveFilters ? 'Clear filters to see resources.' : 'Get started by creating a Job for one-off or batch workloads.'}
+                    hasActiveFilters={!!(searchQuery || hasActiveFilters)}
+                    onClearFilters={() => { setSearchQuery(''); clearAllFilters(); }}
+                    createLabel="Create Job"
+                    onCreate={() => setShowCreateWizard(true)}
+                  />
+                </TableCell>
+              </TableRow>
+            ) : listView === 'flat' ? itemsOnPage.map((item, idx) => {
+              const StatusIcon = statusConfig[item.status]?.icon || Clock;
+              const key = `${item.namespace}/${item.name}`;
+              const isSelected = selectedItems.has(key);
+              const completionsPct = item.completionsDesired > 0 ? Math.round((item.completionsNum / item.completionsDesired) * 100) : 0;
+              const cpuVal = metricsMap[key]?.cpu ?? '-';
+              const memVal = metricsMap[key]?.memory ?? '-';
+              const cpuNum = parseCpu(cpuVal);
+              const memNum = parseMemory(memVal);
+              const cpuDataPoints = cpuNum != null ? Array(12).fill(cpuNum) : undefined;
+              const memDataPoints = memNum != null ? Array(12).fill(memNum) : undefined;
               return (
-                <motion.tr key={key} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.02 }} className={cn('group cursor-pointer border-b border-border hover:bg-muted/50', isSelected && 'bg-primary/5')}>
+                <motion.tr key={key} initial={ROW_MOTION.initial} animate={ROW_MOTION.animate} transition={ROW_MOTION.transition(idx)} className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', isSelected && 'bg-primary/5')}>
                   <TableCell><Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(item)} /></TableCell>
-                  <TableCell><Link to={`/jobs/${item.namespace}/${item.name}`} className="font-medium text-primary hover:underline flex items-center gap-2"><JobIcon className="h-4 w-4 text-muted-foreground" /><span className="truncate max-w-[200px]">{item.name}</span></Link></TableCell>
-                  <TableCell><Badge variant="outline" className="font-normal">{item.namespace}</Badge></TableCell>
-                  <TableCell><div className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium', style.bg, style.color)}><StatusIcon className="h-3.5 w-3.5" />{item.status}</div></TableCell>
-                  <TableCell className="font-mono text-sm">{item.completions}</TableCell><TableCell className="font-mono text-sm">{item.duration}</TableCell>
-                  <TableCell className="text-muted-foreground">{item.age}</TableCell>
+                  <ResizableTableCell columnId="name"><Link to={`/jobs/${item.namespace}/${item.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate"><JobIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" /><span className="truncate">{item.name}</span></Link></ResizableTableCell>
+                  <ResizableTableCell columnId="namespace"><NamespaceBadge namespace={item.namespace} className="font-normal truncate block w-fit max-w-full" /></ResizableTableCell>
+                  <ResizableTableCell columnId="status"><StatusPill label={item.status} variant={jobStatusToVariant[item.status]} icon={StatusIcon} /></ResizableTableCell>
+                  <ResizableTableCell columnId="completions" className="min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Progress value={completionsPct} className="h-1.5 w-10 flex-shrink-0" />
+                      <span className="tabular-nums text-sm">{item.completions}</span>
+                    </div>
+                  </ResizableTableCell>
+                  <ResizableTableCell columnId="parallelism" className="font-mono text-sm">{item.parallelism}</ResizableTableCell>
+                  <ResizableTableCell columnId="active" className="font-mono text-sm">{item.active}</ResizableTableCell>
+                  <ResizableTableCell columnId="succeeded" className="font-mono text-sm">{item.succeeded}</ResizableTableCell>
+                  <ResizableTableCell columnId="failed" className="font-mono text-sm">{item.failed}</ResizableTableCell>
+                  <ResizableTableCell columnId="duration" className="font-mono text-sm">{item.duration}</ResizableTableCell>
+                  <ResizableTableCell columnId="backoffLimit" className="font-mono text-sm">{item.backoffLimit}</ResizableTableCell>
+                  <ResizableTableCell columnId="owner">
+                    {item.owner !== '-' ? (
+                      <Link to={`/cronjobs/${item.namespace}/${item.owner}`} className="text-primary hover:underline text-sm truncate block">{item.owner}</Link>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </ResizableTableCell>
+                  <ResizableTableCell columnId="cpu">
+                    <div className="min-w-0 overflow-hidden">
+                      <UsageBar variant="sparkline" value={cpuVal} kind="cpu" displayFormat="compact" width={56} max={jobResourceMaxMap[key]?.cpuMax} />
+                    </div>
+                  </ResizableTableCell>
+                  <ResizableTableCell columnId="memory">
+                    <div className="min-w-0 overflow-hidden">
+                      <UsageBar variant="sparkline" value={memVal} kind="memory" displayFormat="compact" width={56} max={jobResourceMaxMap[key]?.memoryMax} />
+                    </div>
+                  </ResizableTableCell>
+                  <ResizableTableCell columnId="age" className="text-muted-foreground whitespace-nowrap"><AgeCell age={item.age} timestamp={item.creationTimestamp} /></ResizableTableCell>
                   <TableCell>
-                    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors" aria-label="Job actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-48">
+                        <CopyNameDropdownItem name={item.name} namespace={item.namespace} />
+                        <DropdownMenuItem onClick={() => navigate(`/jobs/${item.namespace}/${item.name}`)} className="gap-2">View Details</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate(`/pods?namespace=${item.namespace}`)} className="gap-2"><Box className="h-4 w-4" />View Pods</DropdownMenuItem>
                         <DropdownMenuItem onClick={() => navigate(`/jobs/${item.namespace}/${item.name}?tab=logs`)} className="gap-2"><FileText className="h-4 w-4" />View Logs</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => navigate(`/jobs/${item.namespace}/${item.name}?tab=yaml`)} className="gap-2"><FileText className="h-4 w-4" />View YAML</DropdownMenuItem>
-                        <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-[hsl(0,72%,51%)]" onClick={() => setDeleteDialog({ open: true, item })}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleRetry(item)} className="gap-2" disabled={!isConnected}><RotateCw className="h-4 w-4" />Retry</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate(`/jobs/${item.namespace}/${item.name}?tab=yaml`)} className="gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
+                        <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-[hsl(0,72%,51%)]" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
                 </motion.tr>
               );
+            }) : groupedOnPage.flatMap((group) => {
+              const isCollapsed = collapsedGroups.has(group.groupKey);
+              return [
+                <TableRow key={group.groupKey} className="bg-muted/30 hover:bg-muted/40 cursor-pointer border-b border-border" onClick={() => toggleGroup(group.groupKey)}>
+                  <TableCell colSpan={16} className="py-2 font-medium">
+                    <div className="flex items-center gap-2">
+                      {isCollapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
+                      Namespace: {group.label}
+                      <span className="text-muted-foreground font-normal">({group.list.length})</span>
+                    </div>
+                  </TableCell>
+                </TableRow>,
+                ...(isCollapsed ? [] : group.list.map((item, idx) => {
+                  const StatusIcon = statusConfig[item.status]?.icon || Clock;
+                  const key = `${item.namespace}/${item.name}`;
+                  const isSelected = selectedItems.has(key);
+                  const completionsPct = item.completionsDesired > 0 ? Math.round((item.completionsNum / item.completionsDesired) * 100) : 0;
+                  const cpuVal = metricsMap[key]?.cpu ?? '-';
+                  const memVal = metricsMap[key]?.memory ?? '-';
+                  const cpuNum = parseCpu(cpuVal);
+                  const memNum = parseMemory(memVal);
+                  const cpuDataPoints = cpuNum != null ? Array(12).fill(cpuNum) : undefined;
+                  const memDataPoints = memNum != null ? Array(12).fill(memNum) : undefined;
+                  return (
+                    <motion.tr key={key} initial={ROW_MOTION.initial} animate={ROW_MOTION.animate} transition={ROW_MOTION.transition(idx)} className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', isSelected && 'bg-primary/5')}>
+                      <TableCell><Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(item)} /></TableCell>
+                      <ResizableTableCell columnId="name"><Link to={`/jobs/${item.namespace}/${item.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate"><JobIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" /><span className="truncate">{item.name}</span></Link></ResizableTableCell>
+                      <ResizableTableCell columnId="namespace"><NamespaceBadge namespace={item.namespace} className="font-normal truncate block w-fit max-w-full" /></ResizableTableCell>
+                      <ResizableTableCell columnId="status"><StatusPill label={item.status} variant={jobStatusToVariant[item.status]} icon={StatusIcon} /></ResizableTableCell>
+                      <ResizableTableCell columnId="completions" className="min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Progress value={completionsPct} className="h-1.5 w-10 flex-shrink-0" />
+                          <span className="tabular-nums text-sm">{item.completions}</span>
+                        </div>
+                      </ResizableTableCell>
+                      <ResizableTableCell columnId="parallelism" className="font-mono text-sm">{item.parallelism}</ResizableTableCell>
+                      <ResizableTableCell columnId="active" className="font-mono text-sm">{item.active}</ResizableTableCell>
+                      <ResizableTableCell columnId="succeeded" className="font-mono text-sm">{item.succeeded}</ResizableTableCell>
+                      <ResizableTableCell columnId="failed" className="font-mono text-sm">{item.failed}</ResizableTableCell>
+                      <ResizableTableCell columnId="duration" className="font-mono text-sm">{item.duration}</ResizableTableCell>
+                      <ResizableTableCell columnId="backoffLimit" className="font-mono text-sm">{item.backoffLimit}</ResizableTableCell>
+                      <ResizableTableCell columnId="owner">
+                        {item.owner !== '-' ? (
+                          <Link to={`/cronjobs/${item.namespace}/${item.owner}`} className="text-primary hover:underline text-sm truncate block">{item.owner}</Link>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </ResizableTableCell>
+                      <ResizableTableCell columnId="cpu">
+                        <div className="min-w-0 overflow-hidden">
+                          <UsageBar variant="sparkline" value={cpuVal} kind="cpu" displayFormat="compact" width={56} max={jobResourceMaxMap[key]?.cpuMax} />
+                        </div>
+                      </ResizableTableCell>
+                      <ResizableTableCell columnId="memory">
+                        <div className="min-w-0 overflow-hidden">
+                          <UsageBar variant="sparkline" value={memVal} kind="memory" displayFormat="compact" width={56} max={jobResourceMaxMap[key]?.memoryMax} />
+                        </div>
+                      </ResizableTableCell>
+                      <ResizableTableCell columnId="age" className="text-muted-foreground whitespace-nowrap"><AgeCell age={item.age} timestamp={item.creationTimestamp} /></ResizableTableCell>
+                      <TableCell>
+                        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors" aria-label="Job actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <CopyNameDropdownItem name={item.name} namespace={item.namespace} />
+                            <DropdownMenuItem onClick={() => navigate(`/jobs/${item.namespace}/${item.name}`)} className="gap-2">View Details</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => navigate(`/pods?namespace=${item.namespace}`)} className="gap-2"><Box className="h-4 w-4" />View Pods</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => navigate(`/jobs/${item.namespace}/${item.name}?tab=logs`)} className="gap-2"><FileText className="h-4 w-4" />View Logs</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleRetry(item)} className="gap-2" disabled={!isConnected}><RotateCw className="h-4 w-4" />Retry</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => navigate(`/jobs/${item.namespace}/${item.name}?tab=yaml`)} className="gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
+                            <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-[hsl(0,72%,51%)]" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </motion.tr>
+                  );
+                })),
+              ];
             })}
           </TableBody>
         </Table>
-      </div>
+        </ResizableTableProvider>
+      </ResourceListTableToolbar>
 
       {showCreateWizard && (
         <ResourceCreator
           resourceKind="Job"
           defaultYaml={DEFAULT_YAMLS.Job}
-          onClose={() => { setShowCreateWizard(false); }}
-          onApply={(yaml) => { toast.success('Job created successfully (demo mode)'); setShowCreateWizard(false); refetch(); }}
+          onClose={() => setShowCreateWizard(false)}
+          onApply={async (yaml) => {
+            if (!isConnected) { toast.error('Connect cluster to create Job'); return; }
+            try {
+              await createResource.mutateAsync({ yaml });
+              toast.success('Job created successfully');
+              setShowCreateWizard(false);
+              refetch();
+            } catch (e: any) {
+              toast.error(e?.message ?? 'Failed to create');
+              throw e;
+            }
+          }}
         />
       )}
       <DeleteConfirmDialog open={deleteDialog.open} onOpenChange={(open) => setDeleteDialog({ open, item: open ? deleteDialog.item : null })} resourceType="Job" resourceName={deleteDialog.bulk ? `${selectedItems.size} jobs` : (deleteDialog.item?.name || '')} namespace={deleteDialog.bulk ? undefined : deleteDialog.item?.namespace} onConfirm={handleDelete} />

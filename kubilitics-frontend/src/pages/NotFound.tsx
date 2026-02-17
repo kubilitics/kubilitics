@@ -1,8 +1,9 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Home, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const NotFound = () => {
+  const navigate = useNavigate();
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="text-center max-w-md">
@@ -12,17 +13,13 @@ const NotFound = () => {
           The resource you're looking for doesn't exist.
         </p>
         <div className="flex items-center justify-center gap-4">
-          <Button variant="outline" asChild>
-            <Link to="/" className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              Go Back
-            </Link>
+          <Button variant="outline" onClick={() => navigate(-1)} className="gap-2 rounded-xl">
+            <ArrowLeft className="h-4 w-4" />
+            Go Back
           </Button>
-          <Button asChild>
-            <Link to="/dashboard" className="gap-2">
-              <Home className="h-4 w-4" />
-              Dashboard
-            </Link>
+          <Button onClick={() => navigate('/home')} className="gap-2 rounded-xl">
+            <Home className="h-4 w-4" />
+            Go to Home
           </Button>
         </div>
       </div>

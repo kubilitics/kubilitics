@@ -124,7 +124,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /clusters/{id}:
+  /clusters/{clusterId}:
     get:
       summary: Get cluster details
       description: Retrieve details of a specific cluster
@@ -163,7 +163,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /clusters/{id}/summary:
+  /clusters/{clusterId}/summary:
     get:
       summary: Get cluster summary
       description: Get aggregated statistics and summary information for a cluster
@@ -183,7 +183,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /clusters/{id}/topology:
+  /clusters/{clusterId}/topology:
     get:
       summary: Get topology graph
       description: |
@@ -216,15 +216,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TopologyGraph'
+              example:
+                schemaVersion: "1.0"
+                nodes:
+                  - id: "Namespace/default"
+                    kind: "Namespace"
+                    namespace: ""
+                    name: "default"
+                    apiVersion: "v1"
+                    status: "Running"
+                    metadata:
+                      labels: {}
+                      annotations: {}
+                      uid: "ns-1"
+                      createdAt: "2024-01-01T00:00:00Z"
+                    computed:
+                      health: "healthy"
+                  - id: "Pod/default/nginx-abc123"
+                    kind: "Pod"
+                    namespace: "default"
+                    name: "nginx-abc123"
+                    apiVersion: "v1"
+                    status: "Running"
+                    metadata:
+                      labels: {}
+                      annotations: {}
+                      uid: "pod-1"
+                      createdAt: "2024-01-01T00:00:00Z"
+                    computed:
+                      health: "healthy"
+                      restartCount: 0
+                edges:
+                  - id: "e-ns-pod"
+                    source: "Namespace/default"
+                    target: "Pod/default/nginx-abc123"
+                    relationshipType: "contains"
+                    label: "contains"
+                    metadata:
+                      derivation: "fieldReference"
+                      confidence: 1
+                      sourceField: "metadata.namespace"
+                metadata:
+                  clusterId: "cluster-uuid"
+                  generatedAt: "2024-01-01T12:00:00Z"
+                  layoutSeed: "deterministic-seed-123"
+                  isComplete: true
+                  warnings: []
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /clusters/{id}/topology/export:
+  /clusters/{clusterId}/topology/export:
     post:
       summary: Export topology
-      description: Export topology graph in various formats (PNG, PDF, SVG, JSON)
+      description: |
+        Export topology graph in various formats (PNG, PDF, SVG, JSON).
+        **Currently returns 501 Not Implemented** until export is implemented; planned formats png, pdf, svg, json.
       tags:
         - Topology
       parameters:
@@ -258,10 +306,20 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '501':
+          description: Not implemented - topology export not yet available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Topology export is not yet implemented. Planned formats: png, pdf, svg, json."
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /clusters/{id}/resources/{kind}:
+  /clusters/{clusterId}/resources/{kind}:
     get:
       summary: List resources by kind
       description: List all resources of a specific kind (e.g., Pods, Services)
@@ -296,7 +354,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /clusters/{id}/resources/{kind}/{namespace}/{name}:
+  /clusters/{clusterId}/resources/{kind}/{namespace}/{name}:
     get:
       summary: Get a specific resource
       description: Retrieve detailed information about a specific Kubernetes resource
@@ -370,7 +428,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /clusters/{id}/apply:
+  /clusters/{clusterId}/apply:
     post:
       summary: Apply YAML manifest
       description: Apply a Kubernetes YAML manifest to the cluster
@@ -420,10 +478,12 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /clusters/{id}/logs/{namespace}/{pod}:
+  /clusters/{clusterId}/logs/{namespace}/{pod}:
     get:
       summary: Get pod logs
-      description: Stream logs from a specific pod
+      description: |
+        Stream logs from a specific pod.
+        **Currently returns 501 Not Implemented** until real log streaming is implemented (Phase B1.1).
       tags:
         - Logs
       parameters:
@@ -477,13 +537,25 @@ paths:
                   2024-01-01 10:00:01 nginx started successfully
         '404':
           $ref: '#/components/responses/NotFound'
+        '501':
+          description: Not implemented - pod log streaming not yet available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Pod log streaming is not yet implemented. Planned: container selection, tail, follow."
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /clusters/{id}/metrics:
+  /clusters/{clusterId}/metrics:
     get:
       summary: Get cluster metrics
-      description: Retrieve CPU and memory metrics for the entire cluster
+      description: |
+        Retrieve CPU and memory metrics for the entire cluster.
+        **Currently returns 501 Not Implemented** until Metrics Server or Prometheus integration (Phase B1.3).
       tags:
         - Metrics
       parameters:
@@ -497,13 +569,25 @@ paths:
                 $ref: '#/components/schemas/ClusterMetrics'
         '404':
           $ref: '#/components/responses/NotFound'
+        '501':
+          description: Not implemented - cluster metrics not yet available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Cluster metrics are not yet implemented. Planned: Metrics Server or Prometheus integration."
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /clusters/{id}/metrics/{namespace}/{pod}:
+  /clusters/{clusterId}/metrics/{namespace}/{pod}:
     get:
       summary: Get pod metrics
-      description: Retrieve CPU and memory metrics for a specific pod
+      description: |
+        Retrieve CPU and memory metrics for a specific pod.
+        **Currently returns 501 Not Implemented** until pod metrics are implemented (Phase B1.3).
       tags:
         - Metrics
       parameters:
@@ -527,11 +611,25 @@ paths:
                 $ref: '#/components/schemas/PodMetrics'
         '404':
           $ref: '#/components/responses/NotFound'
+        '501':
+          description: Not implemented - pod metrics not yet available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Pod metrics are not yet implemented. Planned: container CPU/memory from Metrics Server or Prometheus."
+        '500':
+          $ref: '#/components/responses/InternalError'
 
-  /clusters/{id}/events:
+  /clusters/{clusterId}/events:
     get:
       summary: Get Kubernetes events
-      description: Retrieve events from the cluster
+      description: |
+        Retrieve events from the cluster.
+        **Currently returns 501 Not Implemented** until real events retrieval is implemented (Phase B1.2).
       tags:
         - Events
       parameters:
@@ -569,6 +667,18 @@ paths:
                   $ref: '#/components/schemas/K8sEvent'
         '404':
           $ref: '#/components/responses/NotFound'
+        '501':
+          description: Not implemented - Kubernetes events not yet available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Kubernetes events listing is not yet implemented. Planned: namespace, resource_kind, resource_name, limit."
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /ws/resources:
     get:
@@ -651,10 +761,10 @@ paths:
 components:
   parameters:
     ClusterId:
-      name: id
+      name: clusterId
       in: path
       required: true
-      description: Cluster UUID
+      description: Cluster UUID (path parameter aligned with project-docs)
       schema:
         type: string
         format: uuid
@@ -738,15 +848,19 @@ components:
           format: float
           example: 72.3
 
+    # Canonical topology API response (matches frontend types; backend MUST emit this shape)
     TopologyGraph:
       type: object
+      required:
+        - schemaVersion
+        - nodes
+        - edges
+        - metadata
       properties:
-        cluster_id:
+        schemaVersion:
           type: string
-          format: uuid
-        namespace:
-          type: string
-          example: default
+          description: Topology schema version for compatibility
+          example: "1.0"
         nodes:
           type: array
           items:
@@ -755,72 +869,171 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TopologyEdge'
-        meta:
+        metadata:
           type: object
+          required:
+            - clusterId
+            - generatedAt
+            - layoutSeed
+            - isComplete
           properties:
-            node_count:
-              type: integer
-            edge_count:
-              type: integer
-            generated_at:
+            clusterId:
+              type: string
+              description: Cluster identifier
+            generatedAt:
               type: string
               format: date-time
-            layout_seed:
+              description: When the graph was generated
+            layoutSeed:
               type: string
-              description: Deterministic seed for consistent graph layout
+              description: Deterministic seed for consistent graph layout (same graph = same positions)
+            isComplete:
+              type: boolean
+              description: Whether all relationships were discovered (false = partial graph or validation warnings)
+            warnings:
+              type: array
+              items:
+                $ref: '#/components/schemas/GraphWarning'
+
+    GraphWarning:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        affectedNodes:
+          type: array
+          items:
+            type: string
 
     TopologyNode:
       type: object
+      required:
+        - id
+        - kind
+        - name
+        - metadata
+        - computed
       properties:
         id:
           type: string
-          example: pod-default-nginx-abc123
-        type:
+          description: Unique identifier (e.g. kind/namespace/name or kind/name for cluster-scoped)
+          example: Pod/default/nginx-abc123
+        kind:
           type: string
+          description: Kubernetes resource kind (canonical; use "kind" not "type")
           example: Pod
+        namespace:
+          type: string
+          description: Resource namespace (empty for cluster-scoped)
+          example: default
         name:
           type: string
           example: nginx-abc123
-        namespace:
+        apiVersion:
           type: string
-          example: default
-        labels:
-          type: object
-          additionalProperties:
-            type: string
-          example:
-            app: nginx
-            version: v1.0
+          example: v1
         status:
           type: string
-          enum: [Running, Pending, Failed, Succeeded, Unknown]
+          description: Current status for visual encoding
+          enum: [Running, Pending, Failed, Succeeded, Terminating, Unknown, Ready, NotReady, Available, Bound, Released]
           example: Running
         metadata:
           type: object
-          additionalProperties: true
-          description: Additional resource-specific metadata
+          required:
+            - labels
+            - annotations
+            - uid
+          properties:
+            labels:
+              type: object
+              additionalProperties:
+                type: string
+            annotations:
+              type: object
+              additionalProperties:
+                type: string
+            createdAt:
+              type: string
+              format: date-time
+            uid:
+              type: string
+        computed:
+          type: object
+          required:
+            - health
+          properties:
+            health:
+              type: string
+              enum: [healthy, warning, critical, unknown]
+            restartCount:
+              type: integer
+              description: For Pods
+            replicas:
+              type: object
+              description: For controllers
+              properties:
+                desired:
+                  type: integer
+                ready:
+                  type: integer
+                available:
+                  type: integer
+        position:
+          type: object
+          description: Optional deterministic layout position
+          properties:
+            x:
+              type: number
+            y:
+              type: number
 
     TopologyEdge:
       type: object
+      required:
+        - id
+        - source
+        - target
+        - relationshipType
+        - label
+        - metadata
       properties:
         id:
           type: string
-          example: edge-1234
+          example: Deployment/default/nginx->ReplicaSet/default/nginx-xyz789:owns
         source:
           type: string
           description: Source node ID
-          example: deployment-default-nginx
         target:
           type: string
           description: Target node ID
-          example: replicaset-default-nginx-xyz789
-        type:
+        relationshipType:
           type: string
-          enum: [owner, selector, volume, env, rbac, network, storage, node, autoscaling, job]
-          example: owner
+          description: Canonical relationship type (use "relationshipType" not "type")
+          enum: [owns, selects, mounts, references, configures, permits, validates, mutates, exposes, routes, stores, schedules, limits, manages, contains]
+          example: owns
         label:
           type: string
           example: owns
+        metadata:
+          type: object
+          required:
+            - derivation
+            - confidence
+            - sourceField
+          properties:
+            derivation:
+              type: string
+              enum: [ownerReference, labelSelector, fieldReference, volumeMount, envReference, rbacBinding, admission, helm, gitops]
+            confidence:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: 1.0 = certain
+            sourceField:
+              type: string
+              description: Source field in Kubernetes API that defines this relationship
 
     K8sResource:
       type: object

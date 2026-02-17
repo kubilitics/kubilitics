@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { NamespaceBadge } from '@/components/list';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -33,21 +34,13 @@ export interface RolloutActionsDialogProps {
   onRollback?: (revision: number) => Promise<void> | void;
 }
 
-const mockRevisions: RolloutRevision[] = [
-  { revision: 5, createdAt: '2h ago', current: true, changeReason: 'Image update', image: 'nginx:1.25' },
-  { revision: 4, createdAt: '1d ago', current: false, changeReason: 'Config change', image: 'nginx:1.24' },
-  { revision: 3, createdAt: '3d ago', current: false, changeReason: 'Scale up', image: 'nginx:1.24' },
-  { revision: 2, createdAt: '7d ago', current: false, changeReason: 'Initial release', image: 'nginx:1.23' },
-  { revision: 1, createdAt: '14d ago', current: false, changeReason: 'First deployment', image: 'nginx:1.22' },
-];
-
 export function RolloutActionsDialog({
   open,
   onOpenChange,
   resourceType,
   resourceName,
   namespace,
-  revisions = mockRevisions,
+  revisions = [],
   onRestart,
   onRollback,
 }: RolloutActionsDialogProps) {
@@ -104,7 +97,7 @@ export function RolloutActionsDialog({
             <span className="font-mono font-medium text-foreground">{resourceName}</span>
             {namespace && (
               <span className="text-muted-foreground">
-                {' '}in <Badge variant="outline" className="ml-1">{namespace}</Badge>
+                {' '}in <NamespaceBadge namespace={namespace} className="ml-1" />
               </span>
             )}
           </DialogDescription>
@@ -155,6 +148,18 @@ export function RolloutActionsDialog({
             <div className="text-sm text-muted-foreground mb-2">
               Select a revision to rollback to:
             </div>
+            {revisions.filter((r) => !r.current).length === 0 ? (
+              <div className="p-4 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground mb-2">No other revisions available</p>
+                <p className="mb-2">
+                  Revisions are created only when the <strong>pod template</strong> changes (e.g. image, env, resources).
+                  Changing replica count (e.g. 5 → 6) does <strong>not</strong> create a new revision.
+                </p>
+                <p>
+                  To revert a replica count change (e.g. 6 → 5), close this dialog and use <strong>Scale</strong> in the deployment header or the <strong>Scaling</strong> tab.
+                </p>
+              </div>
+            ) : (
             <ScrollArea className="h-[240px] rounded-lg border border-border">
               <div className="p-2 space-y-1">
                 {revisions.map((rev) => (
@@ -193,6 +198,7 @@ export function RolloutActionsDialog({
                 ))}
               </div>
             </ScrollArea>
+            )}
 
             {selectedRevision && (
               <div className="p-3 rounded-lg bg-warning/10 border border-warning/20 text-warning text-sm flex items-start gap-2">

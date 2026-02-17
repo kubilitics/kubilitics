@@ -1,18 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { 
-  Server, 
-  ArrowRight, 
-  CheckCircle2, 
-  XCircle, 
+import {
+  ArrowRight,
+  CheckCircle2,
+  XCircle,
   AlertCircle,
   Loader2,
   RefreshCw,
   Plus,
   Trash2,
-  Clock,
-  Star
+  Star,
 } from 'lucide-react';
 import { KubernetesLogo } from '@/components/icons/KubernetesIcons';
 import { Button } from '@/components/ui/button';
@@ -20,9 +18,16 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useKubeConfigStore, ParsedCluster } from '@/stores/kubeConfigStore';
 import { useClusterStore, Cluster } from '@/stores/clusterStore';
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
+import { DEFAULT_BACKEND_BASE_URL } from '@/lib/backendConstants';
+import { useClustersFromBackend } from '@/hooks/useClustersFromBackend';
+import { addCluster, type BackendCluster } from '@/services/backendApiClient';
+import { backendClusterToCluster as adapterBackendClusterToCluster, inferRegion } from '@/lib/backendClusterAdapter';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
 
+/** Display shape for cluster list (kubeconfig or backend). */
 interface ClusterWithHealth extends ParsedCluster {
   isChecking: boolean;
   lastChecked?: Date;
@@ -31,97 +36,140 @@ interface ClusterWithHealth extends ParsedCluster {
   provider?: string;
 }
 
+function mapBackendStatus(status?: string): 'healthy' | 'warning' | 'error' {
+  if (status === 'connected') return 'healthy';
+  if (status === 'disconnected') return 'warning';
+  return 'error';
+}
+
+function inferProvider(server?: string): string {
+  if (!server) return 'On-Prem';
+  if (server.includes('eks') || server.includes('amazonaws')) return 'EKS';
+  if (server.includes('gke') || server.includes('google')) return 'GKE';
+  if (server.includes('aks') || server.includes('azure')) return 'AKS';
+  if (server.includes('192.168') || server.includes('localhost') || server.includes('minikube')) return 'Minikube';
+  if (server.includes('kind')) return 'Kind';
+  return 'On-Prem';
+}
+
+function backendClusterToDisplay(b: BackendCluster): ClusterWithHealth {
+  const server = b.server_url ?? b.server ?? '';
+  return {
+    id: b.id,
+    name: b.name,
+    server,
+    context: b.context,
+    user: '',
+    namespace: 'default',
+    isConnected: b.status === 'connected',
+    status: mapBackendStatus(b.status) as ParsedCluster['status'],
+    isChecking: false,
+    version: b.version,
+    nodeCount: b.node_count,
+    provider: b.provider || inferProvider(server),
+  };
+}
+
+function backendClusterToCluster(b: BackendCluster): Cluster {
+  return adapterBackendClusterToCluster(b);
+}
+
 export default function ClusterSelection() {
   const navigate = useNavigate();
   const { parsedClusters, selectCluster, setAuthenticated } = useKubeConfigStore();
   const { setDemo, setClusters, setActiveCluster } = useClusterStore();
-  
+  const storedBackendUrl = useBackendConfigStore((s) => s.backendBaseUrl);
+  const backendBaseUrl = getEffectiveBackendBaseUrl(storedBackendUrl);
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
+  const setCurrentClusterId = useBackendConfigStore((s) => s.setCurrentClusterId);
+  const clustersFromBackend = useClustersFromBackend();
+
+  const queryClient = useQueryClient();
   const [clusters, setClustersState] = useState<ClusterWithHealth[]>([]);
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [primaryClusterId, setPrimaryClusterId] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [showAddCluster, setShowAddCluster] = useState(false);
+  const [addKubeconfigPath, setAddKubeconfigPath] = useState('');
+  const [addContext, setAddContext] = useState('');
+  const [isAddingCluster, setIsAddingCluster] = useState(false);
 
-  // Initialize clusters with health check status
+  // When backend is configured: use cluster list from GET /api/v1/clusters (A3.2)
+  const backendClusters: ClusterWithHealth[] =
+    isBackendConfigured && clustersFromBackend.data
+      ? clustersFromBackend.data.map(backendClusterToDisplay)
+      : [];
+
+  // Clusters to display: from backend when configured, else from local state (kubeconfig or demo)
+  const displayClusters =
+    isBackendConfigured && clustersFromBackend.data
+      ? backendClusters
+      : clusters;
+
+  // Initialize clusters (kubeconfig or demo) when NOT using backend.
+  // Real health check: try fetching the cluster API server /readyz endpoint.
+  // No Math.random() — status is determined by actual reachability.
   useEffect(() => {
-    if (parsedClusters.length > 0) {
-      const clustersWithHealth: ClusterWithHealth[] = parsedClusters.map(c => ({
-        ...c,
-        isChecking: true,
-        status: 'unknown',
-      }));
-      setClustersState(clustersWithHealth);
-      
-      // Simulate health checks
-      clustersWithHealth.forEach((cluster, index) => {
-        setTimeout(() => {
-          setClustersState(prev => prev.map(c => {
-            if (c.id === cluster.id) {
-              // Simulate different results
-              const statuses: ParsedCluster['status'][] = ['healthy', 'healthy', 'healthy', 'warning', 'error'];
-              const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
-              return {
-                ...c,
-                isChecking: false,
-                status: randomStatus,
-                lastChecked: new Date(),
-                version: 'v1.28.4',
-                nodeCount: Math.floor(Math.random() * 10) + 1,
-                provider: detectProvider(c.server),
-              };
-            }
-            return c;
-          }));
-        }, 1000 + index * 500);
-      });
-    } else {
-      // Demo mode if no clusters
-      const demoClusters: ClusterWithHealth[] = [
-        {
-          id: 'prod-eks',
-          name: 'production-eks',
-          server: 'https://eks.us-east-1.amazonaws.com',
-          context: 'prod-eks',
-          user: 'admin',
-          namespace: 'default',
-          isConnected: false,
-          status: 'healthy',
-          isChecking: false,
-          version: 'v1.28.4',
-          nodeCount: 12,
-          provider: 'EKS',
-        },
-        {
-          id: 'staging-gke',
-          name: 'staging-gke',
-          server: 'https://gke.us-central1.google.com',
-          context: 'staging-gke',
-          user: 'admin',
-          namespace: 'default',
-          isConnected: false,
-          status: 'healthy',
-          isChecking: false,
-          version: 'v1.27.8',
-          nodeCount: 5,
-          provider: 'GKE',
-        },
-        {
-          id: 'dev-minikube',
-          name: 'dev-minikube',
-          server: 'https://192.168.49.2:8443',
-          context: 'minikube',
-          user: 'minikube',
-          namespace: 'default',
-          isConnected: false,
-          status: 'warning',
-          isChecking: false,
-          version: 'v1.29.0',
-          nodeCount: 1,
-          provider: 'Minikube',
-        },
-      ];
-      setClustersState(demoClusters);
+    if (backendBaseUrl) return;
+    if (parsedClusters.length === 0) {
+      setClustersState([]);
+      return;
     }
-  }, [parsedClusters]);
+
+    const clustersWithHealth: ClusterWithHealth[] = parsedClusters.map((c) => ({
+      ...c,
+      isChecking: true,
+      status: 'unknown' as ParsedCluster['status'],
+    }));
+    setClustersState(clustersWithHealth);
+
+    clustersWithHealth.forEach((cluster, index) => {
+      // Stagger health checks to avoid thundering-herd
+      setTimeout(async () => {
+        let clusterStatus: ParsedCluster['status'] = 'warning';
+        let version: string | undefined;
+        let nodeCount: number | undefined;
+
+        try {
+          // Try to reach the API server. Most browsers will fail with CORS,
+          // so we treat a network error as unknown/warning rather than error.
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 5000);
+          const res = await fetch(`${cluster.server}/readyz`, {
+            signal: controller.signal,
+            mode: 'no-cors', // avoid CORS preflight; we just need reachability
+          });
+          clearTimeout(timer);
+          // With no-cors the response is opaque — any response means reachable
+          clusterStatus = 'healthy';
+        } catch (err) {
+          if (err instanceof Error && err.name === 'AbortError') {
+            // Timed out — definitely not reachable
+            clusterStatus = 'error';
+          } else {
+            // Network error or CORS — cluster might still be reachable from the
+            // backend process; treat as warning rather than error
+            clusterStatus = 'warning';
+          }
+        }
+
+        setClustersState((prev) =>
+          prev.map((c) => {
+            if (c.id !== cluster.id) return c;
+            return {
+              ...c,
+              isChecking: false,
+              status: clusterStatus,
+              lastChecked: new Date(),
+              version: version ?? c.version,
+              nodeCount: nodeCount ?? c.nodeCount,
+              provider: detectProvider(c.server),
+            };
+          })
+        );
+      }, index * 300); // small stagger, no artificial 1-second delay
+    });
+  }, [parsedClusters, backendBaseUrl]);
 
   const detectProvider = (server: string): string => {
     if (server.includes('eks') || server.includes('amazonaws')) return 'EKS';
@@ -151,7 +199,13 @@ export default function ClusterSelection() {
   };
 
   const handleRemove = (clusterId: string) => {
-    setClustersState(prev => prev.filter(c => c.id !== clusterId));
+    if (isBackendConfigured) {
+      if (selectedClusterId === clusterId) setSelectedClusterId(null);
+      if (primaryClusterId === clusterId) setPrimaryClusterId(null);
+      toast.info('Remove cluster via backend or settings');
+      return;
+    }
+    setClustersState((prev) => prev.filter((c) => c.id !== clusterId));
     if (selectedClusterId === clusterId) setSelectedClusterId(null);
     if (primaryClusterId === clusterId) setPrimaryClusterId(null);
     toast.success('Cluster removed');
@@ -164,43 +218,57 @@ export default function ClusterSelection() {
 
   const handleConnect = async () => {
     if (!selectedClusterId) return;
-    
+
     setIsConnecting(true);
-    const cluster = clusters.find(c => c.id === selectedClusterId);
-    
-    // Simulate connection
-    await new Promise(r => setTimeout(r, 1500));
-    
-    if (cluster) {
-      selectCluster(cluster.id);
-      setAuthenticated(true);
-      
-      // Create proper cluster object for store
-      const activeCluster: Cluster = {
-        id: cluster.id,
-        name: cluster.name,
-        context: cluster.context,
-        version: cluster.version || 'v1.28.4',
-        status: cluster.status === 'error' ? 'error' : cluster.status === 'warning' ? 'warning' : 'healthy',
-        region: 'us-east-1',
-        provider: (cluster.provider?.toLowerCase() || 'eks') as Cluster['provider'],
-        nodes: cluster.nodeCount || 5,
-        namespaces: 8,
-        pods: { running: 120, pending: 3, failed: 1 },
-        cpu: { used: 65, total: 100 },
-        memory: { used: 70, total: 100 },
-      };
-      
+    const useBackend = isBackendConfigured && clustersFromBackend.data;
+    const displayItem = displayClusters.find((c) => c.id === selectedClusterId);
+    const backendItem = useBackend ? clustersFromBackend.data?.find((c) => c.id === selectedClusterId) : null;
+
+    if (useBackend && backendItem) {
+      setCurrentClusterId(backendItem.id);
+      const activeCluster = backendClusterToCluster(backendItem);
+      setClusters(clustersFromBackend.data!.map(backendClusterToCluster));
       setActiveCluster(activeCluster);
-      setDemo(true);
+      setDemo(false);
+      setAuthenticated(true);
+      setIsConnecting(false);
+      navigate('/dashboard');
+      return;
     }
-    
+
+    if (displayItem) {
+      await new Promise((r) => setTimeout(r, 1500));
+      selectCluster(displayItem.id);
+      setAuthenticated(true);
+      const server = displayItem.server ?? '';
+      const region = inferRegion(server) || '';
+      const provider = (displayItem.provider?.toLowerCase() || 'on-prem') as Cluster['provider'];
+      const normalized: Cluster['provider'] = ['eks', 'gke', 'aks', 'minikube', 'kind', 'on-prem'].includes(provider) ? provider : 'on-prem';
+      const activeCluster: Cluster = {
+        id: displayItem.id,
+        name: displayItem.name,
+        context: displayItem.context,
+        version: displayItem.version?.trim() ? displayItem.version : '—',
+        status: displayItem.status === 'error' ? 'error' : displayItem.status === 'warning' ? 'warning' : 'healthy',
+        region,
+        provider: normalized,
+        nodes: displayItem.nodeCount ?? 0,
+        namespaces: 0,
+        pods: { running: 0, pending: 0, failed: 0 },
+        cpu: { used: 0, total: 100 },
+        memory: { used: 0, total: 100 },
+      };
+      setCurrentClusterId(displayItem.id);
+      setActiveCluster(activeCluster);
+      setDemo(false);
+    }
+    setIsConnecting(false);
     navigate('/dashboard');
   };
 
-  const healthyCount = clusters.filter(c => c.status === 'healthy').length;
-  const warningCount = clusters.filter(c => c.status === 'warning').length;
-  const errorCount = clusters.filter(c => c.status === 'error').length;
+  const healthyCount = displayClusters.filter((c) => c.status === 'healthy').length;
+  const warningCount = displayClusters.filter((c) => c.status === 'warning').length;
+  const errorCount = displayClusters.filter((c) => c.status === 'error').length;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/30">
@@ -280,9 +348,122 @@ export default function ClusterSelection() {
             )}
           </div>
 
+          {/* Backend loading / error */}
+          {isBackendConfigured && (
+            <>
+              {clustersFromBackend.isLoading && (
+                <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span>Loading clusters from backend…</span>
+                </div>
+              )}
+              {clustersFromBackend.error && (
+                <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 mb-6 flex items-center justify-between gap-4">
+                  <span className="text-sm text-destructive">
+                    {clustersFromBackend.error instanceof Error
+                      ? clustersFromBackend.error.message
+                      : 'Failed to load clusters from backend'}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => clustersFromBackend.refetch()}
+                    disabled={clustersFromBackend.isFetching}
+                  >
+                    <RefreshCw className={cn('h-4 w-4 mr-1', clustersFromBackend.isFetching && 'animate-spin')} />
+                    Retry
+                  </Button>
+                </div>
+              )}
+              {isBackendConfigured && clustersFromBackend.data && clustersFromBackend.data.length === 0 && (
+                <div className="rounded-lg border bg-muted/50 p-4 mb-6">
+                  <p className="text-sm text-muted-foreground text-center mb-4">
+                    No clusters registered. Add your cluster (e.g. Docker Desktop) by providing the kubeconfig path on the backend server and context name.
+                  </p>
+                  {!showAddCluster ? (
+                    <div className="flex justify-center">
+                      <Button onClick={() => setShowAddCluster(true)} className="gap-2">
+                        <Plus className="h-4 w-4" />
+                        Add cluster
+                      </Button>
+                    </div>
+                  ) : (
+                    <form
+                      className="space-y-3 max-w-md mx-auto"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!backendBaseUrl?.trim()) return;
+                        setIsAddingCluster(true);
+                        try {
+                          const path = addKubeconfigPath.trim() || '';
+                          const contextName = addContext.trim();
+                          if (!contextName) {
+                            toast.error('Context name is required (e.g. docker-desktop)');
+                            setIsAddingCluster(false);
+                            return;
+                          }
+                          await addCluster(backendBaseUrl, path, contextName);
+                          toast.success('Cluster added');
+                          setShowAddCluster(false);
+                          setAddKubeconfigPath('');
+                          setAddContext('');
+                          queryClient.invalidateQueries({ queryKey: ['backend', 'clusters'] });
+                          clustersFromBackend.refetch();
+                        } catch (err) {
+                          toast.error(err instanceof Error ? err.message : 'Failed to add cluster');
+                        } finally {
+                          setIsAddingCluster(false);
+                        }
+                      }}
+                    >
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground block mb-1">Kubeconfig path (on backend server)</label>
+                        <input
+                          type="text"
+                          className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                          placeholder="e.g. /Users/you/.kube/config or leave empty for default"
+                          value={addKubeconfigPath}
+                          onChange={(e) => setAddKubeconfigPath(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground block mb-1">Context name</label>
+                        <input
+                          type="text"
+                          className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                          placeholder="e.g. docker-desktop or default"
+                          value={addContext}
+                          onChange={(e) => setAddContext(e.target.value)}
+                        />
+                      </div>
+                      <div className="flex gap-2 justify-end">
+                        <Button type="button" variant="outline" onClick={() => setShowAddCluster(false)}>
+                          Cancel
+                        </Button>
+                        <Button type="submit" disabled={isAddingCluster}>
+                          {isAddingCluster ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add cluster'}
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Empty state when no backend and no kubeconfig */}
+          {!isBackendConfigured && displayClusters.length === 0 && (
+            <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center mb-8">
+              <p className="text-muted-foreground mb-4">No clusters available. Set the backend URL in Settings (e.g. {DEFAULT_BACKEND_BASE_URL}) to use Docker Desktop or other clusters, or go back to add kubeconfig.</p>
+              <div className="flex gap-2 justify-center flex-wrap">
+                <Button variant="outline" onClick={() => navigate('/settings')}>Settings</Button>
+                <Button variant="outline" onClick={() => navigate('/setup/kubeconfig')}>Back to kubeconfig</Button>
+              </div>
+            </div>
+          )}
           {/* Cluster List */}
           <div className="space-y-3 mb-8">
-            {clusters.map((cluster) => (
+            {(!isBackendConfigured || !clustersFromBackend.isLoading) && displayClusters.map((cluster) => (
               <Card
                 key={cluster.id}
                 className={cn(

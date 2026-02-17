@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Copy, Download, Edit3, CheckCircle2, AlertCircle, RotateCcw, Save, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -82,6 +82,13 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave }: Yam
   const [editedYaml, setEditedYaml] = useState(yaml);
   const [errors, setErrors] = useState<YamlValidationError[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  /** Bump to remount editable editor so it gets fresh value (e.g. after Reset). Avoids controlled sync overwriting typing. */
+  const [editorKey, setEditorKey] = useState(0);
+
+  // Sync editedYaml when parent yaml changes (e.g. after refetch) and we're not editing
+  useEffect(() => {
+    if (!isEditing) setEditedYaml(yaml);
+  }, [yaml, isEditing]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(isEditing ? editedYaml : yaml);
@@ -105,6 +112,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave }: Yam
   const handleEdit = () => {
     setEditedYaml(yaml);
     setErrors([]);
+    setEditorKey((k) => k + 1);
     setIsEditing(true);
   };
 
@@ -117,6 +125,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave }: Yam
   const handleReset = () => {
     setEditedYaml(yaml);
     setErrors([]);
+    setEditorKey((k) => k + 1); // Remount editor so it shows original yaml
   };
 
   const handleYamlChange = useCallback((value: string) => {
@@ -204,6 +213,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave }: Yam
           <div className="flex gap-4">
             <div className="flex-1">
               <CodeEditor
+                key={`yaml-edit-${editorKey}`}
                 value={editedYaml}
                 onChange={handleYamlChange}
                 minHeight="500px"

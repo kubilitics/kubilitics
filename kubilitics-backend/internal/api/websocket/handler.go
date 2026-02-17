@@ -72,7 +72,8 @@ func (h *Handler) SetupInformerHandlers() {
 	for _, resourceType := range resourceTypes {
 		rt := resourceType // Capture for closure
 		h.informerMgr.RegisterHandler(rt, func(eventType string, obj interface{}) {
-			if err := h.hub.BroadcastResourceEvent(eventType, rt, obj); err != nil {
+			// clusterID/namespace can be passed when informers are per-cluster (invokes topology cache invalidation)
+			if err := h.hub.BroadcastResourceEvent("", "", eventType, rt, obj); err != nil {
 				log.Printf("Failed to broadcast %s event for %s: %v", eventType, rt, err)
 			}
 		})

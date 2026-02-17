@@ -1,15 +1,25 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { FileCode, Clock, Layers, Download, Trash2, Package, Code, List, ExternalLink } from 'lucide-react';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { FileCode, Clock, Layers, Download, Trash2, Package, Code, List, ExternalLink, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs, TopologyViewer,
-  YamlViewer, YamlCompareViewer, EventsSection, ActionsSection,
-  type TopologyNode, type TopologyEdge, type ResourceStatus, type EventInfo, type YamlVersion,
+  ResourceDetailLayout,
+  
+  YamlViewer,
+  YamlCompareViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  ResourceTopologyView,
+  
+  
+  type ResourceStatus,
+  type EventInfo,
+  type YamlVersion,
 } from '@/components/resources';
 
 const mockCRD = {
@@ -47,99 +57,25 @@ const mockCRInstances = [
 
 const mockEvents: EventInfo[] = [];
 
-const topologyNodes: TopologyNode[] = [
-  { id: 'crd', type: 'configmap', name: mockCRD.kind, status: 'healthy', isCurrent: true },
-  ...mockCRInstances.map((cr, i) => ({
-    id: `cr${i}`,
-    type: 'secret' as const,
-    name: cr.name,
-    status: cr.ready ? 'healthy' as const : 'warning' as const,
-  })),
-];
-
-const topologyEdges: TopologyEdge[] = mockCRInstances.map((_, i) => ({
-  from: 'crd',
-  to: `cr${i}`,
-  label: 'Defines',
-}));
-
-const yaml = `apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: certificates.cert-manager.io
-spec:
-  group: cert-manager.io
-  names:
-    kind: Certificate
-    listKind: CertificateList
-    plural: certificates
-    singular: certificate
-    shortNames:
-    - cert
-    - certs
-  scope: Namespaced
-  versions:
-  - name: v1
-    served: true
-    storage: true
-    schema:
-      openAPIV3Schema:
-        type: object
-        properties:
-          spec:
-            type: object
-            properties:
-              secretName:
-                type: string
-              issuerRef:
-                type: object
-    additionalPrinterColumns:
-    - name: Ready
-      type: string
-      jsonPath: .status.conditions[?(@.type=="Ready")].status
-    - name: Secret
-      type: string
-      jsonPath: .spec.secretName
-    - name: Age
-      type: date
-      jsonPath: .metadata.creationTimestamp
-  - name: v1alpha2
-    served: true
-    storage: false
-status:
-  conditions:
-  - type: Established
-    status: "True"
-  - type: NamesAccepted
-    status: "True"`;
-
 export default function CustomResourceDefinitionDetail() {
   const { name } = useParams();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const crd = mockCRD;
 
-  // Mock YAML versions for comparison
-  const yamlVersions: YamlVersion[] = [
-    { id: 'current', label: 'Current Version', yaml, timestamp: 'now' },
-    { id: 'previous', label: 'Previous Version', yaml: yaml.replace('served: true', 'served: false'), timestamp: '2 hours ago' },
-    { id: 'initial', label: 'Initial Version', yaml: yaml.replace('storage: true', 'storage: false'), timestamp: '1 day ago' },
-  ];
+  const handleDownloadYaml = useCallback(() => {
+    const blob = new Blob(['apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n...'], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${crd.name || 'crd'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [crd.name]);
 
-  const handleSaveYaml = async (newYaml: string) => {
-    toast.success('CRD updated successfully');
-    console.log('Saving YAML:', newYaml);
-  };
-
-  const handleNodeClick = (node: TopologyNode) => {
-    // Navigate to custom resource instance
-    if (node.type === 'secret') {
-      const cr = mockCRInstances.find(c => c.name === node.name);
-      if (cr) {
-        toast.info(`Navigate to ${crd.plural}/${cr.namespace}/${cr.name}`);
-      }
-    }
-  };
+  const yaml = 'apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n...';
+  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
 
   const statusCards = [
     { label: 'Group', value: crd.group, icon: Package, iconColor: 'primary' as const },
@@ -335,35 +271,62 @@ export default function CustomResourceDefinitionDetail() {
     { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
     { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={crd.name} editable onSave={handleSaveYaml} /> },
     { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={crd.name} /> },
-    { id: 'topology', label: 'Topology', content: <TopologyViewer nodes={topologyNodes} edges={topologyEdges} onNodeClick={handleNodeClick} /> },
+    {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('CustomResourceDefinition')}
+          namespace={''}
+          name={name ?? ''}
+          sourceResourceType="CustomResourceDefinition"
+          sourceResourceName={crd?.name ?? name ?? ''}
+        />
+      ),
+    },
     {
       id: 'actions',
       label: 'Actions',
       content: (
         <ActionsSection actions={[
-          { icon: Download, label: 'Download YAML', description: 'Export CRD definition' },
-          { icon: Trash2, label: 'Delete CRD', description: 'Remove this custom resource definition', variant: 'destructive' },
+          { icon: Download, label: 'Download YAML', description: 'Export CRD definition', onClick: handleDownloadYaml },
+          { icon: Trash2, label: 'Delete CRD', description: 'Remove this custom resource definition', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]} />
       ),
     },
   ];
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="CustomResourceDefinition"
         resourceIcon={FileCode}
         name={crd.name}
         status="Healthy"
         backLink="/customresourcedefinitions"
         backLabel="Custom Resource Definitions"
-        metadata={<span className="flex items-center gap-1.5 ml-2"><Clock className="h-3.5 w-3.5" />Created {crd.age}</span>}
+        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {crd.age}</span>}
         actions={[
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="CustomResourceDefinition"
+        resourceName={crd.name}
+        onConfirm={() => {
+          toast.success(`CRD ${crd.name} deleted (demo mode)`);
+          navigate('/customresourcedefinitions');
+        }}
+        requireNameConfirmation
+      />
+    </>
   );
 }

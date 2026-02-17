@@ -118,6 +118,10 @@ go test -v -race -coverprofile=coverage.out ./...
 go test -v ./test/integration/...
 ```
 
+## Development notes
+
+**Topology:** After changing backend topology code (e.g. `internal/topology/engine_resource.go`), do a clean rebuild and restart: from repo root run `make clean && make backend`, then start the backend (e.g. `./scripts/restart.sh`). Resource-scoped topology (including Node) uses the running binary’s switch and `ResourceTopologyKinds`; an old or cached binary may return "resource topology not implemented" for kinds that are already supported in source.
+
 ## Deployment
 
 ### Docker

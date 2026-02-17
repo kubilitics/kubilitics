@@ -1,0 +1,77 @@
+# Default values for kubilitics backend (R2.1)
+# helm install kubilitics ./deploy/helm/kubilitics -f values.yaml
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/kubilitics/kubilitics-backend
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+
+# Backend listens on this port
+service:
+  type: ClusterIP
+  port: 8080
+
+# Persistence for SQLite database
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 1Gi
+  # mountPath is /data in the container
+
+# Config: env vars (prefix KUBILITICS_)
+# See internal/config for all options
+config:
+  port: 8080
+  databasePath: "/data/kubilitics.db"
+  logLevel: "info"
+  # allowedOrigins for CORS (comma-separated in env)
+  allowedOrigins: "*"
+  requestTimeoutSec: 30
+  topologyTimeoutSec: 30
+  shutdownTimeoutSec: 15
+  maxClusters: 100
+  k8sTimeoutSec: 15
+  topologyCacheTtlSec: 30
+  topologyMaxNodes: 5000
+
+# Use in-cluster kubeconfig (default). For multiple clusters, backend adds them via API.
+# kubeconfig: leave empty to use in-cluster service account
+kubeconfig: {}
+
+# Ingress (optional)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: kubilitics.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Optional: deploy frontend as static files served by backend or separate nginx (R2.2)
+frontend:
+  enabled: false
+  # When true, consider adding an nginx sidecar or serving static from backend
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

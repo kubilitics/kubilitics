@@ -31,9 +31,16 @@ jobs:
       run: go mod download
     
     - name: Run tests
-      working-directory: kubilitics-backend
       run: |
-        go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+        mkdir -p test_reports/backend
+        cd kubilitics-backend && go test -v -race -coverprofile=coverage.out -covermode=atomic ./... 2>&1 | tee ../test_reports/backend/test.log
+    
+    - name: Upload test report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: backend-test-report
+        path: test_reports/backend/
     
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4

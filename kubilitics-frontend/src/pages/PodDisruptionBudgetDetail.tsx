@@ -1,75 +1,118 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Shield, Clock, Download, Trash2, Server, AlertTriangle } from 'lucide-react';
+import { Shield, Clock, Download, Trash2, Server, AlertTriangle, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from 'sonner';
 import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs, TopologyViewer, MetadataCard, YamlViewer, EventsSection, ActionsSection,
-  type TopologyNode, type TopologyEdge, type ResourceStatus, type EventInfo,
+  ResourceDetailLayout,
+  YamlViewer,
+  YamlCompareViewer,
+  MetadataCard,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  ResourceTopologyView,
+  type ResourceStatus,
+  type YamlVersion,
 } from '@/components/resources';
+import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
+import { useDeleteK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 
-const mockPDB = {
-  name: 'nginx-pdb',
-  namespace: 'production',
-  status: 'Healthy' as ResourceStatus,
-  minAvailable: 2,
-  maxUnavailable: null,
-  selector: { matchLabels: { app: 'nginx' } },
-  currentHealthy: 3,
-  desiredHealthy: 2,
-  disruptionsAllowed: 1,
-  expectedPods: 3,
-  observedGeneration: 1,
-  conditions: [
-    { type: 'DisruptionAllowed', status: 'True', reason: 'SufficientPods' },
-  ],
-  age: '30d',
-  labels: { app: 'nginx' },
-};
-
-const mockEvents: EventInfo[] = [];
-
-const topologyNodes: TopologyNode[] = [
-  { id: 'pdb', type: 'pdb', name: 'nginx-pdb', status: 'healthy', isCurrent: true },
-  { id: 'pod1', type: 'pod', name: 'nginx-abc12', status: 'healthy' },
-  { id: 'pod2', type: 'pod', name: 'nginx-def34', status: 'healthy' },
-  { id: 'pod3', type: 'pod', name: 'nginx-ghi56', status: 'healthy' },
-];
-
-const topologyEdges: TopologyEdge[] = [
-  { from: 'pdb', to: 'pod1', label: 'Protects' },
-  { from: 'pdb', to: 'pod2', label: 'Protects' },
-  { from: 'pdb', to: 'pod3', label: 'Protects' },
-];
-
-const yaml = `apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: nginx-pdb
-  namespace: production
-spec:
-  minAvailable: 2
-  selector:
-    matchLabels:
-      app: nginx`;
+interface PDBResource extends KubernetesResource {
+  spec?: {
+    minAvailable?: number | string;
+    maxUnavailable?: number | string;
+    selector?: { matchLabels?: Record<string, string> };
+  };
+  status?: {
+    currentHealthy?: number;
+    desiredHealthy?: number;
+    disruptionsAllowed?: number;
+    expectedPods?: number;
+    conditions?: Array<{ type?: string; status?: string; reason?: string; message?: string }>;
+  };
+}
 
 export default function PodDisruptionBudgetDetail() {
-  const { namespace, name } = useParams();
+  const { namespace, name } = useParams<{ namespace: string; name: string }>();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
-  const pdb = mockPDB;
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const { isConnected } = useConnectionStatus();
+
+  const { resource, isLoading, error: resourceError, age, yaml, refetch } = useResourceDetail<PDBResource>(
+    'poddisruptionbudgets',
+    name ?? undefined,
+    namespace ?? undefined,
+    undefined as unknown as PDBResource
+  );
+  const { events, refetch: refetchEvents } = useResourceEvents('PodDisruptionBudget', namespace ?? undefined, name ?? undefined);
+  const deleteResource = useDeleteK8sResource('poddisruptionbudgets');
+
+  const pdbName = resource?.metadata?.name ?? name ?? '';
+  const pdbNamespace = resource?.metadata?.namespace ?? namespace ?? '';
+  const minAvailable = resource?.spec?.minAvailable;
+  const maxUnavailable = resource?.spec?.maxUnavailable;
+  const selector = resource?.spec?.selector?.matchLabels ?? {};
+  const currentHealthy = resource?.status?.currentHealthy ?? 0;
+  const desiredHealthy = resource?.status?.desiredHealthy ?? 0;
+  const disruptionsAllowed = resource?.status?.disruptionsAllowed ?? 0;
+  const expectedPods = resource?.status?.expectedPods ?? 0;
+  const conditions = resource?.status?.conditions ?? [];
+  const labels = resource?.metadata?.labels ?? {};
+  const annotations = resource?.metadata?.annotations ?? {};
+
+  const handleDownloadYaml = useCallback(() => {
+    if (!yaml) return;
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${pdbName || 'pdb'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [yaml, pdbName]);
+
+  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
 
   const statusCards = [
-    { label: 'Min Available', value: pdb.minAvailable ?? '-', icon: Server, iconColor: 'primary' as const },
-    { label: 'Healthy Pods', value: `${pdb.currentHealthy}/${pdb.expectedPods}`, icon: Server, iconColor: 'success' as const },
-    { label: 'Disruptions Allowed', value: pdb.disruptionsAllowed, icon: AlertTriangle, iconColor: pdb.disruptionsAllowed > 0 ? 'info' as const : 'warning' as const },
-    { label: 'Age', value: pdb.age, icon: Clock, iconColor: 'muted' as const },
+    { label: 'Min Available', value: minAvailable != null && minAvailable !== '' ? String(minAvailable) : '–', icon: Server, iconColor: 'primary' as const },
+    { label: 'Healthy Pods', value: `${currentHealthy}/${expectedPods > 0 ? expectedPods : desiredHealthy}`, icon: Server, iconColor: 'success' as const },
+    { label: 'Disruptions Allowed', value: disruptionsAllowed, icon: AlertTriangle, iconColor: disruptionsAllowed > 0 ? 'info' as const : 'warning' as const },
+    { label: 'Age', value: age, icon: Clock, iconColor: 'muted' as const },
   ];
 
-  const handleNodeClick = (node: TopologyNode) => {
-    if (node.type === 'pod') navigate(`/pods/${namespace}/${node.name}`);
-  };
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  if (isConnected && (resourceError || !resource?.metadata?.name)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
+        <Shield className="h-12 w-12 text-muted-foreground" />
+        <p className="text-lg font-medium">PDB not found</p>
+        <p className="text-sm text-muted-foreground">
+          {namespace && name ? `No PDB "${name}" in namespace "${namespace}".` : 'Missing namespace or name.'}
+        </p>
+        <Button variant="outline" onClick={() => navigate('/poddisruptionbudgets')}>Back to PDBs</Button>
+      </div>
+    );
+  }
 
   const tabs = [
     {
@@ -83,11 +126,11 @@ export default function PodDisruptionBudgetDetail() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-3 rounded-lg bg-muted/50">
                   <p className="text-muted-foreground text-sm mb-1">Min Available</p>
-                  <p className="text-xl font-bold">{pdb.minAvailable ?? 'N/A'}</p>
+                  <p className="text-xl font-bold">{minAvailable != null && minAvailable !== '' ? String(minAvailable) : '–'}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-muted/50">
                   <p className="text-muted-foreground text-sm mb-1">Max Unavailable</p>
-                  <p className="text-xl font-bold">{pdb.maxUnavailable ?? 'N/A'}</p>
+                  <p className="text-xl font-bold">{maxUnavailable != null && maxUnavailable !== '' ? String(maxUnavailable) : '–'}</p>
                 </div>
               </div>
             </CardContent>
@@ -97,15 +140,15 @@ export default function PodDisruptionBudgetDetail() {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div className="p-3 rounded-lg bg-muted/50">
-                  <p className="text-xl font-bold">{pdb.expectedPods}</p>
-                  <p className="text-xs text-muted-foreground">Expected</p>
+                  <p className="text-xl font-bold">{expectedPods > 0 ? expectedPods : desiredHealthy}</p>
+                  <p className="text-xs text-muted-foreground">Expected / Desired</p>
                 </div>
                 <div className="p-3 rounded-lg bg-[hsl(var(--success))]/10">
-                  <p className="text-xl font-bold text-[hsl(var(--success))]">{pdb.currentHealthy}</p>
+                  <p className="text-xl font-bold text-[hsl(var(--success))]">{currentHealthy}</p>
                   <p className="text-xs text-muted-foreground">Healthy</p>
                 </div>
                 <div className="p-3 rounded-lg bg-primary/10">
-                  <p className="text-xl font-bold text-primary">{pdb.disruptionsAllowed}</p>
+                  <p className="text-xl font-bold text-primary">{disruptionsAllowed}</p>
                   <p className="text-xs text-muted-foreground">Allowed</p>
                 </div>
               </div>
@@ -114,62 +157,107 @@ export default function PodDisruptionBudgetDetail() {
           <Card>
             <CardHeader><CardTitle className="text-base">Pod Selector</CardTitle></CardHeader>
             <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(pdb.selector.matchLabels).map(([key, value]) => (
-                  <Badge key={key} variant="outline" className="font-mono text-xs">{key}={value}</Badge>
-                ))}
-              </div>
+              {Object.keys(selector).length === 0 ? (
+                <p className="text-muted-foreground text-sm">No selector.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(selector).map(([k, v]) => (
+                    <Badge key={k} variant="outline" className="font-mono text-xs">{k}={v}</Badge>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
           <Card>
             <CardHeader><CardTitle className="text-base">Conditions</CardTitle></CardHeader>
             <CardContent>
-              <div className="space-y-2">
-                {pdb.conditions.map((condition) => (
-                  <div key={condition.type} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                    <span className="font-medium">{condition.type}</span>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={condition.status === 'True' ? 'default' : 'secondary'}>{condition.status}</Badge>
-                      <span className="text-sm text-muted-foreground">{condition.reason}</span>
+              {conditions.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No conditions.</p>
+              ) : (
+                <div className="space-y-2">
+                  {conditions.map((c, i) => (
+                    <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                      <span className="font-medium">{c.type}</span>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={c.status === 'True' ? 'default' : 'secondary'}>{c.status}</Badge>
+                        {c.reason && <span className="text-sm text-muted-foreground">{c.reason}</span>}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
+          <MetadataCard title="Labels" items={labels} variant="badges" />
+          {Object.keys(annotations).length > 0 && <MetadataCard title="Annotations" items={annotations} variant="badges" />}
         </div>
       ),
     },
-    { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={pdb.name} /> },
-    { id: 'topology', label: 'Topology', content: <TopologyViewer nodes={topologyNodes} edges={topologyEdges} onNodeClick={handleNodeClick} /> },
+    { id: 'events', label: 'Events', content: <EventsSection events={events} /> },
+    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={pdbName} /> },
+    { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={pdbName} /> },
+    {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('PodDisruptionBudget')}
+          namespace={namespace ?? ''}
+          name={name ?? ''}
+          sourceResourceType="PodDisruptionBudget"
+          sourceResourceName={resource?.metadata?.name ?? name ?? ''}
+        />
+      ),
+    },
     {
       id: 'actions',
       label: 'Actions',
       content: (
-        <ActionsSection actions={[
-          { icon: Download, label: 'Download YAML', description: 'Export PDB definition' },
-          { icon: Trash2, label: 'Delete PDB', description: 'Remove this disruption budget', variant: 'destructive' },
-        ]} />
+        <ActionsSection
+          actions={[
+            { icon: Download, label: 'Download YAML', description: 'Export PDB definition', onClick: handleDownloadYaml },
+            { icon: Trash2, label: 'Delete PDB', description: 'Remove this disruption budget', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
+          ]}
+        />
       ),
     },
   ];
 
+  const status: ResourceStatus = disruptionsAllowed > 0 || currentHealthy >= desiredHealthy ? 'Healthy' : 'Progressing';
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="PodDisruptionBudget"
         resourceIcon={Shield}
-        name={pdb.name}
-        namespace={pdb.namespace}
-        status={pdb.status}
+        name={pdbName}
+        namespace={pdbNamespace}
+        status={status}
         backLink="/poddisruptionbudgets"
         backLabel="PDBs"
-        metadata={<span className="flex items-center gap-1.5 ml-2"><Clock className="h-3.5 w-3.5" />Created {pdb.age}</span>}
-        actions={[{ label: 'Delete', icon: Trash2, variant: 'destructive' }]}
+        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {age}</span>}
+        actions={[
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
+        ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="PodDisruptionBudget"
+        resourceName={pdbName}
+        namespace={pdbNamespace}
+        onConfirm={async () => {
+          await deleteResource.mutateAsync({ name: pdbName, namespace: pdbNamespace });
+          navigate('/poddisruptionbudgets');
+        }}
+        requireNameConfirmation
+      />
+    </>
   );
 }

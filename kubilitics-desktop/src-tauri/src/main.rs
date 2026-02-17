@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod menu;
 mod sidecar;
 
 fn main() {
@@ -24,9 +25,26 @@ fn main() {
             commands::select_kubeconfig_file,
         ])
         .setup(|app| {
+            // Native menu (R1.4): File, Edit, View, Help
+            if let Ok(menu) = menu::build_app_menu(&app.handle()) {
+                let _ = app.set_menu(menu.clone());
+                app.on_menu_event(move |app_handle, event| {
+                    match event.id().0.as_str() {
+                        "refresh" => {
+                            let _ = app_handle.emit("menu-refresh", ());
+                        }
+                        "docs" => {
+                            let _ = app_handle.emit("menu-docs", ());
+                        }
+                        "about" => {
+                            let _ = app_handle.emit("menu-about", ());
+                        }
+                        _ => {}
+                    }
+                });
+            }
             // Start Go backend sidecar
             sidecar::start_backend(&app.handle())?;
-            
             Ok(())
         })
         .run(tauri::generate_context!())

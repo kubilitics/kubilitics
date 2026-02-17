@@ -1,0 +1,85 @@
+# Demo Jobs for Kubilitics (3-10 objects). Apply after namespace.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: demo-job-one
+  namespace: kubilitics-demo
+  labels:
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: run
+          image: busybox:1.36
+          command: ["echo", "job one done"]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: demo-job-two
+  namespace: kubilitics-demo
+  labels:
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: run
+          image: busybox:1.36
+          command: ["echo", "job two done"]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: demo-job-three
+  namespace: kubilitics-demo
+  labels:
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: run
+          image: busybox:1.36
+          command: ["echo", "job three done"]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: demo-job-four
+  namespace: kubilitics-demo
+  labels:
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: run
+          image: busybox:1.36
+          command: ["echo", "job four done"]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: demo-job-five
+  namespace: kubilitics-demo
+  labels:
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: run
+          image: busybox:1.36
+          command: ["echo", "job five done"]

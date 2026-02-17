@@ -25,15 +25,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { parseRawLogs, parseLogLine, detectLevel, levelColors, type LogEntry } from '@/lib/logParser';
 import { useK8sPodLogs } from '@/hooks/useKubernetes';
-import { useKubernetesConfigStore } from '@/stores/kubernetesConfigStore';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 
-export interface LogEntry {
-  timestamp: string;
-  level: 'info' | 'warn' | 'error' | 'debug';
-  message: string;
-  raw?: string;
-}
+export type { LogEntry };
 
 export interface LogViewerProps {
   logs?: LogEntry[];
@@ -46,87 +42,9 @@ export interface LogViewerProps {
   tailLines?: number;
 }
 
-const levelColors: Record<string, string> = {
-  info: 'text-[hsl(var(--info))]',
-  warn: 'text-[hsl(var(--warning))]',
-  error: 'text-[hsl(var(--error))]',
-  debug: 'text-muted-foreground',
-};
-
-// Parse a raw log line into structured LogEntry
-function parseLogLine(line: string): LogEntry {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return { timestamp: '', level: 'info', message: '', raw: line };
-  }
-
-  // Try to extract timestamp (ISO format at start)
-  const isoMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^\s]*)\s+(.*)$/);
-  if (isoMatch) {
-    const [, timestamp, rest] = isoMatch;
-    return {
-      timestamp,
-      level: detectLevel(rest),
-      message: rest,
-      raw: line,
-    };
-  }
-
-  // Try to extract timestamp with brackets
-  const bracketMatch = trimmed.match(/^\[([^\]]+)\]\s*(.*)$/);
-  if (bracketMatch) {
-    const [, timestamp, rest] = bracketMatch;
-    return {
-      timestamp,
-      level: detectLevel(rest),
-      message: rest,
-      raw: line,
-    };
-  }
-
-  // No timestamp found
-  return {
-    timestamp: new Date().toISOString(),
-    level: detectLevel(trimmed),
-    message: trimmed,
-    raw: line,
-  };
-}
-
-// Detect log level from message content
-function detectLevel(message: string): 'info' | 'warn' | 'error' | 'debug' {
-  const lower = message.toLowerCase();
-  if (lower.includes('error') || lower.includes('fatal') || lower.includes('panic') || lower.includes('exception')) {
-    return 'error';
-  }
-  if (lower.includes('warn') || lower.includes('warning')) {
-    return 'warn';
-  }
-  if (lower.includes('debug') || lower.includes('trace')) {
-    return 'debug';
-  }
-  return 'info';
-}
-
-// Parse raw log text into entries
-function parseRawLogs(rawLogs: string): LogEntry[] {
-  if (!rawLogs) return [];
-  return rawLogs
-    .split('\n')
-    .filter(line => line.trim())
-    .map(parseLogLine);
-}
-
-const mockLogs: LogEntry[] = [
-  { timestamp: '2025-12-30T09:42:47', level: 'info', message: '🚀 Application started successfully' },
-  { timestamp: '2025-12-30T09:42:47', level: 'info', message: '  Version: v1.0.0' },
-  { timestamp: '2025-12-30T09:42:48', level: 'info', message: "* Serving on port 8080" },
-  { timestamp: '2025-12-30T09:42:48', level: 'debug', message: 'Debug mode: off' },
-  { timestamp: '2025-12-30T09:42:48', level: 'warn', message: 'WARNING: This is a development server.' },
-  { timestamp: '2025-12-30T09:42:48', level: 'info', message: '* Running on http://0.0.0.0:8080' },
-  { timestamp: '2025-12-30T09:42:52', level: 'info', message: 'GET /health HTTP/1.1 200' },
-  { timestamp: '2025-12-30T09:42:57', level: 'info', message: 'GET /health HTTP/1.1 200' },
-];
+// No mock logs — show an empty state when no real data is available.
+// This avoids displaying fabricated timestamps that confuse users.
+const EMPTY_LOGS: LogEntry[] = [];
 
 export function LogViewer({ 
   logs: propLogs,
@@ -138,8 +56,7 @@ export function LogViewer({
   className,
   tailLines = 500,
 }: LogViewerProps) {
-  const { config } = useKubernetesConfigStore();
-  const isConnected = config.isConnected;
+  const { isConnected } = useConnectionStatus();
   
   const [isStreaming, setIsStreaming] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -167,8 +84,10 @@ export function LogViewer({
     }
   }, [rawLogs]);
 
-  // Determine which logs to display
-  const displayLogs = isConnected && podName && namespace ? localLogs : (propLogs || mockLogs);
+  // Determine which logs to display.
+  // Show real logs when connected with a pod/namespace; prop-provided logs as
+  // a secondary source (e.g. pre-fetched by parent); empty otherwise.
+  const displayLogs = isConnected && podName && namespace ? localLogs : (propLogs ?? EMPTY_LOGS);
 
   // Auto-scroll when streaming
   useEffect(() => {
@@ -219,7 +138,7 @@ export function LogViewer({
           ) : (
             <Badge variant="secondary" className="gap-1.5 text-xs">
               <WifiOff className="h-3 w-3" />
-              Mock Data
+              {!podName || !namespace ? 'No pod selected' : 'Offline'}
             </Badge>
           )}
           
@@ -345,7 +264,13 @@ export function LogViewer({
           <div className="p-4 space-y-0.5">
             {filteredLogs.length === 0 ? (
               <div className="text-muted-foreground text-center py-8">
-                {searchQuery || selectedLevel ? 'No logs match your filters' : 'No logs available'}
+                {searchQuery || selectedLevel
+                  ? 'No logs match your filters'
+                  : !podName || !namespace
+                    ? 'Select a pod to view its logs'
+                    : !isConnected
+                      ? 'Disconnected — reconnect to stream logs'
+                      : 'No logs yet — logs will appear here as they stream in'}
               </div>
             ) : (
               filteredLogs.map((log, i) => (

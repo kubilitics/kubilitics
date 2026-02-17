@@ -80,7 +80,7 @@ The complete API specification is available in:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/clusters/{id}/topology` | Get topology graph |
-| POST | `/clusters/{id}/topology/export` | Export topology (PNG/PDF/SVG/JSON) |
+| POST | `/clusters/{clusterId}/topology/export` | Export topology (PNG/PDF/SVG/JSON). **Returns 501** until implemented. |
 
 Query parameters for `/topology`:
 - `namespace` (optional): Filter by namespace
@@ -106,9 +106,9 @@ Supported resource kinds:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/clusters/{id}/logs/{namespace}/{pod}` | Get pod logs |
+| GET | `/clusters/{clusterId}/logs/{namespace}/{pod}` | Get pod logs. **Returns 501** until implemented (Phase B1.1). |
 
-Query parameters:
+Query parameters (when implemented):
 - `container`: Container name (required for multi-container pods)
 - `follow`: Follow logs (true/false)
 - `tail`: Number of lines to tail (default: 100)
@@ -118,16 +118,16 @@ Query parameters:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/clusters/{id}/metrics` | Get cluster metrics |
-| GET | `/clusters/{id}/metrics/{namespace}/{pod}` | Get pod metrics |
+| GET | `/clusters/{clusterId}/metrics` | Get cluster metrics. **Returns 501** until implemented (Phase B1.3). |
+| GET | `/clusters/{clusterId}/metrics/{namespace}/{pod}` | Get pod metrics. **Returns 501** until implemented (Phase B1.3). |
 
 ## Events
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/clusters/{id}/events` | Get Kubernetes events |
+| GET | `/clusters/{clusterId}/events` | Get Kubernetes events. **Returns 501** until implemented (Phase B1.2). |
 
-Query parameters:
+Query parameters (when implemented):
 - `namespace`: Filter by namespace
 - `resource_kind`: Filter by resource kind (e.g., "Pod")
 - `resource_name`: Filter by resource name

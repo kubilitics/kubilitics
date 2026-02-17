@@ -107,8 +107,7 @@ export default function WebsiteLanding() {
             <span className="text-xl font-semibold tracking-tight">Kubilitics</span>
           </a>
           <nav className="hidden md:flex items-center gap-6">
-            <a href="#how-it-works" className="text-sm text-muted-foreground hover:text-foreground transition-colors">How It Works</a>
-            <a href="#installation" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Installation</a>
+            <a href="#installation" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Install</a>
             <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Features</a>
             <a href="https://docs.kubilitics.io" className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">Docs <ExternalLink className="h-3 w-3" /></a>
           </nav>
@@ -119,8 +118,8 @@ export default function WebsiteLanding() {
               </Button>
             </a>
             <Button asChild>
-              <a href="https://app.kubilitics.io">
-                Launch App
+              <a href="#installation">
+                Get started
                 <ArrowRight className="ml-1.5 h-4 w-4" />
               </a>
             </Button>
@@ -149,18 +148,22 @@ export default function WebsiteLanding() {
               <span className="block mt-2 text-base">No accounts. No cloud. Your data stays yours.</span>
             </motion.p>
             <motion.div variants={item} className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
-              <Button size="lg" className="gap-2 text-base px-8 h-12">
-                <Download className="h-5 w-5" />
-                Download Desktop App
+              <Button size="lg" className="gap-2 text-base px-8 h-12" asChild>
+                <a href="#installation">
+                  <Download className="h-5 w-5" />
+                  Get started / Install
+                </a>
               </Button>
-              <Button size="lg" variant="outline" className="gap-2 text-base px-8 h-12">
-                <Terminal className="h-5 w-5" />
-                Install via Helm
+              <Button size="lg" variant="outline" className="gap-2 text-base px-8 h-12" asChild>
+                <a href="#installation">
+                  <Terminal className="h-5 w-5" />
+                  Helm / k3s / kind
+                </a>
               </Button>
               <Button size="lg" variant="ghost" className="gap-2 text-base px-6 h-12" asChild>
-                <a href="https://app.kubilitics.io?demo=true">
-                  <Play className="h-5 w-5" />
-                  Try Demo
+                <a href="https://github.com/kubilitics/kubilitics" target="_blank" rel="noopener noreferrer">
+                  <Github className="h-5 w-5" />
+                  GitHub
                 </a>
               </Button>
             </motion.div>
@@ -190,12 +193,12 @@ export default function WebsiteLanding() {
         </div>
       </section>
 
-      <section id="how-it-works" className="py-20">
+      <section id="installation" className="scroll-mt-20 py-20">
         <div className="container mx-auto px-4">
           <div className="text-center mb-12">
-            <Badge variant="outline" className="mb-4">How It Works</Badge>
+            <Badge variant="outline" className="mb-4">Install methods</Badge>
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4">Two ways to run. Zero cloud dependency.</h2>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">Choose the deployment mode that fits your workflow. Both are fully featured, completely free.</p>
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">Desktop download, Helm in-cluster, or run with k3s/kind. Choose what fits your workflow.</p>
           </div>
           <Tabs value={selectedMode} onValueChange={(v) => setSelectedMode(v as 'desktop' | 'helm')} className="max-w-4xl mx-auto">
             <TabsList className="grid w-full grid-cols-2 mb-8">
@@ -223,15 +226,17 @@ export default function WebsiteLanding() {
                   </div>
                   <div className="space-y-3">
                     {deploymentModes[0].platforms?.map((platform) => (
-                      <Button key={platform.name} variant="outline" className="w-full justify-between h-14">
-                        <span className="flex items-center gap-3">
-                          <platform.icon className="h-5 w-5" />
-                          <span className="font-medium">{platform.action}</span>
-                        </span>
-                        <Download className="h-4 w-4" />
+                      <Button key={platform.name} variant="outline" className="w-full justify-between h-14" asChild>
+                        <a href="https://github.com/kubilitics/kubilitics/releases" target="_blank" rel="noopener noreferrer">
+                          <span className="flex items-center gap-3">
+                            <platform.icon className="h-5 w-5" />
+                            <span className="font-medium">{platform.action}</span>
+                          </span>
+                          <Download className="h-4 w-4" />
+                        </a>
                       </Button>
                     ))}
-                    <p className="text-xs text-muted-foreground text-center pt-2">Requires macOS 10.15+, Windows 10+, or Linux (glibc 2.31+)</p>
+                    <p className="text-xs text-muted-foreground text-center pt-2">Desktop: macOS (Intel + Apple Silicon), Windows x64, Linux x64/ARM64 (DEB, AppImage). Download from GitHub Releases.</p>
                   </div>
                 </div>
               </motion.div>
@@ -245,14 +250,19 @@ export default function WebsiteLanding() {
                 <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm overflow-x-auto">
                   <pre className="text-foreground/90 whitespace-pre-wrap">{deploymentModes[1].code}</pre>
                 </div>
+                <p className="text-sm text-muted-foreground mt-4">For k3s or kind: create a cluster, then run the same <code className="bg-muted px-1 rounded">helm install</code> from this repo (chart in <code className="bg-muted px-1 rounded">deploy/helm/kubilitics/</code>).</p>
                 <div className="mt-6 flex items-center gap-4">
-                  <Button variant="outline" className="gap-2">
-                    <Github className="h-4 w-4" />
-                    View Helm Chart
+                  <Button variant="outline" className="gap-2" asChild>
+                    <a href="https://github.com/kubilitics/kubilitics/tree/main/deploy/helm/kubilitics" target="_blank" rel="noopener noreferrer">
+                      <Github className="h-4 w-4" />
+                      View Helm Chart
+                    </a>
                   </Button>
-                  <Button variant="ghost" className="gap-2">
-                    Read Installation Docs
-                    <ChevronRight className="h-4 w-4" />
+                  <Button variant="ghost" className="gap-2" asChild>
+                    <a href="https://github.com/kubilitics/kubilitics#-quick-start" target="_blank" rel="noopener noreferrer">
+                      Read Installation Docs
+                      <ChevronRight className="h-4 w-4" />
+                    </a>
                   </Button>
                 </div>
               </motion.div>
@@ -315,12 +325,14 @@ export default function WebsiteLanding() {
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4">Ready to make Kubernetes understandable?</h2>
             <p className="text-lg text-muted-foreground mb-8 max-w-xl mx-auto">Download the desktop app or install via Helm. 100% free, 100% open source.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Button size="lg" className="gap-2 text-base px-8">
-                <Download className="h-5 w-5" />
-                Download Desktop App
+              <Button size="lg" className="gap-2 text-base px-8" asChild>
+                <a href="https://github.com/kubilitics/kubilitics/releases" target="_blank" rel="noopener noreferrer">
+                  <Download className="h-5 w-5" />
+                  Download Desktop App
+                </a>
               </Button>
               <Button size="lg" variant="outline" className="gap-2 text-base px-8" asChild>
-                <a href="https://github.com/kubilitics/kubilitics">
+                <a href="https://github.com/kubilitics/kubilitics" target="_blank" rel="noopener noreferrer">
                   <Github className="h-5 w-5" />
                   Star on GitHub
                 </a>

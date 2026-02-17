@@ -4,16 +4,19 @@ import "time"
 
 // Event represents a Kubernetes event
 type Event struct {
-	ID             string    `json:"id"`
-	Type           string    `json:"type"`   // Normal, Warning, Error
-	Reason         string    `json:"reason"`
-	Message        string    `json:"message"`
-	ResourceKind   string    `json:"resource_kind"`
-	ResourceName   string    `json:"resource_name"`
-	Namespace      string    `json:"namespace"`
-	FirstTimestamp time.Time `json:"first_timestamp"`
-	LastTimestamp  time.Time `json:"last_timestamp"`
-	Count          int32     `json:"count"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`               // metadata.name (for detail link)
+	EventNamespace   string    `json:"event_namespace"`    // metadata.namespace (where event lives)
+	Type             string    `json:"type"`               // Normal, Warning, Error
+	Reason           string    `json:"reason"`
+	Message          string    `json:"message"`
+	ResourceKind     string    `json:"resource_kind"`
+	ResourceName     string    `json:"resource_name"`
+	Namespace        string    `json:"namespace"`          // involvedObject.namespace
+	FirstTimestamp   time.Time `json:"first_timestamp"`
+	LastTimestamp    time.Time `json:"last_timestamp"`
+	Count            int32     `json:"count"`
+	SourceComponent  string   `json:"source_component,omitempty"`
 }
 
 // WebSocketMessage represents a message sent via WebSocket

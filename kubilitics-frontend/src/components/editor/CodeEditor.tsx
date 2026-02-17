@@ -148,6 +148,8 @@ interface CodeEditorProps {
   fontSize?: 'small' | 'medium' | 'large';
 }
 
+const EMPTY_EXTENSIONS: Extension[] = [];
+
 const fontSizeMap = {
   small: '13px',
   medium: '15px',
@@ -160,13 +162,13 @@ export function CodeEditor({
   readOnly = false,
   className,
   minHeight = '400px',
-  extensions: additionalExtensions = [],
+  extensions: additionalExtensions = EMPTY_EXTENSIONS,
   fontSize = 'small',
 }: CodeEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
-  
+
   // Keep onChange ref updated
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -218,6 +220,10 @@ export function CodeEditor({
     return baseExtensions;
   }, [readOnly, additionalExtensions, fontSize]);
 
+  // When editable (onChange provided): use value only as initial doc; never overwrite from prop so typing is never reverted.
+  // When readOnly: sync value from prop so external updates (e.g. refetch) are shown.
+  const isControlled = !readOnly && typeof onChange === 'function';
+
   useEffect(() => {
     if (!editorRef.current) return;
 
@@ -239,19 +245,19 @@ export function CodeEditor({
     };
   }, [createExtensions]);
 
-  // Update content when value prop changes externally
+  // Only sync prop into editor when read-only (no onChange). Editable mode never overwrites doc from prop.
   useEffect(() => {
+    if (isControlled) return;
     const view = viewRef.current;
-    if (view && value !== view.state.doc.toString()) {
-      view.dispatch({
-        changes: {
-          from: 0,
-          to: view.state.doc.length,
-          insert: value,
-        },
-      });
-    }
-  }, [value]);
+    if (!view || value === view.state.doc.toString()) return;
+    view.dispatch({
+      changes: {
+        from: 0,
+        to: view.state.doc.length,
+        insert: value,
+      },
+    });
+  }, [value, isControlled]);
 
   return (
     <div

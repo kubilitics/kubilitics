@@ -116,7 +116,7 @@ func (s *exportService) generateSVG(topology *models.TopologyGraph) string {
 	// Add metadata
 	svg.WriteString(fmt.Sprintf(`    <text x="10" y="20" font-size="14" font-weight="bold">Topology: %d nodes, %d edges</text>
     <text x="10" y="40" font-size="12">Generated: %s</text>
-`, topology.Meta.NodeCount, topology.Meta.EdgeCount, time.Now().Format(time.RFC3339)))
+`, topology.Metadata.NodeCount, topology.Metadata.EdgeCount, time.Now().Format(time.RFC3339)))
 
 	// Draw edges first (so they appear behind nodes)
 	for i, edge := range topology.Edges {
@@ -149,7 +149,7 @@ func (s *exportService) generateSVG(topology *models.TopologyGraph) string {
 		// Node label
 		svg.WriteString(fmt.Sprintf(`    <text class="node-text" x="%d" y="%d">%s</text>
     <text class="node-text" x="%d" y="%d" font-size="10">%s</text>
-`, x, y-5, node.Type, x, y+10, node.Name))
+`, x, y-5, node.Kind, x, y+10, node.Name))
 	}
 
 	svg.WriteString(`  </g>

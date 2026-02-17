@@ -1,0 +1,115 @@
+# Demo Ingresses for Kubilitics (3-10 objects). Apply after Services and IngressClasses.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-web-a
+  namespace: kubilitics-demo
+  labels:
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: demo-web-a.kubilitics-demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-web-a
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-web-b
+  namespace: kubilitics-demo
+  labels:
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: demo-web-b.kubilitics-demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-web-b
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-api
+  namespace: kubilitics-demo
+  labels:
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: demo-api.kubilitics-demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-api
+                port:
+                  number: 5678
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-frontend
+  namespace: kubilitics-demo
+  labels:
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: demo-frontend.kubilitics-demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-frontend
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-multihost
+  namespace: kubilitics-demo
+  labels:
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: demo-a.kubilitics-demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-web-a
+                port:
+                  number: 80
+    - host: demo-b.kubilitics-demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-web-b
+                port:
+                  number: 80

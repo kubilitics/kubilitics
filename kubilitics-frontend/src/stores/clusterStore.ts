@@ -8,9 +8,10 @@ export interface Cluster {
   version: string;
   status: 'healthy' | 'warning' | 'error';
   region: string;
-  provider: 'eks' | 'gke' | 'aks' | 'minikube' | 'kind' | 'on-prem';
+  provider: 'eks' | 'gke' | 'aks' | 'minikube' | 'kind' | 'on-prem' | 'openshift' | 'rancher' | 'k3s' | 'docker-desktop';
   nodes: number;
   namespaces: number;
+  isCurrent?: boolean;
   pods: { running: number; pending: number; failed: number };
   cpu: { used: number; total: number };
   memory: { used: number; total: number };
@@ -29,11 +30,16 @@ interface ClusterState {
   activeNamespace: string;
   namespaces: Namespace[];
   isDemo: boolean;
+  appMode: 'desktop' | 'in-cluster' | null;
+  isOnboarded: boolean;
   setClusters: (clusters: Cluster[]) => void;
   setActiveCluster: (cluster: Cluster) => void;
   setActiveNamespace: (namespace: string) => void;
   setNamespaces: (namespaces: Namespace[]) => void;
   setDemo: (isDemo: boolean) => void;
+  setAppMode: (mode: 'desktop' | 'in-cluster' | null) => void;
+  setOnboarded: (onboarded: boolean) => void;
+  signOut: () => void;
 }
 
 // Demo mock data
@@ -101,10 +107,14 @@ export const useClusterStore = create<ClusterState>()(
       activeNamespace: 'all',
       namespaces: [],
       isDemo: false,
+      appMode: null,
+      isOnboarded: false,
       setClusters: (clusters) => set({ clusters }),
       setActiveCluster: (cluster) => set({ activeCluster: cluster }),
       setActiveNamespace: (namespace) => set({ activeNamespace: namespace }),
       setNamespaces: (namespaces) => set({ namespaces }),
+      setAppMode: (appMode) => set({ appMode }),
+      setOnboarded: (isOnboarded) => set({ isOnboarded }),
       setDemo: (isDemo) => {
         if (isDemo) {
           set({
@@ -114,9 +124,19 @@ export const useClusterStore = create<ClusterState>()(
             namespaces: demoNamespaces,
           });
         } else {
-          set({ isDemo, clusters: [], activeCluster: null, namespaces: [] });
+          set({ isDemo: false });
         }
       },
+      signOut: () =>
+        set({
+          clusters: [],
+          activeCluster: null,
+          activeNamespace: 'all',
+          namespaces: [],
+          isDemo: false,
+          appMode: null,
+          isOnboarded: false,
+        }),
     }),
     {
       name: 'kubilitics-cluster',

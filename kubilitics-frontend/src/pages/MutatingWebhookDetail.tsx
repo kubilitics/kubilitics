@@ -1,13 +1,19 @@
-import { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Webhook, Clock, Shield, Download, Trash2, AlertTriangle } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Webhook, Clock, Shield, Download, Trash2, AlertTriangle, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
 import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs,
-  YamlViewer, EventsSection, ActionsSection,
-  type ResourceStatus, type EventInfo,
+  ResourceDetailLayout,
+  YamlViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  ResourceTopologyView,
+  type ResourceStatus,
+  type EventInfo,
 } from '@/components/resources';
 
 const mockWebhook = {
@@ -61,8 +67,20 @@ webhooks:
 
 export default function MutatingWebhookDetail() {
   const { name } = useParams();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const wh = mockWebhook;
+
+  const handleDownloadYaml = useCallback(() => {
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${wh.name || 'mutatingwebhook'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [wh.name]);
 
   const statusCards = [
     { label: 'Webhooks', value: wh.webhooks.length, icon: Webhook, iconColor: 'primary' as const },
@@ -134,33 +152,61 @@ export default function MutatingWebhookDetail() {
     { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
     { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={wh.name} /> },
     {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('MutatingWebhookConfiguration')}
+          namespace={''}
+          name={name ?? ''}
+          sourceResourceType="MutatingWebhookConfiguration"
+          sourceResourceName={wh.name ?? name ?? ''}
+        />
+      ),
+    },
+    {
       id: 'actions',
       label: 'Actions',
       content: (
         <ActionsSection actions={[
-          { icon: Download, label: 'Download YAML', description: 'Export Webhook configuration' },
-          { icon: Trash2, label: 'Delete Webhook', description: 'Remove this webhook configuration', variant: 'destructive' },
+          { icon: Download, label: 'Download YAML', description: 'Export Webhook configuration', onClick: handleDownloadYaml },
+          { icon: Trash2, label: 'Delete Webhook', description: 'Remove this webhook configuration', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]} />
       ),
     },
   ];
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="MutatingWebhookConfiguration"
         resourceIcon={Webhook}
         name={wh.name}
         status={wh.status}
         backLink="/mutatingwebhooks"
         backLabel="Mutating Webhooks"
-        metadata={<span className="flex items-center gap-1.5 ml-2"><Clock className="h-3.5 w-3.5" />Created {wh.age}</span>}
+        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {wh.age}</span>}
         actions={[
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="MutatingWebhookConfiguration"
+        resourceName={wh.name}
+        onConfirm={() => {
+          toast.success(`MutatingWebhookConfiguration ${wh.name} deleted (demo mode)`);
+          navigate('/mutatingwebhooks');
+        }}
+        requireNameConfirmation
+      />
+    </>
   );
 }

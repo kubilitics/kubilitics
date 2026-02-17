@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { NamespaceBadge } from '@/components/list';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { CodeEditor } from '@/components/editor/CodeEditor';
 import { toast } from 'sonner';
@@ -30,7 +31,7 @@ function validateYaml(yaml: string): YamlValidationError[] {
   const errors: YamlValidationError[] = [];
   const lines = yaml.split('\n');
   
-  let indentStack: number[] = [0];
+  const indentStack: number[] = [0];
   let inMultilineString = false;
   
   lines.forEach((line, index) => {
@@ -188,7 +189,7 @@ export function YamlEditorDialog({
             <span className="font-mono font-medium text-foreground">{resourceName}</span>
             {namespace && (
               <>
-                {' '}in <Badge variant="outline">{namespace}</Badge>
+                {' '}in <NamespaceBadge namespace={namespace} />
               </>
             )}
           </DialogDescription>

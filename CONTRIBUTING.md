@@ -15,6 +15,8 @@ Thank you for your interest in contributing to Kubilitics! This document provide
 9. [Release Process](#release-process)
 10. [Community](#community)
 
+**Roadmap and tasks:** The single execution roadmap and task list (phases A–R, O, W, etc.) is in **[TASKS.md](TASKS.md)**. Use it to see what’s in scope, definition of done, and verification steps.
+
 ---
 
 ## Code of Conduct
@@ -443,6 +445,8 @@ Closes #123
 ---
 
 ## Release Process
+
+For full release automation and checklist, see **[docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md)**. Summary:
 
 ### Versioning
 

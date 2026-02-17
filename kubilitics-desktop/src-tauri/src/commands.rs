@@ -19,22 +19,30 @@ pub struct KubeconfigInfo {
     pub contexts: Vec<KubeconfigContext>,
 }
 
+// C4.1: Never include path or content in error messages (no secrets in logs).
+fn kubeconfig_read_error() -> String {
+    "Failed to read kubeconfig at configured path".to_string()
+}
+fn kubeconfig_parse_error() -> String {
+    "Failed to parse kubeconfig".to_string()
+}
+fn kubeconfig_write_error() -> String {
+    "Failed to write kubeconfig".to_string()
+}
+
 #[command]
 pub async fn read_kubeconfig(path: Option<String>) -> Result<String, String> {
     let kubeconfig_path = get_kubeconfig_path(path)?;
 
-    std::fs::read_to_string(kubeconfig_path)
-        .map_err(|e| format!("Failed to read kubeconfig: {}", e))
+    std::fs::read_to_string(kubeconfig_path).map_err(|_| kubeconfig_read_error())
 }
 
 #[command]
 pub async fn get_kubeconfig_info(path: Option<String>) -> Result<KubeconfigInfo, String> {
     let kubeconfig_path = get_kubeconfig_path(path.clone())?;
-    let content = std::fs::read_to_string(&kubeconfig_path)
-        .map_err(|e| format!("Failed to read kubeconfig: {}", e))?;
+    let content = std::fs::read_to_string(&kubeconfig_path).map_err(|_| kubeconfig_read_error())?;
     
-    let config: Value = serde_yaml::from_str(&content)
-        .map_err(|e| format!("Failed to parse kubeconfig: {}", e))?;
+    let config: Value = serde_yaml::from_str(&content).map_err(|_| kubeconfig_parse_error())?;
     
     let current_context = config.get("current-context")
         .and_then(|v| v.as_str())
@@ -52,11 +60,9 @@ pub async fn get_kubeconfig_info(path: Option<String>) -> Result<KubeconfigInfo,
 #[command]
 pub async fn switch_context(context_name: String) -> Result<(), String> {
     let kubeconfig_path = get_kubeconfig_path(None)?;
-    let content = std::fs::read_to_string(&kubeconfig_path)
-        .map_err(|e| format!("Failed to read kubeconfig: {}", e))?;
+    let content = std::fs::read_to_string(&kubeconfig_path).map_err(|_| kubeconfig_read_error())?;
     
-    let mut config: Value = serde_yaml::from_str(&content)
-        .map_err(|e| format!("Failed to parse kubeconfig: {}", e))?;
+    let mut config: Value = serde_yaml::from_str(&content).map_err(|_| kubeconfig_parse_error())?;
     
     // Validate context exists
     let contexts = parse_contexts(&config)?;
@@ -70,11 +76,9 @@ pub async fn switch_context(context_name: String) -> Result<(), String> {
     }
     
     // Write back
-    let yaml = serde_yaml::to_string(&config)
-        .map_err(|e| format!("Failed to serialize kubeconfig: {}", e))?;
+    let yaml = serde_yaml::to_string(&config).map_err(|_| kubeconfig_parse_error())?;
     
-    std::fs::write(&kubeconfig_path, yaml)
-        .map_err(|e| format!("Failed to write kubeconfig: {}", e))?;
+    std::fs::write(&kubeconfig_path, yaml).map_err(|_| kubeconfig_write_error())?;
     
     Ok(())
 }

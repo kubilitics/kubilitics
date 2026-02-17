@@ -1,5 +1,7 @@
 # Security Policy
 
+For the project roadmap and task list (including security-related tasks), see **[TASKS.md](TASKS.md)**. For secure defaults, RBAC, and secrets handling, see **docs/** (e.g. [SECURE-DEFAULTS.md](docs/SECURE-DEFAULTS.md), [SECURITY-RBAC.md](docs/SECURITY-RBAC.md), [SECURITY-SECRETS.md](docs/SECURITY-SECRETS.md)).
+
 ## Supported Versions
 
 We release patches for security vulnerabilities in the following versions:

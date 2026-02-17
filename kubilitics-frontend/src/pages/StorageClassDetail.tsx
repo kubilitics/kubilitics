@@ -1,162 +1,264 @@
-import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Layers, Clock, Download, Trash2, Server, Settings, Star } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Layers, Clock, Download, Trash2, Server, Settings, Star, Info, Network, Loader2, Edit, FileCode, GitCompare } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs, TopologyViewer, MetadataCard, YamlViewer, YamlCompareViewer, EventsSection, ActionsSection,
-  type TopologyNode, type TopologyEdge, type ResourceStatus, type EventInfo, type YamlVersion,
-} from '@/components/resources';
+import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
+import {
+  ResourceDetailLayout,
+  ResourceOverviewMetadata,
+  SectionCard,
+  YamlViewer,
+  YamlCompareViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  ResourceTopologyView,
+  type ResourceStatus,
+  type YamlVersion,
+} from '@/components/resources';
+import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
+import { useDeleteK8sResource, useUpdateK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { Breadcrumbs, useDetailBreadcrumbs } from '@/components/layout/Breadcrumbs';
+import { useClusterStore } from '@/stores/clusterStore';
+import { useBackendConfigStore } from '@/stores/backendConfigStore';
+import { useActiveClusterId } from '@/hooks/useActiveClusterId';
+import { Button } from '@/components/ui/button';
 
-const mockEvents: EventInfo[] = [];
-
-const mockStorageClass = {
-  name: 'standard',
-  status: 'Healthy' as ResourceStatus,
-  provisioner: 'kubernetes.io/gce-pd',
-  reclaimPolicy: 'Delete',
-  volumeBindingMode: 'Immediate',
-  allowVolumeExpansion: true,
-  isDefault: true,
-  age: '365d',
-  labels: { 'storageclass.kubernetes.io/is-default-class': 'true' },
-  parameters: { type: 'pd-standard', 'replication-type': 'none' },
-};
-
-const topologyNodes: TopologyNode[] = [
-  { id: 'sc', type: 'storageclass', name: 'standard', status: 'healthy', isCurrent: true },
-  { id: 'pv1', type: 'pv', name: 'pv-data-001', status: 'healthy' },
-  { id: 'pv2', type: 'pv', name: 'pv-logs-002', status: 'healthy' },
-  { id: 'pvc1', type: 'pvc', name: 'data-pvc', status: 'healthy' },
-  { id: 'pvc2', type: 'pvc', name: 'redis-pvc', status: 'warning' },
-];
-
-const topologyEdges: TopologyEdge[] = [
-  { from: 'sc', to: 'pv1', label: 'Provisions' },
-  { from: 'sc', to: 'pv2', label: 'Provisions' },
-  { from: 'pvc1', to: 'pv1', label: 'Binds' },
-  { from: 'pvc2', to: 'sc', label: 'Requests' },
-];
-
-const yaml = `apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: standard
-  annotations:
-    storageclass.kubernetes.io/is-default-class: "true"
-provisioner: kubernetes.io/gce-pd
-reclaimPolicy: Delete
-volumeBindingMode: Immediate
-allowVolumeExpansion: true
-parameters:
-  type: pd-standard
-  replication-type: none`;
+interface K8sStorageClass extends KubernetesResource {
+  provisioner?: string;
+  reclaimPolicy?: string;
+  volumeBindingMode?: string;
+  allowVolumeExpansion?: boolean;
+  parameters?: Record<string, string>;
+}
 
 export default function StorageClassDetail() {
   const { name } = useParams();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview');
-  const sc = mockStorageClass;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') || 'overview';
+  const [activeTab, setActiveTab] = useState(initialTab);
+  const { activeCluster } = useClusterStore();
+  const breadcrumbSegments = useDetailBreadcrumbs('StorageClass', name ?? undefined, undefined, activeCluster?.name);
+  const clusterId = useActiveClusterId();
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  // Mock YAML versions for comparison
-  const yamlVersions: YamlVersion[] = [
-    { id: 'current', label: 'Current Version', yaml, timestamp: 'now' },
-    { id: 'previous', label: 'Previous Version', yaml: yaml.replace('Delete', 'Retain'), timestamp: '2 hours ago' },
-    { id: 'initial', label: 'Initial Version', yaml: yaml.replace('Immediate', 'WaitForFirstConsumer'), timestamp: '1 day ago' },
-  ];
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
-  const handleSaveYaml = async (newYaml: string) => {
-    toast.success('StorageClass updated successfully');
-    console.log('Saving YAML:', newYaml);
-  };
+  const { resource: sc, isLoading, age, yaml, isConnected, refetch } = useResourceDetail<K8sStorageClass>(
+    'storageclasses',
+    name ?? '',
+    undefined,
+    undefined as unknown as K8sStorageClass
+  );
+  const { events, refetch: refetchEvents } = useResourceEvents('StorageClass', '', name ?? undefined);
+  const deleteSC = useDeleteK8sResource('storageclasses');
+  const updateSC = useUpdateK8sResource('storageclasses');
+
+  useEffect(() => {
+    if (!name?.trim()) navigate('/storageclasses', { replace: true });
+  }, [name, navigate]);
+
+  const handleDownloadYaml = useCallback(() => {
+    if (!yaml) return;
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${sc?.metadata?.name || 'storageclass'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [yaml, sc?.metadata?.name]);
+
+  if (!name?.trim()) return null;
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <div className="grid grid-cols-2 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  if (isConnected && name && !sc?.metadata?.name) {
+    return (
+      <div className="space-y-4 p-6">
+        <Breadcrumbs segments={breadcrumbSegments} className="mb-2" />
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-muted-foreground">StorageClass not found.</p>
+            <Button variant="outline" className="mt-4" onClick={() => navigate('/storageclasses')}>
+              Back to Storage Classes
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const scName = sc?.metadata?.name ?? '';
+  const status: ResourceStatus = 'Healthy';
+  const provisioner = sc?.provisioner ?? '—';
+  const reclaimPolicy = sc?.reclaimPolicy ?? 'Delete';
+  const volumeBindingMode = sc?.volumeBindingMode ?? 'Immediate';
+  const allowVolumeExpansion = sc?.allowVolumeExpansion ?? false;
+  const isDefault = sc?.metadata?.annotations?.['storageclass.kubernetes.io/is-default-class'] === 'true';
+  const parameters = sc?.parameters ?? {};
 
   const statusCards = [
-    { label: 'Provisioner', value: 'gce-pd', icon: Server, iconColor: 'primary' as const },
-    { label: 'Reclaim Policy', value: sc.reclaimPolicy, icon: Settings, iconColor: 'info' as const },
-    { label: 'Default', value: sc.isDefault ? 'Yes' : 'No', icon: Star, iconColor: sc.isDefault ? 'success' as const : 'muted' as const },
-    { label: 'Age', value: sc.age, icon: Clock, iconColor: 'muted' as const },
+    { label: 'Provisioner', value: provisioner, icon: Server, iconColor: 'primary' as const },
+    { label: 'Reclaim Policy', value: reclaimPolicy, icon: Settings, iconColor: 'info' as const },
+    { label: 'Binding Mode', value: volumeBindingMode, icon: Layers, iconColor: 'muted' as const },
+    { label: 'PVs/PVCs', value: '—', icon: Layers, iconColor: 'muted' as const },
   ];
 
-  const handleNodeClick = (node: TopologyNode) => {
-    if (node.type === 'pv') navigate(`/persistentvolumes/${node.name}`);
-    else if (node.type === 'pvc') navigate(`/persistentvolumeclaims/production/${node.name}`);
+  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
+
+  const handleSaveYaml = async (newYaml: string) => {
+    if (!name) return;
+    try {
+      await updateSC.mutateAsync({ name, yaml: newYaml });
+      toast.success('StorageClass updated successfully');
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update StorageClass');
+      throw e;
+    }
   };
+
 
   const tabs = [
     {
       id: 'overview',
       label: 'Overview',
+      icon: Info,
       content: (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader><CardTitle className="text-base">Storage Class Info</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><p className="text-muted-foreground mb-1">Provisioner</p><p className="font-mono text-xs">{sc.provisioner}</p></div>
-                <div><p className="text-muted-foreground mb-1">Reclaim Policy</p><Badge variant="outline">{sc.reclaimPolicy}</Badge></div>
-                <div><p className="text-muted-foreground mb-1">Volume Binding</p><p>{sc.volumeBindingMode}</p></div>
-                <div><p className="text-muted-foreground mb-1">Volume Expansion</p><Badge variant={sc.allowVolumeExpansion ? 'default' : 'secondary'}>{sc.allowVolumeExpansion ? 'Allowed' : 'Disabled'}</Badge></div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle className="text-base">Parameters</CardTitle></CardHeader>
-            <CardContent>
+        <div className="space-y-6">
+          <ResourceOverviewMetadata
+            metadata={sc?.metadata ?? { name: scName }}
+            createdLabel={age}
+          />
+          <SectionCard icon={Layers} title="Storage Class information" tooltip={<p className="text-xs text-muted-foreground">Provisioner and volume behavior</p>}>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+              <div><p className="text-muted-foreground mb-1">Provisioner</p><p className="font-mono text-xs">{provisioner}</p></div>
+              <div><p className="text-muted-foreground mb-1">Reclaim Policy</p><Badge variant="outline">{reclaimPolicy}</Badge></div>
+              <div><p className="text-muted-foreground mb-1">Volume Binding</p><p>{volumeBindingMode}</p></div>
+              <div><p className="text-muted-foreground mb-1">Volume Expansion</p><Badge variant={allowVolumeExpansion ? 'default' : 'secondary'}>{allowVolumeExpansion ? 'Allowed' : 'Disabled'}</Badge></div>
+              <div><p className="text-muted-foreground mb-1">Age</p><p>{age}</p></div>
+            </div>
+          </SectionCard>
+          {Object.keys(parameters).length > 0 && (
+            <SectionCard icon={Settings} title="Parameters" tooltip={<p className="text-xs text-muted-foreground">Storage class parameters</p>}>
               <div className="space-y-2">
-                {Object.entries(sc.parameters).map(([key, value]) => (
+                {Object.entries(parameters).map(([key, value]) => (
                   <div key={key} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
                     <span className="font-mono text-sm">{key}</span>
-                    <Badge variant="secondary" className="font-mono">{value}</Badge>
+                    <Badge variant="secondary" className="font-mono">{String(value)}</Badge>
                   </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
-          <MetadataCard title="Labels" items={sc.labels} variant="badges" />
+            </SectionCard>
+          )}
         </div>
       ),
     },
-    { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={sc.name} editable onSave={handleSaveYaml} /> },
-    { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={sc.name} /> },
-    { id: 'topology', label: 'Topology', content: <TopologyViewer nodes={topologyNodes} edges={topologyEdges} onNodeClick={handleNodeClick} /> },
+    { id: 'events', label: 'Events', icon: Clock, content: <EventsSection events={events} /> },
+    { id: 'yaml', label: 'YAML', icon: FileCode, content: <YamlViewer yaml={yaml} resourceName={scName} editable onSave={handleSaveYaml} /> },
+    { id: 'compare', label: 'Compare', icon: GitCompare, content: <YamlCompareViewer versions={yamlVersions} resourceName={scName} /> },
+    {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('StorageClass')}
+          namespace={''}
+          name={name ?? ''}
+          sourceResourceType="StorageClass"
+          sourceResourceName={sc?.metadata?.name ?? name ?? ''}
+        />
+      ),
+    },
     {
       id: 'actions',
       label: 'Actions',
+      icon: Edit,
       content: (
         <ActionsSection actions={[
-          { icon: Star, label: 'Set as Default', description: 'Make this the default storage class' },
-          { icon: Download, label: 'Download YAML', description: 'Export StorageClass definition' },
-          { icon: Trash2, label: 'Delete StorageClass', description: 'Remove this Storage Class', variant: 'destructive' },
+          { icon: Star, label: 'Set as Default', description: 'Make this the default storage class', onClick: () => toast.info('Requires backend support') },
+          { icon: Download, label: 'Download YAML', description: 'Export StorageClass definition', onClick: handleDownloadYaml },
+          { icon: Trash2, label: 'Delete StorageClass', description: 'Remove this Storage Class', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]} />
       ),
     },
   ];
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="StorageClass"
         resourceIcon={Layers}
-        name={sc.name}
-        status={sc.status}
+        name={scName}
+        status={status}
         backLink="/storageclasses"
         backLabel="Storage Classes"
-        metadata={
-          <span className="flex items-center gap-1.5 ml-2">
-            <Clock className="h-3.5 w-3.5" />Created {sc.age}
-            {sc.isDefault && <><span className="mx-2">•</span><Star className="h-3.5 w-3.5 text-[hsl(var(--warning))]" />Default</>}
+        createdLabel={age}
+        createdAt={sc?.metadata?.creationTimestamp}
+        headerMetadata={
+          <span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground">
+            {isConnected && <Badge variant="outline" className="text-xs">Live</Badge>}
+            {isDefault && <><span className="mx-2">•</span><Star className="h-3.5 w-3.5 text-[hsl(var(--warning))]" />Default</>}
           </span>
         }
         actions={[
-          { label: 'Download YAML', icon: Download, variant: 'outline' },
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Edit', icon: Edit, variant: 'outline', onClick: () => { setActiveTab('yaml'); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'yaml'); return n; }, { replace: true }); } },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={(tabId) => {
+          setActiveTab(tabId);
+          setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            if (tabId === 'overview') next.delete('tab');
+            else next.set('tab', tabId);
+            return next;
+          }, { replace: true });
+        }}
+      >
+        {breadcrumbSegments.length > 0 && (
+          <Breadcrumbs segments={breadcrumbSegments} className="mb-2" />
+        )}
+      </ResourceDetailLayout>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="StorageClass"
+        resourceName={scName}
+        onConfirm={async () => {
+          if (isConnected && name) {
+            await deleteSC.mutateAsync({ name });
+            navigate('/storageclasses');
+          } else {
+            toast.success(`StorageClass ${scName} deleted (demo mode)`);
+            navigate('/storageclasses');
+          }
+        }}
+        requireNameConfirmation
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+    </>
   );
 }

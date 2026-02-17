@@ -1,205 +1,121 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Kubilitics Design System - Apple-grade Kubernetes OS
-   Strict blue/white palette. Calm UX. No color explosions.
-   All colors in HSL format.
-*/
-
 @layer base {
   :root {
-    /* Core Blue System - The only accent colors allowed */
-    --blue-900: 207 65% 21%;
-    --blue-700: 217 76% 51%;
-    --blue-500: 217 91% 60%;
-    --blue-300: 213 94% 78%;
-    --blue-100: 214 95% 93%;
-    
-    /* Grayscale System */
-    --white: 0 0% 100%;
-    --gray-50: 210 20% 98%;
-    --gray-100: 210 17% 95%;
-    --gray-200: 214 14% 90%;
-    --gray-300: 213 12% 84%;
-    --gray-400: 215 12% 66%;
-    --gray-500: 215 14% 46%;
-    --gray-600: 215 19% 35%;
-    --gray-700: 217 24% 27%;
-    --gray-800: 215 28% 17%;
-    --gray-900: 221 39% 11%;
-    
-    /* Status Colors - Used sparingly via icons/badges only */
-    --success: 160 84% 39%;
-    --warning: 38 92% 50%;
-    --error: 0 72% 51%;
-    --info: 217 91% 60%;
-    
-    /* Semantic Design Tokens */
-    --background: var(--white);
-    --foreground: var(--gray-900);
-    
-    --card: var(--white);
-    --card-foreground: var(--gray-900);
-    
-    --popover: var(--white);
-    --popover-foreground: var(--gray-900);
-    
-    --primary: var(--blue-700);
-    --primary-foreground: var(--white);
-    
-    --secondary: var(--gray-100);
-    --secondary-foreground: var(--gray-900);
-    
-    --muted: var(--gray-100);
-    --muted-foreground: var(--gray-500);
-    
-    --accent: var(--blue-100);
-    --accent-foreground: var(--blue-900);
-    
-    --destructive: var(--error);
-    --destructive-foreground: var(--white);
-    
-    --border: var(--gray-200);
-    --input: var(--gray-200);
-    --ring: var(--blue-500);
-    
-    --radius: 0.5rem;
-    
-    /* Sidebar */
-    --sidebar-background: var(--gray-50);
-    --sidebar-foreground: var(--gray-700);
-    --sidebar-primary: var(--blue-700);
-    --sidebar-primary-foreground: var(--white);
-    --sidebar-accent: var(--blue-100);
-    --sidebar-accent-foreground: var(--blue-900);
-    --sidebar-border: var(--gray-200);
-    --sidebar-ring: var(--blue-500);
-    
-    /* Kubilitics-specific tokens */
-    --kube-surface: var(--white);
-    --kube-surface-elevated: var(--white);
-    --kube-divider: var(--gray-200);
-    --kube-text-primary: var(--gray-900);
-    --kube-text-secondary: var(--gray-600);
-    --kube-text-tertiary: var(--gray-500);
-    --kube-interactive: var(--blue-700);
-    --kube-interactive-hover: var(--blue-500);
-    
-    /* Shadows */
-    --shadow-sm: 0 1px 2px 0 hsl(var(--gray-900) / 0.05);
-    --shadow-md: 0 4px 6px -1px hsl(var(--gray-900) / 0.08), 0 2px 4px -2px hsl(var(--gray-900) / 0.04);
-    --shadow-lg: 0 10px 15px -3px hsl(var(--gray-900) / 0.08), 0 4px 6px -4px hsl(var(--gray-900) / 0.04);
-    --shadow-xl: 0 20px 25px -5px hsl(var(--gray-900) / 0.1), 0 8px 10px -6px hsl(var(--gray-900) / 0.04);
-    --shadow-glow: 0 0 20px hsl(var(--blue-500) / 0.15);
-    
-    /* Animation */
-    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
-    --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    /* Clean White & Slate Theme (Default) */
+    --background: 210 40% 98%;
+    /* slate-50 */
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+
+    --radius: 1rem;
   }
 
-  .dark {
-    --background: var(--gray-900);
-    --foreground: var(--gray-50);
-    
-    --card: var(--gray-800);
-    --card-foreground: var(--gray-50);
-    
-    --popover: var(--gray-800);
-    --popover-foreground: var(--gray-50);
-    
-    --primary: var(--blue-500);
-    --primary-foreground: var(--white);
-    
-    --secondary: var(--gray-700);
-    --secondary-foreground: var(--gray-50);
-    
-    --muted: var(--gray-700);
-    --muted-foreground: var(--gray-400);
-    
-    --accent: var(--gray-700);
-    --accent-foreground: var(--blue-300);
-    
-    --border: var(--gray-700);
-    --input: var(--gray-700);
-    --ring: var(--blue-500);
-    
-    --sidebar-background: var(--gray-800);
-    --sidebar-foreground: var(--gray-200);
-    --sidebar-primary: var(--blue-500);
-    --sidebar-primary-foreground: var(--white);
-    --sidebar-accent: var(--gray-700);
-    --sidebar-accent-foreground: var(--blue-300);
-    --sidebar-border: var(--gray-700);
-    
-    --kube-surface: var(--gray-800);
-    --kube-surface-elevated: var(--gray-700);
-    --kube-divider: var(--gray-700);
-    --kube-text-primary: var(--gray-50);
-    --kube-text-secondary: var(--gray-300);
-    --kube-text-tertiary: var(--gray-400);
-  }
-}
-
-@layer base {
   * {
     @apply border-border;
   }
 
-  html {
-    font-family: 'Inter', system-ui, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased selection:bg-blue-100 selection:text-blue-900;
   }
 }
 
 @layer components {
-  /* Glass morphism surfaces */
-  .kube-glass {
-    @apply bg-white/80 backdrop-blur-xl border border-white/20;
+
+  /* Apple-style Soft Shadow Cards */
+  .clean-card {
+    @apply bg-white rounded-[2rem] border border-slate-100/50 transition-all duration-300;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.02), 0 2px 4px -2px rgb(0 0 0 / 0.02), 0 20px 25px -5px rgb(0 0 0 / 0.03);
   }
-  
-  /* Smooth hover transitions */
-  .kube-hover {
-    @apply transition-all duration-200 ease-out;
+
+  .clean-card:hover {
+    @apply border-blue-100/50;
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.04), 0 4px 6px -4px rgb(0 0 0 / 0.04), 0 25px 50px -12px rgb(0 0 0 / 0.08);
   }
-  
-  .kube-hover:hover {
-    @apply translate-y-[-1px];
+
+  /* Refined Hero Banner */
+  .clean-hero {
+    @apply relative overflow-hidden bg-white border border-slate-100/80 rounded-[2.5rem];
+    box-shadow: 0 20px 50px -12px rgb(0 0 0 / 0.05);
   }
-  
-  /* Status indicators */
-  .kube-status-healthy {
-    @apply bg-[hsl(var(--success))] text-white;
+
+  /* Minimalist Tabs */
+  .clean-tabs-list {
+    @apply inline-flex h-12 items-center justify-center rounded-2xl bg-slate-100/50 p-1.5 text-slate-500;
   }
-  
-  .kube-status-warning {
-    @apply bg-[hsl(var(--warning))] text-white;
+
+  .clean-tabs-trigger {
+    @apply inline-flex items-center justify-center whitespace-nowrap rounded-xl px-5 py-2 text-sm font-medium transition-all;
   }
-  
-  .kube-status-error {
-    @apply bg-[hsl(var(--error))] text-white;
+
+  .clean-tabs-trigger[data-state='active'] {
+    @apply bg-white text-slate-950 shadow-sm ring-1 ring-slate-200;
   }
-  
-  /* Interactive states */
-  .kube-interactive {
-    @apply cursor-pointer transition-colors duration-150;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
   }
-  
-  .kube-interactive:hover {
-    @apply text-[hsl(var(--blue-700))];
+
+  /* Refined Typography */
+  .heading-xl {
+    @apply text-5xl font-extrabold tracking-tight text-slate-900 sm:text-6xl;
   }
-  
-  /* Focus states */
-  .kube-focus {
-    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--blue-500))] focus-visible:ring-offset-2;
+
+  .heading-lg {
+    @apply text-3xl font-bold tracking-tight text-slate-900;
   }
+
+  /* Subtle AI Accent (Apple-ish) */
+  .ai-accent-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-br from-indigo-500 via-blue-600 to-indigo-700;
+  }
+
+  .ai-accent-bg {
+    @apply bg-gradient-to-br from-indigo-50/50 to-blue-50/50;
+  }
+}
+
+/* Base animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fadeIn 0.5s ease-out forwards;
 }

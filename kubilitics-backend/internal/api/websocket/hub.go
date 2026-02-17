@@ -8,6 +8,7 @@ import (
 
 	_ "github.com/gorilla/websocket"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
 )
 
 // Hub maintains active WebSocket connections and broadcasts messages
@@ -30,6 +31,9 @@ type Hub struct {
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Optional: invalidate topology cache when resource events are broadcast (C1.3)
+	invalidateTopology func(clusterID, namespace string)
 }
 
 // NewHub creates a new WebSocket hub
@@ -55,6 +59,7 @@ func (h *Hub) Run() {
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
+			metrics.WebSocketConnectionsActive.Set(float64(len(h.clients)))
 			h.mu.Unlock()
 
 		case client := <-h.unregister:
@@ -63,6 +68,7 @@ func (h *Hub) Run() {
 				delete(h.clients, client)
 				close(client.send)
 			}
+			metrics.WebSocketConnectionsActive.Set(float64(len(h.clients)))
 			h.mu.Unlock()
 
 		case message := <-h.broadcast:
@@ -94,8 +100,24 @@ func (h *Hub) Stop() {
 	}
 }
 
-// BroadcastResourceEvent broadcasts a resource event to all clients
-func (h *Hub) BroadcastResourceEvent(eventType string, resourceType string, obj interface{}) error {
+// SetTopologyInvalidator sets the callback invoked when a resource event is broadcast with a cluster scope (C1.3).
+// When BroadcastResourceEvent is called with non-empty clusterID, this is called so topology cache can be invalidated.
+func (h *Hub) SetTopologyInvalidator(fn func(clusterID, namespace string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.invalidateTopology = fn
+}
+
+// BroadcastResourceEvent broadcasts a resource event to all clients. If clusterID is non-empty and a topology
+// invalidator is set, the cache for that scope is invalidated (C1.3).
+func (h *Hub) BroadcastResourceEvent(clusterID, namespace, eventType string, resourceType string, obj interface{}) error {
+	h.mu.RLock()
+	inv := h.invalidateTopology
+	h.mu.RUnlock()
+	if inv != nil && clusterID != "" {
+		inv(clusterID, namespace)
+	}
+
 	msg := models.WebSocketMessage{
 		Type:      "resource_update",
 		Event:     eventType,

@@ -436,8 +436,10 @@ kind: StatefulSet
 metadata:
   name: ''
   namespace: ''
+  labels:
+    app: kubilitics
 spec:
-  serviceName: ''
+  serviceName: statefulset-service
   replicas: 1
   selector:
     matchLabels:
@@ -451,7 +453,17 @@ spec:
         - name: ''
           image: ''
           ports:
-            - containerPort: 80`,
+            - containerPort: 80
+  # Optional: add volumeClaimTemplates for persistent storage per pod
+  # volumeClaimTemplates:
+  #   - metadata:
+  #       name: data
+  #     spec:
+  #       accessModes: ["ReadWriteOnce"]
+  #       storageClassName: standard
+  #       resources:
+  #         requests:
+  #           storage: 1Gi`,
 
   DaemonSet: `apiVersion: apps/v1
 kind: DaemonSet
@@ -462,11 +474,17 @@ spec:
   selector:
     matchLabels:
       app: kubilitics
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
   template:
     metadata:
       labels:
         app: kubilitics
     spec:
+      # nodeSelector: {}
+      # tolerations: []
       containers:
         - name: ''
           image: ''`,
@@ -477,6 +495,9 @@ metadata:
   name: ''
   namespace: ''
 spec:
+  completions: 1
+  parallelism: 1
+  backoffLimit: 6
   template:
     spec:
       containers:
@@ -484,7 +505,7 @@ spec:
           image: ''
           command: []
       restartPolicy: Never
-  backoffLimit: 4`,
+`,
 
   CronJob: `apiVersion: batch/v1
 kind: CronJob
@@ -493,6 +514,9 @@ metadata:
   namespace: ''
 spec:
   schedule: "*/5 * * * *"
+  concurrencyPolicy: Allow
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       template:
@@ -501,7 +525,8 @@ spec:
             - name: ''
               image: ''
               command: []
-          restartPolicy: OnFailure`,
+          restartPolicy: OnFailure
+`,
 
   Ingress: `apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -644,6 +669,23 @@ metadata:
   name: ''
 provisioner: kubernetes.io/no-provisioner
 volumeBindingMode: WaitForFirstConsumer`,
+
+  VolumeSnapshot: `apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: ''
+  namespace: default
+spec:
+  source:
+    persistentVolumeClaimName: ''
+  volumeSnapshotClassName: ''`,
+
+  VolumeSnapshotClass: `apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: ''
+driver: ''
+deletionPolicy: Delete`,
 
   ResourceQuota: `apiVersion: v1
 kind: ResourceQuota
@@ -859,4 +901,16 @@ webhooks:
     admissionReviewVersions: ["v1"]
     sideEffects: None
     failurePolicy: Fail`,
+
+  APIService: `apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: ''
+spec:
+  service:
+    namespace: ''
+    name: ''
+  group: ''
+  version: ''
+  insecureSkipTLSVerify: false`,
 };

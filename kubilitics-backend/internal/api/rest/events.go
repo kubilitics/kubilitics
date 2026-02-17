@@ -2,49 +2,87 @@ package rest
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
-	"time"
 
 	"github.com/gorilla/mux"
+
+	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
 
-// GetEvents handles GET /clusters/{id}/events
+// sortEventsByLastTimestampDesc sorts events by LastTimestamp descending (most recent first).
+func sortEventsByLastTimestampDesc(events []*models.Event) {
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].LastTimestamp.After(events[j].LastTimestamp)
+	})
+}
+
+// GetEvents handles GET /clusters/{clusterId}/events
+// Lists Kubernetes events (namespace, limit). Optional: involvedObjectKind + involvedObjectName for pod-scoped events. B1.2.
 func (h *Handler) GetEvents(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	clusterID := vars["id"]
-
-	// Query parameters
-	namespace := r.URL.Query().Get("namespace")
-	resourceKind := r.URL.Query().Get("resource_kind")
-	resourceName := r.URL.Query().Get("resource_name")
-	limitStr := r.URL.Query().Get("limit")
-
-	limit := 100
-	if limitStr != "" {
-		if parsed, err := strconv.Atoi(limitStr); err == nil {
-			limit = parsed
-		}
+	if h.eventsService == nil {
+		respondError(w, http.StatusNotImplemented, "Kubernetes events are not configured")
+		return
 	}
 
-	// TODO: Implement actual events retrieval via events_service
-	respondJSON(w, http.StatusOK, []map[string]interface{}{
-		{
-			"cluster_id":   clusterID,
-			"namespace":    namespace,
-			"name":         "event-1",
-			"type":         "Normal",
-			"reason":       "Started",
-			"message":      "Started container",
-			"involved_object": map[string]interface{}{
-				"kind":      resourceKind,
-				"namespace": namespace,
-				"name":      resourceName,
-			},
-			"first_timestamp": time.Now().Add(-1 * time.Hour),
-			"last_timestamp":  time.Now(),
-			"count":           1,
-		},
-	})
+	vars := mux.Vars(r)
+	clusterID := vars["clusterId"]
+	if !validate.ClusterID(clusterID) {
+		respondError(w, http.StatusBadRequest, "Invalid clusterId")
+		return
+	}
+	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	namespace := r.URL.Query().Get("namespace")
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	involvedObjectKind := r.URL.Query().Get("involvedObjectKind")
+	involvedObjectName := r.URL.Query().Get("involvedObjectName")
 
-	_ = limit // Use limit when implementing actual query
+	if involvedObjectKind != "" && involvedObjectName != "" {
+		ns := namespace
+		if ns == "" || ns == "*" || ns == "_all" {
+			ns = "default"
+		}
+		// Pod-scoped (or any resource) events: last N events for the resource (most recent first)
+		events, err := h.eventsService.GetResourceEvents(r.Context(), resolvedID, ns, involvedObjectKind, involvedObjectName)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		sortEventsByLastTimestampDesc(events)
+		if len(events) > limit {
+			events = events[:limit]
+		}
+		respondJSON(w, http.StatusOK, events)
+		return
+	}
+
+	// All namespaces: namespace empty, "*", or "_all"
+	if namespace == "" || namespace == "*" || namespace == "_all" {
+		events, err := h.eventsService.ListEventsAllNamespaces(r.Context(), resolvedID, limit)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, events)
+		return
+	}
+
+	// Single namespace
+	events, err := h.eventsService.ListEvents(r.Context(), resolvedID, namespace, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, events)
 }

@@ -9,6 +9,41 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// buildNode creates a contract-shaped TopologyNode (id=kind/ns/name, kind, metadata, computed).
+func buildNode(kind, namespace, name, status string, meta metav1.ObjectMeta) models.TopologyNode {
+	id := kind + "/" + name
+	if namespace != "" {
+		id = kind + "/" + namespace + "/" + name
+	}
+	createdAt := ""
+	if !meta.CreationTimestamp.IsZero() {
+		createdAt = meta.CreationTimestamp.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	if meta.Labels == nil {
+		meta.Labels = make(map[string]string)
+	}
+	if meta.Annotations == nil {
+		meta.Annotations = make(map[string]string)
+	}
+	return models.TopologyNode{
+		ID:          id,
+		Kind:        kind,
+		Namespace:   namespace,
+		Name:        name,
+		Status:      status,
+		Metadata:    models.NodeMetadata{Labels: meta.Labels, Annotations: meta.Annotations, UID: string(meta.UID), CreatedAt: createdAt},
+		Computed:    models.NodeComputed{Health: "healthy"},
+	}
+}
+
+func convertOwnerRefs(refs []metav1.OwnerReference) []OwnerRef {
+	out := make([]OwnerRef, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, OwnerRef{UID: string(r.UID), Kind: r.Kind, Name: r.Name, Namespace: ""})
+	}
+	return out
+}
+
 // Engine builds topology graphs from Kubernetes resources
 type Engine struct {
 	client *k8s.Client
@@ -21,9 +56,10 @@ func NewEngine(client *k8s.Client) *Engine {
 	}
 }
 
-// BuildGraph constructs the complete topology graph
-func (e *Engine) BuildGraph(ctx context.Context, filters models.TopologyFilters) (*models.TopologyGraph, error) {
-	graph := NewGraph()
+// BuildGraph constructs the topology graph (clusterID is used for contract metadata).
+// maxNodes caps the number of nodes (C1.4); 0 = no limit. When reached, graph is truncated and IsComplete=false.
+func (e *Engine) BuildGraph(ctx context.Context, filters models.TopologyFilters, clusterID string, maxNodes int) (*models.TopologyGraph, error) {
+	graph := NewGraph(maxNodes)
 
 	// Phase 1: Discover all resources
 	if err := e.discoverResources(ctx, graph, filters); err != nil {
@@ -44,11 +80,7 @@ func (e *Engine) BuildGraph(ctx context.Context, filters models.TopologyFilters)
 		return nil, fmt.Errorf("graph validation failed: %w", err)
 	}
 
-	topology := graph.ToTopologyGraph()
-	if filters.Namespace != "" {
-		topology.Meta.Namespace = filters.Namespace
-	}
-
+	topology := graph.ToTopologyGraph(clusterID)
 	return &topology, nil
 }
 
@@ -159,17 +191,14 @@ func (e *Engine) discoverPods(ctx context.Context, graph *Graph, namespace strin
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
 	for _, pod := range pods.Items {
-		node := models.TopologyNode{
-			ID:          string(pod.UID),
-			Type:        "Pod",
-			Namespace:   pod.Namespace,
-			Name:        pod.Name,
-			Status:      string(pod.Status.Phase),
-			Labels:      pod.Labels,
-			Annotations: pod.Annotations,
-			Metadata:    convertToMap(pod.ObjectMeta),
-		}
+		node := buildNode("Pod", pod.Namespace, pod.Name, string(pod.Status.Phase), pod.ObjectMeta)
 		graph.AddNode(node)
+		graph.SetOwnerRefs(node.ID, convertOwnerRefs(pod.OwnerReferences))
+		saName := pod.Spec.ServiceAccountName
+		if saName == "" {
+			saName = "default"
+		}
+		graph.SetNodeExtra(node.ID, map[string]interface{}{"serviceAccountName": saName})
 	}
 	return nil
 }
@@ -180,17 +209,7 @@ func (e *Engine) discoverServices(ctx context.Context, graph *Graph, namespace s
 		return fmt.Errorf("failed to list services: %w", err)
 	}
 	for _, svc := range services.Items {
-		node := models.TopologyNode{
-			ID:          string(svc.UID),
-			Type:        "Service",
-			Namespace:   svc.Namespace,
-			Name:        svc.Name,
-			Status:      "Active",
-			Labels:      svc.Labels,
-			Annotations: svc.Annotations,
-			Metadata:    convertToMap(svc.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("Service", svc.Namespace, svc.Name, "Active", svc.ObjectMeta))
 	}
 	return nil
 }
@@ -201,17 +220,9 @@ func (e *Engine) discoverDeployments(ctx context.Context, graph *Graph, namespac
 		return fmt.Errorf("failed to list deployments: %w", err)
 	}
 	for _, deploy := range deployments.Items {
-		node := models.TopologyNode{
-			ID:          string(deploy.UID),
-			Type:        "Deployment",
-			Namespace:   deploy.Namespace,
-			Name:        deploy.Name,
-			Status:      "Active",
-			Labels:      deploy.Labels,
-			Annotations: deploy.Annotations,
-			Metadata:    convertToMap(deploy.ObjectMeta),
-		}
+		node := buildNode("Deployment", deploy.Namespace, deploy.Name, "Active", deploy.ObjectMeta)
 		graph.AddNode(node)
+		graph.SetOwnerRefs(node.ID, convertOwnerRefs(deploy.OwnerReferences))
 	}
 	return nil
 }
@@ -222,17 +233,9 @@ func (e *Engine) discoverReplicaSets(ctx context.Context, graph *Graph, namespac
 		return fmt.Errorf("failed to list replicasets: %w", err)
 	}
 	for _, rs := range replicaSets.Items {
-		node := models.TopologyNode{
-			ID:          string(rs.UID),
-			Type:        "ReplicaSet",
-			Namespace:   rs.Namespace,
-			Name:        rs.Name,
-			Status:      "Active",
-			Labels:      rs.Labels,
-			Annotations: rs.Annotations,
-			Metadata:    convertToMap(rs.ObjectMeta),
-		}
+		node := buildNode("ReplicaSet", rs.Namespace, rs.Name, "Active", rs.ObjectMeta)
 		graph.AddNode(node)
+		graph.SetOwnerRefs(node.ID, convertOwnerRefs(rs.OwnerReferences))
 	}
 	return nil
 }
@@ -243,17 +246,9 @@ func (e *Engine) discoverStatefulSets(ctx context.Context, graph *Graph, namespa
 		return fmt.Errorf("failed to list statefulsets: %w", err)
 	}
 	for _, sts := range statefulSets.Items {
-		node := models.TopologyNode{
-			ID:          string(sts.UID),
-			Type:        "StatefulSet",
-			Namespace:   sts.Namespace,
-			Name:        sts.Name,
-			Status:      "Active",
-			Labels:      sts.Labels,
-			Annotations: sts.Annotations,
-			Metadata:    convertToMap(sts.ObjectMeta),
-		}
+		node := buildNode("StatefulSet", sts.Namespace, sts.Name, "Active", sts.ObjectMeta)
 		graph.AddNode(node)
+		graph.SetOwnerRefs(node.ID, convertOwnerRefs(sts.OwnerReferences))
 	}
 	return nil
 }
@@ -264,17 +259,9 @@ func (e *Engine) discoverDaemonSets(ctx context.Context, graph *Graph, namespace
 		return fmt.Errorf("failed to list daemonsets: %w", err)
 	}
 	for _, ds := range daemonSets.Items {
-		node := models.TopologyNode{
-			ID:          string(ds.UID),
-			Type:        "DaemonSet",
-			Namespace:   ds.Namespace,
-			Name:        ds.Name,
-			Status:      "Active",
-			Labels:      ds.Labels,
-			Annotations: ds.Annotations,
-			Metadata:    convertToMap(ds.ObjectMeta),
-		}
+		node := buildNode("DaemonSet", ds.Namespace, ds.Name, "Active", ds.ObjectMeta)
 		graph.AddNode(node)
+		graph.SetOwnerRefs(node.ID, convertOwnerRefs(ds.OwnerReferences))
 	}
 	return nil
 }
@@ -285,17 +272,9 @@ func (e *Engine) discoverJobs(ctx context.Context, graph *Graph, namespace strin
 		return fmt.Errorf("failed to list jobs: %w", err)
 	}
 	for _, job := range jobs.Items {
-		node := models.TopologyNode{
-			ID:          string(job.UID),
-			Type:        "Job",
-			Namespace:   job.Namespace,
-			Name:        job.Name,
-			Status:      "Active",
-			Labels:      job.Labels,
-			Annotations: job.Annotations,
-			Metadata:    convertToMap(job.ObjectMeta),
-		}
+		node := buildNode("Job", job.Namespace, job.Name, "Active", job.ObjectMeta)
 		graph.AddNode(node)
+		graph.SetOwnerRefs(node.ID, convertOwnerRefs(job.OwnerReferences))
 	}
 	return nil
 }
@@ -306,17 +285,9 @@ func (e *Engine) discoverCronJobs(ctx context.Context, graph *Graph, namespace s
 		return fmt.Errorf("failed to list cronjobs: %w", err)
 	}
 	for _, cj := range cronJobs.Items {
-		node := models.TopologyNode{
-			ID:          string(cj.UID),
-			Type:        "CronJob",
-			Namespace:   cj.Namespace,
-			Name:        cj.Name,
-			Status:      "Active",
-			Labels:      cj.Labels,
-			Annotations: cj.Annotations,
-			Metadata:    convertToMap(cj.ObjectMeta),
-		}
+		node := buildNode("CronJob", cj.Namespace, cj.Name, "Active", cj.ObjectMeta)
 		graph.AddNode(node)
+		graph.SetOwnerRefs(node.ID, convertOwnerRefs(cj.OwnerReferences))
 	}
 	return nil
 }
@@ -327,17 +298,7 @@ func (e *Engine) discoverConfigMaps(ctx context.Context, graph *Graph, namespace
 		return fmt.Errorf("failed to list configmaps: %w", err)
 	}
 	for _, cm := range configMaps.Items {
-		node := models.TopologyNode{
-			ID:          string(cm.UID),
-			Type:        "ConfigMap",
-			Namespace:   cm.Namespace,
-			Name:        cm.Name,
-			Status:      "Active",
-			Labels:      cm.Labels,
-			Annotations: cm.Annotations,
-			Metadata:    convertToMap(cm.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("ConfigMap", cm.Namespace, cm.Name, "Active", cm.ObjectMeta))
 	}
 	return nil
 }
@@ -348,17 +309,7 @@ func (e *Engine) discoverSecrets(ctx context.Context, graph *Graph, namespace st
 		return fmt.Errorf("failed to list secrets: %w", err)
 	}
 	for _, secret := range secrets.Items {
-		node := models.TopologyNode{
-			ID:          string(secret.UID),
-			Type:        "Secret",
-			Namespace:   secret.Namespace,
-			Name:        secret.Name,
-			Status:      "Active",
-			Labels:      secret.Labels,
-			Annotations: secret.Annotations,
-			Metadata:    convertToMap(secret.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("Secret", secret.Namespace, secret.Name, "Active", secret.ObjectMeta))
 	}
 	return nil
 }
@@ -375,15 +326,7 @@ func (e *Engine) discoverNodes(ctx context.Context, graph *Graph) error {
 				status = "NotReady"
 			}
 		}
-		graphNode := models.TopologyNode{
-			ID:          string(node.UID),
-			Type:        "Node",
-			Name:        node.Name,
-			Status:      status,
-			Labels:      node.Labels,
-			Annotations: node.Annotations,
-			Metadata:    convertToMap(node.ObjectMeta),
-		}
+		graphNode := buildNode("Node", "", node.Name, status, node.ObjectMeta)
 		graph.AddNode(graphNode)
 	}
 	return nil
@@ -395,16 +338,7 @@ func (e *Engine) discoverNamespaces(ctx context.Context, graph *Graph) error {
 		return fmt.Errorf("failed to list namespaces: %w", err)
 	}
 	for _, ns := range namespaces.Items {
-		node := models.TopologyNode{
-			ID:          string(ns.UID),
-			Type:        "Namespace",
-			Name:        ns.Name,
-			Status:      string(ns.Status.Phase),
-			Labels:      ns.Labels,
-			Annotations: ns.Annotations,
-			Metadata:    convertToMap(ns.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("Namespace", "", ns.Name, string(ns.Status.Phase), ns.ObjectMeta))
 	}
 	return nil
 }
@@ -415,16 +349,7 @@ func (e *Engine) discoverPersistentVolumes(ctx context.Context, graph *Graph) er
 		return fmt.Errorf("failed to list persistent volumes: %w", err)
 	}
 	for _, pv := range pvs.Items {
-		node := models.TopologyNode{
-			ID:          string(pv.UID),
-			Type:        "PersistentVolume",
-			Name:        pv.Name,
-			Status:      string(pv.Status.Phase),
-			Labels:      pv.Labels,
-			Annotations: pv.Annotations,
-			Metadata:    convertToMap(pv.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("PersistentVolume", "", pv.Name, string(pv.Status.Phase), pv.ObjectMeta))
 	}
 	return nil
 }
@@ -435,17 +360,7 @@ func (e *Engine) discoverPersistentVolumeClaims(ctx context.Context, graph *Grap
 		return fmt.Errorf("failed to list persistent volume claims: %w", err)
 	}
 	for _, pvc := range pvcs.Items {
-		node := models.TopologyNode{
-			ID:          string(pvc.UID),
-			Type:        "PersistentVolumeClaim",
-			Namespace:   pvc.Namespace,
-			Name:        pvc.Name,
-			Status:      string(pvc.Status.Phase),
-			Labels:      pvc.Labels,
-			Annotations: pvc.Annotations,
-			Metadata:    convertToMap(pvc.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("PersistentVolumeClaim", pvc.Namespace, pvc.Name, string(pvc.Status.Phase), pvc.ObjectMeta))
 	}
 	return nil
 }
@@ -456,17 +371,7 @@ func (e *Engine) discoverServiceAccounts(ctx context.Context, graph *Graph, name
 		return fmt.Errorf("failed to list service accounts: %w", err)
 	}
 	for _, sa := range sas.Items {
-		node := models.TopologyNode{
-			ID:          string(sa.UID),
-			Type:        "ServiceAccount",
-			Namespace:   sa.Namespace,
-			Name:        sa.Name,
-			Status:      "Active",
-			Labels:      sa.Labels,
-			Annotations: sa.Annotations,
-			Metadata:    convertToMap(sa.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("ServiceAccount", sa.Namespace, sa.Name, "Active", sa.ObjectMeta))
 	}
 	return nil
 }
@@ -477,17 +382,7 @@ func (e *Engine) discoverEndpoints(ctx context.Context, graph *Graph, namespace 
 		return fmt.Errorf("failed to list endpoints: %w", err)
 	}
 	for _, ep := range endpoints.Items {
-		node := models.TopologyNode{
-			ID:          string(ep.UID),
-			Type:        "Endpoints",
-			Namespace:   ep.Namespace,
-			Name:        ep.Name,
-			Status:      "Active",
-			Labels:      ep.Labels,
-			Annotations: ep.Annotations,
-			Metadata:    convertToMap(ep.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("Endpoints", ep.Namespace, ep.Name, "Active", ep.ObjectMeta))
 	}
 	return nil
 }
@@ -498,17 +393,22 @@ func (e *Engine) discoverIngresses(ctx context.Context, graph *Graph, namespace 
 		return fmt.Errorf("failed to list ingresses: %w", err)
 	}
 	for _, ing := range ingresses.Items {
-		node := models.TopologyNode{
-			ID:          string(ing.UID),
-			Type:        "Ingress",
-			Namespace:   ing.Namespace,
-			Name:        ing.Name,
-			Status:      "Active",
-			Labels:      ing.Labels,
-			Annotations: ing.Annotations,
-			Metadata:    convertToMap(ing.ObjectMeta),
-		}
+		node := buildNode("Ingress", ing.Namespace, ing.Name, "Active", ing.ObjectMeta)
 		graph.AddNode(node)
+		// Store spec for inference (rules -> http -> paths -> backend.service.name)
+		var rules []interface{}
+		for _, r := range ing.Spec.Rules {
+			if r.HTTP != nil {
+				var paths []interface{}
+				for _, path := range r.HTTP.Paths {
+					paths = append(paths, map[string]interface{}{
+						"backend": map[string]interface{}{"service": map[string]interface{}{"name": path.Backend.Service.Name}},
+					})
+				}
+				rules = append(rules, map[string]interface{}{"http": map[string]interface{}{"paths": paths}})
+			}
+		}
+		graph.SetNodeExtra(node.ID, map[string]interface{}{"spec": map[string]interface{}{"rules": rules}})
 	}
 	return nil
 }
@@ -519,17 +419,7 @@ func (e *Engine) discoverNetworkPolicies(ctx context.Context, graph *Graph, name
 		return fmt.Errorf("failed to list network policies: %w", err)
 	}
 	for _, np := range nps.Items {
-		node := models.TopologyNode{
-			ID:          string(np.UID),
-			Type:        "NetworkPolicy",
-			Namespace:   np.Namespace,
-			Name:        np.Name,
-			Status:      "Active",
-			Labels:      np.Labels,
-			Annotations: np.Annotations,
-			Metadata:    convertToMap(np.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("NetworkPolicy", np.Namespace, np.Name, "Active", np.ObjectMeta))
 	}
 	return nil
 }
@@ -540,17 +430,7 @@ func (e *Engine) discoverRoles(ctx context.Context, graph *Graph, namespace stri
 		return fmt.Errorf("failed to list roles: %w", err)
 	}
 	for _, role := range roles.Items {
-		node := models.TopologyNode{
-			ID:          string(role.UID),
-			Type:        "Role",
-			Namespace:   role.Namespace,
-			Name:        role.Name,
-			Status:      "Active",
-			Labels:      role.Labels,
-			Annotations: role.Annotations,
-			Metadata:    convertToMap(role.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("Role", role.Namespace, role.Name, "Active", role.ObjectMeta))
 	}
 	return nil
 }
@@ -561,17 +441,15 @@ func (e *Engine) discoverRoleBindings(ctx context.Context, graph *Graph, namespa
 		return fmt.Errorf("failed to list role bindings: %w", err)
 	}
 	for _, rb := range rbs.Items {
-		node := models.TopologyNode{
-			ID:          string(rb.UID),
-			Type:        "RoleBinding",
-			Namespace:   rb.Namespace,
-			Name:        rb.Name,
-			Status:      "Active",
-			Labels:      rb.Labels,
-			Annotations: rb.Annotations,
-			Metadata:    convertToMap(rb.ObjectMeta),
-		}
+		node := buildNode("RoleBinding", rb.Namespace, rb.Name, "Active", rb.ObjectMeta)
 		graph.AddNode(node)
+		extra := map[string]interface{}{"roleRef": map[string]interface{}{"kind": rb.RoleRef.Kind, "name": rb.RoleRef.Name}}
+		subs := make([]interface{}, 0, len(rb.Subjects))
+		for _, s := range rb.Subjects {
+			subs = append(subs, map[string]interface{}{"kind": s.Kind, "name": s.Name, "namespace": s.Namespace})
+		}
+		extra["subjects"] = subs
+		graph.SetNodeExtra(node.ID, extra)
 	}
 	return nil
 }
@@ -582,16 +460,7 @@ func (e *Engine) discoverClusterRoles(ctx context.Context, graph *Graph) error {
 		return fmt.Errorf("failed to list cluster roles: %w", err)
 	}
 	for _, cr := range crs.Items {
-		node := models.TopologyNode{
-			ID:          string(cr.UID),
-			Type:        "ClusterRole",
-			Name:        cr.Name,
-			Status:      "Active",
-			Labels:      cr.Labels,
-			Annotations: cr.Annotations,
-			Metadata:    convertToMap(cr.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("ClusterRole", "", cr.Name, "Active", cr.ObjectMeta))
 	}
 	return nil
 }
@@ -602,16 +471,15 @@ func (e *Engine) discoverClusterRoleBindings(ctx context.Context, graph *Graph) 
 		return fmt.Errorf("failed to list cluster role bindings: %w", err)
 	}
 	for _, crb := range crbs.Items {
-		node := models.TopologyNode{
-			ID:          string(crb.UID),
-			Type:        "ClusterRoleBinding",
-			Name:        crb.Name,
-			Status:      "Active",
-			Labels:      crb.Labels,
-			Annotations: crb.Annotations,
-			Metadata:    convertToMap(crb.ObjectMeta),
-		}
+		node := buildNode("ClusterRoleBinding", "", crb.Name, "Active", crb.ObjectMeta)
 		graph.AddNode(node)
+		extra := map[string]interface{}{"roleRef": map[string]interface{}{"kind": crb.RoleRef.Kind, "name": crb.RoleRef.Name}}
+		subs := make([]interface{}, 0, len(crb.Subjects))
+		for _, s := range crb.Subjects {
+			subs = append(subs, map[string]interface{}{"kind": s.Kind, "name": s.Name, "namespace": s.Namespace})
+		}
+		extra["subjects"] = subs
+		graph.SetNodeExtra(node.ID, extra)
 	}
 	return nil
 }
@@ -622,16 +490,7 @@ func (e *Engine) discoverStorageClasses(ctx context.Context, graph *Graph) error
 		return fmt.Errorf("failed to list storage classes: %w", err)
 	}
 	for _, sc := range scs.Items {
-		node := models.TopologyNode{
-			ID:          string(sc.UID),
-			Type:        "StorageClass",
-			Name:        sc.Name,
-			Status:      "Active",
-			Labels:      sc.Labels,
-			Annotations: sc.Annotations,
-			Metadata:    convertToMap(sc.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("StorageClass", "", sc.Name, "Active", sc.ObjectMeta))
 	}
 	return nil
 }
@@ -642,17 +501,13 @@ func (e *Engine) discoverHorizontalPodAutoscalers(ctx context.Context, graph *Gr
 		return fmt.Errorf("failed to list horizontal pod autoscalers: %w", err)
 	}
 	for _, hpa := range hpas.Items {
-		node := models.TopologyNode{
-			ID:          string(hpa.UID),
-			Type:        "HorizontalPodAutoscaler",
-			Namespace:   hpa.Namespace,
-			Name:        hpa.Name,
-			Status:      "Active",
-			Labels:      hpa.Labels,
-			Annotations: hpa.Annotations,
-			Metadata:    convertToMap(hpa.ObjectMeta),
-		}
+		node := buildNode("HorizontalPodAutoscaler", hpa.Namespace, hpa.Name, "Active", hpa.ObjectMeta)
 		graph.AddNode(node)
+		if hpa.Spec.ScaleTargetRef.Kind != "" {
+			graph.SetNodeExtra(node.ID, map[string]interface{}{
+				"scaleTargetRef": map[string]interface{}{"kind": hpa.Spec.ScaleTargetRef.Kind, "name": hpa.Spec.ScaleTargetRef.Name},
+			})
+		}
 	}
 	return nil
 }
@@ -663,17 +518,7 @@ func (e *Engine) discoverPodDisruptionBudgets(ctx context.Context, graph *Graph,
 		return fmt.Errorf("failed to list pod disruption budgets: %w", err)
 	}
 	for _, pdb := range pdbs.Items {
-		node := models.TopologyNode{
-			ID:          string(pdb.UID),
-			Type:        "PodDisruptionBudget",
-			Namespace:   pdb.Namespace,
-			Name:        pdb.Name,
-			Status:      "Active",
-			Labels:      pdb.Labels,
-			Annotations: pdb.Annotations,
-			Metadata:    convertToMap(pdb.ObjectMeta),
-		}
-		graph.AddNode(node)
+		graph.AddNode(buildNode("PodDisruptionBudget", pdb.Namespace, pdb.Name, "Active", pdb.ObjectMeta))
 	}
 	return nil
 }

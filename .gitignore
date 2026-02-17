@@ -91,15 +91,18 @@ kubilitics-desktop/**/binaries/
 .cache/
 
 # Mobile development
-android-sdk/ -e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
--e 
+android-sdk/
+
+# Documentation files (project docs)
+project-docs/
+*.md
+!README.md
+!CHANGELOG.md
+
+# Temporary/backup files
+Topology.tsx
+KUBERNETES-TOOLS-MARKET-ANALYSIS-2026.md
+
 # Environment files
 *.env
 *.env.*

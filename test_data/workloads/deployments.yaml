@@ -1,0 +1,124 @@
+# Demo deployments for Kubilitics (3-10 objects). Apply after namespace.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-web-a
+  namespace: kubilitics-demo
+  labels:
+    app: demo-web-a
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-web-a
+  template:
+    metadata:
+      labels:
+        app: demo-web-a
+        app.kubernetes.io/part-of: kubilitics-demo
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25-alpine
+          ports:
+            - containerPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-web-b
+  namespace: kubilitics-demo
+  labels:
+    app: demo-web-b
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-web-b
+  template:
+    metadata:
+      labels:
+        app: demo-web-b
+        app.kubernetes.io/part-of: kubilitics-demo
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25-alpine
+          ports:
+            - containerPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-api
+  namespace: kubilitics-demo
+  labels:
+    app: demo-api
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-api
+  template:
+    metadata:
+      labels:
+        app: demo-api
+        app.kubernetes.io/part-of: kubilitics-demo
+    spec:
+      containers:
+        - name: api
+          image: hashicorp/http-echo:latest
+          args: ["-text=hello"]
+          ports:
+            - containerPort: 5678
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-worker
+  namespace: kubilitics-demo
+  labels:
+    app: demo-worker
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-worker
+  template:
+    metadata:
+      labels:
+        app: demo-worker
+        app.kubernetes.io/part-of: kubilitics-demo
+    spec:
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.9
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-frontend
+  namespace: kubilitics-demo
+  labels:
+    app: demo-frontend
+    app.kubernetes.io/part-of: kubilitics-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-frontend
+  template:
+    metadata:
+      labels:
+        app: demo-frontend
+        app.kubernetes.io/part-of: kubilitics-demo
+    spec:
+      containers:
+        - name: frontend
+          image: nginx:1.25-alpine
+          ports:
+            - containerPort: 80

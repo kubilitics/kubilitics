@@ -1,73 +1,114 @@
-import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { UserCircle, Clock, Download, Trash2, KeyRound, Shield } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { UserCircle, Clock, Download, Trash2, KeyRound, Shield, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs, TopologyViewer, MetadataCard, YamlViewer, EventsSection, ActionsSection,
-  type TopologyNode, type TopologyEdge, type ResourceStatus, type EventInfo,
+  ResourceDetailLayout,
+  
+  MetadataCard,
+  YamlViewer,
+  YamlCompareViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  ResourceTopologyView,
+  
+  
+  type ResourceStatus,
+  type YamlVersion,
 } from '@/components/resources';
+import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
+import { useDeleteK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 
-const mockEvents: EventInfo[] = [];
-
-const mockServiceAccount = {
-  name: 'nginx-sa',
-  namespace: 'production',
-  status: 'Healthy' as ResourceStatus,
-  age: '90d',
-  labels: { app: 'nginx' },
-  secrets: ['nginx-sa-token-abc12', 'nginx-sa-dockercfg-def34'],
-  imagePullSecrets: ['docker-registry'],
-  automountServiceAccountToken: true,
-};
-
-const topologyNodes: TopologyNode[] = [
-  { id: 'sa', type: 'serviceaccount', name: 'nginx-sa', status: 'healthy', isCurrent: true },
-  { id: 'secret1', type: 'secret', name: 'nginx-sa-token-abc12', status: 'healthy' },
-  { id: 'secret2', type: 'secret', name: 'nginx-sa-dockercfg-def34', status: 'healthy' },
-  { id: 'rb', type: 'rolebinding', name: 'nginx-binding', status: 'healthy' },
-  { id: 'pod', type: 'pod', name: 'nginx-pod-abc12', status: 'healthy' },
-];
-
-const topologyEdges: TopologyEdge[] = [
-  { from: 'sa', to: 'secret1', label: 'Uses' },
-  { from: 'sa', to: 'secret2', label: 'Uses' },
-  { from: 'rb', to: 'sa', label: 'Binds To' },
-  { from: 'pod', to: 'sa', label: 'Uses' },
-];
-
-const yaml = `apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: nginx-sa
-  namespace: production
-  labels:
-    app: nginx
-secrets:
-  - name: nginx-sa-token-abc12
-  - name: nginx-sa-dockercfg-def34
-imagePullSecrets:
-  - name: docker-registry
-automountServiceAccountToken: true`;
+interface ServiceAccountResource extends KubernetesResource {
+  secrets?: Array<{ name?: string }>;
+  imagePullSecrets?: Array<{ name?: string }>;
+  automountServiceAccountToken?: boolean;
+}
 
 export default function ServiceAccountDetail() {
-  const { namespace, name } = useParams();
+  const { namespace, name } = useParams<{ namespace: string; name: string }>();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview');
-  const sa = mockServiceAccount;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') || 'overview';
+  const [activeTab, setActiveTab] = useState(initialTab);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const { isConnected } = useConnectionStatus();
+
+  const { resource, isLoading, error: resourceError, age, yaml, refetch } = useResourceDetail<ServiceAccountResource>(
+    'serviceaccounts',
+    name ?? undefined,
+    namespace ?? undefined,
+    undefined as unknown as ServiceAccountResource
+  );
+  const { events, refetch: refetchEvents } = useResourceEvents('ServiceAccount', namespace ?? undefined, name ?? undefined);
+  const deleteResource = useDeleteK8sResource('serviceaccounts');
+
+  useEffect(() => {
+    setActiveTab(searchParams.get('tab') || 'overview');
+  }, [searchParams.get('tab')]);
+
+  const saName = resource?.metadata?.name ?? name ?? '';
+  const saNamespace = resource?.metadata?.namespace ?? namespace ?? '';
+  const secrets = resource?.secrets ?? [];
+  const imagePullSecrets = resource?.imagePullSecrets ?? [];
+  const automount = resource?.automountServiceAccountToken !== false;
+  const labels = resource?.metadata?.labels ?? {};
+  const annotations = resource?.metadata?.annotations ?? {};
+
+  const handleDownloadYaml = useCallback(() => {
+    if (!yaml) return;
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${saName || 'serviceaccount'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [yaml, saName]);
+
+  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
 
   const statusCards = [
-    { label: 'Secrets', value: sa.secrets.length, icon: KeyRound, iconColor: 'primary' as const },
-    { label: 'Image Pull Secrets', value: sa.imagePullSecrets.length, icon: Shield, iconColor: 'info' as const },
-    { label: 'Age', value: sa.age, icon: Clock, iconColor: 'muted' as const },
+    { label: 'Secrets', value: secrets.length, icon: KeyRound, iconColor: 'primary' as const },
+    { label: 'Pods Using', value: '–', icon: UserCircle, iconColor: 'muted' as const },
+    { label: 'Roles Bound', value: '–', icon: Shield, iconColor: 'muted' as const },
+    { label: 'Permission Level', value: '–', icon: Shield, iconColor: 'muted' as const },
+    { label: 'Token Auto-Mount', value: automount ? 'Yes' : 'No', icon: KeyRound, iconColor: 'info' as const },
   ];
 
-  const handleNodeClick = (node: TopologyNode) => {
-    if (node.type === 'secret') navigate(`/secrets/${namespace}/${node.name}`);
-    else if (node.type === 'rolebinding') navigate(`/rolebindings/${namespace}/${node.name}`);
-    else if (node.type === 'pod') navigate(`/pods/${namespace}/${node.name}`);
-  };
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  if (isConnected && (resourceError || !resource?.metadata?.name)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
+        <UserCircle className="h-12 w-12 text-muted-foreground" />
+        <p className="text-lg font-medium">Service Account not found</p>
+        <p className="text-sm text-muted-foreground">
+          {namespace && name ? `No service account "${name}" in namespace "${namespace}".` : 'Missing namespace or name.'}
+        </p>
+        <Button variant="outline" onClick={() => navigate('/serviceaccounts')}>Back to Service Accounts</Button>
+      </div>
+    );
+  }
 
   const tabs = [
     {
@@ -80,21 +121,28 @@ export default function ServiceAccountDetail() {
             <CardContent className="space-y-4">
               <div className="flex justify-between p-2 rounded-lg bg-muted/50">
                 <span>Automount Token</span>
-                <Badge variant={sa.automountServiceAccountToken ? 'default' : 'secondary'}>
-                  {sa.automountServiceAccountToken ? 'Yes' : 'No'}
-                </Badge>
+                <Badge variant={automount ? 'default' : 'secondary'}>{automount ? 'Yes' : 'No'}</Badge>
               </div>
+              <div className="text-sm text-muted-foreground">Age: {age}</div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader><CardTitle className="text-base">Secrets</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {sa.secrets.map((secret) => (
-                  <div key={secret} className="p-2 rounded-lg bg-muted/50 font-mono text-sm cursor-pointer hover:bg-muted" onClick={() => navigate(`/secrets/${namespace}/${secret}`)}>
-                    {secret}
-                  </div>
-                ))}
+                {secrets.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">No secrets</p>
+                ) : (
+                  secrets.map((s) => (
+                    <div
+                      key={s.name}
+                      className="p-2 rounded-lg bg-muted/50 font-mono text-sm cursor-pointer hover:bg-muted"
+                      onClick={() => navigate(`/secrets/${saNamespace}/${s.name}`)}
+                    >
+                      {s.name}
+                    </div>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
@@ -102,50 +150,118 @@ export default function ServiceAccountDetail() {
             <CardHeader><CardTitle className="text-base">Image Pull Secrets</CardTitle></CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-2">
-                {sa.imagePullSecrets.map((secret) => (
-                  <Badge key={secret} variant="outline" className="font-mono">{secret}</Badge>
-                ))}
+                {imagePullSecrets.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">None</p>
+                ) : (
+                  imagePullSecrets.map((s) => (
+                    <Badge key={s.name} variant="outline" className="font-mono cursor-pointer" onClick={() => navigate(`/secrets/${saNamespace}/${s.name}`)}>
+                      {s.name}
+                    </Badge>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
-          <MetadataCard title="Labels" items={sa.labels} variant="badges" />
+          <MetadataCard title="Labels" items={labels} variant="badges" />
+          {Object.keys(annotations).length > 0 && <MetadataCard title="Annotations" items={annotations} variant="badges" />}
         </div>
       ),
     },
-    { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={sa.name} /> },
-    { id: 'topology', label: 'Topology', content: <TopologyViewer nodes={topologyNodes} edges={topologyEdges} onNodeClick={handleNodeClick} /> },
+    {
+      id: 'permissions',
+      label: 'Permissions',
+      content: (
+        <Card>
+          <CardHeader><CardTitle className="text-base">RoleBindings / ClusterRoleBindings</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm">Bindings that reference this ServiceAccount would be listed here. Use the cluster RBAC APIs or list RoleBindings/ClusterRoleBindings and filter by subject to see them.</p>
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: 'usedby',
+      label: 'Used By',
+      content: (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Pods / Workloads</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm">Pods and workloads using this ServiceAccount (e.g. <code>spec.serviceAccountName</code>) can be listed when backend supports it or by listing pods in this namespace.</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => navigate(`/pods?namespace=${saNamespace}`)}>View Pods in {saNamespace}</Button>
+          </CardContent>
+        </Card>
+      ),
+    },
+    { id: 'events', label: 'Events', content: <EventsSection events={events} /> },
+    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={saName} /> },
+    { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={saName} /> },
+    {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('ServiceAccount')}
+          namespace={namespace ?? ''}
+          name={name ?? ''}
+          sourceResourceType="ServiceAccount"
+          sourceResourceName={resource?.metadata?.name ?? name ?? ''}
+        />
+      ),
+    },
     {
       id: 'actions',
       label: 'Actions',
       content: (
-        <ActionsSection actions={[
-          { icon: KeyRound, label: 'Create Token', description: 'Generate a new service account token' },
-          { icon: Download, label: 'Download YAML', description: 'Export ServiceAccount definition' },
-          { icon: Trash2, label: 'Delete ServiceAccount', description: 'Remove this service account', variant: 'destructive' },
-        ]} />
+        <ActionsSection
+          actions={[
+            { icon: KeyRound, label: 'Create Token', description: 'Generate a new service account token', onClick: () => toast.info('Create token not implemented') },
+            { icon: Download, label: 'Download YAML', description: 'Export ServiceAccount definition', onClick: handleDownloadYaml },
+            { icon: Trash2, label: 'Delete ServiceAccount', description: 'Remove this service account', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
+          ]}
+        />
       ),
     },
   ];
 
+  const status: ResourceStatus = 'Healthy';
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="ServiceAccount"
         resourceIcon={UserCircle}
-        name={sa.name}
-        namespace={sa.namespace}
-        status={sa.status}
+        name={saName}
+        namespace={saNamespace}
+        status={status}
         backLink="/serviceaccounts"
         backLabel="Service Accounts"
-        metadata={<span className="flex items-center gap-1.5 ml-2"><Clock className="h-3.5 w-3.5" />Created {sa.age}</span>}
+        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {age}</span>}
         actions={[
-          { label: 'Create Token', icon: KeyRound, variant: 'outline' },
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Create Token', icon: KeyRound, variant: 'outline', onClick: () => toast.info('Create token not implemented') },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          setSearchParams((p) => { p.set('tab', tab); return p; });
+        }}
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="ServiceAccount"
+        resourceName={saName}
+        namespace={saNamespace}
+        onConfirm={async () => {
+          await deleteResource.mutateAsync({ name: saName, namespace: saNamespace });
+          navigate('/serviceaccounts');
+        }}
+        requireNameConfirmation
+      />
+    </>
   );
 }

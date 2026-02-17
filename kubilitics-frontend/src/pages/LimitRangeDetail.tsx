@@ -1,91 +1,112 @@
-import { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Scale, Clock, Cpu, HardDrive, Download, Trash2 } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Scale, Clock, Cpu, HardDrive, Download, Trash2, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import {
-  ResourceHeader, ResourceStatusCards, ResourceTabs,
-  YamlViewer, YamlCompareViewer, EventsSection, ActionsSection,
-  type ResourceStatus, type EventInfo, type YamlVersion,
+  ResourceDetailLayout,
+  YamlViewer,
+  YamlCompareViewer,
+  EventsSection,
+  ActionsSection,
+  DeleteConfirmDialog,
+  MetadataCard,
+  ResourceTopologyView,
+  type ResourceStatus,
+  type YamlVersion,
 } from '@/components/resources';
-import { toast } from 'sonner';
+import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
+import { useDeleteK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
+import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 
-const mockLimitRange = {
-  name: 'prod-limits',
-  namespace: 'production',
-  status: 'Active' as ResourceStatus,
-  age: '90d',
-  limits: [
-    {
-      type: 'Container',
-      default: { cpu: '500m', memory: '512Mi' },
-      defaultRequest: { cpu: '100m', memory: '128Mi' },
-      max: { cpu: '2', memory: '2Gi' },
-      min: { cpu: '50m', memory: '64Mi' },
-    },
-    {
-      type: 'Pod',
-      max: { cpu: '4', memory: '4Gi' },
-      min: { cpu: '100m', memory: '128Mi' },
-    },
-  ],
-};
+interface LimitRangeItemSpec {
+  type: string;
+  default?: Record<string, string>;
+  defaultRequest?: Record<string, string>;
+  min?: Record<string, string>;
+  max?: Record<string, string>;
+  maxLimitRequestRatio?: Record<string, string>;
+}
 
-const mockEvents: EventInfo[] = [];
-
-const yaml = `apiVersion: v1
-kind: LimitRange
-metadata:
-  name: prod-limits
-  namespace: production
-spec:
-  limits:
-  - type: Container
-    default:
-      cpu: 500m
-      memory: 512Mi
-    defaultRequest:
-      cpu: 100m
-      memory: 128Mi
-    max:
-      cpu: "2"
-      memory: 2Gi
-    min:
-      cpu: 50m
-      memory: 64Mi
-  - type: Pod
-    max:
-      cpu: "4"
-      memory: 4Gi
-    min:
-      cpu: 100m
-      memory: 128Mi`;
+interface LimitRangeResource extends KubernetesResource {
+  spec?: { limits?: LimitRangeItemSpec[] };
+}
 
 export default function LimitRangeDetail() {
-  const { namespace, name } = useParams();
+  const { namespace, name } = useParams<{ namespace: string; name: string }>();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
-  const lr = mockLimitRange;
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const { isConnected } = useConnectionStatus();
 
-  // Mock YAML versions for comparison
-  const yamlVersions: YamlVersion[] = [
-    { id: 'current', label: 'Current Version', yaml, timestamp: 'now' },
-    { id: 'previous', label: 'Previous Version', yaml: yaml.replace('cpu: 500m', 'cpu: 400m'), timestamp: '2 hours ago' },
-    { id: 'initial', label: 'Initial Version', yaml: yaml.replace('memory: 512Mi', 'memory: 256Mi'), timestamp: '1 day ago' },
-  ];
+  const { resource, isLoading, error: resourceError, age, yaml, refetch } = useResourceDetail<LimitRangeResource>(
+    'limitranges',
+    name ?? undefined,
+    namespace ?? undefined,
+    undefined as unknown as LimitRangeResource
+  );
+  const { events, refetch: refetchEvents } = useResourceEvents('LimitRange', namespace ?? undefined, name ?? undefined);
+  const deleteResource = useDeleteK8sResource('limitranges');
 
-  const handleSaveYaml = async (newYaml: string) => {
-    toast.success('LimitRange updated successfully');
-    console.log('Saving YAML:', newYaml);
-  };
+  const lrName = resource?.metadata?.name ?? name ?? '';
+  const lrNamespace = resource?.metadata?.namespace ?? namespace ?? '';
+  const limits = resource?.spec?.limits ?? [];
+  const labels = resource?.metadata?.labels ?? {};
+  const annotations = resource?.metadata?.annotations ?? {};
+  const containerLimit = limits.find((l) => l.type === 'Container');
+  const defaultCpu = containerLimit?.default?.cpu ?? containerLimit?.defaultRequest?.cpu ?? '–';
+  const defaultMemory = containerLimit?.default?.memory ?? containerLimit?.defaultRequest?.memory ?? '–';
+  const maxCpu = containerLimit?.max?.cpu ?? limits.find((l) => l.type === 'Pod')?.max?.cpu ?? '–';
 
-  const containerLimit = lr.limits.find(l => l.type === 'Container');
+  const handleDownloadYaml = useCallback(() => {
+    if (!yaml) return;
+    const blob = new Blob([yaml], { type: 'application/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${lrName || 'limitrange'}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [yaml, lrName]);
+
+  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
+
   const statusCards = [
-    { label: 'Default CPU', value: containerLimit?.default?.cpu || '-', icon: Cpu, iconColor: 'primary' as const },
-    { label: 'Default Memory', value: containerLimit?.default?.memory || '-', icon: HardDrive, iconColor: 'info' as const },
-    { label: 'Limit Types', value: lr.limits.length, icon: Scale, iconColor: 'success' as const },
-    { label: 'Age', value: lr.age, icon: Clock, iconColor: 'muted' as const },
+    { label: 'Types Covered', value: limits.length, icon: Scale, iconColor: 'primary' as const },
+    { label: 'Default CPU', value: defaultCpu, icon: Cpu, iconColor: 'muted' as const },
+    { label: 'Default Memory', value: defaultMemory, icon: HardDrive, iconColor: 'muted' as const },
+    { label: 'Max CPU', value: maxCpu, icon: Cpu, iconColor: 'info' as const },
   ];
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  if (isConnected && (resourceError || !resource?.metadata?.name)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
+        <Scale className="h-12 w-12 text-muted-foreground" />
+        <p className="text-lg font-medium">Limit Range not found</p>
+        <p className="text-sm text-muted-foreground">
+          {namespace && name ? `No limit range "${name}" in namespace "${namespace}".` : 'Missing namespace or name.'}
+        </p>
+        <Button variant="outline" onClick={() => navigate('/limitranges')}>Back to Limit Ranges</Button>
+      </div>
+    );
+  }
 
   const tabs = [
     {
@@ -93,7 +114,7 @@ export default function LimitRangeDetail() {
       label: 'Overview',
       content: (
         <div className="space-y-6">
-          {lr.limits.map((limit, idx) => (
+          {limits.map((limit, idx) => (
             <Card key={idx}>
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2">
@@ -103,7 +124,7 @@ export default function LimitRangeDetail() {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {limit.default && (
+                  {limit.default && Object.keys(limit.default).length > 0 && (
                     <div className="p-4 rounded-lg bg-muted/50">
                       <p className="text-sm text-muted-foreground mb-2">Default</p>
                       <div className="space-y-1 text-sm font-mono">
@@ -113,7 +134,7 @@ export default function LimitRangeDetail() {
                       </div>
                     </div>
                   )}
-                  {limit.defaultRequest && (
+                  {limit.defaultRequest && Object.keys(limit.defaultRequest).length > 0 && (
                     <div className="p-4 rounded-lg bg-muted/50">
                       <p className="text-sm text-muted-foreground mb-2">Default Request</p>
                       <div className="space-y-1 text-sm font-mono">
@@ -123,7 +144,7 @@ export default function LimitRangeDetail() {
                       </div>
                     </div>
                   )}
-                  {limit.max && (
+                  {limit.max && Object.keys(limit.max).length > 0 && (
                     <div className="p-4 rounded-lg bg-muted/50">
                       <p className="text-sm text-muted-foreground mb-2">Max</p>
                       <div className="space-y-1 text-sm font-mono">
@@ -133,7 +154,7 @@ export default function LimitRangeDetail() {
                       </div>
                     </div>
                   )}
-                  {limit.min && (
+                  {limit.min && Object.keys(limit.min).length > 0 && (
                     <div className="p-4 rounded-lg bg-muted/50">
                       <p className="text-sm text-muted-foreground mb-2">Min</p>
                       <div className="space-y-1 text-sm font-mono">
@@ -143,45 +164,103 @@ export default function LimitRangeDetail() {
                       </div>
                     </div>
                   )}
+                  {limit.maxLimitRequestRatio && Object.keys(limit.maxLimitRequestRatio).length > 0 && (
+                    <div className="p-4 rounded-lg bg-muted/50">
+                      <p className="text-sm text-muted-foreground mb-2">Max Limit/Request Ratio</p>
+                      <div className="space-y-1 text-sm font-mono">
+                        {Object.entries(limit.maxLimitRequestRatio).map(([k, v]) => (
+                          <p key={k}>{k}: {v}</p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
           ))}
+          {limits.length === 0 && <p className="text-muted-foreground text-sm">No limits defined.</p>}
+          <MetadataCard title="Labels" items={labels} variant="badges" />
+          {Object.keys(annotations).length > 0 && <MetadataCard title="Annotations" items={annotations} variant="badges" />}
         </div>
       ),
     },
-    { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={lr.name} editable onSave={handleSaveYaml} /> },
-    { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={lr.name} /> },
+    {
+      id: 'limit-details',
+      label: 'Limit Details',
+      content: (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Per-Type Limits</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm">Same as Overview — limits array with default, defaultRequest, min, max per type (Container, Pod, PVC).</p>
+          </CardContent>
+        </Card>
+      ),
+    },
+    { id: 'events', label: 'Events', content: <EventsSection events={events} /> },
+    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={lrName} /> },
+    { id: 'compare', label: 'Compare', content: <YamlCompareViewer versions={yamlVersions} resourceName={lrName} /> },
+    {
+      id: 'topology',
+      label: 'Topology',
+      icon: Network,
+      content: (
+        <ResourceTopologyView
+          kind={normalizeKindForTopology('LimitRange')}
+          namespace={namespace ?? ''}
+          name={name ?? ''}
+          sourceResourceType="LimitRange"
+          sourceResourceName={resource?.metadata?.name ?? name ?? ''}
+        />
+      ),
+    },
     {
       id: 'actions',
       label: 'Actions',
       content: (
-        <ActionsSection actions={[
-          { icon: Download, label: 'Download YAML', description: 'Export LimitRange definition' },
-          { icon: Trash2, label: 'Delete LimitRange', description: 'Remove this limit range', variant: 'destructive' },
-        ]} />
+        <ActionsSection
+          actions={[
+            { icon: Download, label: 'Download YAML', description: 'Export LimitRange definition', onClick: handleDownloadYaml },
+            { icon: Trash2, label: 'Delete LimitRange', description: 'Remove this limit range', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
+          ]}
+        />
       ),
     },
   ];
 
+  const status: ResourceStatus = 'Healthy';
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <ResourceHeader
+    <>
+      <ResourceDetailLayout
         resourceType="LimitRange"
         resourceIcon={Scale}
-        name={lr.name}
-        namespace={lr.namespace}
-        status={lr.status}
+        name={lrName}
+        namespace={lrNamespace}
+        status={status}
         backLink="/limitranges"
         backLabel="Limit Ranges"
-        metadata={<span className="flex items-center gap-1.5 ml-2"><Clock className="h-3.5 w-3.5" />Created {lr.age}</span>}
+        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {age}</span>}
         actions={[
-          { label: 'Delete', icon: Trash2, variant: 'destructive' },
+          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
+          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
         ]}
+        statusCards={statusCards}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
-      <ResourceStatusCards cards={statusCards} />
-      <ResourceTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-    </motion.div>
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        resourceType="LimitRange"
+        resourceName={lrName}
+        namespace={lrNamespace}
+        onConfirm={async () => {
+          await deleteResource.mutateAsync({ name: lrName, namespace: lrNamespace });
+          navigate('/limitranges');
+        }}
+        requireNameConfirmation
+      />
+    </>
   );
 }
