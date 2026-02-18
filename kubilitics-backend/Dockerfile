@@ -6,6 +6,11 @@
 # ── Stage 1: Build backend + kcli in one stage (one base image, faster) ───────
 FROM golang:1.24-alpine AS builder
 
+# Build arguments for multi-platform support
+ARG TARGETOS=linux
+ARG TARGETARCH
+ARG BUILDPLATFORM
+
 # Create output directory
 RUN mkdir -p /out
 
@@ -16,10 +21,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 COPY kubilitics-backend/ .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/kubilitics-backend ./cmd/server
+# Build with explicit target architecture for cross-compilation
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/kubilitics-backend ./cmd/server
 
 # Verify backend binary was created
-RUN test -f /out/kubilitics-backend || (echo "ERROR: Backend binary not found" && exit 1)
+RUN test -f /out/kubilitics-backend || (echo "ERROR: Backend binary not found for ${TARGETOS}/${TARGETARCH}" && exit 1)
 
 # kcli: same stage, different dir (avoids second golang image pull)
 WORKDIR /build-kcli
@@ -28,15 +34,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 COPY kcli/ .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/kcli ./cmd/kcli
+# Build kcli with explicit target architecture for cross-compilation
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/kcli ./cmd/kcli
 
 # Verify kcli binary was created
-RUN test -f /out/kcli || (echo "ERROR: kcli binary not found" && exit 1)
+RUN test -f /out/kcli || (echo "ERROR: kcli binary not found for ${TARGETOS}/${TARGETARCH}" && exit 1)
 RUN ls -lh /out/
 
 # ── Stage 2: Runtime ────────────────────────────────────────────────────────
 FROM alpine:3.19
-RUN apk --no-cache add ca-certificates kubectl
 WORKDIR /app
 
 # Copy binaries from builder
@@ -47,6 +53,9 @@ COPY --from=builder /out/kcli /usr/local/bin/kcli
 RUN test -f /usr/local/bin/kcli || (echo "ERROR: kcli not found in final image" && exit 1)
 RUN chmod +x /usr/local/bin/kcli
 RUN test -x /usr/local/bin/kcli || (echo "ERROR: kcli not executable" && exit 1)
+
+# Install runtime dependencies
+RUN apk --no-cache add ca-certificates kubectl
 
 RUN mkdir -p /data
 EXPOSE 819

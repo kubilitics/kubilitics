@@ -97,6 +97,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
+          # Docker Buildx automatically provides TARGETOS and TARGETARCH for multi-platform builds
 
       - name: Verify kcli binary in Docker image
         if: github.event_name != 'pull_request'
