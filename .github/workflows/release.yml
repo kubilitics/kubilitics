@@ -249,32 +249,13 @@ jobs:
             rm -rf kubilitics-desktop/src-tauri/target/universal-apple-darwin
           fi
           echo "✅ Cleaned build artifacts"
-      - name: Prepare signing key
+      - name: Verify signing key secret
         shell: bash
-        env:
-          SIGNING_KEY_SECRET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          if [ -z "$SIGNING_KEY_SECRET" ]; then
+          if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
             echo "⚠️ No TAURI_SIGNING_PRIVATE_KEY secret found — updater artifacts will not be signed"
-            exit 0
-          fi
-          # Auto-detect whether the secret is base64-encoded or raw minisign key.
-          # A raw minisign key starts with "untrusted comment:" so if the secret
-          # starts with that prefix it is already raw; otherwise try base64-decode.
-          KEY_DEST="kubilitics-desktop/src-tauri/kubilitics.key"
-          if echo "$SIGNING_KEY_SECRET" | grep -q "^untrusted comment:"; then
-            printf '%s' "$SIGNING_KEY_SECRET" > "$KEY_DEST"
-            echo "✅ Raw minisign key written to $KEY_DEST"
           else
-            # Treat as base64-encoded; decode to get the raw key
-            DECODED=$(echo "$SIGNING_KEY_SECRET" | base64 --decode 2>/dev/null) || true
-            if echo "$DECODED" | grep -q "^untrusted comment:"; then
-              printf '%s' "$DECODED" > "$KEY_DEST"
-              echo "✅ Base64-decoded minisign key written to $KEY_DEST"
-            else
-              echo "❌ ERROR: TAURI_SIGNING_PRIVATE_KEY does not appear to be a valid minisign key (raw or base64-encoded)"
-              exit 1
-            fi
+            echo "✅ Signing key secret is present"
           fi
       - uses: actions/setup-node@v4
         with:
@@ -483,7 +464,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         working-directory: kubilitics-desktop/src-tauri
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ github.workspace }}/kubilitics-desktop/src-tauri/kubilitics.key
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_SKIP_DEVSERVER_CHECK: "true"
         # --config overrides beforeBuildCommand to "" so Tauri doesn't try to run
@@ -538,7 +519,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         working-directory: kubilitics-desktop/src-tauri
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ github.workspace }}/kubilitics-desktop/src-tauri/kubilitics.key
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_SKIP_DEVSERVER_CHECK: "true"
         shell: pwsh
@@ -559,7 +540,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         working-directory: kubilitics-desktop/src-tauri
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ github.workspace }}/kubilitics-desktop/src-tauri/kubilitics.key
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_SKIP_DEVSERVER_CHECK: "true"
         shell: bash
@@ -580,7 +561,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         working-directory: kubilitics-desktop/src-tauri
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ github.workspace }}/kubilitics-desktop/src-tauri/kubilitics.key
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_SKIP_DEVSERVER_CHECK: "true"
         shell: bash
@@ -601,7 +582,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         working-directory: kubilitics-desktop/src-tauri
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ github.workspace }}/kubilitics-desktop/src-tauri/kubilitics.key
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_SKIP_DEVSERVER_CHECK: "true"
         shell: bash
