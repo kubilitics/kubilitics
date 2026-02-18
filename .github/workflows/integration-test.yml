@@ -1,16 +1,9 @@
 name: Integration Tests
 
+# Integration tests are heavy (Docker Compose, full-stack startup).
+# They run on PRs to main/develop and on manual dispatch only.
+# Do NOT run on every push to main — that is handled by unit/component CIs.
 on:
-  push:
-    branches:
-      - main
-      - develop
-    paths:
-      - 'kubilitics-backend/**'
-      - 'kubilitics-ai/**'
-      - 'kubilitics-frontend/**'
-      - 'docker-compose.test.yml'
-      - '.github/workflows/integration-test.yml'
   pull_request:
     branches:
       - main
@@ -19,6 +12,7 @@ on:
       - 'kubilitics-backend/**'
       - 'kubilitics-ai/**'
       - 'kubilitics-frontend/**'
+      - 'docker-compose.test.yml'
   workflow_dispatch:
     inputs:
       include_ai:
