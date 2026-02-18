@@ -22,20 +22,18 @@ on:
         type: boolean
         default: false
 
-# Cancel in-progress runs for the same branch/PR.
-concurrency:
-  group: helm-ci-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
   packages: write
+
+concurrency:
+  group: helm-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
     name: Lint Chart
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -57,20 +55,20 @@ jobs:
         run: |
           # Test with default values
           helm template . --debug --dry-run > /dev/null
-
+          
           # Test with PostgreSQL enabled
           helm template . --debug --dry-run \
             --set database.type=postgresql \
             --set postgresql.enabled=true > /dev/null
-
+          
           # Test with frontend enabled
           helm template . --debug --dry-run \
             --set frontend.enabled=true > /dev/null
-
+          
           # Test with AI enabled
           helm template . --debug --dry-run \
             --set ai.enabled=true > /dev/null
-
+          
           # Test with all components enabled
           helm template . --debug --dry-run \
             --set database.type=postgresql \
@@ -78,13 +76,12 @@ jobs:
             --set frontend.enabled=true \
             --set ai.enabled=true \
             --set ingress.enabled=true > /dev/null
-
+          
           echo "✓ All value combinations validated successfully"
 
   test:
     name: Test Chart
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     needs: lint
     steps:
       - name: Checkout code
@@ -146,7 +143,6 @@ jobs:
   package:
     name: Package Chart
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     needs: lint
     if: github.event_name != 'pull_request'
     steps:
@@ -178,7 +174,6 @@ jobs:
       - name: Upload chart artifact
         uses: actions/upload-artifact@v4
         with:
-          # Artifact name is "helm-chart-{version}" (e.g. helm-chart-0.1.0)
           name: helm-chart-${{ steps.chart-version.outputs.version }}
           path: deploy/helm/kubilitics/packaged/*.tgz
           retention-days: 30
@@ -186,7 +181,6 @@ jobs:
   publish:
     name: Publish Chart to OCI
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     needs: [lint, package]
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
@@ -203,8 +197,8 @@ jobs:
       - name: Download chart artifact
         uses: actions/download-artifact@v4
         with:
-          # FIX: pattern matches artifact *names*, not filenames inside them.
-          # The package job uploads artifact named "helm-chart-{version}" (no .tgz suffix).
+          # FIX: pattern matches artifact *names* not filenames — the artifact is named
+          # "helm-chart-{version}" (no .tgz suffix), so the old pattern never matched.
           pattern: helm-chart-*
           path: ./charts
           merge-multiple: true
@@ -229,9 +223,10 @@ jobs:
 
       - name: Push chart to OCI registry
         run: |
+          # Helm push automatically uses the version from Chart.yaml
           helm push ${{ steps.chart-info.outputs.file }} \
             oci://ghcr.io/${{ github.repository_owner }}/charts
-
+          
           echo "✓ Chart pushed: oci://ghcr.io/${{ github.repository_owner }}/charts/${{ steps.chart-info.outputs.name }}:${{ steps.chart-info.outputs.version }}"
 
       - name: Output chart location

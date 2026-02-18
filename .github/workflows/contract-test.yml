@@ -19,19 +19,17 @@ on:
       - 'kubilitics-ai/api/openapi.yaml'
       - 'kubilitics-frontend/src/types/api/**'
 
-# Cancel in-progress runs for the same branch/PR.
+permissions:
+  contents: read
+
 concurrency:
   group: contract-test-${{ github.ref }}
   cancel-in-progress: true
-
-permissions:
-  contents: read
 
 jobs:
   validate-backend-spec:
     name: Validate Backend OpenAPI Spec
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -63,7 +61,6 @@ jobs:
   generate-typescript-types:
     name: Generate TypeScript Types
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -108,7 +105,6 @@ jobs:
   validate-api-contract:
     name: Validate API Contract
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     needs: [validate-backend-spec, generate-typescript-types]
     steps:
       - name: Checkout code

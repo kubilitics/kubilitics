@@ -11,7 +11,6 @@ on:
     paths:
       - 'kubilitics-backend/**'
 
-# Cancel in-progress runs for the same branch/PR.
 concurrency:
   group: backend-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,29 +19,29 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-
+    
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version: '1.24'
         cache-dependency-path: kubilitics-backend/go.sum
-
+    
     - name: Install dependencies
       working-directory: kubilitics-backend
       run: go mod download
-
+    
     - name: Build kcli binary (for integration tests)
-      working-directory: kcli
       run: |
+        cd kcli
         go build -ldflags="-s -w" -o ../kubilitics-backend/bin/kcli ./cmd/kcli
         chmod +x ../kubilitics-backend/bin/kcli
         # Also ensure kcli is in PATH for tests
         echo "$(pwd)/../kubilitics-backend/bin" >> $GITHUB_PATH
+      working-directory: .
 
     - name: Install kubectl (for kcli integration tests)
       run: |
@@ -61,71 +60,66 @@ jobs:
         cd kubilitics-backend
         go test -v -timeout 10m ./tests/integration/kcli_test.go -run TestKCLI 2>&1 | tee ../test_reports/backend/kcli-integration-test.log || echo "⚠️ kcli integration tests require running backend - skipping in CI"
       continue-on-error: true
-
+    
     - name: Run govulncheck
-      working-directory: kubilitics-backend
       run: |
         go install golang.org/x/vuln/cmd/govulncheck@latest
         govulncheck ./...
-
+      working-directory: kubilitics-backend
+    
     - name: Upload test report
       uses: actions/upload-artifact@v4
       if: always()
       with:
         name: backend-test-report
         path: test_reports/backend/
-
+    
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       with:
         files: ./kubilitics-backend/coverage.out
         flags: backend
         name: backend-coverage
-
+  
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-
+    
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version: '1.24'
-        cache-dependency-path: kubilitics-backend/go.sum
-
+    
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v4
       with:
         version: latest
         working-directory: kubilitics-backend
         args: --timeout=5m
-
+  
   build:
     name: Build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     needs: [test, lint]
-
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-
+    
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version: '1.24'
-        cache-dependency-path: kubilitics-backend/go.sum
-
+    
     - name: Build
       working-directory: kubilitics-backend
-      # FIX: use package path (./cmd/server) not a single file path — correct for multi-file packages
       run: |
-        go build -v -o bin/kubilitics-backend ./cmd/server
-
+        go build -v -o bin/kubilitics-backend cmd/server/main.go
+    
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:

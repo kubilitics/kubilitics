@@ -36,11 +36,6 @@ on:
         type: string
         default: 'latest'
 
-# Cancel in-progress runs for the same branch/PR to avoid duplicate builds.
-concurrency:
-  group: docker-build-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 env:
   REGISTRY: ghcr.io
   BACKEND_IMAGE: kubilitics-backend
@@ -50,11 +45,14 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     name: Build and Push Backend
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     if: |
       github.event_name == 'workflow_dispatch' && (github.event.inputs.component == 'backend' || github.event.inputs.component == 'all') ||
       github.event_name != 'workflow_dispatch'
@@ -101,15 +99,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
 
       - name: Verify kcli binary in Docker image
-        # Use the SHA-based tag for a deterministic, always-available reference.
-        # The SHA tag is always generated (type=sha) and is unambiguous.
         if: github.event_name != 'pull_request'
         run: |
-          SHA_TAG="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.BACKEND_IMAGE }}:${{ github.ref_name }}-$(echo ${{ github.sha }} | head -c 7)"
-          # Fallback: use the first tag from metadata output
-          IMAGE_TAG=$(echo "${{ steps.meta-backend.outputs.tags }}" | tr ',' '\n' | grep -v '^$' | head -1)
+          IMAGE_TAG=$(echo "${{ steps.meta-backend.outputs.tags }}" | head -1)
           echo "Verifying kcli binary in image: $IMAGE_TAG"
-          docker pull --platform linux/amd64 "$IMAGE_TAG"
           docker run --rm --platform linux/amd64 "$IMAGE_TAG" test -f /usr/local/bin/kcli || (echo "❌ kcli not found" && exit 1)
           docker run --rm --platform linux/amd64 "$IMAGE_TAG" test -x /usr/local/bin/kcli || (echo "❌ kcli not executable" && exit 1)
           echo "✅ kcli binary verification passed"
@@ -118,7 +111,6 @@ jobs:
   ai:
     name: Build and Push AI Backend
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     if: |
       github.event_name == 'workflow_dispatch' && (github.event.inputs.component == 'ai' || github.event.inputs.component == 'all') ||
       github.event_name != 'workflow_dispatch'
@@ -168,7 +160,6 @@ jobs:
   frontend:
     name: Build Frontend (if Dockerfile exists)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.component == 'all' ||
       github.event_name != 'workflow_dispatch'
