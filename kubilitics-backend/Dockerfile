@@ -13,10 +13,8 @@ ARG KUBECTL_VERSION=v1.30.3
 
 # ── Stage 1: Builder ──────────────────────────────────────────────────────────
 # Use the exact Go patch version that satisfies both go.mod toolchain directives:
-#   kubilitics-backend: go 1.24.0  (toolchain go1.24.5 — download-only fallback)
+#   kubilitics-backend: go 1.24.0
 #   kcli:               go 1.24.2
-# 1.24.2 satisfies kcli; backend's "toolchain go1.24.5" is advisory — Go will
-# use the installed 1.24.2 and not attempt a network download when GOTOOLCHAIN=local.
 FROM golang:${GO_VERSION}-alpine AS builder
 
 ARG TARGETOS=linux

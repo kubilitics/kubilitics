@@ -43,6 +43,7 @@ jobs:
 
     - name: Build kcli binary (for integration tests)
       run: |
+        mkdir -p kubilitics-backend/bin
         cd kcli
         CGO_ENABLED=0 go build -ldflags="-s -w" -o ../kubilitics-backend/bin/kcli ./cmd/kcli
         chmod +x ../kubilitics-backend/bin/kcli

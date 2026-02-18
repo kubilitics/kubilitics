@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build kcli binary for desktop app bundling
-# This script builds kcli for the current platform and copies it to the desktop app's binaries directory
+# Download kcli binaries for desktop app bundling
+# This script downloads kcli binaries for all platforms and copies them to the desktop app's binaries directory
+# Option: Set KCLI_BUILD_FROM_SOURCE=1 to build from source instead (requires kcli directory)
 
 set -euo pipefail
 
@@ -8,69 +9,59 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 KCLI_DIR="$REPO_ROOT/kcli"
 DESKTOP_BINARIES_DIR="$REPO_ROOT/kubilitics-desktop/binaries"
+KCLI_VERSION="${KCLI_VERSION:-v1.0.0}"
 
-echo "=== Building kcli for Desktop App ==="
-
-# Get target triple
-TARGET_TRIPLE=$(rustc --print target-triple 2>/dev/null || echo "")
-if [ -z "$TARGET_TRIPLE" ]; then
-    echo "Warning: Could not determine target triple. Building for current platform."
-fi
-
-# Build kcli
-cd "$KCLI_DIR"
-echo "Building kcli..."
-go build -ldflags="-s -w" -o bin/kcli ./cmd/kcli
-
-if [ ! -f "bin/kcli" ]; then
-    echo "Error: kcli binary not found after build"
-    exit 1
-fi
+echo "=== Downloading kcli binaries for Desktop App ==="
+echo "kcli version: $KCLI_VERSION"
 
 # Create binaries directory if it doesn't exist
 mkdir -p "$DESKTOP_BINARIES_DIR"
 
-# Copy binary with target triple suffix (required by Tauri)
-if [ -n "$TARGET_TRIPLE" ]; then
-    BINARY_NAME="kcli-$TARGET_TRIPLE"
+if [ "${KCLI_BUILD_FROM_SOURCE:-0}" = "1" ]; then
+    echo "Building kcli from source (KCLI_BUILD_FROM_SOURCE=1)..."
+    if [ ! -d "$KCLI_DIR" ]; then
+        echo "Error: kcli directory not found at $KCLI_DIR"
+        exit 1
+    fi
+    cd "$KCLI_DIR"
+    go build -ldflags="-s -w" -o bin/kcli ./cmd/kcli
+    
+    # Copy for current platform only
+    TARGET_TRIPLE=$(rustc --print target-triple 2>/dev/null || echo "")
+    if [ -n "$TARGET_TRIPLE" ]; then
+        cp "bin/kcli" "$DESKTOP_BINARIES_DIR/kcli-$TARGET_TRIPLE"
+        chmod +x "$DESKTOP_BINARIES_DIR/kcli-$TARGET_TRIPLE"
+    fi
+    cp "bin/kcli" "$DESKTOP_BINARIES_DIR/kcli"
+    chmod +x "$DESKTOP_BINARIES_DIR/kcli"
+    echo "✅ Built kcli from source"
 else
-    # Fallback: use platform-specific naming
-    case "$(uname -s)" in
-        Darwin)
-            case "$(uname -m)" in
-                arm64) BINARY_NAME="kcli-aarch64-apple-darwin" ;;
-                x86_64) BINARY_NAME="kcli-x86_64-apple-darwin" ;;
-                *) BINARY_NAME="kcli" ;;
-            esac
-            ;;
-        Linux)
-            case "$(uname -m)" in
-                x86_64) BINARY_NAME="kcli-x86_64-unknown-linux-gnu" ;;
-                aarch64) BINARY_NAME="kcli-aarch64-unknown-linux-gnu" ;;
-                *) BINARY_NAME="kcli" ;;
-            esac
-            ;;
-        MINGW*|MSYS*|CYGWIN*)
-            BINARY_NAME="kcli-x86_64-pc-windows-msvc.exe"
-            ;;
-        *)
-            BINARY_NAME="kcli"
-            ;;
-    esac
+    echo "Downloading kcli binaries from GitHub releases..."
+    
+    # Download binaries for all platforms (required by Tauri)
+    echo "Downloading macOS binaries..."
+    curl -fsSL "https://github.com/vellankikoti/kcli/releases/download/${KCLI_VERSION}/kcli-darwin-amd64" \
+        -o "$DESKTOP_BINARIES_DIR/kcli-x86_64-apple-darwin"
+    curl -fsSL "https://github.com/vellankikoti/kcli/releases/download/${KCLI_VERSION}/kcli-darwin-arm64" \
+        -o "$DESKTOP_BINARIES_DIR/kcli-aarch64-apple-darwin"
+    
+    echo "Downloading Linux binaries..."
+    curl -fsSL "https://github.com/vellankikoti/kcli/releases/download/${KCLI_VERSION}/kcli-linux-amd64" \
+        -o "$DESKTOP_BINARIES_DIR/kcli-x86_64-unknown-linux-gnu"
+    curl -fsSL "https://github.com/vellankikoti/kcli/releases/download/${KCLI_VERSION}/kcli-linux-arm64" \
+        -o "$DESKTOP_BINARIES_DIR/kcli-aarch64-unknown-linux-gnu"
+    
+    echo "Downloading Windows binary..."
+    curl -fsSL "https://github.com/vellankikoti/kcli/releases/download/${KCLI_VERSION}/kcli-windows-amd64.exe" \
+        -o "$DESKTOP_BINARIES_DIR/kcli-x86_64-pc-windows-msvc.exe"
+    
+    chmod +x "$DESKTOP_BINARIES_DIR"/kcli-*
+    
+    echo "✅ Downloaded kcli binaries for all platforms"
 fi
 
-# Copy binary
-cp "bin/kcli" "$DESKTOP_BINARIES_DIR/$BINARY_NAME"
-chmod +x "$DESKTOP_BINARIES_DIR/$BINARY_NAME"
-
-echo "✅ kcli built and copied to: $DESKTOP_BINARIES_DIR/$BINARY_NAME"
-
-# Also copy without suffix for development (Tauri will use the suffixed version in production)
-cp "bin/kcli" "$DESKTOP_BINARIES_DIR/kcli"
-chmod +x "$DESKTOP_BINARIES_DIR/kcli"
-
-echo "✅ Also copied as: $DESKTOP_BINARIES_DIR/kcli (for development)"
-
+echo ""
+echo "kcli binaries ready in: $DESKTOP_BINARIES_DIR"
 echo ""
 echo "Next steps:"
 echo "1. Build desktop app: cd kubilitics-desktop && npm run tauri build"

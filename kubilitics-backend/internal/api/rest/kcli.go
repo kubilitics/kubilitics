@@ -200,7 +200,7 @@ func resolveKCLIBinary() (string, error) {
 		errMsg.WriteString(fmt.Sprintf("  - %s\n", p))
 	}
 	errMsg.WriteString("\nTo fix this issue:\n")
-	errMsg.WriteString("  1. Install kcli: https://github.com/kubilitics/kcli#installation\n")
+	errMsg.WriteString("  1. Install kcli: https://github.com/vellankikoti/kcli#installation\n")
 	errMsg.WriteString("  2. Set KCLI_BIN environment variable to the full path of the kcli binary\n")
 	errMsg.WriteString("  3. Build kcli from source: cd kcli && go build -o bin/kcli ./cmd/kcli\n")
 	errMsg.WriteString("  4. For Docker deployments: ensure kcli is included in the container image\n")

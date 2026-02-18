@@ -228,6 +228,24 @@ go build -o bin/kubilitics-backend cmd/server/main.go
 ./bin/kubilitics-backend
 ```
 
+### kcli Integration
+
+The backend uses **kcli** (Kubilitics CLI) as a sidecar binary for executing Kubernetes commands. kcli is downloaded from GitHub releases during Docker builds and is not built from source in this repository.
+
+**Version Management:**
+- kcli version is pinned in `KCLI_VERSION` file (default: `v1.0.0`)
+- Docker builds download kcli binary from: `https://github.com/vellankikoti/kcli/releases/download/{VERSION}/kcli-linux-{ARCH}`
+- To update kcli version, update `KCLI_VERSION` file or pass `--build-arg KCLI_VERSION=v1.x.x` to Docker build
+
+**Local Development:**
+- For integration tests, kcli binary is downloaded automatically by CI workflows
+- For local development, use `make kcli` to download kcli binary
+- Or set `KCLI_BIN` environment variable to point to an existing kcli binary
+
+**Standalone kcli:**
+- kcli is also available as a standalone tool: https://github.com/vellankikoti/kcli
+- Users can install kcli independently without the full Kubilitics platform
+
 ### Configuration
 
 See [CONFIGURATION.md](./CONFIGURATION.md) for complete configuration reference.
