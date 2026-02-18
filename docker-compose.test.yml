@@ -4,8 +4,8 @@ services:
   # Backend service
   backend:
     build:
-      context: ./kubilitics-backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: kubilitics-backend/Dockerfile
     container_name: kubilitics-backend-test
     ports:
       - "819:819"

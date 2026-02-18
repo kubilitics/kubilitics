@@ -40,6 +40,8 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w
 # Verify kcli binary was created
 RUN test -f /out/kcli || (echo "ERROR: kcli binary not found for ${TARGETOS}/${TARGETARCH}" && exit 1)
 RUN ls -lh /out/
+# Verify kcli is executable and not empty/corrupt
+RUN /out/kcli version || (echo "ERROR: kcli binary failed to execute" && exit 1)
 
 # ── Stage 2: Runtime ────────────────────────────────────────────────────────
 FROM alpine:3.19
