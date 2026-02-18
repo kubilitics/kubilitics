@@ -4,12 +4,14 @@
 mod commands;
 mod menu;
 mod sidecar;
+mod tray;
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::read_kubeconfig,
             commands::get_kubeconfig_info,
@@ -23,6 +25,26 @@ fn main() {
             commands::get_recent_exports,
             commands::get_app_data_dir,
             commands::select_kubeconfig_file,
+            commands::get_selected_contexts,
+            commands::save_selected_contexts,
+            commands::is_first_launch,
+            commands::mark_first_launch_complete,
+            commands::save_custom_kubeconfig_path,
+            commands::get_custom_kubeconfig_path,
+            commands::encrypt_kubeconfig,
+            commands::decrypt_kubeconfig,
+            commands::save_encrypted_kubeconfig,
+            commands::load_encrypted_kubeconfig,
+            commands::check_connectivity,
+            commands::get_analytics_consent,
+            commands::set_analytics_consent,
+            commands::has_analytics_consent_been_asked,
+            commands::check_for_updates,
+            commands::install_update,
+            commands::get_desktop_info,
+            commands::restart_sidecar,
+            commands::check_kubectl_installed,
+            sidecar::get_ai_status,
         ])
         .setup(|app| {
             // Native menu (R1.4): File, Edit, View, Help
@@ -43,8 +65,25 @@ fn main() {
                     }
                 });
             }
-            // Start Go backend sidecar
+            // Start Go backend sidecar (and AI backend if available)
             sidecar::start_backend(&app.handle())?;
+            
+            // Setup system tray
+            if let Err(e) = tray::setup_system_tray(&app.handle()) {
+                eprintln!("Failed to setup system tray: {}", e);
+            }
+            
+            // Configure window to minimize to tray instead of closing
+            if let Some(window) = app.get_webview_window("main") {
+                window.on_window_event(|event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        // Hide window instead of closing
+                        event.window().hide().unwrap();
+                        api.prevent_close();
+                    }
+                });
+            }
+            
             Ok(())
         })
         .run(tauri::generate_context!())

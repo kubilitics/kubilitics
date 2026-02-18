@@ -50,6 +50,10 @@ func (m *mockExecutor) Execute(_ context.Context, name string, args map[string]i
 	return m.response, nil
 }
 
+func (m *mockExecutor) WithAutonomyLevel(level int) types.ToolExecutor {
+	return m
+}
+
 // ─── SSE helpers ─────────────────────────────────────────────────────────────
 
 func sseEvent(eventType, data string) string {

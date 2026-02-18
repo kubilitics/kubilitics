@@ -5,6 +5,8 @@
  */
 import type { TopologyGraph } from '@/topology-engine';
 import { adaptTopologyGraph, validateTopologyGraph } from '@/topology-engine';
+import { useAuthStore } from '@/stores/authStore';
+import { getCurrentBackendUrl } from '@/stores/settingsStore';
 
 const API_PREFIX = '/api/v1';
 
@@ -66,6 +68,9 @@ export const CONFIRM_DESTRUCTIVE_HEADER = 'X-Confirm-Destructive';
 /**
  * Low-level request against the backend.
  * Path is relative to API root, e.g. "clusters" -> /api/v1/clusters.
+ * 
+ * Desktop mode (Tauri): Sends kubeconfig with each request via X-Kubeconfig header (Headlamp/Lens model).
+ * Web mode: Uses JWT token authentication.
  */
 export async function backendRequest<T>(
   baseUrl: string,
@@ -79,6 +84,8 @@ export async function backendRequest<T>(
       undefined
     );
   }
+
+  // Ensure no trailing slash
   const normalizedBase = baseUrl.replace(/\/+$/, '');
   const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
   const url = `${normalizedBase}${API_PREFIX}/${normalizedPath}`;
@@ -87,6 +94,22 @@ export async function backendRequest<T>(
     'Content-Type': 'application/json',
     ...((init?.headers as Record<string, string>) || {}),
   };
+
+  // Desktop mode (Tauri): Send kubeconfig with each request (Headlamp/Lens model)
+  const isTauriMode = typeof window !== 'undefined' &&
+    !!(((window as any).__TAURI_INTERNALS__) ?? ((window as any).__TAURI__));
+
+  if (isTauriMode) {
+    const { useClusterStore } = await import('@/stores/clusterStore');
+    const { activeCluster, kubeconfigContent } = useClusterStore.getState();
+
+    if (kubeconfigContent) {
+      headers['X-Kubeconfig'] = btoa(kubeconfigContent);
+    } else if (activeCluster?.kubeconfig) {
+      headers['X-Kubeconfig'] = btoa(activeCluster.kubeconfig);
+    }
+  }
+  // Web mode: No login — no Authorization header. When auth_mode=required, re-add token injection.
 
   let response: Response;
   try {
@@ -102,6 +125,16 @@ export async function backendRequest<T>(
   const requestId = response.headers.get('X-Request-ID') ?? undefined;
   const body = await response.text();
   if (!response.ok) {
+    if (response.status === 401) {
+      if (isTauriMode) {
+        console.error('Kubeconfig authentication failed - kubeconfig may be invalid or expired');
+      } else {
+        // Headlamp/Lens model: no login page — redirect to entry point
+        useAuthStore.getState().logout();
+        window.location.href = '/';
+      }
+    }
+
     throw new BackendApiError(
       `Backend API error: ${response.status}${body ? ` - ${body}` : ''}`,
       response.status,
@@ -1263,7 +1296,7 @@ export interface ShellStatusResult {
 }
 
 /** Response from GET /api/v1/clusters/{clusterId}/kcli/tui/state */
-export interface KCLITUIStateResult extends ShellStatusResult {}
+export interface KCLITUIStateResult extends ShellStatusResult { }
 
 /**
  * GET /api/v1/clusters/{clusterId}/shell/complete?line=... — IDE-style kubectl completions (optional for dropdown).

@@ -1,11 +1,11 @@
 /**
- * Backend config store: Kubilitics backend base URL and current cluster ID.
- * Used when frontend talks to Kubilitics backend (GET clusters, GET topology, etc.).
- * Per TASKS A3.1: store for backend URL and current cluster ID.
+ * Backend config store: Kubilitics backend base URL, AI URLs, and current cluster ID.
+ * Consolidated store for all backend-related URLs (previously split between settingsStore and backendConfigStore).
+ * Used when frontend talks to Kubilitics backend (GET clusters, GET topology, etc.) and AI service.
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { DEFAULT_BACKEND_BASE_URL, isLocalHostname } from '@/lib/backendConstants';
+import { DEFAULT_BACKEND_BASE_URL, DEFAULT_AI_BASE_URL, DEFAULT_AI_WS_URL, isLocalHostname } from '@/lib/backendConstants';
 
 /** C4.5: When running inside Tauri desktop, default to sidecar (same port as backend). */
 function isTauri(): boolean {
@@ -46,15 +46,21 @@ export function getEffectiveBackendBaseUrl(stored: string): string {
 }
 
 export interface BackendConfigState {
-  /** Base URL of Kubilitics backend (e.g. http://localhost:8080). Empty = backend not configured. */
+  /** Base URL of Kubilitics backend (e.g. http://localhost:819). Empty = backend not configured. */
   backendBaseUrl: string;
   /** Currently selected cluster ID for backend-scoped requests (e.g. topology, resources). */
   currentClusterId: string | null;
+  /** AI backend HTTP URL (e.g. http://localhost:8081). */
+  aiBackendUrl: string;
+  /** AI backend WebSocket URL (e.g. ws://localhost:8081/ws). */
+  aiWsUrl: string;
 }
 
 interface BackendConfigStore extends BackendConfigState {
   setBackendBaseUrl: (url: string) => void;
   setCurrentClusterId: (clusterId: string | null) => void;
+  setAiBackendUrl: (url: string) => void;
+  setAiWsUrl: (url: string) => void;
   /** Clear backend URL and cluster; call when switching to direct K8s or disconnecting. */
   clearBackend: () => void;
   /** True when backend mode is configured (non-empty base URL). */
@@ -64,6 +70,8 @@ interface BackendConfigStore extends BackendConfigState {
 const initialState: BackendConfigState = {
   backendBaseUrl: getDefaultBackendBaseUrl(),
   currentClusterId: null,
+  aiBackendUrl: DEFAULT_AI_BASE_URL,
+  aiWsUrl: DEFAULT_AI_WS_URL,
 };
 
 export const useBackendConfigStore = create<BackendConfigStore>()(
@@ -79,10 +87,22 @@ export const useBackendConfigStore = create<BackendConfigStore>()(
       setCurrentClusterId: (clusterId) =>
         set({ currentClusterId: clusterId ?? null }),
 
+      setAiBackendUrl: (url) =>
+        set({
+          aiBackendUrl: (url || '').trim().replace(/\/+$/, ''),
+        }),
+
+      setAiWsUrl: (url) =>
+        set({
+          aiWsUrl: (url || '').trim(),
+        }),
+
       clearBackend: () =>
         set({
           backendBaseUrl: getDefaultBackendBaseUrl(),
           currentClusterId: null,
+          aiBackendUrl: DEFAULT_AI_BASE_URL,
+          aiWsUrl: DEFAULT_AI_WS_URL,
         }),
 
       isBackendConfigured: () => {
@@ -96,6 +116,39 @@ export const useBackendConfigStore = create<BackendConfigStore>()(
     }),
     {
       name: 'kubilitics-backend-config',
+      // Migration: copy AI URLs from old settingsStore if present
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+
+        try {
+          const oldSettings = localStorage.getItem('kubilitics-settings');
+          if (oldSettings) {
+            const parsed = JSON.parse(oldSettings);
+            const settingsState = parsed?.state;
+
+            // Only migrate if backendConfigStore doesn't have AI URLs yet (first migration)
+            if (settingsState && state.aiBackendUrl === DEFAULT_AI_BASE_URL && state.aiWsUrl === DEFAULT_AI_WS_URL) {
+              if (settingsState.aiBackendUrl) {
+                state.aiBackendUrl = settingsState.aiBackendUrl;
+              }
+              if (settingsState.aiWsUrl) {
+                state.aiWsUrl = settingsState.aiWsUrl;
+              }
+
+              // Clear old settingsStore after migration
+              localStorage.removeItem('kubilitics-settings');
+              console.log('[backendConfigStore] Migrated AI URLs from settingsStore');
+            }
+          }
+        } catch (error) {
+          console.warn('[backendConfigStore] Failed to migrate from settingsStore:', error);
+        }
+      },
     }
   )
 );
+
+// Helper functions for non-React usage
+export const getCurrentBackendUrl = () => useBackendConfigStore.getState().backendBaseUrl;
+export const getCurrentAiBackendUrl = () => useBackendConfigStore.getState().aiBackendUrl;
+export const getCurrentAiWsUrl = () => useBackendConfigStore.getState().aiWsUrl;

@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Security Dashboard', () => {
   test.beforeEach(async ({ page }) => {
     // Navigate to security dashboard
-    await page.goto('http://localhost:3000/security');
+    await page.goto('/security');
   });
 
   test('should display security dashboard page', async ({ page }) => {

@@ -32,6 +32,12 @@ export interface UseWebSocketOptions {
   onClose?: () => void;
   onError?: (error: Event) => void;
   autoConnect?: boolean;
+  /** Enable auto-reconnect (default: true) */
+  reconnect?: boolean;
+  /** Maximum number of reconnect attempts (default: 5) */
+  maxReconnectAttempts?: number;
+  /** Base delay in ms for exponential backoff (default: 1000) */
+  reconnectBaseDelayMs?: number;
 }
 
 export interface SendMessageOptions {
@@ -53,13 +59,19 @@ export function useWebSocket(options: UseWebSocketOptions) {
     onClose,
     onError,
     autoConnect = true,
+    reconnect = true,
+    maxReconnectAttempts = 5,
+    reconnectBaseDelayMs = 1000,
   } = options;
 
   const ws = useRef<WebSocket | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttempt = useRef(0);
+  const intentionalClose = useRef(false);
 
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) {
@@ -67,6 +79,10 @@ export function useWebSocket(options: UseWebSocketOptions) {
     }
 
     setIsConnecting(true);
+    // If we are not in a retry cycle (attempt 0), ensure isReconnecting is false
+    if (reconnectAttempt.current === 0) {
+      setIsReconnecting(false);
+    }
 
     try {
       ws.current = new WebSocket(url);
@@ -75,6 +91,8 @@ export function useWebSocket(options: UseWebSocketOptions) {
         console.log('WebSocket connected');
         setIsConnected(true);
         setIsConnecting(false);
+        setIsReconnecting(false);
+        reconnectAttempt.current = 0;
         onOpen?.();
       };
 
@@ -84,15 +102,35 @@ export function useWebSocket(options: UseWebSocketOptions) {
         setIsConnecting(false);
         onClose?.();
 
-        // Attempt to reconnect after 3 seconds
-        reconnectTimer.current = setTimeout(() => {
-          console.log('Attempting to reconnect...');
-          connect();
-        }, 3000);
+        if (intentionalClose.current) {
+          return;
+        }
+
+        if (reconnect) {
+          if (reconnectAttempt.current < maxReconnectAttempts) {
+            const attempt = reconnectAttempt.current + 1;
+            // Exponential backoff with jitter could be added, but simple exponential is fine for now.
+            // Cap at 30s.
+            const delay = Math.min(reconnectBaseDelayMs * Math.pow(2, reconnectAttempt.current), 30000);
+
+            console.log(`Attempting to reconnect (${attempt}/${maxReconnectAttempts}) in ${delay}ms...`);
+            setIsReconnecting(true);
+
+            reconnectTimer.current = setTimeout(() => {
+              reconnectAttempt.current = attempt;
+              connect();
+            }, delay);
+          } else {
+            console.error('Max reconnect attempts reached. Giving up.');
+            setIsReconnecting(false);
+          }
+        }
       };
 
       ws.current.onerror = (error) => {
         console.error('WebSocket error:', error);
+        // onError does not imply close, so we don't handle reconnect here.
+        // onclose will fire if the error causes disconnection.
         setIsConnecting(false);
         onError?.(error);
       };
@@ -185,10 +223,19 @@ export function useWebSocket(options: UseWebSocketOptions) {
     } catch (error) {
       console.error('Failed to create WebSocket:', error);
       setIsConnecting(false);
+      // If creation fails synchronously, trigger reconnect logic
+      if (reconnect && !intentionalClose.current && reconnectAttempt.current < maxReconnectAttempts) {
+        const delay = Math.min(reconnectBaseDelayMs * Math.pow(2, reconnectAttempt.current), 30000);
+        reconnectTimer.current = setTimeout(() => {
+          reconnectAttempt.current += 1;
+          connect();
+        }, delay);
+      }
     }
-  }, [url, onOpen, onClose, onError]);
+  }, [url, onOpen, onClose, onError, reconnect, maxReconnectAttempts, reconnectBaseDelayMs]);
 
   const disconnect = useCallback(() => {
+    intentionalClose.current = true;
     if (reconnectTimer.current) {
       clearTimeout(reconnectTimer.current);
       reconnectTimer.current = null;
@@ -201,6 +248,8 @@ export function useWebSocket(options: UseWebSocketOptions) {
 
     setIsConnected(false);
     setIsConnecting(false);
+    setIsReconnecting(false);
+    reconnectAttempt.current = 0;
   }, []);
 
   const sendMessage = useCallback(
@@ -282,6 +331,7 @@ export function useWebSocket(options: UseWebSocketOptions) {
   // Auto-connect on mount if enabled
   useEffect(() => {
     if (autoConnect) {
+      intentionalClose.current = false;
       connect();
     }
 
@@ -294,6 +344,7 @@ export function useWebSocket(options: UseWebSocketOptions) {
     messages,
     isConnected,
     isConnecting,
+    isReconnecting, // Exposed for UI feedback
     connect,
     disconnect,
     sendMessage,

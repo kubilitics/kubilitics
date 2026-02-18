@@ -1,21 +1,28 @@
 # Multi-stage build for kubilitics-ai
 # Stage 1: Build
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache git make gcc musl-dev
+# Install build dependencies (no make needed — build directly with go)
+RUN apk add --no-cache git gcc musl-dev
 
 # Set working directory
 WORKDIR /build
 
+# Copy go module files first for layer-cache efficiency
+COPY go.mod go.sum ./
+RUN go mod download
+
 # Copy source code
 COPY . .
 
-# Build the application
-RUN make build
+# Build the application — strip debug info for a smaller, production binary
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -o bin/kubilitics-ai \
+    ./cmd/server/main.go
 
-# Stage 2: Runtime
-FROM alpine:3.18
+# Stage 2: Runtime — use the same Alpine series as the builder
+FROM alpine:3.21
 
 # Install runtime dependencies
 RUN apk add --no-cache ca-certificates

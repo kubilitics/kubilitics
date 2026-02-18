@@ -20,7 +20,7 @@ const (
 var (
 	allowedKCLIVerbs = []string{
 		"get", "describe", "apply", "delete", "logs", "exec", "port-forward", "top", "rollout", "diff", "explain", "wait", "scale", "patch", "label", "annotate",
-		"auth", "ctx", "ns", "search", "metrics", "restarts", "instability", "events", "incident", "ai", "why", "summarize", "suggest", "completion",
+		"auth", "ctx", "ns", "search", "metrics", "restarts", "instability", "events", "incident", "ai", "why", "summarize", "suggest", "completion", "plugin",
 	}
 	mutatingKCLIVerbs = map[string]struct{}{
 		"apply": {}, "delete": {}, "patch": {}, "scale": {}, "label": {}, "annotate": {}, "rollout": {},
@@ -70,9 +70,12 @@ func validateKCLIArgs(args []string, force bool) ([]string, bool, error) {
 	if !slices.Contains(allowedKCLIVerbs, verb) {
 		return nil, false, fmt.Errorf("command %q is not allowed in embedded kcli mode", verb)
 	}
-	if verb == "ui" || verb == "plugin" {
-		return nil, false, fmt.Errorf("command %q is not supported in non-interactive /kcli/exec", verb)
+	// UI mode requires interactive PTY, so it's not supported in non-interactive exec endpoint
+	if verb == "ui" {
+		return nil, false, fmt.Errorf("command %q requires interactive PTY; use /kcli/stream?mode=ui instead", verb)
 	}
+	// Plugin commands are allowed in exec endpoint (plugins can be executed non-interactively)
+	// Note: Plugin execution via PTY stream also works for interactive plugins
 	_, mutating := mutatingKCLIVerbs[verb]
 	if mutating && !force {
 		return nil, true, fmt.Errorf("mutating command %q requires force=true", verb)

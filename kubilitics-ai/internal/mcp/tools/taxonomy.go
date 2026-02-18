@@ -35,12 +35,13 @@ const (
 
 // ToolDefinition defines a complete MCP tool specification
 type ToolDefinition struct {
-	Name        string       `json:"name"`
-	Category    ToolCategory `json:"category"`
-	Description string       `json:"description"`
-	InputSchema interface{}  `json:"inputSchema"`
-	Destructive bool         `json:"destructive"`
-	RequiresAI  bool         `json:"requiresAI"`
+	Name                  string       `json:"name"`
+	Category              ToolCategory `json:"category"`
+	Description           string       `json:"description"`
+	InputSchema           interface{}  `json:"inputSchema"`
+	Destructive           bool         `json:"destructive"`
+	RequiresAI            bool         `json:"requiresAI"`
+	RequiredAutonomyLevel int          `json:"requiredAutonomyLevel"` // 1=Observe, 2=Recommend, 3=Propose, 4=Act, 5=Autonomous
 }
 
 // Kubilitics AI MCP Tool Taxonomy - 100x More Powerful
@@ -61,13 +62,15 @@ type ToolDefinition struct {
 var ToolTaxonomy = []ToolDefinition{
 	// === OBSERVATION TOOLS (15 tools) ===
 	// Read-only cluster state queries with intelligent filtering
+	// Autonomy Level: 1 (Observe)
 
 	{
-		Name:        "observe_cluster_overview",
-		Category:    CategoryObservation,
-		Description: "Get comprehensive cluster overview with health, capacity, and resource distribution. Returns intelligent summary with anomaly detection.",
-		Destructive: false,
-		RequiresAI:  true,
+		Name:                  "observe_cluster_overview",
+		Category:              CategoryObservation,
+		Description:           "Get comprehensive cluster overview with health, capacity, and resource distribution. Returns intelligent summary with anomaly detection.",
+		Destructive:           false,
+		RequiresAI:            true,
+		RequiredAutonomyLevel: 1,
 	},
 	{
 		Name:        "observe_resource",
@@ -176,13 +179,16 @@ var ToolTaxonomy = []ToolDefinition{
 	},
 
 	// === DEEP ANALYSIS TOOLS (12 tools) ===
+	// === DEEP ANALYSIS TOOLS (12 tools) ===
 	// Tier-2 specialized analysis tools — compute real intelligence from K8s data
 	// These tools use the gRPC backend proxy and run deterministic algorithms.
+	// Autonomy Level: 2 (Recommend)
 
 	{
-		Name:        "analyze_pod_health",
-		Category:    CategoryAnalysis,
-		Description: "Analyze pod health across a namespace: detect OOMKills, restart loops, eviction patterns, and stuck-pending pods. Returns per-pod severity findings with actionable messages.",
+		Name:                  "analyze_pod_health",
+		Category:              CategoryAnalysis,
+		Description:           "Analyze pod health across a namespace: detect OOMKills, restart loops, eviction patterns, and stuck-pending pods. Returns per-pod severity findings with actionable messages.",
+		RequiredAutonomyLevel: 2,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -448,13 +454,15 @@ var ToolTaxonomy = []ToolDefinition{
 
 	// === RECOMMENDATION TOOLS (8 tools) ===
 	// AI-powered suggestions and optimizations
+	// Autonomy Level: 2 (Recommend)
 
 	{
-		Name:        "recommend_resource_optimization",
-		Category:    CategoryRecommendation,
-		Description: "Generate actionable recommendations for resource optimization (CPU, memory, storage).",
-		Destructive: false,
-		RequiresAI:  true,
+		Name:                  "recommend_resource_optimization",
+		Category:              CategoryRecommendation,
+		Description:           "Generate actionable recommendations for resource optimization (CPU, memory, storage).",
+		Destructive:           false,
+		RequiresAI:            true,
+		RequiredAutonomyLevel: 2,
 	},
 	{
 		Name:        "recommend_cost_reduction",
@@ -508,13 +516,15 @@ var ToolTaxonomy = []ToolDefinition{
 
 	// === TROUBLESHOOTING TOOLS (7 tools) ===
 	// Problem detection and resolution
+	// Autonomy Level: 2 (Recommend)
 
 	{
-		Name:        "troubleshoot_pod_failures",
-		Category:    CategoryTroubleshooting,
-		Description: "Autonomous investigation of pod failures with root cause analysis and fix suggestions.",
-		Destructive: false,
-		RequiresAI:  true,
+		Name:                  "troubleshoot_pod_failures",
+		Category:              CategoryTroubleshooting,
+		Description:           "Autonomous investigation of pod failures with root cause analysis and fix suggestions.",
+		Destructive:           false,
+		RequiresAI:            true,
+		RequiredAutonomyLevel: 2,
 	},
 	{
 		Name:        "troubleshoot_network_issues",
@@ -561,13 +571,15 @@ var ToolTaxonomy = []ToolDefinition{
 
 	// === SECURITY TOOLS (5 tools) ===
 	// Security analysis and compliance
+	// Autonomy Level: 2 (Recommend)
 
 	{
-		Name:        "security_scan_cluster",
-		Category:    CategorySecurity,
-		Description: "Comprehensive cluster security scan with CIS benchmarks and compliance checks.",
-		Destructive: false,
-		RequiresAI:  true,
+		Name:                  "security_scan_cluster",
+		Category:              CategorySecurity,
+		Description:           "Comprehensive cluster security scan with CIS benchmarks and compliance checks.",
+		Destructive:           false,
+		RequiresAI:            true,
+		RequiredAutonomyLevel: 2,
 	},
 	{
 		Name:        "security_audit_rbac",
@@ -600,13 +612,15 @@ var ToolTaxonomy = []ToolDefinition{
 
 	// === COST TOOLS (4 tools) ===
 	// Resource optimization and cost analysis
+	// Autonomy Level: 2 (Recommend)
 
 	{
-		Name:        "cost_analyze_spending",
-		Category:    CategoryCost,
-		Description: "Analyze cluster costs with breakdown by namespace, workload, and resource type.",
-		Destructive: false,
-		RequiresAI:  true,
+		Name:                  "cost_analyze_spending",
+		Category:              CategoryCost,
+		Description:           "Analyze cluster costs with breakdown by namespace, workload, and and resource type.",
+		Destructive:           false,
+		RequiresAI:            true,
+		RequiredAutonomyLevel: 2,
 	},
 	{
 		Name:        "cost_identify_waste",
@@ -632,52 +646,60 @@ var ToolTaxonomy = []ToolDefinition{
 
 	// === ACTION TOOLS (5 tools) ===
 	// Cluster modifications (requires approval)
+	// Autonomy Level: 4 (Act)
 
 	{
-		Name:        "action_scale_workload",
-		Category:    CategoryAction,
-		Description: "Scale deployments, statefulsets, or replicasets with safety checks.",
-		Destructive: false,
-		RequiresAI:  false,
+		Name:                  "action_scale_workload",
+		Category:              CategoryAction,
+		Description:           "Scale deployments, statefulsets, or replicasets with safety checks.",
+		Destructive:           false,
+		RequiresAI:            false,
+		RequiredAutonomyLevel: 4,
 	},
 	{
-		Name:        "action_restart_workload",
-		Category:    CategoryAction,
-		Description: "Restart pods or workloads with rolling update strategy.",
-		Destructive: true,
-		RequiresAI:  false,
+		Name:                  "action_restart_workload",
+		Category:              CategoryAction,
+		Description:           "Restart pods or workloads with rolling update strategy.",
+		Destructive:           true,
+		RequiresAI:            false,
+		RequiredAutonomyLevel: 4,
 	},
 	{
-		Name:        "action_apply_manifest",
-		Category:    CategoryAction,
-		Description: "Apply Kubernetes manifests with validation and dry-run support.",
-		Destructive: true,
-		RequiresAI:  false,
+		Name:                  "action_apply_manifest",
+		Category:              CategoryAction,
+		Description:           "Apply Kubernetes manifests with validation and dry-run support.",
+		Destructive:           true,
+		RequiresAI:            false,
+		RequiredAutonomyLevel: 4,
 	},
 	{
-		Name:        "action_rollback_deployment",
-		Category:    CategoryAction,
-		Description: "Rollback deployment to previous revision with impact analysis.",
-		Destructive: true,
-		RequiresAI:  true,
+		Name:                  "action_rollback_deployment",
+		Category:              CategoryAction,
+		Description:           "Rollback deployment to previous revision with impact analysis.",
+		Destructive:           true,
+		RequiresAI:            true,
+		RequiredAutonomyLevel: 4,
 	},
 	{
-		Name:        "action_execute_command",
-		Category:    CategoryAction,
-		Description: "Execute command in pod container with security validation.",
-		Destructive: true,
-		RequiresAI:  false,
+		Name:                  "action_execute_command",
+		Category:              CategoryAction,
+		Description:           "Execute command in pod container with security validation.",
+		Destructive:           true,
+		RequiresAI:            false,
+		RequiredAutonomyLevel: 4,
 	},
 
-	// === AUTOMATION TOOLS (4 tools) ===
-	// Workflow and automation
+	// === AUTOMATION TOOLS (3 tools) ===
+	// Multi-step automation workflows
+	// Autonomy Level: 4 (Act)
 
 	{
-		Name:        "automation_create_workflow",
-		Category:    CategoryAutomation,
-		Description: "Create multi-step automation workflows for common operations.",
-		Destructive: false,
-		RequiresAI:  true,
+		Name:                  "automation_run_playbook",
+		Category:              CategoryAutomation,
+		Description:           "Run a predefined remediation playbook (e.g., 'clear-logs', 'restart-deployment', 'cordon-node').",
+		Destructive:           false,
+		RequiresAI:            true,
+		RequiredAutonomyLevel: 4,
 	},
 	{
 		Name:        "automation_schedule_task",
@@ -702,9 +724,11 @@ var ToolTaxonomy = []ToolDefinition{
 	},
 
 	// === EXECUTION TOOLS (9 tools) — A-CORE-004 ===
+	// === EXECUTION TOOLS (9 tools) — A-CORE-004 ===
 	// Safety-gated cluster mutations. EVERY tool passes through the Safety Engine
 	// (autonomy level check + blast radius + policy) before any cluster change.
 	// All tools support dry_run=true for impact preview without execution.
+	// Autonomy Level: 3 (Active execution)
 
 	{
 		Name:     "restart_pod",

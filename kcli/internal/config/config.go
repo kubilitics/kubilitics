@@ -27,6 +27,11 @@ var (
 	}
 )
 
+type Store struct {
+	ActiveProfile string             `yaml:"active_profile" json:"active_profile"`
+	Profiles      map[string]*Config `yaml:"profiles" json:"profiles"`
+}
+
 type Config struct {
 	General     GeneralConfig     `yaml:"general" json:"general"`
 	Context     ContextConfig     `yaml:"context" json:"context"`
@@ -132,6 +137,14 @@ func FilePath() (string, error) {
 }
 
 func Load() (*Config, error) {
+	s, err := LoadStore()
+	if err != nil {
+		return nil, err
+	}
+	return s.Current(), nil
+}
+
+func LoadStore() (*Store, error) {
 	path, err := FilePath()
 	if err != nil {
 		return nil, err
@@ -139,33 +152,86 @@ func Load() (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			cfg := Default()
-			return cfg, nil
+			s := DefaultStore()
+			return s, nil
 		}
 		return nil, err
 	}
 	if len(strings.TrimSpace(string(b))) == 0 {
+		return DefaultStore(), nil
+	}
+
+	// Try to detect if it's an old single-config format or new Store format
+	if !strings.Contains(string(b), "profiles:") {
+		// Old format: migrate to Store
 		cfg := Default()
-		return cfg, nil
+		if err := yaml.Unmarshal(b, cfg); err != nil {
+			return nil, fmt.Errorf("failed to parse legacy config YAML: %w", err)
+		}
+		s := &Store{
+			ActiveProfile: "default",
+			Profiles: map[string]*Config{
+				"default": cfg,
+			},
+		}
+		return s, nil
 	}
-	cfg := Default()
-	if err := yaml.Unmarshal(b, cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config YAML: %w", err)
+
+	s := DefaultStore()
+	if err := yaml.Unmarshal(b, s); err != nil {
+		return nil, fmt.Errorf("failed to parse config store YAML: %w", err)
 	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
+	if s.Profiles == nil {
+		s.Profiles = map[string]*Config{"default": Default()}
 	}
-	cfg.normalize()
-	return cfg, nil
+	if s.ActiveProfile == "" {
+		s.ActiveProfile = "default"
+	}
+	for _, cfg := range s.Profiles {
+		cfg.normalize()
+	}
+	return s, nil
+}
+
+func DefaultStore() *Store {
+	return &Store{
+		ActiveProfile: "default",
+		Profiles: map[string]*Config{
+			"default": Default(),
+		},
+	}
+}
+
+func (s *Store) Current() *Config {
+	if s == nil || s.Profiles == nil {
+		return Default()
+	}
+	cfg, ok := s.Profiles[s.ActiveProfile]
+	if !ok {
+		// Fallback to default if active not found
+		if d, ok := s.Profiles["default"]; ok {
+			return d
+		}
+		return Default()
+	}
+	return cfg
 }
 
 func Save(cfg *Config) error {
-	if cfg == nil {
-		return fmt.Errorf("config is nil")
-	}
-	cfg.normalize()
-	if err := cfg.Validate(); err != nil {
+	s, err := LoadStore()
+	if err != nil {
 		return err
+	}
+	if s.Profiles == nil {
+		s.Profiles = make(map[string]*Config)
+	}
+	s.Profiles[s.ActiveProfile] = cfg
+	return SaveStore(s)
+}
+
+func SaveStore(s *Store) error {
+	if s == nil {
+		return fmt.Errorf("store is nil")
 	}
 	path, err := FilePath()
 	if err != nil {
@@ -174,7 +240,7 @@ func Save(cfg *Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	b, err := yaml.Marshal(cfg)
+	b, err := yaml.Marshal(s)
 	if err != nil {
 		return err
 	}
@@ -452,7 +518,7 @@ func (c *Config) GetByKey(key string) (any, error) {
 	case k == "ai.model":
 		return c.AI.Model, nil
 	case k == "ai.apikey", k == "ai.api_key":
-		return c.AI.APIKey, nil
+		return maskIfSet(c.AI.APIKey), nil
 	case k == "ai.endpoint":
 		return c.AI.Endpoint, nil
 	case k == "ai.budgetmonthlyusd", k == "ai.budget_monthly_usd":
@@ -462,6 +528,25 @@ func (c *Config) GetByKey(key string) (any, error) {
 	default:
 		return nil, fmt.Errorf("unsupported key %q", key)
 	}
+}
+
+// Redacted returns a copy of the config with sensitive fields masked for display.
+// AI.APIKey is replaced by "***" when non-empty to avoid leaking secrets in config view.
+func (c *Config) Redacted() *Config {
+	if c == nil {
+		return nil
+	}
+	cp := *c
+	cp.AI = c.AI
+	cp.AI.APIKey = maskIfSet(c.AI.APIKey)
+	return &cp
+}
+
+func maskIfSet(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return s
+	}
+	return "***"
 }
 
 func (c *Config) ToYAML() (string, error) {

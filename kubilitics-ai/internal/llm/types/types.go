@@ -8,16 +8,17 @@ type Message struct {
 
 // Tool represents a tool/function definition that can be called by the LLM
 type Tool struct {
-	Name        string                 `json:"name"`        // tool name
-	Description string                 `json:"description"` // what the tool does
-	Parameters  map[string]interface{} `json:"parameters"`  // JSON schema for parameters
+	Name                  string                 `json:"name"`                              // tool name
+	Description           string                 `json:"description"`                       // what the tool does
+	Parameters            map[string]interface{} `json:"parameters"`                        // JSON schema for parameters
+	RequiredAutonomyLevel int                    `json:"required_autonomy_level,omitempty"` // Minimum autonomy level required
 }
 
 // ToolCall represents a tool call made by the LLM
 type ToolCall struct {
-	ID       string                 `json:"id"`       // unique call ID
-	Type     string                 `json:"type"`     // "function" or "tool_use"
-	Name     string                 `json:"name"`     // tool name
+	ID        string                 `json:"id"`        // unique call ID
+	Type      string                 `json:"type"`      // "function" or "tool_use"
+	Name      string                 `json:"name"`      // tool name
 	Arguments map[string]interface{} `json:"arguments"` // tool arguments
 }
 
@@ -29,9 +30,9 @@ type CompletionRequest struct {
 
 // CompletionResponse represents a completion response
 type CompletionResponse struct {
-	Content   string      `json:"content"`    // generated text
-	ToolCalls []ToolCall  `json:"tool_calls"` // tools called
-	Usage     TokenUsage  `json:"usage"`      // token usage
+	Content   string     `json:"content"`    // generated text
+	ToolCalls []ToolCall `json:"tool_calls"` // tools called
+	Usage     TokenUsage `json:"usage"`      // token usage
 }
 
 // TokenUsage tracks token usage and cost

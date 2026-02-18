@@ -211,8 +211,50 @@ func newPluginCmd() *cobra.Command {
 				return plugin.Run(args[0], args[1:])
 			},
 		},
+		newPluginVerifyCmd(),
 	)
 	return cmd
+}
+
+func newPluginVerifyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "verify [name]",
+		Short: "Print SHA256 checksum of installed plugin binary(ies)",
+		Long:  "With no name, lists all installed plugins with their binary SHA256. With a name, prints the checksum for that plugin only. Use for integrity verification.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				name := strings.TrimSpace(args[0])
+				path, err := plugin.Resolve(name)
+				if err != nil {
+					return err
+				}
+				checksum, err := plugin.FileSHA256(path)
+				if err != nil {
+					return fmt.Errorf("checksum %s: %w", path, err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", name, path, checksum)
+				return nil
+			}
+			plugins, err := plugin.DiscoverInfo()
+			if err != nil {
+				return err
+			}
+			if len(plugins) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "No plugins installed.")
+				return nil
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "NAME\tPATH\tSHA256")
+			for _, p := range plugins {
+				checksum, err := plugin.FileSHA256(p.Path)
+				if err != nil {
+					checksum = fmt.Sprintf("<error: %v>", err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", p.Name, p.Path, checksum)
+			}
+			return nil
+		},
+	}
 }
 
 func printPluginInspect(cmd *cobra.Command, name string) error {

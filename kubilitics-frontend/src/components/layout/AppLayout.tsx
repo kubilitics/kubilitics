@@ -6,10 +6,14 @@ import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { BackendStatusBanner } from './BackendStatusBanner';
 import { ConnectionRequiredBanner } from './ConnectionRequiredBanner';
-import { AIAssistant } from '@/components/ai';
+import { OfflineIndicator } from '@/components/OfflineIndicator';
+// AIAssistant is rendered globally in App.tsx
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useRecentlyVisited } from '@/hooks/useRecentlyVisited';
+import { useOfflineMode } from '@/hooks/useOfflineMode';
+import { analyticsService } from '@/services/analyticsService';
 import { cn } from '@/lib/utils';
+import { isTauri } from '@/lib/tauri';
 
 export function AppLayout() {
   useRecentlyVisited();
@@ -17,8 +21,16 @@ export function AppLayout() {
   const location = useLocation();
   const reduceMotion = useReducedMotion();
   const { isConnected } = useConnectionStatus();
+  const { isOffline, aiBackendReachable } = useOfflineMode();
   const gPendingRef = useRef(false);
   const gTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Track app start
+  useEffect(() => {
+    if (isTauri()) {
+      analyticsService.trackAppStart();
+    }
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -71,6 +83,7 @@ export function AppLayout() {
       <div className="flex">
         <Sidebar />
         <main id="main-content" className="flex-1 p-6 pb-28 pr-3 overflow-auto flex flex-col gap-4 min-h-0" role="main" aria-label="Main content">
+          <OfflineIndicator />
           <ConnectionRequiredBanner />
           <BackendStatusBanner />
           <div
@@ -92,7 +105,6 @@ export function AppLayout() {
           </div>
         </main>
       </div>
-      <AIAssistant />
     </div>
   );
 }

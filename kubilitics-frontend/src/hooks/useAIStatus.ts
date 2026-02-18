@@ -1,6 +1,6 @@
 /**
  * useAIStatus — E-PLAT-004
- * Polls /api/v1/health on the kubilitics-ai backend (port 8081) every 30 s.
+ * Polls /health on the kubilitics-ai backend (port 8081) every 30 s.
  * Returns { status: 'active' | 'unavailable' | 'unconfigured', provider, model, error }
  *
  * 'active'       — backend responded, LLM provider configured and healthy
@@ -34,7 +34,7 @@ interface HealthResponse {
 
 async function fetchAIHealth(signal: AbortSignal): Promise<AIStatus> {
   try {
-    const res = await fetch(`${AI_BACKEND_URL}/api/v1/health`, { signal });
+    const res = await fetch(`${AI_BACKEND_URL}/health`, { signal });
     if (!res.ok) {
       return { status: 'unavailable', errorMessage: `HTTP ${res.status}`, checking: false };
     }

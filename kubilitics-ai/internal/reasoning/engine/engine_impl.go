@@ -13,12 +13,14 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kubilitics/kubilitics-ai/internal/audit"
+	"github.com/kubilitics/kubilitics-ai/internal/db"
 	"github.com/kubilitics/kubilitics-ai/internal/llm/adapter"
 	"github.com/kubilitics/kubilitics-ai/internal/llm/types"
 	reasoningContext "github.com/kubilitics/kubilitics-ai/internal/reasoning/context"
@@ -39,21 +41,22 @@ const (
 
 // Investigation holds the full state of a single investigation session.
 type Investigation struct {
-	ID          string                 `json:"id"`
-	Type        string                 `json:"type"`
-	State       InvestigationState     `json:"state"`
-	Description string                 `json:"description"`
-	Context     string                 `json:"context"`
-	Findings    []Finding              `json:"findings"`
-	ToolCalls   []ToolCallRecord       `json:"tool_calls"`
-	Conclusion  string                 `json:"conclusion"`
-	Confidence  int                    `json:"confidence"`
-	Steps       []Step                 `json:"steps"`
-	Tokens      int                    `json:"tokens_used"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
-	ConcludedAt *time.Time             `json:"concluded_at,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata"`
+	ID            string                 `json:"id"`
+	Type          string                 `json:"type"`
+	State         InvestigationState     `json:"state"`
+	Description   string                 `json:"description"`
+	Context       string                 `json:"context"`
+	Findings      []Finding              `json:"findings"`
+	ToolCalls     []ToolCallRecord       `json:"tool_calls"`
+	Conclusion    string                 `json:"conclusion"`
+	Confidence    int                    `json:"confidence"`
+	Steps         []Step                 `json:"steps"`
+	Tokens        int                    `json:"tokens_used"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+	ConcludedAt   *time.Time             `json:"concluded_at,omitempty"`
+	AutonomyLevel int                    `json:"autonomy_level"`
+	Metadata      map[string]interface{} `json:"metadata"`
 }
 
 // Finding is a single discovered fact extracted from LLM output.
@@ -120,10 +123,9 @@ var _ LLMAdapterInterface = (adapter.LLMAdapter)(nil)
 
 // engineImpl is the concrete ReasoningEngine.
 type engineImpl struct {
-	mu             sync.RWMutex
-	investigations map[string]*Investigation
-
+	mu sync.RWMutex
 	// Dependencies
+	store          db.Store
 	contextBuilder reasoningContext.ContextBuilder
 	promptManager  prompt.PromptManager
 	llmAdapter     LLMAdapterInterface
@@ -138,12 +140,13 @@ type engineImpl struct {
 
 // NewReasoningEngineWithDeps creates a ReasoningEngine (backward-compat, no LLM).
 func NewReasoningEngineWithDeps(
+	store db.Store,
 	cb reasoningContext.ContextBuilder,
 	pm prompt.PromptManager,
 	auditLog audit.Logger,
 ) ReasoningEngine {
 	return &engineImpl{
-		investigations: make(map[string]*Investigation),
+		store:          store,
 		contextBuilder: cb,
 		promptManager:  pm,
 		auditLog:       auditLog,
@@ -153,6 +156,7 @@ func NewReasoningEngineWithDeps(
 
 // NewReasoningEngine creates a fully-wired ReasoningEngine with LLM execution.
 func NewReasoningEngine(
+	store db.Store,
 	cb reasoningContext.ContextBuilder,
 	pm prompt.PromptManager,
 	llm LLMAdapterInterface,
@@ -161,7 +165,7 @@ func NewReasoningEngine(
 	auditLog audit.Logger,
 ) ReasoningEngine {
 	return &engineImpl{
-		investigations: make(map[string]*Investigation),
+		store:          store,
 		contextBuilder: cb,
 		promptManager:  pm,
 		llmAdapter:     llm,
@@ -209,7 +213,7 @@ func (e *engineImpl) closeSubs(id string) {
 // ─── Public interface ─────────────────────────────────────────────────────────
 
 // Investigate starts a new investigation and returns its ID.
-func (e *engineImpl) Investigate(ctx context.Context, description string, investigationType string) (string, error) {
+func (e *engineImpl) Investigate(ctx context.Context, description string, investigationType string, autonomyLevel int) (string, error) {
 	if description == "" {
 		return "", fmt.Errorf("investigation description is required")
 	}
@@ -219,21 +223,22 @@ func (e *engineImpl) Investigate(ctx context.Context, description string, invest
 
 	correlationID := audit.GenerateCorrelationID()
 	inv := &Investigation{
-		ID:          correlationID,
-		Type:        investigationType,
-		State:       StateCreated,
-		Description: description,
-		Findings:    []Finding{},
-		ToolCalls:   []ToolCallRecord{},
-		Steps:       []Step{},
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		Metadata:    map[string]interface{}{},
+		ID:            correlationID,
+		Type:          investigationType,
+		State:         StateCreated,
+		Description:   description,
+		Findings:      []Finding{},
+		ToolCalls:     []ToolCallRecord{},
+		Steps:         []Step{},
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		AutonomyLevel: autonomyLevel,
+		Metadata:      map[string]interface{}{},
 	}
 
-	e.mu.Lock()
-	e.investigations[correlationID] = inv
-	e.mu.Unlock()
+	if err := e.saveInvestigation(ctx, inv); err != nil {
+		return "", fmt.Errorf("failed to create investigation: %w", err)
+	}
 
 	// Detach from request context so investigation survives HTTP close.
 	go e.runInvestigation(context.Background(), inv)
@@ -249,39 +254,40 @@ func (e *engineImpl) Investigate(ctx context.Context, description string, invest
 }
 
 // GetInvestigation retrieves an investigation by ID.
-func (e *engineImpl) GetInvestigation(_ context.Context, id string) (interface{}, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	inv, ok := e.investigations[id]
-	if !ok {
-		return nil, fmt.Errorf("investigation not found: %s", id)
+func (e *engineImpl) GetInvestigation(ctx context.Context, id string) (interface{}, error) {
+	dbRec, err := e.store.GetInvestigation(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get investigation: %w", err)
 	}
-	return inv, nil
+	return fromDBInvestigation(dbRec), nil
 }
 
 // CancelInvestigation cancels an in-progress investigation.
-func (e *engineImpl) CancelInvestigation(_ context.Context, id string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	inv, ok := e.investigations[id]
-	if !ok {
+func (e *engineImpl) CancelInvestigation(ctx context.Context, id string) error {
+	dbRec, err := e.store.GetInvestigation(ctx, id)
+	if err != nil {
 		return fmt.Errorf("investigation not found: %s", id)
 	}
+	inv := fromDBInvestigation(dbRec)
+
 	if inv.State == StateConcluded || inv.State == StateCancelled || inv.State == StateFailed {
 		return fmt.Errorf("investigation %s is already in terminal state: %s", id, inv.State)
 	}
 	inv.State = StateCancelled
 	inv.UpdatedAt = time.Now()
-	return nil
+
+	return e.saveInvestigation(ctx, inv)
 }
 
 // ListInvestigations returns all investigations.
-func (e *engineImpl) ListInvestigations(_ context.Context, _ interface{}) ([]interface{}, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	result := make([]interface{}, 0, len(e.investigations))
-	for _, inv := range e.investigations {
-		result = append(result, inv)
+func (e *engineImpl) ListInvestigations(ctx context.Context, _ interface{}) ([]interface{}, error) {
+	recs, err := e.store.ListInvestigations(ctx, 100, 0)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(recs))
+	for i, rec := range recs {
+		result[i] = fromDBInvestigation(rec)
 	}
 	return result, nil
 }
@@ -344,6 +350,9 @@ func (e *engineImpl) runInvestigation(ctx context.Context, inv *Investigation) {
 	e.addStep(inv, "LLM investigation", "Running agentic investigation loop…")
 	e.publish(inv.ID, e.stepEvent(inv, inv.Steps[len(inv.Steps)-1]))
 
+	// Save initial progress
+	_ = e.saveInvestigation(ctx, inv)
+
 	messages := []types.Message{
 		{Role: "system", Content: buildSystemPrompt()},
 		{Role: "user", Content: investigationPrompt},
@@ -356,7 +365,16 @@ func (e *engineImpl) runInvestigation(ctx context.Context, inv *Investigation) {
 	agentCfg := types.DefaultAgentConfig()
 	agentCfg.MaxTurns = 12
 
-	eventCh, err := e.llmAdapter.CompleteWithTools(ctx, messages, e.toolSchemas, e.toolExecutor, agentCfg)
+	// Use investigation-specific autonomy level for tool execution
+	// If inv.AutonomyLevel is 0, the executor will fall back to its configured default
+	// or we can explicitly set it here if needed.
+	// The ToolExecutor.WithAutonomyLevel method handles the logic of returning a modified executor.
+	scopedExecutor := e.toolExecutor
+	if inv.AutonomyLevel > 0 {
+		scopedExecutor = e.toolExecutor.WithAutonomyLevel(inv.AutonomyLevel)
+	}
+
+	eventCh, err := e.llmAdapter.CompleteWithTools(ctx, messages, e.toolSchemas, scopedExecutor, agentCfg)
 	if err != nil {
 		e.failInvestigation(ctx, inv, fmt.Sprintf("LLM call failed: %v", err))
 		return
@@ -415,6 +433,9 @@ func (e *engineImpl) runInvestigation(ctx context.Context, inv *Investigation) {
 				inv.ToolCalls = append(inv.ToolCalls, rec)
 				inv.UpdatedAt = time.Now()
 				e.mu.Unlock()
+
+				// Persist tool call
+				_ = e.saveInvestigation(ctx, inv)
 			}
 		}
 	}
@@ -426,7 +447,7 @@ func (e *engineImpl) runInvestigation(ctx context.Context, inv *Investigation) {
 	e.publish(inv.ID, e.stepEvent(inv, inv.Steps[len(inv.Steps)-1]))
 
 	// Step 4: Extract findings
-	findings := extractFindings(fullResponse, toolCallRecords)
+	findings, conclusion := extractAnalysis(fullResponse, toolCallRecords)
 	e.mu.Lock()
 	inv.Findings = findings
 	inv.Metadata["raw_response_len"] = len(fullResponse)
@@ -444,7 +465,6 @@ func (e *engineImpl) runInvestigation(ctx context.Context, inv *Investigation) {
 	}
 
 	// Step 5: Conclude
-	conclusion := extractConclusion(fullResponse)
 	confidence := calculateConfidence(findings)
 	e.conclude(ctx, inv, conclusion, confidence)
 }
@@ -464,10 +484,22 @@ INVESTIGATION APPROACH:
 5. Conclude with root cause and prioritized recommendations
 
 OUTPUT FORMAT:
-- Use **Finding:** to mark key discoveries
-- Use **Root Cause:** to summarize the primary issue
-- Use **Recommendation:** to propose actionable fixes
-- Always cite evidence (tool results) that support each finding
+You MUST output your final analysis in strictly valid JSON format matching this schema:
+{
+  "findings": [
+    {
+      "statement": "Key discovery statement",
+      "evidence": "Tool output or log snippet supporting this",
+      "confidence": 0-100,
+      "severity": "critical|high|medium|low|info"
+    }
+  ],
+  "root_cause": "Concise summary of the primary issue",
+  "recommendations": [
+    "Actionable step 1",
+    "Actionable step 2"
+  ]
+}
 
 SAFETY RULES:
 - Never suggest deleting resources without explicit justification
@@ -475,7 +507,18 @@ SAFETY RULES:
 - Flag security concerns immediately`
 }
 
-func extractFindings(response string, toolCalls []ToolCallRecord) []Finding {
+type jsonAnalysis struct {
+	Findings []struct {
+		Statement  string `json:"statement"`
+		Evidence   string `json:"evidence"`
+		Confidence int    `json:"confidence"`
+		Severity   string `json:"severity"`
+	} `json:"findings"`
+	RootCause       string   `json:"root_cause"`
+	Recommendations []string `json:"recommendations"`
+}
+
+func extractFindingsLegacy(response string, toolCalls []ToolCallRecord) []Finding {
 	var findings []Finding
 	lines := strings.Split(response, "\n")
 	for i, line := range lines {
@@ -518,7 +561,7 @@ func extractFindings(response string, toolCalls []ToolCallRecord) []Finding {
 	return findings
 }
 
-func extractConclusion(response string) string {
+func extractConclusionLegacy(response string) string {
 	lines := strings.Split(response, "\n")
 	for i, line := range lines {
 		line = strings.TrimSpace(line)
@@ -541,6 +584,68 @@ func extractConclusion(response string) string {
 		}
 	}
 	return "Investigation complete — review findings above for details"
+}
+
+// extractJSONBlock strips optional markdown fences and returns the outermost
+// JSON object found in the LLM response.  Handles:
+//   - Bare JSON:       { ... }
+//   - Code-fenced:     ```json\n{ ... }\n```  or  ```\n{ ... }\n```
+func extractJSONBlock(response string) (string, bool) {
+	// Strip markdown code fences if present.
+	stripped := response
+	for _, fence := range []string{"```json", "```JSON", "```"} {
+		if idx := strings.Index(stripped, fence); idx != -1 {
+			stripped = stripped[idx+len(fence):]
+			if end := strings.Index(stripped, "```"); end != -1 {
+				stripped = stripped[:end]
+			}
+			break
+		}
+	}
+
+	jsonStart := strings.Index(stripped, "{")
+	jsonEnd := strings.LastIndex(stripped, "}")
+	if jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart {
+		return stripped[jsonStart : jsonEnd+1], true
+	}
+	return "", false
+}
+
+func extractAnalysis(response string, toolCallRecords []ToolCallRecord) ([]Finding, string) {
+	var findings []Finding
+	var conclusion string
+
+	// AI-009: Try JSON-first structured output (handles code fences + bare JSON).
+	if jsonStr, ok := extractJSONBlock(response); ok {
+		var analysis jsonAnalysis
+		if err := json.Unmarshal([]byte(jsonStr), &analysis); err == nil && len(analysis.Findings) > 0 {
+			for _, f := range analysis.Findings {
+				sev := strings.ToLower(f.Severity)
+				if sev == "" {
+					sev = inferSeverity(f.Statement)
+				}
+				conf := f.Confidence
+				if conf <= 0 || conf > 100 {
+					conf = 70 // sensible default when LLM omits or sends invalid value
+				}
+				findings = append(findings, Finding{
+					Statement:  f.Statement,
+					Evidence:   f.Evidence,
+					Confidence: conf,
+					Severity:   sev,
+					Timestamp:  time.Now(),
+				})
+			}
+			conclusion = analysis.RootCause
+			if len(analysis.Recommendations) > 0 {
+				conclusion += "\n\nRecommendations:\n- " + strings.Join(analysis.Recommendations, "\n- ")
+			}
+			return findings, conclusion
+		}
+	}
+
+	// Fallback to text extraction if JSON parsing failed or yielded nothing.
+	return extractFindingsLegacy(response, toolCallRecords), extractConclusionLegacy(response)
 }
 
 func calculateConfidence(findings []Finding) int {
@@ -570,6 +675,8 @@ func (e *engineImpl) conclude(ctx context.Context, inv *Investigation, conclusio
 	inv.ConcludedAt = &now
 	e.mu.Unlock()
 
+	_ = e.saveInvestigation(ctx, inv)
+
 	e.publish(inv.ID, InvestigationEvent{
 		InvestigationID: inv.ID,
 		Type:            "conclusion",
@@ -595,6 +702,8 @@ func (e *engineImpl) conclude(ctx context.Context, inv *Investigation, conclusio
 
 func (e *engineImpl) failInvestigation(ctx context.Context, inv *Investigation, reason string) {
 	e.transition(inv, StateFailed)
+	_ = e.saveInvestigation(ctx, inv)
+
 	e.publish(inv.ID, InvestigationEvent{
 		InvestigationID: inv.ID,
 		Type:            "error",
@@ -687,4 +796,125 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ─── DB Mapping Helpers ───────────────────────────────────────────────────────
+
+func (e *engineImpl) saveInvestigation(ctx context.Context, inv *Investigation) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.store.SaveInvestigation(ctx, toDBInvestigation(inv))
+}
+
+func toDBInvestigation(inv *Investigation) *db.InvestigationRecord {
+	metadataBytes, _ := json.Marshal(inv.Metadata)
+	if len(metadataBytes) == 0 {
+		metadataBytes = []byte("{}")
+	}
+
+	rec := &db.InvestigationRecord{
+		ID:          inv.ID,
+		Type:        inv.Type,
+		State:       string(inv.State),
+		Description: inv.Description,
+		Context:     inv.Context,
+		Conclusion:  inv.Conclusion,
+		Confidence:  inv.Confidence,
+		Metadata:    string(metadataBytes),
+		CreatedAt:   inv.CreatedAt,
+		UpdatedAt:   inv.UpdatedAt,
+	}
+
+	for _, f := range inv.Findings {
+		rec.Findings = append(rec.Findings, db.FindingRecord{
+			Statement:  f.Statement,
+			Evidence:   f.Evidence,
+			Confidence: f.Confidence,
+			Severity:   f.Severity,
+			Timestamp:  f.Timestamp,
+		})
+	}
+
+	for _, tc := range inv.ToolCalls {
+		argsBytes, _ := json.Marshal(tc.Args)
+		if len(argsBytes) == 0 {
+			argsBytes = []byte("{}")
+		}
+		rec.ToolCalls = append(rec.ToolCalls, db.ToolCallRecord{
+			ToolName:  tc.ToolName,
+			Args:      string(argsBytes),
+			Result:    tc.Result,
+			TurnIndex: tc.TurnIndex,
+			Timestamp: tc.Timestamp,
+		})
+	}
+
+	for _, s := range inv.Steps {
+		rec.Steps = append(rec.Steps, db.StepRecord{
+			Number:      s.Number,
+			Description: s.Description,
+			Result:      s.Result,
+			Timestamp:   s.Timestamp,
+		})
+	}
+
+	return rec
+}
+
+func fromDBInvestigation(rec *db.InvestigationRecord) *Investigation {
+	inv := &Investigation{
+		ID:          rec.ID,
+		Type:        rec.Type,
+		State:       InvestigationState(rec.State),
+		Description: rec.Description,
+		Context:     rec.Context,
+		Conclusion:  rec.Conclusion,
+		Confidence:  rec.Confidence,
+		Tokens:      0, // Not persisted in DB yet
+		CreatedAt:   rec.CreatedAt,
+		UpdatedAt:   rec.UpdatedAt,
+		Metadata:    make(map[string]interface{}),
+	}
+	if len(rec.Metadata) > 0 {
+		_ = json.Unmarshal([]byte(rec.Metadata), &inv.Metadata)
+	}
+
+	if rec.State == string(StateConcluded) {
+		inv.ConcludedAt = &rec.UpdatedAt
+	}
+
+	for _, f := range rec.Findings {
+		inv.Findings = append(inv.Findings, Finding{
+			Statement:  f.Statement,
+			Evidence:   f.Evidence,
+			Confidence: f.Confidence,
+			Severity:   f.Severity,
+			Timestamp:  f.Timestamp,
+		})
+	}
+
+	for _, tc := range rec.ToolCalls {
+		args := make(map[string]interface{})
+		if len(tc.Args) > 0 {
+			_ = json.Unmarshal([]byte(tc.Args), &args)
+		}
+		inv.ToolCalls = append(inv.ToolCalls, ToolCallRecord{
+			ToolName:  tc.ToolName,
+			Args:      args,
+			Result:    tc.Result,
+			TurnIndex: tc.TurnIndex,
+			Timestamp: tc.Timestamp,
+		})
+	}
+
+	for _, s := range rec.Steps {
+		inv.Steps = append(inv.Steps, Step{
+			Number:      s.Number,
+			Description: s.Description,
+			Result:      s.Result,
+			Timestamp:   s.Timestamp,
+		})
+	}
+
+	return inv
 }

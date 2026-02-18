@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -12,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/audit"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/redact"
@@ -29,26 +31,29 @@ func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("namespace")
 
 	if !validate.ClusterID(clusterID) || !validate.Kind(kind) || !validate.Namespace(namespace) {
-		respondError(w, http.StatusBadRequest, "Invalid clusterId, kind, or namespace")
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid clusterId, kind, or namespace", requestID)
 		return
 	}
 
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
+	// BE-FUNC-002: Pagination support (limit, continue token)
 	opts := metav1.ListOptions{}
-	const defaultLimit = 5000
+	const defaultLimit = 100
+	const maxLimit = 500
 	opts.Limit = int64(defaultLimit)
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if n, err := strconv.ParseInt(limitStr, 10, 64); err == nil && n > 0 {
+			if n > maxLimit {
+				n = maxLimit
+			}
 			opts.Limit = n
 		}
 	}
@@ -64,41 +69,52 @@ func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
 
 	list, err := client.ListResources(r.Context(), kind, namespace, opts)
 	if err != nil {
+		// BE-SCALE-001: Handle circuit breaker errors
+		requestID := logger.FromContext(r.Context())
+		if errors.Is(err, k8s.ErrCircuitOpen) {
+			w.Header().Set("Retry-After", "30")
+			respondErrorWithCode(w, http.StatusServiceUnavailable, ErrCodeCircuitBreaker, "Cluster API is temporarily unavailable due to repeated failures. Circuit breaker is open. Please retry after 30 seconds.", requestID)
+			return
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			respondError(w, http.StatusGatewayTimeout, "Request to Kubernetes API timed out. The cluster may be slow or overloaded. Try again or use a more specific query with namespace or label selectors.")
+			respondErrorWithCode(w, http.StatusGatewayTimeout, ErrCodeTimeout, "Request to Kubernetes API timed out. The cluster may be slow or overloaded. Try again or use a more specific query with namespace or label selectors.", requestID)
 			return
 		}
 		if apierrors.IsNotFound(err) {
-			respondError(w, http.StatusNotFound, err.Error())
+			respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 			return
 		}
 		if apierrors.IsForbidden(err) {
-			respondError(w, http.StatusForbidden, err.Error())
+			respondErrorWithCode(w, http.StatusForbidden, ErrCodeForbidden, err.Error(), requestID)
 			return
 		}
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondErrorWithCode(w, http.StatusInternalServerError, ErrCodeInternalError, err.Error(), requestID)
 		return
 	}
 
-	// Return list in API shape: items array + metadata (resourceVersion, continue, remainingItemCount when set)
+	// BE-FUNC-002: Return pagination metadata: items + metadata with continue token and total
 	itemsRaw := listItemsToRaw(list.Items)
 	if redact.IsSecretKind(kind) {
 		for i := range itemsRaw {
 			redact.SecretData(itemsRaw[i])
 		}
 	}
+	// Calculate total: if RemainingItemCount is set, total = len(items) + remaining; otherwise use len(items) as estimate
+	total := int64(len(itemsRaw))
+	if list.GetRemainingItemCount() != nil {
+		total = int64(len(itemsRaw)) + *list.GetRemainingItemCount()
+	}
 	meta := map[string]interface{}{
 		"resourceVersion": list.GetResourceVersion(),
 		"continue":        list.GetContinue(),
+		"total":           total,
 	}
 	if list.GetRemainingItemCount() != nil {
 		meta["remainingItemCount"] = *list.GetRemainingItemCount()
 	}
 	out := map[string]interface{}{
-		"kind":       "List",
-		"apiVersion": "v1",
-		"metadata":   meta,
-		"items":      itemsRaw,
+		"items":    itemsRaw,
+		"metadata": meta,
 	}
 	respondJSON(w, http.StatusOK, out)
 }
@@ -125,18 +141,16 @@ func (h *Handler) GetResource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !validate.ClusterID(clusterID) || !validate.Kind(kind) || !validate.Namespace(namespace) || !validate.Name(name) {
-		respondError(w, http.StatusBadRequest, "Invalid clusterId, kind, namespace, or name")
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid clusterId, kind, namespace, or name", requestID)
 		return
 	}
 
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
@@ -179,18 +193,16 @@ func (h *Handler) PatchResource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !validate.ClusterID(clusterID) || !validate.Kind(kind) || !validate.Namespace(namespace) || !validate.Name(name) {
-		respondError(w, http.StatusBadRequest, "Invalid clusterId, kind, namespace, or name")
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid clusterId, kind, namespace, or name", requestID)
 		return
 	}
 
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
@@ -256,18 +268,16 @@ func (h *Handler) DeleteResource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !validate.ClusterID(clusterID) || !validate.Kind(kind) || !validate.Namespace(namespace) || !validate.Name(name) {
-		respondError(w, http.StatusBadRequest, "Invalid clusterId, kind, namespace, or name")
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid clusterId, kind, namespace, or name", requestID)
 		return
 	}
 
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
@@ -330,7 +340,12 @@ func (h *Handler) ApplyManifest(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBytes))
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "Invalid request body or YAML too large")
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			respondError(w, http.StatusRequestEntityTooLarge, "Request entity too large")
+			return
+		}
+		respondError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -339,14 +354,16 @@ func (h *Handler) ApplyManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
+	// BE-DATA-001: log dangerous pod/container settings (hostPID, privileged, hostNetwork)
+	for _, w := range validate.ApplyYAMLDangerousWarnings(req.YAML) {
+		log.Printf("[apply] security warning: %s", w)
 	}
-	client, err := h.clusterService.GetClient(resolvedID)
+
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
@@ -398,18 +415,16 @@ func (h *Handler) GetServiceEndpoints(w http.ResponseWriter, r *http.Request) {
 	name := vars["name"]
 
 	if !validate.ClusterID(clusterID) || !validate.Namespace(namespace) || !validate.Name(name) {
-		respondError(w, http.StatusBadRequest, "Invalid clusterId, namespace, or name")
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid clusterId, namespace, or name", requestID)
 		return
 	}
 
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 

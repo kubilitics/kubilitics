@@ -16,16 +16,17 @@ import (
 
 const shellTimeout = 60 * time.Second
 
-// blockedShellVerbs: mutating/dangerous kubectl verbs not allowed in the web shell (user must use UI or direct kubectl).
+// blockedShellVerbs: mutating/dangerous kubectl/kcli verbs not allowed in the web shell (user must use UI or direct kubectl).
 var blockedShellVerbs = map[string]bool{
 	"delete": true, "apply": true, "edit": true, "patch": true, "replace": true,
 	"create": true, "run": true, "drain": true, "taint": true, "set": true,
 	"expose": true, "rollout": true, "scale": true, "autoscale": true,
 	"label": true, "annotate": true, "exec": true,
+	"ui": true, "fix": true,
 }
 
 // PostShell handles POST /clusters/{clusterId}/shell
-// Body: {"command": "get pods"} or "get pods -n default". Runs kubectl with cluster's kubeconfig and returns stdout/stderr.
+// Body: {"command": "get pods"} or "get pods -n default". Runs kcli (kubectl wrapper) with cluster's kubeconfig and returns stdout/stderr.
 func (h *Handler) PostShell(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	clusterID := vars["clusterId"]
@@ -42,11 +43,18 @@ func (h *Handler) PostShell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cmdStr := strings.TrimSpace(req.Command)
-	// Strip leading "kubectl" (case-insensitive) so "kubectl get po" and "get po" both work; keep rest of command unchanged
+	// Strip leading "kubectl" or "kcli" (case-insensitive) so "kubectl get po", "kcli get po" and "get po" all work
 	for {
 		trimmed := strings.TrimSpace(cmdStr)
 		if len(trimmed) >= 7 && strings.EqualFold(trimmed[:7], "kubectl") {
 			after := trimmed[7:]
+			if len(after) == 0 || after[0] == ' ' || after[0] == '\t' {
+				cmdStr = strings.TrimSpace(after)
+				continue
+			}
+		}
+		if len(trimmed) >= 4 && strings.EqualFold(trimmed[:4], "kcli") {
+			after := trimmed[4:]
 			if len(after) == 0 || after[0] == ' ' || after[0] == '\t' {
 				cmdStr = strings.TrimSpace(after)
 				continue
@@ -66,15 +74,15 @@ func (h *Handler) PostShell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bare "kubectl" or empty: run version so the shell always returns something useful
+	// Bare "kcli"/"kubectl" or empty: run version so the shell always returns something useful
 	if cmdStr == "" {
 		ctx, cancel := context.WithTimeout(r.Context(), shellTimeout)
 		defer cancel()
-		args := []string{"version", "--client"}
+		args := []string{"version"}
 		if cluster.Context != "" {
 			args = append([]string{"--context", cluster.Context}, args...)
 		}
-		cmd := exec.CommandContext(ctx, "kubectl", args...)
+		cmd := exec.CommandContext(ctx, "kcli", args...)
 		cmd.Env = append(cmd.Env, "KUBECONFIG="+cluster.KubeconfigPath)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -93,9 +101,14 @@ func (h *Handler) PostShell(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid command")
 		return
 	}
-	// Strip any remaining leading "kubectl" from parsed parts (e.g. "kubectl get po" -> ["get", "po"])
-	for len(parts) > 0 && strings.ToLower(strings.TrimSpace(parts[0])) == "kubectl" {
-		parts = parts[1:]
+	// Strip any remaining leading "kubectl" or "kcli" from parsed parts (e.g. "kubectl get po" -> ["get", "po"])
+	for len(parts) > 0 {
+		lower := strings.ToLower(strings.TrimSpace(parts[0]))
+		if lower == "kubectl" || lower == "kcli" {
+			parts = parts[1:]
+			continue
+		}
+		break
 	}
 	if len(parts) == 0 {
 		respondError(w, http.StatusBadRequest, "Invalid command")
@@ -114,7 +127,7 @@ func (h *Handler) PostShell(w http.ResponseWriter, r *http.Request) {
 	if cluster.Context != "" {
 		args = append([]string{"--context", cluster.Context}, parts...)
 	}
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd := exec.CommandContext(ctx, "kcli", args...)
 	cmd.Env = append(cmd.Env, "KUBECONFIG="+cluster.KubeconfigPath)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -9,33 +9,36 @@ import (
 
 	"github.com/kubilitics/kubilitics-ai/internal/analytics"
 	"github.com/kubilitics/kubilitics-ai/internal/audit"
+	appconfig "github.com/kubilitics/kubilitics-ai/internal/config"
 	"github.com/kubilitics/kubilitics-ai/internal/cost"
 	"github.com/kubilitics/kubilitics-ai/internal/db"
-	"github.com/kubilitics/kubilitics-ai/internal/llm/budget"
-	"github.com/kubilitics/kubilitics-ai/internal/security"
-	appconfig "github.com/kubilitics/kubilitics-ai/internal/config"
 	"github.com/kubilitics/kubilitics-ai/internal/integration/backend"
 	"github.com/kubilitics/kubilitics-ai/internal/integration/events"
 	"github.com/kubilitics/kubilitics-ai/internal/llm/adapter"
+	"github.com/kubilitics/kubilitics-ai/internal/llm/budget"
 	"github.com/kubilitics/kubilitics-ai/internal/llm/types"
 	mcpserver "github.com/kubilitics/kubilitics-ai/internal/mcp/server"
-	reasoningcontext "github.com/kubilitics/kubilitics-ai/internal/reasoning/context"
-	reasoningengine "github.com/kubilitics/kubilitics-ai/internal/reasoning/engine"
-	reasoningprompt "github.com/kubilitics/kubilitics-ai/internal/reasoning/prompt"
 	"github.com/kubilitics/kubilitics-ai/internal/memory/temporal"
 	"github.com/kubilitics/kubilitics-ai/internal/memory/vector"
 	"github.com/kubilitics/kubilitics-ai/internal/memory/worldmodel"
+	reasoningcontext "github.com/kubilitics/kubilitics-ai/internal/reasoning/context"
+	reasoningengine "github.com/kubilitics/kubilitics-ai/internal/reasoning/engine"
+	reasoningprompt "github.com/kubilitics/kubilitics-ai/internal/reasoning/prompt"
 	"github.com/kubilitics/kubilitics-ai/internal/safety"
+	"github.com/kubilitics/kubilitics-ai/internal/security"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	_ "github.com/kubilitics/kubilitics-ai/internal/metrics" // register Prometheus metrics
 )
 
 // Server represents the Kubilitics AI server
 type Server struct {
-	config *Config
+	config *appconfig.Config
 
 	// Core components
 	llmAdapter        adapter.LLMAdapter
 	mcpServer         mcpserver.MCPServer
-	toolExecutor      *mcpToolExecutor
+	toolExecutor      types.ToolExecutor
 	safetyEngine      *safety.Engine
 	analyticsEngine   *analytics.Engine
 	conversationStore *ConversationStore
@@ -80,7 +83,7 @@ type Server struct {
 }
 
 // NewServer creates a new Kubilitics AI server
-func NewServer(cfg *Config) (*Server, error) {
+func NewServer(cfg *appconfig.Config) (*Server, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
@@ -105,12 +108,79 @@ func NewServer(cfg *Config) (*Server, error) {
 
 // initializeComponents initializes all server components
 func (s *Server) initializeComponents() error {
+	// 0. Initialize Persistence Store (A-CORE-013) - FIRST, as others depend on it
+	dbPath := s.config.Database.SQLitePath
+	if dbPath == "" {
+		dbPath = ":memory:"
+	}
+	if store, err := db.NewSQLiteStore(dbPath); err != nil {
+		return fmt.Errorf("failed to initialize persistence store: %w", err)
+	} else {
+		s.store = store
+	}
+
 	// 1. Initialize LLM Adapter
+	// Check if a provider was saved to the DB in a previous run (via POST /api/v1/config/provider).
+	// If so, overlay it on top of the YAML/env config so the user never has to re-enter their key.
+	if saved, err := s.store.LoadLLMConfig(context.Background()); err != nil {
+		fmt.Printf("[WARN] Failed to load persisted LLM config from DB: %v — using config file values\n", err)
+	} else if saved != nil && saved.Provider != "" {
+		fmt.Printf("[INFO] Restoring persisted LLM config: provider=%s model=%s\n", saved.Provider, saved.Model)
+		s.config.LLM.Provider = saved.Provider
+		s.config.LLM.Configured = true
+		switch saved.Provider {
+		case "openai":
+			if s.config.LLM.OpenAI == nil {
+				s.config.LLM.OpenAI = make(map[string]interface{})
+			}
+			s.config.LLM.OpenAI["api_key"] = saved.APIKey
+			s.config.LLM.OpenAI["model"] = saved.Model
+		case "anthropic":
+			if s.config.LLM.Anthropic == nil {
+				s.config.LLM.Anthropic = make(map[string]interface{})
+			}
+			s.config.LLM.Anthropic["api_key"] = saved.APIKey
+			s.config.LLM.Anthropic["model"] = saved.Model
+		case "ollama":
+			if s.config.LLM.Ollama == nil {
+				s.config.LLM.Ollama = make(map[string]interface{})
+			}
+			s.config.LLM.Ollama["base_url"] = saved.BaseURL
+			s.config.LLM.Ollama["model"] = saved.Model
+		case "custom":
+			if s.config.LLM.Custom == nil {
+				s.config.LLM.Custom = make(map[string]interface{})
+			}
+			s.config.LLM.Custom["base_url"] = saved.BaseURL
+			s.config.LLM.Custom["model"] = saved.Model
+			if saved.APIKey != "" {
+				s.config.LLM.Custom["api_key"] = saved.APIKey
+			}
+		}
+	}
+
+	var apiKey, model, baseURL string
+	switch s.config.LLM.Provider {
+	case "openai":
+		apiKey, _ = s.config.LLM.OpenAI["api_key"].(string)
+		model, _ = s.config.LLM.OpenAI["model"].(string)
+	case "anthropic":
+		apiKey, _ = s.config.LLM.Anthropic["api_key"].(string)
+		model, _ = s.config.LLM.Anthropic["model"].(string)
+	case "ollama":
+		baseURL, _ = s.config.LLM.Ollama["base_url"].(string)
+		model, _ = s.config.LLM.Ollama["model"].(string)
+	case "custom":
+		baseURL, _ = s.config.LLM.Custom["base_url"].(string)
+		model, _ = s.config.LLM.Custom["model"].(string)
+		apiKey, _ = s.config.LLM.Custom["api_key"].(string)
+	}
+
 	llmConfig := &adapter.Config{
-		Provider: adapter.ProviderType(s.config.LLMProvider),
-		APIKey:   s.config.LLMAPIKey,
-		Model:    s.config.LLMModel,
-		BaseURL:  s.config.LLMBaseURL,
+		Provider: adapter.ProviderType(s.config.LLM.Provider),
+		APIKey:   apiKey,
+		Model:    model,
+		BaseURL:  baseURL,
 	}
 
 	llmAdapter, err := adapter.NewLLMAdapter(llmConfig)
@@ -120,8 +190,9 @@ func (s *Server) initializeComponents() error {
 	s.llmAdapter = llmAdapter
 
 	// 2. Initialize Safety Engine (if enabled)
-	if s.config.EnableSafetyEngine {
-		safetyEngine, err := safety.NewEngine()
+	if s.config.Safety.Enabled {
+		// Pass store to safety engine for policy persistence
+		safetyEngine, err := safety.NewEngine(s.store)
 		if err != nil {
 			return fmt.Errorf("failed to initialize safety engine: %w", err)
 		}
@@ -129,7 +200,7 @@ func (s *Server) initializeComponents() error {
 	}
 
 	// 3. Initialize Analytics Engine (if enabled)
-	if s.config.AnalyticsEnabled {
+	if s.config.Analytics.Enabled {
 		s.analyticsEngine = analytics.NewEngine()
 	}
 
@@ -137,10 +208,10 @@ func (s *Server) initializeComponents() error {
 	s.conversationStore = NewConversationStore()
 
 	// 5. Initialize MCP server (if enabled)
-	if s.config.MCPEnabled {
-		// Build minimal appconfig.Config from our server Config.
-		mcpCfg := &appconfig.Config{}
-		mcpCfg.Backend.HTTPBaseURL = s.config.LLMBaseURL // best-effort; proxy uses its own env
+	if s.config.MCP.Enabled {
+		// Pass the entire appconfig to backend proxy if needed, or clone relevant parts.
+		// The backend proxy expects *appconfig.Config.
+		mcpCfg := s.config
 
 		// Audit logger — use default (logs to stderr / files).
 		auditLogger, err := audit.NewLogger(nil)
@@ -153,12 +224,12 @@ func (s *Server) initializeComponents() error {
 			if err != nil {
 				fmt.Printf("warning: failed to create backend proxy: %v\n", err)
 			} else {
-				mcp, err := mcpserver.NewMCPServer(mcpCfg, backendProxy, auditLogger)
+				mcp, err := mcpserver.NewMCPServer(mcpCfg, backendProxy, auditLogger, s.store)
 				if err != nil {
 					fmt.Printf("warning: failed to initialize MCP server: %v\n", err)
 				} else {
 					s.mcpServer = mcp
-					s.toolExecutor = newMCPToolExecutor(mcp)
+					s.toolExecutor = newMCPToolExecutor(mcp).WithAutonomyLevel(s.config.Autonomy.DefaultLevel)
 				}
 			}
 		}
@@ -192,19 +263,11 @@ func (s *Server) initializeComponents() error {
 		// Uses bProxy as ResourceFetcher for live RBAC, pod security, network policy, and secret analysis.
 		s.securityEngine = security.NewSecurityEngine(bProxy)
 
-		// 11. Initialize Persistence Store (A-CORE-013)
-		// SQLite-backed store for audit logs, conversations, anomaly history, and cost snapshots.
-		dbPath := s.config.DatabasePath
-		if dbPath == "" {
-			dbPath = ":memory:"
-		}
-		if store, err := db.NewSQLiteStore(dbPath); err == nil {
-			s.store = store
-		}
+		// 11. (Moved to step 0) Persistence Store initialized at top.
 
 		// 12. Initialize Token Budget Tracker (A-CORE-014)
 		// In-memory tracker with configurable per-user and global limits.
-		s.budgetTracker = budget.NewBudgetTracker()
+		s.budgetTracker = budget.NewBudgetTracker(s.store)
 
 		ctxBuilder := reasoningcontext.NewContextBuilderWithProxy(bProxy)
 		promptMgr := reasoningprompt.NewPromptManager()
@@ -216,15 +279,17 @@ func (s *Server) initializeComponents() error {
 			if err == nil {
 				for _, t := range mcpTools {
 					toolSchemas = append(toolSchemas, types.Tool{
-						Name:        t.Name,
-						Description: t.Description,
-						Parameters:  toMap(t.InputSchema),
+						Name:                  t.Name,
+						Description:           t.Description,
+						Parameters:            toMap(t.InputSchema),
+						RequiredAutonomyLevel: t.RequiredAutonomyLevel,
 					})
 				}
 			}
 		}
 
 		s.reasoningEngine = reasoningengine.NewReasoningEngine(
+			s.store,
 			ctxBuilder,
 			promptMgr,
 			s.llmAdapter,
@@ -252,28 +317,43 @@ func (s *Server) Start() error {
 	s.registerHandlers(mux)
 
 	s.httpServer = &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", s.config.Host, s.config.HTTPPort),
+		Addr:         fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port),
 		Handler:      mux,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Start HTTP server
+	// Start HTTP(S) server — AI-017: honour TLSEnabled to serve WSS (WebSocket over TLS).
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		fmt.Printf("Starting HTTP server on %s:%d\n", s.config.Host, s.config.HTTPPort)
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("HTTP server error: %v\n", err)
+		if s.config.Server.TLSEnabled && s.config.Server.TLSCertPath != "" && s.config.Server.TLSKeyPath != "" {
+			fmt.Printf("Starting HTTPS server on %s:%d (TLS enabled)\n", s.config.Server.Host, s.config.Server.Port)
+			if err := s.httpServer.ListenAndServeTLS(s.config.Server.TLSCertPath, s.config.Server.TLSKeyPath); err != nil && err != http.ErrServerClosed {
+				fmt.Printf("HTTPS server error: %v\n", err)
+			}
+		} else {
+			fmt.Printf("Starting HTTP server on %s:%d\n", s.config.Server.Host, s.config.Server.Port)
+			if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				fmt.Printf("HTTP server error: %v\n", err)
+			}
 		}
 	}()
 
+	// AI-016: Monthly budget rollover cron — wake up at midnight on the 1st of each month
+	// and reset per-user budgets so spending counters start fresh without a service restart.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.runBudgetRolloverCron(s.ctx)
+	}()
+
 	fmt.Println("Kubilitics AI Server started successfully")
-	fmt.Printf("  LLM Provider: %s\n", s.config.LLMProvider)
-	fmt.Printf("  Safety Engine: %v\n", s.config.EnableSafetyEngine)
-	fmt.Printf("  Analytics: %v\n", s.config.AnalyticsEnabled)
-	fmt.Printf("  Autonomy Level: %d\n", s.config.DefaultAutonomyLevel)
+	fmt.Printf("  LLM Provider: %s\n", s.config.LLM.Provider)
+	fmt.Printf("  Safety Engine: %v\n", s.config.Safety.Enabled)
+	fmt.Printf("  Analytics: %v\n", s.config.Analytics.Enabled)
+	fmt.Printf("  Autonomy Level: %d\n", s.config.Autonomy.DefaultLevel)
 
 	return nil
 }
@@ -333,7 +413,7 @@ func (s *Server) GetMCPServer() mcpserver.MCPServer {
 }
 
 // GetToolExecutor returns the tool executor (may be nil).
-func (s *Server) GetToolExecutor() *mcpToolExecutor {
+func (s *Server) GetToolExecutor() types.ToolExecutor {
 	return s.toolExecutor
 }
 
@@ -362,6 +442,9 @@ func (s *Server) registerHandlers(mux *http.ServeMux) {
 
 	// Info endpoint
 	mux.HandleFunc("/info", s.handleInfo)
+
+	// Prometheus metrics (production monitoring)
+	mux.Handle("/metrics", promhttp.Handler())
 
 	// LLM endpoints
 	mux.HandleFunc("/api/v1/llm/complete", s.handleLLMComplete)
@@ -441,18 +524,26 @@ func (s *Server) registerHandlers(mux *http.ServeMux) {
 	// Token budget endpoints (A-CORE-014)
 	mux.HandleFunc("/api/v1/budget/", s.handleBudgetDispatch)
 	mux.HandleFunc("/api/v1/budget", s.handleBudgetDispatch)
+
+	// Runtime LLM provider configuration (doc 06 — BYOLLM, loopback-only).
+	// POST /api/v1/config/provider — hot-wires a new LLM adapter without restart.
+	mux.HandleFunc("/api/v1/config/provider", s.handleConfigProvider)
 }
 
-// handleHealth handles health check requests
+// handleHealth handles health check requests.
+// Returns llm_configured so the frontend can surface a "Configure AI Provider"
+// prompt without waiting for an LLM call to fail.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	llmConfigured := s.config.LLM.Configured
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"healthy","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
+	fmt.Fprintf(w, `{"status":"healthy","llm_configured":%v,"llm_provider":%q,"timestamp":%q}`,
+		llmConfigured, s.config.LLM.Provider, time.Now().Format(time.RFC3339))
 }
 
 // handleReady handles readiness check requests
@@ -463,7 +554,9 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.RLock()
-	ready := s.running && s.llmAdapter != nil
+	// Ready means the HTTP server is up. LLM being unconfigured is not a readiness failure —
+	// it is a user configuration state surfaced via /health's llm_configured field.
+	ready := s.running
 	s.mu.RUnlock()
 
 	if !ready {
@@ -494,10 +587,10 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"autonomy_level":%d,
 		"timestamp":"%s"
 	}`,
-		s.config.LLMProvider,
-		s.config.EnableSafetyEngine,
-		s.config.AnalyticsEnabled,
-		s.config.DefaultAutonomyLevel,
+		s.config.LLM.Provider,
+		s.config.Safety.Enabled,
+		s.config.Analytics.Enabled,
+		s.config.Autonomy.DefaultLevel,
 		time.Now().Format(time.RFC3339),
 	)
 
@@ -515,6 +608,76 @@ func toMap(v interface{}) map[string]interface{} {
 		return m
 	}
 	return nil
+}
+
+// ReloadLLMAdapter rebuilds the LLM adapter from a freshly loaded config.
+// This enables zero-downtime API key rotation: send SIGHUP to main, which
+// calls cfgMgr.Reload() then srv.ReloadLLMAdapter(newCfg) (AI-015).
+func (s *Server) ReloadLLMAdapter(newCfg *appconfig.Config) error {
+	var apiKey, model, baseURL string
+	switch newCfg.LLM.Provider {
+	case "openai":
+		apiKey, _ = newCfg.LLM.OpenAI["api_key"].(string)
+		model, _ = newCfg.LLM.OpenAI["model"].(string)
+	case "anthropic":
+		apiKey, _ = newCfg.LLM.Anthropic["api_key"].(string)
+		model, _ = newCfg.LLM.Anthropic["model"].(string)
+	case "ollama":
+		baseURL, _ = newCfg.LLM.Ollama["base_url"].(string)
+		model, _ = newCfg.LLM.Ollama["model"].(string)
+	case "custom":
+		baseURL, _ = newCfg.LLM.Custom["base_url"].(string)
+	}
+
+	llmConfig := &adapter.Config{
+		Provider: adapter.ProviderType(newCfg.LLM.Provider),
+		APIKey:   apiKey,
+		Model:    model,
+		BaseURL:  baseURL,
+	}
+
+	newLLMAdapter, err := adapter.NewLLMAdapter(llmConfig)
+	if err != nil {
+		return fmt.Errorf("reload llm adapter: %w", err)
+	}
+
+	s.mu.Lock()
+	s.llmAdapter = newLLMAdapter
+	s.config = newCfg
+	s.mu.Unlock()
+
+	fmt.Printf("LLM adapter reloaded: provider=%s configured=%v\n", newCfg.LLM.Provider, newCfg.LLM.Configured)
+	return nil
+}
+
+// runBudgetRolloverCron blocks until ctx is cancelled, waking at midnight on
+// the 1st of each month to advance period_start for all users (AI-016).
+// This ensures the monthly spending window rolls over even if the service has
+// been running continuously since the previous month.
+func (s *Server) runBudgetRolloverCron(ctx context.Context) {
+	for {
+		now := time.Now().UTC()
+		// Compute midnight on the 1st of next month.
+		nextMonth := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+		sleepDur := nextMonth.Sub(now)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(sleepDur):
+		}
+
+		if s.store == nil {
+			continue
+		}
+		rollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		if err := s.store.RolloverAllBudgets(rollCtx); err != nil {
+			fmt.Printf("[ERROR] Monthly budget rollover failed: %v\n", err)
+		} else {
+			fmt.Printf("[INFO] Monthly budget rollover completed at %s\n", time.Now().UTC().Format(time.RFC3339))
+		}
+		cancel()
+	}
 }
 
 // API endpoint handlers are implemented in handlers.go and websocket.go

@@ -12,11 +12,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
+
+// sharedHTTPClient is a package-level HTTP client with a pooled transport.
+// Reusing a single client across all MCP tool calls prevents file-descriptor
+// exhaustion under concurrent investigation load (AI-011).
+var sharedHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 20,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
 
 // backendHTTP is a thin client for the kubilitics-backend REST API.
 type backendHTTP struct {
@@ -24,17 +37,16 @@ type backendHTTP struct {
 	httpClient *http.Client
 }
 
-// newBackendHTTP creates a client pointing at baseURL (e.g. "http://localhost:8080").
-// If baseURL is empty it defaults to http://localhost:8080.
+// newBackendHTTP creates a client pointing at baseURL (e.g. "http://localhost:819").
+// If baseURL is empty it defaults to http://localhost:819.
+// All callers share the same pooled HTTP transport (AI-011).
 func newBackendHTTP(baseURL string) *backendHTTP {
 	if baseURL == "" {
-		baseURL = "http://localhost:8080"
+		baseURL = "http://localhost:819"
 	}
 	return &backendHTTP{
-		baseURL: strings.TrimSuffix(baseURL, "/"),
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		baseURL:    strings.TrimSuffix(baseURL, "/"),
+		httpClient: sharedHTTPClient,
 	}
 }
 
@@ -83,11 +95,23 @@ func (c *backendHTTP) firstClusterID(ctx context.Context) (string, error) {
 
 // resolveCluster returns the clusterID from args["cluster_id"], falling back to
 // the first registered cluster if the arg is absent.
+// WARNING: In multi-cluster environments, always pass cluster_id to avoid
+// operating on the wrong cluster (AI-012).
 func (c *backendHTTP) resolveCluster(ctx context.Context, args map[string]interface{}) (string, error) {
 	if id, ok := args["cluster_id"].(string); ok && id != "" {
 		return url.PathEscape(id), nil
 	}
-	return c.firstClusterID(ctx)
+
+	// Log warning about fallback in multi-cluster environments
+	firstID, err := c.firstClusterID(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	// AI-012: Warn on fallback so operators know a cluster_id should be passed.
+	log.Printf("[WARN] cluster_id not provided — falling back to first registered cluster %q. "+
+		"In multi-cluster environments always supply cluster_id to avoid targeting the wrong cluster.", firstID)
+	return firstID, nil
 }
 
 // clusterPath returns "/api/v1/clusters/{clusterID}{suffix}".

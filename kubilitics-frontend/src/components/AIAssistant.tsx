@@ -1,8 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { useLocation } from 'react-router-dom';
-import { MessageCircle, X, Send, Trash2 } from 'lucide-react';
+import { useLocation, Link } from 'react-router-dom';
+import { MessageCircle, X, Send, Trash2, Settings } from 'lucide-react';
 import { buildChatWSUrl } from '@/services/aiService';
+import { useOfflineMode } from '@/hooks/useOfflineMode';
+import { useAIStatus } from '@/hooks/useAIStatus';
+import { analyticsService } from '@/services/analyticsService';
+import { isTauri } from '@/lib/tauri';
 // AI WebSocket endpoint (/ws/chat) lives on the AI backend (port 8081).
 // Use buildChatWSUrl() from aiService for consistent URL construction.
 
@@ -12,6 +16,8 @@ export function AIAssistant() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const location = useLocation();
+  const { aiBackendReachable } = useOfflineMode();
+  const aiStatus = useAIStatus();
 
   // WebSocket connection — use buildChatWSUrl() so the correct AI backend
   // port (8081) and any query-string context params are included.
@@ -91,11 +97,28 @@ export function AIAssistant() {
 
   const handleSend = () => {
     if (!input.trim()) return;
+    if (!aiBackendReachable) {
+      // AI backend unavailable - don't send
+      return;
+    }
 
     const context = getContext();
     sendUserMessage(input, context);
+    
+    // Track feature usage
+    if (isTauri()) {
+      analyticsService.trackFeatureUsage('ai_assistant', 'message_sent');
+    }
+    
     setInput('');
   };
+
+  // Track AI assistant opens
+  useEffect(() => {
+    if (isOpen && isTauri()) {
+      analyticsService.trackFeatureUsage('ai_assistant', 'opened');
+    }
+  }, [isOpen]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -104,13 +127,20 @@ export function AIAssistant() {
     }
   };
 
+  // Gate on AI status: hide assistant when AI backend is unavailable
+  if (aiStatus.status === 'unavailable') {
+    return null;
+  }
+
+  const showConfigurePrompt = aiStatus.status === 'unconfigured';
+
   return (
     <>
       {/* Floating button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200"
-        title="AI Assistant (Cmd/Ctrl + K)"
+        title={showConfigurePrompt ? 'AI Assistant — Configure in Settings' : 'AI Assistant (Cmd/Ctrl + K)'}
       >
         <MessageCircle className="h-6 w-6 mx-auto" />
       </button>
@@ -156,7 +186,23 @@ export function AIAssistant() {
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length === 0 && (
+            {showConfigurePrompt ? (
+              <div className="text-center text-gray-500 dark:text-gray-400 mt-8 px-4">
+                <Settings className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p className="text-sm font-medium">AI is not configured</p>
+                <p className="text-xs mt-2">
+                  Configure your LLM provider and API key in Settings to use the AI assistant.
+                </p>
+                <Link
+                  to="/settings"
+                  className="inline-flex items-center gap-2 mt-4 px-4 py-2 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-700"
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Settings className="h-4 w-4" />
+                  Open Settings
+                </Link>
+              </div>
+            ) : messages.length === 0 && (
               <div className="text-center text-gray-500 dark:text-gray-400 mt-8">
                 <MessageCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p className="text-sm">
@@ -173,7 +219,7 @@ export function AIAssistant() {
               </div>
             )}
 
-            {messages.map((msg, i) => (
+            {!showConfigurePrompt && messages.map((msg, i) => (
               <div
                 key={i}
                 className={`flex ${
@@ -200,7 +246,7 @@ export function AIAssistant() {
             ))}
 
             {/* Typing indicator */}
-            {messages.length > 0 && messages[messages.length - 1]?.role === 'user' && (
+            {!showConfigurePrompt && messages.length > 0 && messages[messages.length - 1]?.role === 'user' && (
               <div className="flex justify-start">
                 <div className="bg-gray-100 dark:bg-gray-700 rounded-lg px-4 py-2">
                   <div className="flex space-x-1">
@@ -215,9 +261,15 @@ export function AIAssistant() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
+          {/* Input — hidden when AI is unconfigured (user must go to Settings) */}
+          {!showConfigurePrompt && (
           <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-            {!isConnected && !isConnecting && (
+            {!aiBackendReachable && (
+              <div className="mb-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 p-2 rounded">
+                AI backend is unavailable. AI features are disabled.
+              </div>
+            )}
+            {aiBackendReachable && !isConnected && !isConnecting && (
               <div className="mb-2 text-xs text-red-500 dark:text-red-400">
                 Not connected to AI backend. Check if the server is running.
               </div>
@@ -229,13 +281,13 @@ export function AIAssistant() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Ask me anything..."
+                placeholder={aiBackendReachable ? "Ask me anything..." : "AI backend unavailable"}
                 className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                disabled={!isConnected}
+                disabled={!isConnected || !aiBackendReachable}
               />
               <button
                 onClick={handleSend}
-                disabled={!input.trim() || !isConnected}
+                disabled={!input.trim() || !isConnected || !aiBackendReachable}
                 className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
               >
                 <Send className="h-4 w-4" />
@@ -245,6 +297,7 @@ export function AIAssistant() {
               Press <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">Enter</kbd> to send, <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">Cmd+K</kbd> to toggle
             </p>
           </div>
+          )}
         </div>
       )}
     </>

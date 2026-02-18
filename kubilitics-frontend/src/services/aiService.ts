@@ -25,11 +25,11 @@
 
 // ─── Base URL ────────────────────────────────────────────────────────────────
 
-export const AI_BASE_URL =
-  import.meta.env.VITE_AI_BACKEND_URL || 'http://localhost:8081';
+import { getCurrentAiBackendUrl, getCurrentAiWsUrl } from '@/stores/backendConfigStore';
+import { DEFAULT_AI_BASE_URL, DEFAULT_AI_WS_URL } from '@/lib/backendConstants';
 
-export const AI_WS_URL =
-  import.meta.env.VITE_AI_WS_URL || 'ws://localhost:8081';
+export const AI_BASE_URL = DEFAULT_AI_BASE_URL;
+export const AI_WS_URL = DEFAULT_AI_WS_URL;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -158,7 +158,7 @@ async function aiRequest<T>(
   path: string,
   init?: RequestInit
 ): Promise<T> {
-  const url = `${AI_BASE_URL}${path}`;
+  const url = `${getCurrentAiBackendUrl()}${path}`;
   let response: Response;
 
   try {
@@ -377,20 +377,32 @@ export async function getConversation(id: string): Promise<Conversation> {
 
 const LLM_CONFIG_KEY = 'kubilitics_ai_provider_config';
 
-export function saveLLMProviderConfig(config: LLMProviderConfig): void {
-  // Never store API key in plain localStorage in production.
-  // This is a dev-only shortcut; production should use a settings endpoint.
-  localStorage.setItem(LLM_CONFIG_KEY, JSON.stringify(config));
+export async function updateAIConfiguration(config: LLMProviderConfig): Promise<void> {
+  // Security fix: Send config to backend, never store API keys in localStorage.
+  await aiRequest('/api/v1/config/provider', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
 }
 
+export async function getAIConfiguration(): Promise<LLMProviderConfig> {
+  return aiRequest<LLMProviderConfig>('/api/v1/config/provider');
+}
+
+/**
+ * @deprecated Use updateAIConfiguration (server-side persistence) instead.
+ * This remains only for non-sensitive preferences if needed.
+ */
+export function saveLLMProviderConfig(config: LLMProviderConfig): void {
+  // Legacy cleanup: ensure no sensitive data lingers
+  localStorage.removeItem(LLM_CONFIG_KEY);
+}
+
+/**
+ * @deprecated Use getAIConfiguration (server-side persistence) instead.
+ */
 export function loadLLMProviderConfig(): LLMProviderConfig | null {
-  const raw = localStorage.getItem(LLM_CONFIG_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as LLMProviderConfig;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 export function clearLLMProviderConfig(): void {
@@ -454,7 +466,7 @@ export async function cancelInvestigation(id: string): Promise<{ id: string; sta
 
 /** Build a WebSocket URL for streaming investigation events */
 export function buildInvestigationStreamUrl(id: string): string {
-  return `${AI_WS_URL}/ws/investigations/${id}`;
+  return `${getCurrentAiWsUrl()}/ws/investigations/${id}`;
 }
 
 // ─── WebSocket chat URL builder ───────────────────────────────────────────────
@@ -471,5 +483,5 @@ export function buildChatWSUrl(context?: WSChatContext): string {
   if (context?.resource) params.set('resource', context.resource);
   if (context?.screen) params.set('screen', context.screen);
   const qs = params.toString();
-  return `${AI_WS_URL}/ws/chat${qs ? `?${qs}` : ''}`;
+  return `${getCurrentAiWsUrl()}/ws/chat${qs ? `?${qs}` : ''}`;
 }

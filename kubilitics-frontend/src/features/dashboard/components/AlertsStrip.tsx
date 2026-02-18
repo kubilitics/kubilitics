@@ -286,8 +286,8 @@ export const AlertsStrip = () => {
             <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
           </div>
           <div>
-            <p className="text-sm font-medium text-foreground">All clear</p>
-            <p className="text-xs text-muted-foreground">No active alerts or warnings in the cluster</p>
+            <p className="text-sm font-medium text-slate-900 dark:text-slate-100">All clear</p>
+            <p className="text-xs text-slate-600 dark:text-slate-400">No active alerts or warnings in the cluster</p>
           </div>
         </div>
       )}

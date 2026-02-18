@@ -1,0 +1,77 @@
+version: 2
+updates:
+  # Go modules - Backend
+  - package-ecosystem: "gomod"
+    directory: "/kubilitics-backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "kubilitics"
+    labels:
+      - "dependencies"
+      - "go"
+      - "backend"
+
+  # Go modules - AI Backend
+  - package-ecosystem: "gomod"
+    directory: "/kubilitics-ai"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "kubilitics"
+    labels:
+      - "dependencies"
+      - "go"
+      - "ai"
+
+  # npm - Frontend
+  - package-ecosystem: "npm"
+    directory: "/kubilitics-frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "kubilitics"
+    labels:
+      - "dependencies"
+      - "javascript"
+      - "frontend"
+    versioning-strategy: increase
+
+  # Cargo - Desktop
+  - package-ecosystem: "cargo"
+    directory: "/kubilitics-desktop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "kubilitics"
+    labels:
+      - "dependencies"
+      - "rust"
+      - "desktop"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "kubilitics"
+    labels:
+      - "dependencies"
+      - "github-actions"
+      - "ci"

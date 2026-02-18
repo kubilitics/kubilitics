@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
 
@@ -22,15 +23,11 @@ func (h *Handler) GetWorkloadsOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
@@ -49,7 +46,8 @@ func (h *Handler) GetWorkloadsOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Events for alerts
-	events, _ := h.eventsService.ListEventsAllNamespaces(r.Context(), resolvedID, 200)
+	// Note: Events service still uses clusterID, but for Headlamp/Lens we'd need to update events service too
+	events, _ := h.eventsService.ListEventsAllNamespaces(r.Context(), clusterID, 200)
 	warnings := 0
 	critical := 0
 	var top3 []models.WorkloadAlert

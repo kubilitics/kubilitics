@@ -7,9 +7,11 @@ package engine_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/kubilitics/kubilitics-ai/internal/db"
 	"github.com/kubilitics/kubilitics-ai/internal/llm/types"
 	"github.com/kubilitics/kubilitics-ai/internal/reasoning/engine"
 )
@@ -60,6 +62,10 @@ func (f *fakeToolExecutor) Execute(_ context.Context, toolName string, _ map[str
 	return f.result, nil
 }
 
+func (f *fakeToolExecutor) WithAutonomyLevel(level int) types.ToolExecutor {
+	return f
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper to collect events from a subscriber
 // ─────────────────────────────────────────────────────────────────────────────
@@ -81,12 +87,29 @@ func collectEvents(sub *engine.Subscriber, timeout time.Duration) []engine.Inves
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
+func newTestStore(t *testing.T) db.Store {
+	f, err := os.CreateTemp("", "kubilitics-ai-test-*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	name := f.Name()
+	f.Close()
+	t.Cleanup(func() { os.Remove(name) })
+
+	s, err := db.NewSQLiteStore(name)
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	return s
+}
+
 func TestInvestigate_RequiresDescription(t *testing.T) {
-	eng := engine.NewReasoningEngine(nil, nil, nil, nil, nil, nil)
-	_, err := eng.Investigate(context.Background(), "", "general")
+	eng := engine.NewReasoningEngine(newTestStore(t), nil, nil, nil, nil, nil, nil)
+	_, err := eng.Investigate(context.Background(), "", "general", 0)
 	if err == nil {
 		t.Error("expected error for empty description")
 	}
@@ -97,9 +120,9 @@ func TestInvestigate_DefaultsType(t *testing.T) {
 		{TextToken: "**Root Cause:** network policy blocking traffic"},
 	}}
 	executor := &fakeToolExecutor{result: "ok"}
-	eng := engine.NewReasoningEngine(nil, nil, llm, executor, nil, nil)
+	eng := engine.NewReasoningEngine(newTestStore(t), nil, nil, llm, executor, nil, nil)
 
-	id, err := eng.Investigate(context.Background(), "something is wrong", "")
+	id, err := eng.Investigate(context.Background(), "something is wrong", "", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,14 +134,25 @@ func TestInvestigate_DefaultsType(t *testing.T) {
 func TestInvestigate_FullLoop_ConcludesSuccessfully(t *testing.T) {
 	llm := &fakeLLM{events: []types.AgentStreamEvent{
 		{TextToken: "Analyzing the cluster state.\n"},
-		{TextToken: "**Finding:** Pod is in CrashLoopBackOff due to OOMKill\n"},
-		{TextToken: "**Root Cause:** Container memory limit is too low\n"},
-		{TextToken: "**Recommendation:** Increase memory limit to 512Mi\n"},
+		{TextToken: `{
+  "findings": [
+    {
+      "statement": "Pod is in CrashLoopBackOff due to OOMKill",
+      "evidence": "Container memory limit is too low",
+      "confidence": 95,
+      "severity": "high"
+    }
+  ],
+  "root_cause": "Container memory limit is too low",
+  "recommendations": [
+    "Increase memory limit to 512Mi"
+  ]
+}`},
 	}}
 	executor := &fakeToolExecutor{result: `{"pods": [{"name": "web", "status": "CrashLoopBackOff"}]}`}
-	eng := engine.NewReasoningEngine(nil, nil, llm, executor, nil, nil)
+	eng := engine.NewReasoningEngine(newTestStore(t), nil, nil, llm, executor, nil, nil)
 
-	id, err := eng.Investigate(context.Background(), "pod web is crashing", "pod_crash")
+	id, err := eng.Investigate(context.Background(), "pod web is crashing", "pod_crash", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -151,11 +185,53 @@ func TestInvestigate_FullLoop_ConcludesSuccessfully(t *testing.T) {
 	}
 }
 
+func TestInvestigate_LegacyFallback(t *testing.T) {
+	llm := &fakeLLM{events: []types.AgentStreamEvent{
+		{TextToken: "Analyzing...\n"},
+		{TextToken: "**Finding:** Legacy finding style\n"},
+		{TextToken: "**Evidence:** Legacy evidence\n"},
+		{TextToken: "**Root Cause:** Legacy root cause\n"},
+	}}
+	executor := &fakeToolExecutor{result: "ok"}
+	eng := engine.NewReasoningEngine(newTestStore(t), nil, nil, llm, executor, nil, nil)
+
+	id, err := eng.Investigate(context.Background(), "legacy test", "general", 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Poll until concluded
+	var inv interface{}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		inv, err = eng.GetInvestigation(context.Background(), id)
+		if err != nil {
+			t.Fatalf("GetInvestigation failed: %v", err)
+		}
+		invMap := inv.(*engine.Investigation)
+		if invMap.State == engine.StateConcluded {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	invFinal := inv.(*engine.Investigation)
+	if len(invFinal.Findings) == 0 {
+		t.Fatal("expected findings via legacy extraction")
+	}
+	if invFinal.Findings[0].Statement != "Legacy finding style" {
+		t.Errorf("expected legacy finding, got %s", invFinal.Findings[0].Statement)
+	}
+	if invFinal.Conclusion != "Legacy root cause" {
+		t.Errorf("expected legacy conclusion, got %s", invFinal.Conclusion)
+	}
+}
+
 func TestInvestigate_NoLLM_ConcludesWithContextMessage(t *testing.T) {
 	// When no LLM is configured, investigation should still conclude gracefully
-	eng := engine.NewReasoningEngine(nil, nil, nil, nil, nil, nil)
+	eng := engine.NewReasoningEngine(newTestStore(t), nil, nil, nil, nil, nil, nil)
 
-	id, err := eng.Investigate(context.Background(), "check cluster health", "general")
+	id, err := eng.Investigate(context.Background(), "check cluster health", "general", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -182,9 +258,9 @@ func TestInvestigate_NoLLM_ConcludesWithContextMessage(t *testing.T) {
 func TestInvestigate_LLMError_FailsGracefully(t *testing.T) {
 	llm := &fakeLLM{err: fmt.Errorf("LLM provider unreachable")}
 	executor := &fakeToolExecutor{}
-	eng := engine.NewReasoningEngine(nil, nil, llm, executor, nil, nil)
+	eng := engine.NewReasoningEngine(newTestStore(t), nil, nil, llm, executor, nil, nil)
 
-	id, err := eng.Investigate(context.Background(), "pod is failing", "pod_crash")
+	id, err := eng.Investigate(context.Background(), "pod is failing", "pod_crash", 0)
 	if err != nil {
 		t.Fatalf("unexpected error from Investigate: %v", err)
 	}
@@ -206,7 +282,7 @@ func TestInvestigate_LLMError_FailsGracefully(t *testing.T) {
 }
 
 func TestGetInvestigation_NotFound(t *testing.T) {
-	eng := engine.NewReasoningEngine(nil, nil, nil, nil, nil, nil)
+	eng := engine.NewReasoningEngine(newTestStore(t), nil, nil, nil, nil, nil, nil)
 	_, err := eng.GetInvestigation(context.Background(), "nonexistent-id")
 	if err == nil {
 		t.Error("expected error for nonexistent investigation")
@@ -214,9 +290,9 @@ func TestGetInvestigation_NotFound(t *testing.T) {
 }
 
 func TestCancelInvestigation(t *testing.T) {
-	eng := engine.NewReasoningEngine(nil, nil, nil, nil, nil, nil)
+	eng := engine.NewReasoningEngine(newTestStore(t), nil, nil, nil, nil, nil, nil)
 
-	id, err := eng.Investigate(context.Background(), "check pods", "general")
+	id, err := eng.Investigate(context.Background(), "check pods", "general", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -231,12 +307,12 @@ func TestCancelInvestigation(t *testing.T) {
 }
 
 func TestListInvestigations(t *testing.T) {
-	eng := engine.NewReasoningEngine(nil, nil, nil, nil, nil, nil)
+	eng := engine.NewReasoningEngine(newTestStore(t), nil, nil, nil, nil, nil, nil)
 	ctx := context.Background()
 
-	eng.Investigate(ctx, "issue 1", "general")
-	eng.Investigate(ctx, "issue 2", "pod_crash")
-	eng.Investigate(ctx, "issue 3", "performance")
+	eng.Investigate(ctx, "issue 1", "general", 0)
+	eng.Investigate(ctx, "issue 2", "pod_crash", 0)
+	eng.Investigate(ctx, "issue 3", "performance", 0)
 
 	time.Sleep(200 * time.Millisecond) // let goroutines start
 
@@ -272,9 +348,9 @@ func TestInvestigate_WithToolCalls_RecordsToolCallHistory(t *testing.T) {
 		{TextToken: "**Root Cause:** Memory limit is too restrictive\n"},
 	}}
 	executor := &fakeToolExecutor{result: "data"}
-	eng := engine.NewReasoningEngine(nil, nil, llm, executor, nil, nil)
+	eng := engine.NewReasoningEngine(newTestStore(t), nil, nil, llm, executor, nil, nil)
 
-	id, err := eng.Investigate(context.Background(), "pod health investigation", "pod_crash")
+	id, err := eng.Investigate(context.Background(), "pod health investigation", "pod_crash", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -304,7 +380,7 @@ func TestSubscribe_ReceivesEvents(t *testing.T) {
 		{TextToken: "**Root Cause:** memory pressure\n"},
 	}}
 	executor := &fakeToolExecutor{}
-	engImpl := engine.NewReasoningEngine(nil, nil, llm, executor, nil, nil)
+	engImpl := engine.NewReasoningEngine(newTestStore(t), nil, nil, llm, executor, nil, nil)
 
 	// Type assert to access Subscribe method
 	type subscribeableEngine interface {
@@ -318,7 +394,7 @@ func TestSubscribe_ReceivesEvents(t *testing.T) {
 		return
 	}
 
-	id, err := se.Investigate(context.Background(), "test streaming", "general")
+	id, err := se.Investigate(context.Background(), "test streaming", "general", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

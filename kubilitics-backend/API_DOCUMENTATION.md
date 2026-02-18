@@ -4,204 +4,726 @@
 
 The Kubilitics Backend provides a comprehensive REST API and WebSocket interface for Kubernetes cluster management, topology visualization, and real-time monitoring.
 
-**Base URL**: `http://localhost:8080/api/v1`
+**Base URL**: `http://localhost:819/api/v1`  
+**API Version**: 1.0.0  
+**Protocol**: HTTP/HTTPS, WebSocket
 
-**API Version**: 1.0.0
+## Table of Contents
 
-## Quick Start
+- [Authentication](#authentication)
+- [Rate Limiting](#rate-limiting)
+- [Error Codes](#error-codes)
+- [API Endpoints](#api-endpoints)
+  - [Health & Capabilities](#health--capabilities)
+  - [Authentication](#authentication-endpoints)
+  - [User Management](#user-management)
+  - [Cluster Management](#cluster-management)
+  - [Topology](#topology)
+  - [Resources](#resources)
+  - [Logs](#logs)
+  - [Metrics](#metrics)
+  - [Events](#events)
+  - [Shell & kcli](#shell--kcli)
+  - [Projects](#projects)
+  - [Audit Log](#audit-log)
+- [WebSocket Endpoints](#websocket-endpoints)
+- [Request/Response Schemas](#requestresponse-schemas)
+- [Examples](#examples)
 
-### 1. Start the Backend
+---
+
+## Authentication
+
+### Authentication Modes
+
+The backend supports three authentication modes (configured via `auth_mode`):
+
+- **`disabled`**: No authentication required (default for development)
+- **`optional`**: Accepts Bearer tokens or anonymous requests
+- **`required`**: Requires Bearer token for all requests
+
+### Getting an Access Token
+
+#### 1. Login
 
 ```bash
-cd kubilitics-backend/cmd/server
-go run main.go
+POST /api/v1/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "your-password"
+}
 ```
 
-Or using the compiled binary:
+**Response** (200 OK):
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expires_in": 3600,
+  "token_type": "Bearer"
+}
+```
+
+#### 2. Using the Token
+
+Include the token in the `Authorization` header:
 
 ```bash
-./kubilitics-server
+curl -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  http://localhost:819/api/v1/clusters
 ```
 
-### 2. Check Health
+#### 3. Refresh Token
+
+When the access token expires, use the refresh token:
 
 ```bash
-curl http://localhost:8080/health
+POST /api/v1/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
 ```
 
-Response:
+**Response** (200 OK):
+```json
+{
+  "access_token": "new-access-token...",
+  "refresh_token": "new-refresh-token...",
+  "expires_in": 3600,
+  "token_type": "Bearer"
+}
+```
+
+### API Key Authentication (BE-AUTH-003)
+
+For programmatic access (e.g., kcli), use API keys:
+
+```bash
+curl -H "X-API-Key: kubilitics_xxxxxxxxxxxxxxxxxxxx" \
+  http://localhost:819/api/v1/clusters
+```
+
+### Authorization Roles
+
+- **`viewer`**: Read-only access (GET endpoints)
+- **`operator`**: Can read and modify resources (GET, POST, PATCH, DELETE)
+- **`admin`**: Full access including user management
+
+Per-cluster permissions override global role for specific clusters.
+
+---
+
+## Rate Limiting
+
+Rate limiting is enforced per IP address with different tiers based on endpoint type.
+
+### Rate Limit Tiers
+
+| Tier | Endpoints | Limit | Burst |
+|------|-----------|-------|-------|
+| **Exec/Shell** | `/shell`, `/kcli/exec`, `/kcli/stream`, `/pods/{name}/exec` | 10 req/min | 10 |
+| **GET** | All GET endpoints | 120 req/min | 120 |
+| **Standard** | All other endpoints (POST, PATCH, DELETE) | 60 req/min | 60 |
+
+### Rate Limit Headers
+
+All responses include rate limit headers:
+
+```
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 45
+X-RateLimit-Reset: 1640995200
+```
+
+### Rate Limit Exceeded
+
+When rate limit is exceeded, the API returns:
+
+**Status**: `429 Too Many Requests`  
+**Headers**:
+```
+Retry-After: 30
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 0
+```
+
+**Response Body**:
+```json
+{
+  "error": "Rate limit exceeded. Please retry after 30 seconds."
+}
+```
+
+### Excluded Endpoints
+
+Rate limiting does not apply to:
+- `/health` - Health check endpoint
+- `/metrics` - Prometheus metrics endpoint
+
+---
+
+## Error Codes
+
+All error responses follow this format:
+
+```json
+{
+  "error": "Error message description"
+}
+```
+
+### HTTP Status Codes
+
+| Code | Description | Common Causes |
+|------|-------------|---------------|
+| `200` | Success | - |
+| `201` | Created | Resource created successfully |
+| `400` | Bad Request | Invalid request parameters, malformed JSON |
+| `401` | Unauthorized | Missing or invalid authentication token |
+| `403` | Forbidden | Insufficient permissions (RBAC) |
+| `404` | Not Found | Resource or cluster not found |
+| `409` | Conflict | Resource already exists |
+| `429` | Too Many Requests | Rate limit exceeded |
+| `500` | Internal Server Error | Server error, check logs |
+| `503` | Service Unavailable | Circuit breaker open, cluster API unavailable |
+| `504` | Gateway Timeout | Request to Kubernetes API timed out |
+
+### Error Examples
+
+**401 Unauthorized**:
+```json
+{
+  "error": "Authentication required"
+}
+```
+
+**403 Forbidden**:
+```json
+{
+  "error": "Insufficient permissions: requires operator role"
+}
+```
+
+**503 Service Unavailable** (Circuit Breaker):
+```json
+{
+  "error": "Cluster API is temporarily unavailable due to repeated failures. Circuit breaker is open. Please retry after 30 seconds."
+}
+```
+
+---
+
+## API Endpoints
+
+### Health & Capabilities
+
+#### GET /health
+
+Health check endpoint. No authentication required.
+
+**Response** (200 OK):
 ```json
 {
   "status": "healthy",
   "service": "kubilitics-backend",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "topology_kinds": ["Pod", "Service", "Deployment", ...]
 }
 ```
 
-### 3. Add a Cluster
+#### GET /capabilities
 
-```bash
-curl -X POST http://localhost:8080/api/v1/clusters \
-  -H "Content-Type: application/json" \
-  -d '{
-    "kubeconfig_path": "/home/user/.kube/config",
-    "context": "my-cluster"
-  }'
-```
+Get backend capabilities (e.g., supported topology resource kinds).
 
-### 4. Get Topology
-
-```bash
-curl http://localhost:8080/api/v1/clusters/{cluster-id}/topology?namespace=default
-```
-
-## API Reference
-
-### Full OpenAPI/Swagger Documentation
-
-The complete API specification is available in:
-- **File**: `/app/kubilitics-backend/api/swagger.yaml`
-- **Interactive Docs**: Coming soon (Swagger UI integration)
-
-### Quick API Reference
-
-## Cluster Management
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/clusters` | List all clusters |
-| POST | `/clusters` | Add new cluster |
-| GET | `/clusters/{id}` | Get cluster details |
-| DELETE | `/clusters/{id}` | Remove cluster |
-| GET | `/clusters/{id}/summary` | Get cluster summary stats |
-
-## Topology
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/clusters/{id}/topology` | Get topology graph |
-| POST | `/clusters/{clusterId}/topology/export` | Export topology (PNG/PDF/SVG/JSON). **Returns 501** until implemented. |
-
-Query parameters for `/topology`:
-- `namespace` (optional): Filter by namespace
-- `resource_types` (optional): Comma-separated resource types
-
-## Resources
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/clusters/{id}/resources/{kind}` | List resources by kind |
-| GET | `/clusters/{id}/resources/{kind}/{namespace}/{name}` | Get specific resource |
-| DELETE | `/clusters/{id}/resources/{kind}/{namespace}/{name}` | Delete resource |
-| POST | `/clusters/{id}/apply` | Apply YAML manifest |
-
-Supported resource kinds:
-- Pod, Service, Deployment, ReplicaSet, StatefulSet, DaemonSet
-- ConfigMap, Secret, PersistentVolume, PersistentVolumeClaim
-- Ingress, NetworkPolicy, StorageClass
-- Role, RoleBinding, ClusterRole, ClusterRoleBinding, ServiceAccount
-- HorizontalPodAutoscaler, PodDisruptionBudget, Job, CronJob
-
-## Logs
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/clusters/{clusterId}/logs/{namespace}/{pod}` | Get pod logs. **Returns 501** until implemented (Phase B1.1). |
-
-Query parameters (when implemented):
-- `container`: Container name (required for multi-container pods)
-- `follow`: Follow logs (true/false)
-- `tail`: Number of lines to tail (default: 100)
-- `since`: Duration (e.g., "10m", "1h")
-
-## Metrics
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/clusters/{clusterId}/metrics` | Get cluster metrics. **Returns 501** until implemented (Phase B1.3). |
-| GET | `/clusters/{clusterId}/metrics/{namespace}/{pod}` | Get pod metrics. **Returns 501** until implemented (Phase B1.3). |
-
-## Events
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/clusters/{clusterId}/events` | Get Kubernetes events. **Returns 501** until implemented (Phase B1.2). |
-
-Query parameters (when implemented):
-- `namespace`: Filter by namespace
-- `resource_kind`: Filter by resource kind (e.g., "Pod")
-- `resource_name`: Filter by resource name
-- `limit`: Max number of events (default: 100)
-
-## WebSocket Endpoints
-
-### Resource Updates
-
-**URL**: `ws://localhost:8080/ws/resources?cluster_id={id}&namespace={ns}`
-
-Receive real-time Kubernetes resource updates.
-
-**Message Format**:
+**Response** (200 OK):
 ```json
 {
-  "type": "RESOURCE_ADDED|RESOURCE_UPDATED|RESOURCE_DELETED",
-  "cluster_id": "uuid",
-  "resource": {
-    "kind": "Pod",
-    "namespace": "default",
-    "name": "nginx-abc",
-    "data": { }
-  },
-  "timestamp": "2024-01-01T10:00:00Z"
+  "topology_kinds": ["Pod", "Service", "Deployment", ...]
 }
 ```
 
-### Topology Updates
+---
 
-**URL**: `ws://localhost:8080/ws/topology?cluster_id={id}`
+### Authentication Endpoints
 
-Receive real-time topology graph updates.
+#### POST /api/v1/auth/login
 
-**Message Format**:
+Authenticate user and receive access/refresh tokens.
+
+**Request Body**:
 ```json
 {
-  "type": "TOPOLOGY_UPDATED",
-  "cluster_id": "uuid",
-  "changes": {
-    "nodes_added": [ ],
-    "nodes_updated": [ ],
-    "nodes_removed": [ ],
-    "edges_added": [ ],
-    "edges_removed": [ ]
-  },
-  "timestamp": "2024-01-01T10:00:00Z"
+  "username": "admin",
+  "password": "password123"
 }
 ```
 
-## Data Models
-
-### Cluster
-
+**Response** (200 OK):
 ```json
 {
-  "id": "uuid",
-  "name": "production-cluster",
-  "context": "prod-context",
-  "server": "https://api.k8s.example.com",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expires_in": 3600,
+  "token_type": "Bearer"
+}
+```
+
+**Error Responses**:
+- `400`: Invalid request body
+- `401`: Invalid credentials
+- `423`: Account locked (too many failed login attempts)
+- `429`: Rate limit exceeded (login attempts)
+
+#### POST /api/v1/auth/refresh
+
+Refresh access token using refresh token.
+
+**Request Body**:
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+**Response** (200 OK): Same as login response
+
+**Error Responses**:
+- `400`: Invalid request body
+- `401`: Invalid or expired refresh token
+
+#### POST /api/v1/auth/logout
+
+Logout (invalidates refresh token). Requires authentication.
+
+**Response** (200 OK):
+```json
+{
+  "message": "Logged out successfully"
+}
+```
+
+#### GET /api/v1/auth/me
+
+Get current user information. Requires authentication.
+
+**Response** (200 OK):
+```json
+{
+  "id": "user-uuid",
+  "username": "admin",
+  "role": "admin",
+  "cluster_permissions": {
+    "cluster-uuid-1": "admin",
+    "cluster-uuid-2": "viewer"
+  }
+}
+```
+
+#### POST /api/v1/auth/change-password
+
+Change user password. Requires authentication.
+
+**Request Body**:
+```json
+{
+  "current_password": "old-password",
+  "new_password": "new-secure-password-min-12-chars"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "message": "Password changed successfully"
+}
+```
+
+**Error Responses**:
+- `400`: Invalid password (doesn't meet policy)
+- `401`: Current password incorrect
+
+#### POST /api/v1/auth/api-keys
+
+Create API key for programmatic access. Requires authentication.
+
+**Request Body**:
+```json
+{
+  "name": "kcli-production"
+}
+```
+
+**Response** (201 Created):
+```json
+{
+  "id": "key-uuid",
+  "name": "kcli-production",
+  "key": "kubilitics_xxxxxxxxxxxxxxxxxxxx",
+  "created_at": "2024-01-01T10:00:00Z",
+  "expires_at": null
+}
+```
+
+**Note**: The API key is only shown once. Store it securely.
+
+#### GET /api/v1/auth/api-keys
+
+List user's API keys. Requires authentication.
+
+**Response** (200 OK):
+```json
+[
+  {
+    "id": "key-uuid",
+    "name": "kcli-production",
+    "last_used": "2024-01-01T10:00:00Z",
+    "created_at": "2024-01-01T09:00:00Z",
+    "expires_at": null
+  }
+]
+```
+
+#### DELETE /api/v1/auth/api-keys/{keyId}
+
+Delete API key. Requires authentication.
+
+**Response** (200 OK):
+```json
+{
+  "message": "API key deleted"
+}
+```
+
+---
+
+### User Management
+
+All user management endpoints require `admin` role.
+
+#### GET /api/v1/users
+
+List all users. Admin only.
+
+**Query Parameters**:
+- `limit` (optional): Max results (default: 100)
+- `offset` (optional): Pagination offset
+
+**Response** (200 OK):
+```json
+[
+  {
+    "id": "user-uuid",
+    "username": "admin",
+    "role": "admin",
+    "created_at": "2024-01-01T10:00:00Z",
+    "last_login": "2024-01-01T11:00:00Z",
+    "locked_until": null
+  }
+]
+```
+
+#### POST /api/v1/users
+
+Create new user. Admin only.
+
+**Request Body**:
+```json
+{
+  "username": "newuser",
+  "password": "secure-password-min-12-chars",
+  "role": "viewer"
+}
+```
+
+**Response** (201 Created):
+```json
+{
+  "id": "user-uuid",
+  "username": "newuser",
+  "role": "viewer",
+  "created_at": "2024-01-01T10:00:00Z"
+}
+```
+
+#### GET /api/v1/users/{userId}
+
+Get user details. Admin only.
+
+**Response** (200 OK):
+```json
+{
+  "id": "user-uuid",
+  "username": "admin",
+  "role": "admin",
+  "created_at": "2024-01-01T10:00:00Z",
+  "last_login": "2024-01-01T11:00:00Z",
+  "locked_until": null
+}
+```
+
+#### PATCH /api/v1/users/{userId}
+
+Update user. Admin can change role; users can change their own password.
+
+**Request Body**:
+```json
+{
+  "role": "operator"
+}
+```
+
+Or for password change:
+```json
+{
+  "password": "new-password-min-12-chars"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "id": "user-uuid",
+  "username": "admin",
+  "role": "operator",
+  "updated_at": "2024-01-01T12:00:00Z"
+}
+```
+
+#### DELETE /api/v1/users/{userId}
+
+Delete user (soft delete). Admin only.
+
+**Response** (200 OK):
+```json
+{
+  "message": "User deleted"
+}
+```
+
+#### POST /api/v1/users/{userId}/unlock
+
+Unlock locked user account. Admin only.
+
+**Response** (200 OK):
+```json
+{
+  "message": "User unlocked"
+}
+```
+
+#### GET /api/v1/users/{userId}/cluster-permissions
+
+List user's cluster permissions. Admin only.
+
+**Response** (200 OK):
+```json
+[
+  {
+    "cluster_id": "cluster-uuid",
+    "role": "admin"
+  }
+]
+```
+
+#### POST /api/v1/users/{userId}/cluster-permissions
+
+Set user's cluster permission. Admin only.
+
+**Request Body**:
+```json
+{
+  "cluster_id": "cluster-uuid",
+  "role": "operator"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "cluster_id": "cluster-uuid",
+  "role": "operator"
+}
+```
+
+#### DELETE /api/v1/users/{userId}/cluster-permissions/{clusterId}
+
+Remove user's cluster permission. Admin only.
+
+**Response** (200 OK):
+```json
+{
+  "message": "Cluster permission removed"
+}
+```
+
+---
+
+### Cluster Management
+
+#### GET /api/v1/clusters
+
+List all clusters. Requires `viewer` role. Filtered by user permissions.
+
+**Response** (200 OK):
+```json
+[
+  {
+    "id": "cluster-uuid",
+    "name": "production",
+    "context": "prod-context",
+    "server_url": "https://api.k8s.example.com",
+    "version": "v1.28.0",
+    "status": "connected",
+    "provider": "eks",
+    "created_at": "2024-01-01T10:00:00Z",
+    "last_connected": "2024-01-01T11:00:00Z"
+  }
+]
+```
+
+#### POST /api/v1/clusters
+
+Add new cluster. Requires `admin` role.
+
+**Request Body**:
+```json
+{
+  "kubeconfig_path": "/path/to/kubeconfig",
+  "context": "my-cluster"
+}
+```
+
+Or with base64 kubeconfig:
+```json
+{
+  "kubeconfig_base64": "base64-encoded-kubeconfig-content",
+  "context": "my-cluster"
+}
+```
+
+**Response** (201 Created):
+```json
+{
+  "id": "cluster-uuid",
+  "name": "my-cluster",
+  "context": "my-cluster",
+  "server_url": "https://api.k8s.example.com",
   "version": "v1.28.0",
+  "status": "connected",
+  "provider": "eks",
+  "created_at": "2024-01-01T10:00:00Z",
+  "last_connected": "2024-01-01T10:00:00Z"
+}
+```
+
+#### GET /api/v1/clusters/discover
+
+Discover clusters from kubeconfig. No authentication required if auth disabled.
+
+**Response** (200 OK):
+```json
+[
+  {
+    "name": "docker-desktop",
+    "context": "docker-desktop",
+    "server_url": "https://kubernetes.docker.internal:6443"
+  }
+]
+```
+
+#### GET /api/v1/clusters/{clusterId}
+
+Get cluster details. Requires `viewer` role.
+
+**Response** (200 OK): Same as cluster object in list response
+
+#### DELETE /api/v1/clusters/{clusterId}
+
+Remove cluster. Requires `admin` role.
+
+**Response** (200 OK):
+```json
+{
+  "message": "Cluster removed"
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/summary
+
+Get cluster summary statistics. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
   "node_count": 5,
   "namespace_count": 12,
-  "created_at": "2024-01-01T10:00:00Z",
-  "last_connected": "2024-01-01T11:30:00Z",
-  "status": "connected|disconnected|error"
+  "pod_count": 150,
+  "deployment_count": 20
 }
 ```
 
-### Topology Graph
+#### GET /api/v1/clusters/{clusterId}/overview
 
+Get cluster overview. Requires `viewer` role.
+
+**Response** (200 OK):
 ```json
 {
-  "cluster_id": "uuid",
+  "cluster": { ... },
+  "summary": { ... },
+  "recent_events": [ ... ]
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/workloads
+
+Get workloads overview. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "deployments": 20,
+  "statefulsets": 5,
+  "daemonsets": 3,
+  "jobs": 10,
+  "cronjobs": 2
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/kubeconfig
+
+Download kubeconfig for cluster. Requires `viewer` role.
+
+**Response** (200 OK):
+```
+Content-Type: application/yaml
+Content-Disposition: attachment; filename="kubeconfig-{clusterId}.yaml"
+
+apiVersion: v1
+kind: Config
+...
+```
+
+---
+
+### Topology
+
+#### GET /api/v1/clusters/{clusterId}/topology
+
+Get topology graph. Requires `viewer` role.
+
+**Query Parameters**:
+- `namespace` (optional): Filter by namespace
+- `force_refresh` (optional): `true` to bypass cache
+
+**Response** (200 OK):
+```json
+{
+  "cluster_id": "cluster-uuid",
   "namespace": "default",
   "nodes": [
     {
@@ -211,7 +733,9 @@ Receive real-time topology graph updates.
       "namespace": "default",
       "labels": { "app": "nginx" },
       "status": "Running",
-      "metadata": { }
+      "metadata": { },
+      "x": 100,
+      "y": 200
     }
   ],
   "edges": [
@@ -232,9 +756,855 @@ Receive real-time topology graph updates.
 }
 ```
 
-## Error Responses
+#### GET /api/v1/clusters/{clusterId}/topology/resource/{kind}/{namespace}/{name}
 
-All errors follow a consistent format:
+Get resource-specific topology subgraph. Requires `viewer` role.
+
+**Path Parameters**:
+- `kind`: Resource kind (e.g., "Pod", "Deployment")
+- `namespace`: Namespace (use "-" or "_" for cluster-scoped resources)
+- `name`: Resource name
+
+**Response** (200 OK): Same format as topology endpoint
+
+#### POST /api/v1/clusters/{clusterId}/topology/export
+
+Export topology in various formats. Requires `operator` role.
+
+**Request Body**:
+```json
+{
+  "format": "png",
+  "namespace": "default"
+}
+```
+
+**Supported Formats**: `json`, `svg`, `drawio`, `png`
+
+**Response** (200 OK):
+- `Content-Type`: `image/png` (for PNG), `image/svg+xml` (for SVG), `application/json` (for JSON), `application/xml` (for draw.io)
+- `Content-Disposition`: `attachment; filename="topology.{format}"`
+- Body: Binary content (PNG/SVG) or JSON/XML
+
+#### GET /api/v1/clusters/{clusterId}/topology/export/drawio
+
+Export topology as draw.io XML. Requires `viewer` role.
+
+**Query Parameters**:
+- `namespace` (optional): Filter by namespace
+
+**Response** (200 OK):
+```
+Content-Type: application/xml
+Content-Disposition: attachment; filename="topology.drawio"
+
+<mxfile>...</mxfile>
+```
+
+---
+
+### Resources
+
+#### GET /api/v1/clusters/{clusterId}/resources/{kind}
+
+List resources by kind. Requires `viewer` role.
+
+**Path Parameters**:
+- `kind`: Resource kind (e.g., "pods", "deployments", "services")
+
+**Query Parameters**:
+- `namespace` (optional): Filter by namespace
+- `limit` (optional): Max results (default: 100, max: 500)
+- `continue` (optional): Pagination token
+- `labelSelector` (optional): Label selector (e.g., "app=nginx")
+- `fieldSelector` (optional): Field selector
+
+**Response** (200 OK):
+```json
+{
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "nginx-pod",
+        "namespace": "default"
+      },
+      "spec": { ... },
+      "status": { ... }
+    }
+  ],
+  "metadata": {
+    "resourceVersion": "12345",
+    "continue": "token-for-next-page",
+    "total": 150
+  }
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/resources/{kind}/{namespace}/{name}
+
+Get specific resource. Requires `viewer` role.
+
+**Path Parameters**:
+- `kind`: Resource kind
+- `namespace`: Namespace (use "-" or "_" for cluster-scoped)
+- `name`: Resource name
+
+**Response** (200 OK): Resource object
+
+#### PATCH /api/v1/clusters/{clusterId}/resources/{kind}/{namespace}/{name}
+
+Patch resource using JSON merge patch. Requires `operator` role.
+
+**Request Body**: JSON patch object
+
+**Response** (200 OK): Updated resource object
+
+#### DELETE /api/v1/clusters/{clusterId}/resources/{kind}/{namespace}/{name}
+
+Delete resource. Requires `operator` role.
+
+**Headers**:
+- `X-Confirm-Destructive`: Required for destructive operations
+
+**Response** (200 OK):
+```json
+{
+  "message": "Resource deleted"
+}
+```
+
+#### POST /api/v1/clusters/{clusterId}/apply
+
+Apply YAML manifest. Requires `operator` role.
+
+**Request Body**: YAML or JSON Kubernetes manifest(s)
+
+**Headers**:
+- `Content-Type`: `application/yaml` or `application/json`
+- `X-Confirm-Destructive`: Required if manifest contains destructive operations
+
+**Response** (200 OK):
+```json
+{
+  "applied": [
+    {
+      "kind": "Deployment",
+      "namespace": "default",
+      "name": "nginx",
+      "action": "created"
+    }
+  ]
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/resources/deployments/{namespace}/{name}/rollout-history
+
+Get deployment rollout history. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "revisions": [
+    {
+      "revision": 3,
+      "creationTimestamp": "2024-01-01T10:00:00Z",
+      "changeCause": "Updated image",
+      "ready": 3,
+      "desired": 3,
+      "available": 3,
+      "images": ["nginx:1.21"]
+    }
+  ]
+}
+```
+
+#### POST /api/v1/clusters/{clusterId}/resources/deployments/{namespace}/{name}/rollback
+
+Rollback deployment to previous revision. Requires `operator` role.
+
+**Request Body**:
+```json
+{
+  "revision": 2
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "message": "Deployment rolled back to revision 2"
+}
+```
+
+#### POST /api/v1/clusters/{clusterId}/resources/cronjobs/{namespace}/{name}/trigger
+
+Trigger CronJob manually. Requires `operator` role.
+
+**Response** (200 OK):
+```json
+{
+  "job_name": "cronjob-trigger-12345",
+  "message": "CronJob triggered"
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/resources/cronjobs/{namespace}/{name}/jobs
+
+List jobs created by CronJob. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "items": [ ... ]
+}
+```
+
+#### POST /api/v1/clusters/{clusterId}/resources/jobs/{namespace}/{name}/retry
+
+Retry failed job. Requires `operator` role.
+
+**Response** (200 OK):
+```json
+{
+  "message": "Job retried"
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/resources/services/{namespace}/{name}/endpoints
+
+Get service endpoints. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "endpoints": [
+    {
+      "ip": "10.244.1.5",
+      "ports": [{"port": 80, "protocol": "TCP"}],
+      "targetRef": {
+        "kind": "Pod",
+        "name": "nginx-pod"
+      }
+    }
+  ]
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/resources/configmaps/{namespace}/{name}/consumers
+
+Get ConfigMap consumers (resources that reference it). Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "consumers": [
+    {
+      "kind": "Pod",
+      "namespace": "default",
+      "name": "nginx-pod"
+    }
+  ]
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/resources/secrets/{namespace}/{name}/consumers
+
+Get Secret consumers. Requires `viewer` role.
+
+**Response** (200 OK): Same format as ConfigMap consumers
+
+#### GET /api/v1/clusters/{clusterId}/resources/secrets/{namespace}/{name}/tls-info
+
+Get TLS certificate information from Secret. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "certificate": {
+    "subject": "CN=example.com",
+    "issuer": "CN=Let's Encrypt",
+    "validFrom": "2024-01-01T00:00:00Z",
+    "validTo": "2024-04-01T00:00:00Z",
+    "daysRemaining": 90
+  }
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/resources/persistentvolumeclaims/{namespace}/{name}/consumers
+
+Get PVC consumers. Requires `viewer` role.
+
+**Response** (200 OK): Same format as ConfigMap consumers
+
+#### GET /api/v1/clusters/{clusterId}/resources/storageclasses/pv-counts
+
+Get PersistentVolume counts per StorageClass. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "gp2": 10,
+  "gp3": 5
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/resources/namespaces/counts
+
+Get resource counts per namespace. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "default": {
+    "pods": 10,
+    "deployments": 5
+  }
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/resources/serviceaccounts/token-counts
+
+Get ServiceAccount token counts. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "default": {
+    "default": 1,
+    "nginx-sa": 2
+  }
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/crd-instances/{crdName}
+
+List CRD instances. Requires `viewer` role.
+
+**Query Parameters**:
+- `namespace` (optional): Filter by namespace
+- `limit` (optional): Max results (default: 100, max: 500)
+- `continue` (optional): Pagination token
+
+**Response** (200 OK): Same format as resource list
+
+#### GET /api/v1/clusters/{clusterId}/search
+
+Global search (command palette). Requires `viewer` role.
+
+**Query Parameters**:
+- `q`: Search query
+- `limit` (optional): Max results (default: 25)
+
+**Response** (200 OK):
+```json
+{
+  "results": [
+    {
+      "kind": "Pod",
+      "namespace": "default",
+      "name": "nginx-pod",
+      "match": "name"
+    }
+  ]
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/features/metallb
+
+Detect MetalLB feature. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "enabled": true,
+  "version": "0.13.0"
+}
+```
+
+---
+
+### Logs
+
+#### GET /api/v1/clusters/{clusterId}/logs/{namespace}/{pod}
+
+Get pod logs. Requires `viewer` role.
+
+**Query Parameters**:
+- `container` (optional): Container name (required for multi-container pods)
+- `follow` (optional): `true` to stream logs (WebSocket)
+- `tail` (optional): Number of lines (default: 100)
+- `since` (optional): Duration (e.g., "10m", "1h")
+
+**Response** (200 OK):
+```
+Plain text log output
+```
+
+For `follow=true`, response is streamed via WebSocket.
+
+---
+
+### Metrics
+
+#### GET /api/v1/clusters/{clusterId}/metrics/summary
+
+Get unified metrics summary. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "summary": {
+    "cpu": {
+      "total": "10.5",
+      "used": "5.2",
+      "unit": "cores"
+    },
+    "memory": {
+      "total": "64Gi",
+      "used": "32Gi",
+      "unit": "bytes"
+    }
+  },
+  "query_ms": 150,
+  "cache_hit": false
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/metrics
+
+Get cluster metrics. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "nodes": [ ... ],
+  "namespaces": [ ... ]
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/metrics/nodes/{nodeName}
+
+Get node metrics. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "cpu": { ... },
+  "memory": { ... }
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/metrics/{namespace}/deployment/{name}
+
+Get deployment metrics. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "replicas": {
+    "desired": 3,
+    "ready": 3,
+    "available": 3
+  },
+  "pods": [ ... ]
+}
+```
+
+Similar endpoints exist for:
+- `/metrics/{namespace}/replicaset/{name}`
+- `/metrics/{namespace}/statefulset/{name}`
+- `/metrics/{namespace}/daemonset/{name}`
+- `/metrics/{namespace}/job/{name}`
+- `/metrics/{namespace}/cronjob/{name}`
+- `/metrics/{namespace}/{pod}`
+
+---
+
+### Events
+
+#### GET /api/v1/clusters/{clusterId}/events
+
+Get Kubernetes events. Requires `viewer` role.
+
+**Query Parameters**:
+- `namespace` (optional): Filter by namespace
+- `limit` (optional): Max results (default: 100, max: 500)
+- `continue` (optional): Pagination token
+
+**Response** (200 OK):
+```json
+{
+  "items": [
+    {
+      "type": "Normal",
+      "reason": "Created",
+      "message": "Created pod",
+      "firstTimestamp": "2024-01-01T10:00:00Z",
+      "lastTimestamp": "2024-01-01T10:00:00Z",
+      "count": 1,
+      "involvedObject": {
+        "kind": "Pod",
+        "namespace": "default",
+        "name": "nginx-pod"
+      }
+    }
+  ],
+  "metadata": {
+    "continue": "token",
+    "total": 50
+  }
+}
+```
+
+---
+
+### Shell & kcli
+
+#### POST /api/v1/clusters/{clusterId}/shell
+
+Execute kubectl command. Requires `operator` role.
+
+**Request Body**:
+```json
+{
+  "command": "get pods",
+  "namespace": "default"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "stdout": "NAME READY STATUS\nnginx-pod 1/1 Running",
+  "stderr": "",
+  "exit_code": 0
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/shell/status
+
+Get shell status (effective context/namespace). Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "context": "my-cluster",
+  "namespace": "default",
+  "capabilities": ["exec", "port-forward"]
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/shell/stream
+
+Interactive shell stream (WebSocket PTY). Requires `operator` role.
+
+**Query Parameters**:
+- `namespace` (optional): Default namespace
+
+**Protocol**: WebSocket
+
+#### GET /api/v1/clusters/{clusterId}/shell/complete
+
+Shell completion (IDE-style Tab). Requires `viewer` role.
+
+**Query Parameters**:
+- `command`: Command to complete
+- `position`: Cursor position
+
+**Response** (200 OK):
+```json
+{
+  "completions": ["get", "describe", "delete"]
+}
+```
+
+#### POST /api/v1/clusters/{clusterId}/kcli/exec
+
+Execute kcli command. Requires `operator` role.
+
+**Request Body**:
+```json
+{
+  "command": "get pods",
+  "namespace": "default"
+}
+```
+
+**Response** (200 OK): Same format as shell exec
+
+#### GET /api/v1/clusters/{clusterId}/kcli/stream
+
+kcli stream (WebSocket PTY). Requires `operator` role.
+
+**Query Parameters**:
+- `mode` (optional): `ui` (default) or `shell`
+
+**Protocol**: WebSocket
+
+#### GET /api/v1/clusters/{clusterId}/kcli/complete
+
+kcli completion. Requires `viewer` role.
+
+**Response** (200 OK): Same format as shell completion
+
+#### GET /api/v1/clusters/{clusterId}/kcli/tui/state
+
+Get kcli TUI/session state. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+{
+  "state": { ... }
+}
+```
+
+#### GET /api/v1/clusters/{clusterId}/pods/{namespace}/{name}/exec
+
+Pod exec (WebSocket). Requires `operator` role.
+
+**Query Parameters**:
+- `container` (optional): Container name
+- `command` (optional): Command to execute (default: `/bin/sh`)
+
+**Protocol**: WebSocket
+
+---
+
+### Projects
+
+#### GET /api/v1/projects
+
+List projects. Requires `viewer` role.
+
+**Response** (200 OK):
+```json
+[
+  {
+    "id": "project-uuid",
+    "name": "production",
+    "description": "Production environment",
+    "clusters": ["cluster-uuid-1"],
+    "namespaces": [
+      {
+        "cluster_id": "cluster-uuid-1",
+        "namespace": "prod"
+      }
+    ]
+  }
+]
+```
+
+#### POST /api/v1/projects
+
+Create project. Requires `admin` role.
+
+**Request Body**:
+```json
+{
+  "name": "production",
+  "description": "Production environment"
+}
+```
+
+**Response** (201 Created): Project object
+
+#### GET /api/v1/projects/{projectId}
+
+Get project details. Requires `viewer` role.
+
+**Response** (200 OK): Project object
+
+#### PATCH /api/v1/projects/{projectId}
+
+Update project. Requires `admin` role.
+
+**Request Body**:
+```json
+{
+  "description": "Updated description"
+}
+```
+
+**Response** (200 OK): Updated project object
+
+#### DELETE /api/v1/projects/{projectId}
+
+Delete project. Requires `admin` role.
+
+**Response** (200 OK):
+```json
+{
+  "message": "Project deleted"
+}
+```
+
+#### POST /api/v1/projects/{projectId}/clusters
+
+Add cluster to project. Requires `admin` role.
+
+**Request Body**:
+```json
+{
+  "cluster_id": "cluster-uuid"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "message": "Cluster added to project"
+}
+```
+
+#### DELETE /api/v1/projects/{projectId}/clusters/{clusterId}
+
+Remove cluster from project. Requires `admin` role.
+
+**Response** (200 OK):
+```json
+{
+  "message": "Cluster removed from project"
+}
+```
+
+#### POST /api/v1/projects/{projectId}/namespaces
+
+Add namespace to project. Requires `admin` role.
+
+**Request Body**:
+```json
+{
+  "cluster_id": "cluster-uuid",
+  "namespace": "prod",
+  "team": "platform"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "message": "Namespace added to project"
+}
+```
+
+#### DELETE /api/v1/projects/{projectId}/namespaces/{clusterId}/{namespaceName}
+
+Remove namespace from project. Requires `admin` role.
+
+**Response** (200 OK):
+```json
+{
+  "message": "Namespace removed from project"
+}
+```
+
+---
+
+### Audit Log
+
+#### GET /api/v1/audit-log
+
+List audit log entries. Requires `admin` role.
+
+**Query Parameters**:
+- `user_id` (optional): Filter by user ID
+- `cluster_id` (optional): Filter by cluster ID
+- `action` (optional): Filter by action
+- `since` (optional): Filter entries since timestamp
+- `until` (optional): Filter entries until timestamp
+- `limit` (optional): Max results (default: 100)
+- `format` (optional): `csv` for CSV export
+
+**Response** (200 OK):
+```json
+[
+  {
+    "id": "audit-uuid",
+    "timestamp": "2024-01-01T10:00:00Z",
+    "user_id": "user-uuid",
+    "username": "admin",
+    "cluster_id": "cluster-uuid",
+    "action": "delete",
+    "resource_kind": "Pod",
+    "resource_namespace": "default",
+    "resource_name": "nginx-pod",
+    "status_code": 200,
+    "request_ip": "192.168.1.1",
+    "details": "Resource deleted successfully"
+  }
+]
+```
+
+For `format=csv`, response is CSV with `Content-Type: text/csv` and `Content-Disposition: attachment`.
+
+---
+
+## WebSocket Endpoints
+
+### Resource Updates
+
+**URL**: `ws://localhost:819/ws/resources?cluster_id={id}&namespace={ns}`
+
+Receive real-time Kubernetes resource updates.
+
+**Message Format**:
+```json
+{
+  "type": "RESOURCE_ADDED|RESOURCE_UPDATED|RESOURCE_DELETED",
+  "cluster_id": "uuid",
+  "resource": {
+    "kind": "Pod",
+    "namespace": "default",
+    "name": "nginx-abc",
+    "data": { }
+  },
+  "timestamp": "2024-01-01T10:00:00Z"
+}
+```
+
+---
+
+## Request/Response Schemas
+
+### Common Headers
+
+**Request Headers**:
+- `Authorization`: `Bearer {token}` or `X-API-Key: {key}` (if auth enabled)
+- `Content-Type`: `application/json` (for JSON requests)
+- `X-Request-ID`: Optional request ID for tracing
+- `X-Confirm-Destructive`: Required for DELETE operations
+- `X-Trace-ID`: Trace ID for distributed tracing (response header)
+
+**Response Headers**:
+- `X-Request-ID`: Request ID for correlation
+- `X-Trace-ID`: Trace ID for distributed tracing
+- `X-RateLimit-Limit`: Rate limit per minute
+- `X-RateLimit-Remaining`: Remaining requests in current window
+- `X-RateLimit-Reset`: Unix timestamp when rate limit resets
+- `Retry-After`: Seconds to wait before retry (429/503)
+
+### Pagination
+
+List endpoints support cursor-based pagination:
+
+**Query Parameters**:
+- `limit`: Max results (default: 100, max: 500)
+- `continue`: Pagination token from previous response
+
+**Response Metadata**:
+```json
+{
+  "metadata": {
+    "resourceVersion": "12345",
+    "continue": "token-for-next-page",
+    "total": 150
+  }
+}
+```
+
+### Error Response Format
 
 ```json
 {
@@ -242,75 +1612,57 @@ All errors follow a consistent format:
 }
 ```
 
-HTTP Status Codes:
-- `200`: Success
-- `201`: Created
-- `400`: Bad Request
-- `404`: Not Found
-- `500`: Internal Server Error
-
-## Authentication
-
-Currently, the backend authenticates to Kubernetes clusters using kubeconfig files. 
-
-**Planned**: Token-based authentication for multi-user scenarios (Phase 3+).
-
-## Rate Limiting
-
-Rate limiting is not currently enforced but will be added in future versions for production deployments.
-
-## CORS Configuration
-
-CORS is configured to allow:
-- Methods: GET, POST, PUT, DELETE, OPTIONS
-- Headers: Content-Type, Authorization
-- Credentials: Enabled
-
-Configure allowed origins via environment variables:
-```bash
-KUBILITICS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
-```
+---
 
 ## Examples
 
 ### Complete Workflow Example
 
 ```bash
-# 1. Add a cluster
-CLUSTER_ID=$(curl -s -X POST http://localhost:8080/api/v1/clusters \
+# 1. Login (if auth enabled)
+TOKEN=$(curl -s -X POST http://localhost:819/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"password"}' | jq -r '.access_token')
+
+# 2. Add a cluster
+CLUSTER_ID=$(curl -s -X POST http://localhost:819/api/v1/clusters \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "kubeconfig_path": "~/.kube/config",
     "context": "minikube"
   }' | jq -r '.id')
 
-# 2. Get cluster summary
-curl -s http://localhost:8080/api/v1/clusters/$CLUSTER_ID/summary | jq
+# 3. Get cluster summary
+curl -s http://localhost:819/api/v1/clusters/$CLUSTER_ID/summary \
+  -H "Authorization: Bearer $TOKEN" | jq
 
-# 3. Get topology for default namespace
-curl -s "http://localhost:8080/api/v1/clusters/$CLUSTER_ID/topology?namespace=default" | jq
+# 4. Get topology for default namespace
+curl -s "http://localhost:819/api/v1/clusters/$CLUSTER_ID/topology?namespace=default&force_refresh=true" \
+  -H "Authorization: Bearer $TOKEN" | jq
 
-# 4. Export topology as PNG
-curl -s -X POST http://localhost:8080/api/v1/clusters/$CLUSTER_ID/topology/export \
-  -H "Content-Type: application/json" \
-  -d '{"format": "png", "namespace": "default"}' \
-  --output topology.png
+# 5. List pods with pagination
+curl -s "http://localhost:819/api/v1/clusters/$CLUSTER_ID/resources/pods?namespace=default&limit=50" \
+  -H "Authorization: Bearer $TOKEN" | jq
 
-# 5. Get pod logs
-curl -s "http://localhost:8080/api/v1/clusters/$CLUSTER_ID/logs/default/nginx-pod?tail=50"
+# 6. Get pod logs
+curl -s "http://localhost:819/api/v1/clusters/$CLUSTER_ID/logs/default/nginx-pod?tail=50" \
+  -H "Authorization: Bearer $TOKEN"
 
-# 6. Get cluster metrics
-curl -s http://localhost:8080/api/v1/clusters/$CLUSTER_ID/metrics | jq
+# 7. Get metrics summary
+curl -s http://localhost:819/api/v1/clusters/$CLUSTER_ID/metrics/summary \
+  -H "Authorization: Bearer $TOKEN" | jq
 
-# 7. Get events
-curl -s "http://localhost:8080/api/v1/clusters/$CLUSTER_ID/events?namespace=default&limit=10" | jq
+# 8. Get events
+curl -s "http://localhost:819/api/v1/clusters/$CLUSTER_ID/events?namespace=default&limit=10" \
+  -H "Authorization: Bearer $TOKEN" | jq
 ```
 
 ### WebSocket Client Example (JavaScript)
 
 ```javascript
 // Connect to resource updates
-const ws = new WebSocket('ws://localhost:8080/ws/resources?cluster_id=' + clusterId);
+const ws = new WebSocket('ws://localhost:819/ws/resources?cluster_id=' + clusterId);
 
 ws.onopen = () => {
   console.log('Connected to resource updates');
@@ -342,132 +1694,13 @@ ws.onclose = () => {
 };
 ```
 
-## Development
-
-### Running Tests
-
-```bash
-cd kubilitics-backend
-go test ./...
-```
-
-### Running Benchmarks
-
-```bash
-go test ./internal/topology -bench=. -benchmem
-```
-
-### Generating API Docs
-
-To view the Swagger documentation interactively, you can use Swagger UI:
-
-```bash
-# Option 1: Docker
-docker run -p 8081:8080 -e SWAGGER_JSON=/swagger/swagger.yaml \
-  -v $(pwd)/api:/swagger swaggerapi/swagger-ui
-
-# Then visit: http://localhost:8081
-
-# Option 2: NPM
-npx swagger-ui-watcher api/swagger.yaml
-```
+---
 
 ## Configuration
 
-Configuration can be provided via:
+See [CONFIGURATION.md](./CONFIGURATION.md) for complete configuration reference.
 
-1. **Config file**: `config.yaml`
-2. **Environment variables**: Prefixed with `KUBILITICS_`
-
-Example `config.yaml`:
-
-```yaml
-port: 8080
-database:
-  type: sqlite
-  path: ./kubilitics.db
-allowed_origins:
-  - http://localhost:3000
-  - http://localhost:5173
-log_level: info
-```
-
-Environment variables:
-
-```bash
-KUBILITICS_PORT=8080
-KUBILITICS_DATABASE_TYPE=sqlite
-KUBILITICS_DATABASE_PATH=./kubilitics.db
-KUBILITICS_LOG_LEVEL=info
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**Issue**: Cannot connect to cluster
-- Check kubeconfig path
-- Verify cluster is accessible
-- Check network connectivity
-
-**Issue**: WebSocket connection fails
-- Ensure backend is running
-- Check firewall settings
-- Verify cluster_id parameter
-
-**Issue**: Topology is empty
-- Verify cluster has resources
-- Check namespace filter
-- Review backend logs
-
-### Debug Mode
-
-Enable debug logging:
-
-```bash
-KUBILITICS_LOG_LEVEL=debug ./kubilitics-server
-```
-
-### Logs Location
-
-- Console: stdout/stderr
-- File: `/var/log/kubilitics/backend.log` (if configured)
-
-## Production Considerations
-
-### Performance
-
-- The backend can handle multiple clusters simultaneously
-- WebSocket connections are pooled and managed efficiently
-- Topology generation is optimized for clusters with 10,000+ resources
-
-### Security
-
-- Always use HTTPS in production
-- Restrict CORS origins to trusted domains
-- Use network policies to limit backend exposure
-- Keep kubeconfig files secure with appropriate file permissions
-
-### Monitoring
-
-- Health endpoint: `/health`
-- Metrics endpoint: Coming soon (Prometheus integration)
-- Structured logging for observability
-
-## Next Steps
-
-1. Integrate with frontend application
-2. Add authentication/authorization
-3. Implement cluster health monitoring
-4. Add Prometheus metrics export
-5. Add rate limiting
-6. Implement caching layer
-
-## Support
-
-For issues and questions:
-- GitHub Issues: https://github.com/kubilitics/kubilitics-backend/issues
-- Documentation: https://kubilitics.io/docs
+---
 
 ## License
 

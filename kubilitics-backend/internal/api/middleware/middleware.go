@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 
+	"github.com/kubilitics/kubilitics-backend/internal/auth"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
 )
@@ -53,11 +54,16 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, fmt.Errorf("http.ResponseWriter does not support hijacking")
 }
 
-// StructuredLog logs each request as a single JSON line (request_id, cluster_id, method, path, status, duration).
+// StructuredLog logs each request as a single JSON line (request_id, user_id, cluster_id, method, path, status, duration). BE-OBS-002.
 func StructuredLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		reqID := logger.FromContext(r.Context())
+		userID := ""
+		// Extract user_id from auth claims if available
+		if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+			userID = claims.UserID
+		}
 		clusterID := ""
 		if vars := mux.Vars(r); vars != nil {
 			clusterID = vars["clusterId"]
@@ -69,7 +75,7 @@ func StructuredLog(next http.Handler) http.Handler {
 		if rw.status >= 400 {
 			errMsg = http.StatusText(rw.status)
 		}
-		logger.RequestLog(requestLogOut, reqID, clusterID, r.Method, r.URL.Path, rw.status, duration, errMsg)
+		logger.RequestLog(requestLogOut, reqID, userID, clusterID, r.Method, r.URL.Path, rw.status, duration, errMsg)
 
 		// Prometheus: path normalized via route template to avoid high cardinality
 		pathLabel := r.URL.Path

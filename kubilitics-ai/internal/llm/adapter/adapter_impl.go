@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/kubilitics/kubilitics-ai/internal/llm/provider/anthropic"
 	"github.com/kubilitics/kubilitics-ai/internal/llm/provider/custom"
 	"github.com/kubilitics/kubilitics-ai/internal/llm/provider/ollama"
 	"github.com/kubilitics/kubilitics-ai/internal/llm/provider/openai"
 	"github.com/kubilitics/kubilitics-ai/internal/llm/types"
+	"github.com/kubilitics/kubilitics-ai/internal/metrics"
 )
 
 // Package adapter provides unified LLM interface supporting ANY provider.
@@ -58,17 +60,21 @@ const (
 	ProviderNone      ProviderType = "none" // No LLM configured
 )
 
+// ErrProviderNotConfigured is returned when an LLM operation is attempted without a configured provider
+var ErrProviderNotConfigured = fmt.Errorf("LLM provider not configured")
+
 // Config holds LLM provider configuration (from user settings)
 type Config struct {
 	Provider ProviderType `json:"provider"`
-	APIKey   string       `json:"api_key"`   // For OpenAI/Anthropic
-	BaseURL  string       `json:"base_url"`  // For Ollama/Custom
-	Model    string       `json:"model"`     // Model name
+	APIKey   string       `json:"api_key"`  // For OpenAI/Anthropic
+	BaseURL  string       `json:"base_url"` // For Ollama/Custom
+	Model    string       `json:"model"`    // Model name
 }
 
 // llmAdapterImpl is the unified adapter implementation
 type llmAdapterImpl struct {
 	provider     ProviderType
+	model        string      // Model name for metrics
 	client       interface{} // Actual provider client
 	capabilities interface{} // Cached capabilities
 }
@@ -85,19 +91,21 @@ func NewLLMAdapter(cfg *Config) (LLMAdapter, error) {
 		}
 	}
 
-	// If no provider configured, return error with helpful message
+	// If no provider or no credentials, return an unconfigured adapter (not an error).
+	// The service starts in degraded mode — LLM endpoints return HTTP 503 until the
+	// user supplies credentials via Settings → AI Configuration.
 	if cfg.Provider == "" || cfg.Provider == ProviderNone {
-		return nil, fmt.Errorf("no LLM provider configured: please configure in Settings → AI Configuration")
+		return &llmAdapterImpl{provider: ProviderNone, client: nil}, nil
 	}
 
-	// Create provider-specific client
+	// Create provider-specific client. Missing credentials yield an unconfigured adapter.
 	var client interface{}
 	var err error
 
 	switch cfg.Provider {
 	case ProviderOpenAI:
 		if cfg.APIKey == "" {
-			return nil, fmt.Errorf("OpenAI API key required")
+			return &llmAdapterImpl{provider: ProviderNone, client: nil}, nil
 		}
 		client, err = openai.NewOpenAIClient(cfg.APIKey, cfg.Model)
 		if err != nil {
@@ -106,7 +114,7 @@ func NewLLMAdapter(cfg *Config) (LLMAdapter, error) {
 
 	case ProviderAnthropic:
 		if cfg.APIKey == "" {
-			return nil, fmt.Errorf("Anthropic API key required")
+			return &llmAdapterImpl{provider: ProviderNone, client: nil}, nil
 		}
 		client, err = anthropic.NewAnthropicClient(cfg.APIKey, cfg.Model)
 		if err != nil {
@@ -124,7 +132,7 @@ func NewLLMAdapter(cfg *Config) (LLMAdapter, error) {
 
 	case ProviderCustom:
 		if cfg.BaseURL == "" {
-			return nil, fmt.Errorf("custom provider requires base URL")
+			return &llmAdapterImpl{provider: ProviderNone, client: nil}, nil
 		}
 		client, err = custom.NewCustomClient(cfg.BaseURL, cfg.APIKey, cfg.Model)
 		if err != nil {
@@ -137,44 +145,98 @@ func NewLLMAdapter(cfg *Config) (LLMAdapter, error) {
 
 	return &llmAdapterImpl{
 		provider: cfg.Provider,
+		model:    cfg.Model,
 		client:   client,
 	}, nil
 }
 
 // Complete delegates to provider-specific client
 func (a *llmAdapterImpl) Complete(ctx context.Context, messages []types.Message, tools []types.Tool) (string, []interface{}, error) {
+	if a.provider == ProviderNone {
+		return "", nil, ErrProviderNotConfigured
+	}
+
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start).Seconds()
+		metrics.LLMRequestDuration.WithLabelValues(string(a.provider), a.model).Observe(duration)
+	}()
+
+	var err error
+	var resp string
+	var toolCalls []interface{}
+
 	switch client := a.client.(type) {
 	case *anthropic.AnthropicClientImpl:
-		return client.Complete(ctx, messages, tools)
+		resp, toolCalls, err = client.Complete(ctx, messages, tools)
 	case *openai.OpenAIClientImpl:
-		return client.Complete(ctx, messages, tools)
+		resp, toolCalls, err = client.Complete(ctx, messages, tools)
 	case *ollama.OllamaClientImpl:
-		return client.Complete(ctx, messages, tools)
+		resp, toolCalls, err = client.Complete(ctx, messages, tools)
 	case *custom.CustomClientImpl:
-		return client.Complete(ctx, messages, tools)
+		resp, toolCalls, err = client.Complete(ctx, messages, tools)
 	default:
-		return "", nil, fmt.Errorf("unknown client type")
+		err = fmt.Errorf("unknown client type")
 	}
+
+	status := "success"
+	if err != nil {
+		status = "error"
+	}
+	metrics.LLMRequestsTotal.WithLabelValues(string(a.provider), a.model, status).Inc()
+
+	return resp, toolCalls, err
 }
 
 // CompleteStream delegates to provider-specific client
 func (a *llmAdapterImpl) CompleteStream(ctx context.Context, messages []types.Message, tools []types.Tool) (chan string, chan interface{}, error) {
+	if a.provider == ProviderNone {
+		return nil, nil, ErrProviderNotConfigured
+	}
+
+	start := time.Now()
+	// Note: We record duration when stream starts, effectively measuring TTFT (Time To First Token) + overhead
+	// Ideally we'd wrap valid channels to measure full stream duration, but that's complex.
+	// For now, let's measure init time.
+	// actually, let's keep it simple: record request total here. Duration is hard for streams without wrapping.
+	// We'll rely on the caller/wrapper (BudgetedAdapter) for full duration if needed, or just count calls here.
+
+	var err error
+	var textCh chan string
+	var toolCh chan interface{}
+
 	switch client := a.client.(type) {
 	case *anthropic.AnthropicClientImpl:
-		return client.CompleteStream(ctx, messages, tools)
+		textCh, toolCh, err = client.CompleteStream(ctx, messages, tools)
 	case *openai.OpenAIClientImpl:
-		return client.CompleteStream(ctx, messages, tools)
+		textCh, toolCh, err = client.CompleteStream(ctx, messages, tools)
 	case *ollama.OllamaClientImpl:
-		return client.CompleteStream(ctx, messages, tools)
+		textCh, toolCh, err = client.CompleteStream(ctx, messages, tools)
 	case *custom.CustomClientImpl:
-		return client.CompleteStream(ctx, messages, tools)
+		textCh, toolCh, err = client.CompleteStream(ctx, messages, tools)
 	default:
-		return nil, nil, fmt.Errorf("unknown client type")
+		err = fmt.Errorf("unknown client type")
 	}
+
+	status := "success"
+	if err != nil {
+		status = "error"
+	}
+	metrics.LLMRequestsTotal.WithLabelValues(string(a.provider), a.model, status).Inc()
+
+	// We don't record duration for stream init as it's negligible usually.
+	// A better place for stream duration is in the loop consuming the stream.
+	metrics.LLMRequestDuration.WithLabelValues(string(a.provider), a.model).Observe(time.Since(start).Seconds())
+
+	return textCh, toolCh, err
 }
 
 // CountTokens delegates to provider-specific client
 func (a *llmAdapterImpl) CountTokens(ctx context.Context, messages []types.Message, tools []types.Tool) (int, error) {
+	if a.provider == ProviderNone {
+		return 0, ErrProviderNotConfigured
+	}
+
 	switch client := a.client.(type) {
 	case *anthropic.AnthropicClientImpl:
 		return client.CountTokens(ctx, messages, tools)
@@ -191,6 +253,15 @@ func (a *llmAdapterImpl) CountTokens(ctx context.Context, messages []types.Messa
 
 // GetCapabilities delegates to provider-specific client
 func (a *llmAdapterImpl) GetCapabilities(ctx context.Context) (interface{}, error) {
+	if a.provider == ProviderNone {
+		return map[string]interface{}{
+			"provider":           "none",
+			"model":              "none",
+			"supports_streaming": false,
+			"supports_tools":     false,
+		}, nil
+	}
+
 	if a.capabilities != nil {
 		return a.capabilities, nil
 	}
@@ -221,6 +292,10 @@ func (a *llmAdapterImpl) GetCapabilities(ctx context.Context) (interface{}, erro
 
 // NormalizeToolCall converts provider-specific format to standard
 func (a *llmAdapterImpl) NormalizeToolCall(ctx context.Context, toolCall interface{}) (map[string]interface{}, error) {
+	if a.provider == ProviderNone {
+		return nil, ErrProviderNotConfigured
+	}
+
 	switch client := a.client.(type) {
 	case *anthropic.AnthropicClientImpl:
 		return client.NormalizeToolCall(ctx, toolCall)
@@ -244,6 +319,15 @@ func (a *llmAdapterImpl) CompleteWithTools(
 	executor types.ToolExecutor,
 	cfg types.AgentConfig,
 ) (<-chan types.AgentStreamEvent, error) {
+	if a.provider == ProviderNone {
+		ch := make(chan types.AgentStreamEvent, 1)
+		ch <- types.AgentStreamEvent{
+			Err: ErrProviderNotConfigured,
+		}
+		close(ch)
+		return ch, ErrProviderNotConfigured
+	}
+
 	switch client := a.client.(type) {
 	case *anthropic.AnthropicClientImpl:
 		return client.CompleteWithTools(ctx, messages, tools, executor, cfg)

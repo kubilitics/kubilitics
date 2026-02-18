@@ -14,11 +14,12 @@ type contextKey string
 
 const RequestIDKey contextKey = "request_id"
 
-// LogEntry is the structured log payload (JSON). Safe for aggregation; no secrets.
+// LogEntry is the structured log payload (JSON). Safe for aggregation; no secrets. BE-OBS-002: includes user_id.
 type LogEntry struct {
 	Time       string  `json:"time"`
 	Level      string  `json:"level"`
 	RequestID  string  `json:"request_id,omitempty"`
+	UserID     string  `json:"user_id,omitempty"`     // BE-OBS-002: authenticated user ID
 	ClusterID  string  `json:"cluster_id,omitempty"`
 	Method     string  `json:"method,omitempty"`
 	Path       string  `json:"path,omitempty"`
@@ -28,8 +29,8 @@ type LogEntry struct {
 	Error      string  `json:"error,omitempty"`
 }
 
-// RequestLog writes a single JSON line for an HTTP request (after response). Use from middleware.
-func RequestLog(out *os.File, reqID, clusterID, method, path string, status int, duration time.Duration, errMsg string) {
+// RequestLog writes a single JSON line for an HTTP request (after response). Use from middleware. BE-OBS-002: includes user_id.
+func RequestLog(out *os.File, reqID, userID, clusterID, method, path string, status int, duration time.Duration, errMsg string) {
 	level := "info"
 	if status >= 500 {
 		level = "error"
@@ -40,6 +41,7 @@ func RequestLog(out *os.File, reqID, clusterID, method, path string, status int,
 		Time:       time.Now().UTC().Format(time.RFC3339Nano),
 		Level:      level,
 		RequestID:  reqID,
+		UserID:     userID,
 		ClusterID:  clusterID,
 		Method:     method,
 		Path:       path,
@@ -60,10 +62,21 @@ func FromContext(ctx context.Context) string {
 	return ""
 }
 
-// StdLogger returns a slog.Logger for non-request logs (startup, shutdown). JSON when LOG_JSON=1.
-func StdLogger() *slog.Logger {
-	opts := &slog.HandlerOptions{Level: slog.LevelInfo}
-	if os.Getenv("LOG_JSON") == "1" {
+// StdLogger returns a slog.Logger for non-request logs (startup, shutdown). BE-OBS-002: configurable format and level.
+func StdLogger(format, level string) *slog.Logger {
+	var logLevel slog.Level
+	switch level {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: logLevel}
+	if format == "json" || os.Getenv("LOG_JSON") == "1" {
 		return slog.New(slog.NewJSONHandler(os.Stderr, opts))
 	}
 	return slog.New(slog.NewTextHandler(os.Stderr, opts))

@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
 
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
 
@@ -111,9 +112,11 @@ func (h *Handler) GetPodExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
@@ -123,21 +126,14 @@ func (h *Handler) GetPodExec(w http.ResponseWriter, r *http.Request) {
 		shell = "/bin/sh"
 	}
 
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
 	conn, err := execUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 	log.Printf(
-		"pod exec: connected requestedCluster=%s resolvedCluster=%s ns=%s pod=%s container=%s",
+		"pod exec: connected requestedCluster=%s ns=%s pod=%s container=%s",
 		clusterID,
-		resolvedID,
 		namespace,
 		name,
 		container,
@@ -304,9 +300,8 @@ func (h *Handler) GetPodExec(w http.ResponseWriter, r *http.Request) {
 				if !firstStdinLogged {
 					firstStdinLogged = true
 					log.Printf(
-						"pod exec: first stdin received requestedCluster=%s resolvedCluster=%s ns=%s pod=%s container=%s",
+						"pod exec: first stdin received requestedCluster=%s ns=%s pod=%s container=%s",
 						clusterID,
-						resolvedID,
 						namespace,
 						name,
 						container,

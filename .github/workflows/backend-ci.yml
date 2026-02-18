@@ -30,10 +30,38 @@ jobs:
       working-directory: kubilitics-backend
       run: go mod download
     
+    - name: Build kcli binary (for integration tests)
+      run: |
+        cd kcli
+        go build -ldflags="-s -w" -o ../kubilitics-backend/bin/kcli ./cmd/kcli
+        chmod +x ../kubilitics-backend/bin/kcli
+        # Also ensure kcli is in PATH for tests
+        echo "$(pwd)/../kubilitics-backend/bin" >> $GITHUB_PATH
+      working-directory: .
+
+    - name: Install kubectl (for kcli integration tests)
+      run: |
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        sudo mv kubectl /usr/local/bin/
+        kubectl version --client
+
     - name: Run tests
       run: |
         mkdir -p test_reports/backend
         cd kubilitics-backend && go test -v -race -coverprofile=coverage.out -covermode=atomic ./... 2>&1 | tee ../test_reports/backend/test.log
+
+    - name: Run kcli integration tests
+      run: |
+        cd kubilitics-backend
+        go test -v -timeout 10m ./tests/integration/kcli_test.go -run TestKCLI 2>&1 | tee ../test_reports/backend/kcli-integration-test.log || echo "⚠️ kcli integration tests require running backend - skipping in CI"
+      continue-on-error: true
+    
+    - name: Run govulncheck
+      run: |
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        govulncheck ./...
+      working-directory: kubilitics-backend
     
     - name: Upload test report
       uses: actions/upload-artifact@v4

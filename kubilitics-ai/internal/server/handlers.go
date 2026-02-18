@@ -44,10 +44,12 @@ func (s *Server) handleLLMComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get LLM adapter
+	// Get LLM adapter — may be unconfigured when no API key has been provided yet.
 	llmAdapter := s.GetLLMAdapter()
-	if llmAdapter == nil {
-		http.Error(w, "LLM adapter not initialized", http.StatusInternalServerError)
+	if llmAdapter == nil || !s.config.LLM.Configured {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":"LLM not configured","code":"LLM_NOT_CONFIGURED","hint":"Add your API key in Settings \u2192 AI Configuration"}`))
 		return
 	}
 
@@ -145,6 +147,11 @@ type SafetyRulesResponse struct {
 func (s *Server) handleSafetyRules(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Check if LLM is configured
+	if !s.config.LLM.Configured {
+		http.Error(w, "AI provider not configured", http.StatusServiceUnavailable)
 		return
 	}
 

@@ -9,10 +9,12 @@ import (
 
 	"github.com/kubilitics/kubilitics-ai/internal/audit"
 	"github.com/kubilitics/kubilitics-ai/internal/config"
+	"github.com/kubilitics/kubilitics-ai/internal/db"
 	"github.com/kubilitics/kubilitics-ai/internal/integration/backend"
 	"github.com/kubilitics/kubilitics-ai/internal/mcp/tools"
 	analysistools "github.com/kubilitics/kubilitics-ai/internal/mcp/tools/analysis"
 	executiontools "github.com/kubilitics/kubilitics-ai/internal/mcp/tools/execution"
+	"github.com/kubilitics/kubilitics-ai/internal/metrics"
 	"github.com/kubilitics/kubilitics-ai/internal/safety"
 )
 
@@ -41,6 +43,9 @@ type MCPServer interface {
 	// ExecuteTool executes a tool call from the LLM.
 	ExecuteTool(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error)
 
+	// GetTool retrieves a tool definition by name.
+	GetTool(name string) (*Tool, error)
+
 	// Start starts the MCP server (websocket or stdio transport).
 	Start(ctx context.Context) error
 
@@ -53,12 +58,13 @@ type MCPServer interface {
 
 // Tool represents a single tool available to the LLM.
 type Tool struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	InputSchema interface{} `json:"inputSchema"`
-	Category    string      `json:"category"`
-	Destructive bool        `json:"destructive"`
-	RequiresAI  bool        `json:"requiresAI"`
+	Name                  string      `json:"name"`
+	Description           string      `json:"description"`
+	InputSchema           interface{} `json:"inputSchema"`
+	Category              string      `json:"category"`
+	Destructive           bool        `json:"destructive"`
+	RequiresAI            bool        `json:"requiresAI"`
+	RequiredAutonomyLevel int         `json:"requiredAutonomyLevel"`
 }
 
 // ToolHandler is the function signature for tool execution handlers.
@@ -77,10 +83,10 @@ type ToolCall struct {
 
 // mcpServerImpl is the concrete implementation of MCPServer.
 type mcpServerImpl struct {
-	config        *config.Config
-	backendProxy  *backend.Proxy
-	auditLog      audit.Logger
-	analysisTools  *analysistools.AnalysisTools  // Tier-2 deep analysis tools (A-CORE-003)
+	config         *config.Config
+	backendProxy   *backend.Proxy
+	auditLog       audit.Logger
+	analysisTools  *analysistools.AnalysisTools   // Tier-2 deep analysis tools (A-CORE-003)
 	executionTools *executiontools.ExecutionTools // Safety-gated execution tools (A-CORE-004)
 
 	// Tool registry
@@ -89,18 +95,18 @@ type mcpServerImpl struct {
 	handlers map[string]ToolHandler
 
 	// Server state
-	running     bool
-	startTime   time.Time
-	stopChan    chan struct{}
+	running   bool
+	startTime time.Time
+	stopChan  chan struct{}
 
 	// Statistics
 	stats struct {
 		sync.RWMutex
-		TotalCalls       int64
-		SuccessfulCalls  int64
-		FailedCalls      int64
-		AvgDuration      time.Duration
-		CallsByTool      map[string]int64
+		TotalCalls      int64
+		SuccessfulCalls int64
+		FailedCalls     int64
+		AvgDuration     time.Duration
+		CallsByTool     map[string]int64
 	}
 
 	// Rate limiting
@@ -115,15 +121,15 @@ type toolRegistration struct {
 
 // rateLimiter implements simple token bucket rate limiting.
 type rateLimiter struct {
-	mu            sync.Mutex
-	maxTokens     int
-	tokens        int
-	refillRate    time.Duration
-	lastRefill    time.Time
+	mu         sync.Mutex
+	maxTokens  int
+	tokens     int
+	refillRate time.Duration
+	lastRefill time.Time
 }
 
 // NewMCPServer creates a new MCP server with all tool registrations.
-func NewMCPServer(cfg *config.Config, backendProxy *backend.Proxy, auditLog audit.Logger) (MCPServer, error) {
+func NewMCPServer(cfg *config.Config, backendProxy *backend.Proxy, auditLog audit.Logger, store db.Store) (MCPServer, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -133,8 +139,11 @@ func NewMCPServer(cfg *config.Config, backendProxy *backend.Proxy, auditLog audi
 	if auditLog == nil {
 		return nil, fmt.Errorf("audit logger is required")
 	}
+	if store == nil {
+		return nil, fmt.Errorf("store is required")
+	}
 
-	safetyEngine, err := safety.NewEngine()
+	safetyEngine, err := safety.NewEngine(store)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create safety engine: %w", err)
 	}
@@ -163,11 +172,11 @@ func NewMCPServer(cfg *config.Config, backendProxy *backend.Proxy, auditLog audi
 
 // RegisterTool registers a new tool with the MCP server.
 func (s *mcpServerImpl) RegisterTool(name string, description string, schema interface{}, handler ToolHandler) error {
-	return s.registerToolWithCategory(name, description, schema, handler, "", false, false)
+	return s.registerToolWithCategory(name, description, schema, handler, "", false, false, 0)
 }
 
 // registerToolWithCategory registers a tool with full metadata.
-func (s *mcpServerImpl) registerToolWithCategory(name string, description string, schema interface{}, handler ToolHandler, category string, destructive bool, requiresAI bool) error {
+func (s *mcpServerImpl) registerToolWithCategory(name string, description string, schema interface{}, handler ToolHandler, category string, destructive bool, requiresAI bool, requiredAutonomyLevel int) error {
 	if name == "" {
 		return fmt.Errorf("tool name is required")
 	}
@@ -183,12 +192,13 @@ func (s *mcpServerImpl) registerToolWithCategory(name string, description string
 	}
 
 	tool := &Tool{
-		Name:        name,
-		Description: description,
-		InputSchema: schema,
-		Category:    category,
-		Destructive: destructive,
-		RequiresAI:  requiresAI,
+		Name:                  name,
+		Description:           description,
+		InputSchema:           schema,
+		Category:              category,
+		Destructive:           destructive,
+		RequiresAI:            requiresAI,
+		RequiredAutonomyLevel: requiredAutonomyLevel,
 	}
 
 	s.tools[name] = &toolRegistration{
@@ -210,6 +220,19 @@ func (s *mcpServerImpl) ListTools(ctx context.Context) ([]Tool, error) {
 	}
 
 	return result, nil
+}
+
+// GetTool retrieves a tool definition by name.
+func (s *mcpServerImpl) GetTool(name string) (*Tool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	reg, exists := s.tools[name]
+	if !exists {
+		return nil, fmt.Errorf("tool not found: %s", name)
+	}
+
+	return reg.Tool, nil
 }
 
 // ExecuteTool executes a tool call from the LLM.
@@ -242,10 +265,12 @@ func (s *mcpServerImpl) ExecuteTool(ctx context.Context, toolName string, args m
 	// Execute tool handler
 	result, err := reg.Handler(ctx, args)
 	duration := time.Since(startTime)
+	metrics.MCPToolDuration.WithLabelValues(toolName).Observe(duration.Seconds())
 
 	// Record statistics
 	if err != nil {
 		s.recordFailure(toolName)
+		metrics.MCPToolCalls.WithLabelValues(toolName, "error").Inc()
 		s.auditLog.Log(ctx, audit.NewEvent(audit.EventActionFailed).
 			WithCorrelationID(correlationID).
 			WithDescription(fmt.Sprintf("Tool execution failed: %s", toolName)).
@@ -255,6 +280,7 @@ func (s *mcpServerImpl) ExecuteTool(ctx context.Context, toolName string, args m
 	}
 
 	s.recordSuccess(toolName, duration)
+	metrics.MCPToolCalls.WithLabelValues(toolName, "success").Inc()
 	s.auditLog.Log(ctx, audit.NewEvent(audit.EventActionExecuted).
 		WithCorrelationID(correlationID).
 		WithDescription(fmt.Sprintf("Tool executed successfully: %s", toolName)).
@@ -375,7 +401,7 @@ func (s *mcpServerImpl) registerAllTools() error {
 	observationTools := tools.GetToolsByCategory(tools.CategoryObservation)
 	for _, toolDef := range observationTools {
 		handler := s.createObservationHandler(&toolDef)
-		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI); err != nil {
+		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI, toolDef.RequiredAutonomyLevel); err != nil {
 			return fmt.Errorf("failed to register observation tool %s: %w", toolDef.Name, err)
 		}
 		totalTools++
@@ -385,7 +411,7 @@ func (s *mcpServerImpl) registerAllTools() error {
 	analysisTools := tools.GetToolsByCategory(tools.CategoryAnalysis)
 	for _, toolDef := range analysisTools {
 		handler := s.createAnalysisHandler(&toolDef)
-		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI); err != nil {
+		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI, toolDef.RequiredAutonomyLevel); err != nil {
 			return fmt.Errorf("failed to register analysis tool %s: %w", toolDef.Name, err)
 		}
 		totalTools++
@@ -395,7 +421,7 @@ func (s *mcpServerImpl) registerAllTools() error {
 	recommendationTools := tools.GetToolsByCategory(tools.CategoryRecommendation)
 	for _, toolDef := range recommendationTools {
 		handler := s.createRecommendationHandler(&toolDef)
-		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI); err != nil {
+		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI, toolDef.RequiredAutonomyLevel); err != nil {
 			return fmt.Errorf("failed to register recommendation tool %s: %w", toolDef.Name, err)
 		}
 		totalTools++
@@ -405,7 +431,7 @@ func (s *mcpServerImpl) registerAllTools() error {
 	troubleshootingTools := tools.GetToolsByCategory(tools.CategoryTroubleshooting)
 	for _, toolDef := range troubleshootingTools {
 		handler := s.createTroubleshootingHandler(&toolDef)
-		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI); err != nil {
+		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI, toolDef.RequiredAutonomyLevel); err != nil {
 			return fmt.Errorf("failed to register troubleshooting tool %s: %w", toolDef.Name, err)
 		}
 		totalTools++
@@ -415,7 +441,7 @@ func (s *mcpServerImpl) registerAllTools() error {
 	securityTools := tools.GetToolsByCategory(tools.CategorySecurity)
 	for _, toolDef := range securityTools {
 		handler := s.createSecurityHandler(&toolDef)
-		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI); err != nil {
+		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI, toolDef.RequiredAutonomyLevel); err != nil {
 			return fmt.Errorf("failed to register security tool %s: %w", toolDef.Name, err)
 		}
 		totalTools++
@@ -425,7 +451,7 @@ func (s *mcpServerImpl) registerAllTools() error {
 	costTools := tools.GetToolsByCategory(tools.CategoryCost)
 	for _, toolDef := range costTools {
 		handler := s.createCostHandler(&toolDef)
-		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI); err != nil {
+		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI, toolDef.RequiredAutonomyLevel); err != nil {
 			return fmt.Errorf("failed to register cost tool %s: %w", toolDef.Name, err)
 		}
 		totalTools++
@@ -435,7 +461,7 @@ func (s *mcpServerImpl) registerAllTools() error {
 	actionTools := tools.GetToolsByCategory(tools.CategoryAction)
 	for _, toolDef := range actionTools {
 		handler := s.createActionHandler(&toolDef)
-		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI); err != nil {
+		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI, toolDef.RequiredAutonomyLevel); err != nil {
 			return fmt.Errorf("failed to register action tool %s: %w", toolDef.Name, err)
 		}
 		totalTools++
@@ -445,7 +471,7 @@ func (s *mcpServerImpl) registerAllTools() error {
 	automationTools := tools.GetToolsByCategory(tools.CategoryAutomation)
 	for _, toolDef := range automationTools {
 		handler := s.createAutomationHandler(&toolDef)
-		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI); err != nil {
+		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI, toolDef.RequiredAutonomyLevel); err != nil {
 			return fmt.Errorf("failed to register automation tool %s: %w", toolDef.Name, err)
 		}
 		totalTools++
@@ -455,7 +481,7 @@ func (s *mcpServerImpl) registerAllTools() error {
 	executionToolDefs := tools.GetToolsByCategory(tools.CategoryExecution)
 	for _, toolDef := range executionToolDefs {
 		handler := s.createExecutionHandler(&toolDef)
-		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI); err != nil {
+		if err := s.registerToolWithCategory(toolDef.Name, toolDef.Description, toolDef.InputSchema, handler, string(toolDef.Category), toolDef.Destructive, toolDef.RequiresAI, toolDef.RequiredAutonomyLevel); err != nil {
 			return fmt.Errorf("failed to register execution tool %s: %w", toolDef.Name, err)
 		}
 		totalTools++

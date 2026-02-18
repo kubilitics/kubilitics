@@ -3,13 +3,20 @@ package runner
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// MinKubectlMajor and MinKubectlMinor define the minimum recommended kubectl client version.
+// Older versions may trigger a warning (no hard failure).
+const MinKubectlMajor = 1
+const MinKubectlMinor = 28
 
 type ExecOptions struct {
 	Force  bool
@@ -60,6 +67,46 @@ func CaptureKubectl(args []string) (string, error) {
 	cmd := exec.Command("kubectl", args...)
 	b, err := cmd.CombinedOutput()
 	return string(b), err
+}
+
+// KubectlVersionClient returns the client version (major, minor) from kubectl version --client -o json.
+// Returns 0,0 and nil error if parsing fails (caller can ignore).
+func KubectlVersionClient() (major, minor int, err error) {
+	out, err := CaptureKubectl([]string{"version", "--client", "--output=json"})
+	if err != nil {
+		return 0, 0, err
+	}
+	var v struct {
+		ClientVersion struct {
+			Major string `json:"major"`
+			Minor string `json:"minor"`
+		} `json:"clientVersion"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		return 0, 0, err
+	}
+	major, _ = strconv.Atoi(strings.TrimSpace(v.ClientVersion.Major))
+	minor, _ = strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(v.ClientVersion.Minor), "+"))
+	return major, minor, nil
+}
+
+// WarnKubectlVersionSkew checks the current kubectl client version against MinKubectlMajor/MinKubectlMinor
+// and writes a warning to w if the version is older. No-op if check fails (e.g. kubectl not in PATH).
+func WarnKubectlVersionSkew(w io.Writer) {
+	if w == nil {
+		return
+	}
+	major, minor, err := KubectlVersionClient()
+	if err != nil {
+		return
+	}
+	if major > MinKubectlMajor {
+		return
+	}
+	if major == MinKubectlMajor && minor >= MinKubectlMinor {
+		return
+	}
+	fmt.Fprintf(w, "kcli: warning: kubectl client version %d.%d is older than recommended %d.%d; some features may not work\n", major, minor, MinKubectlMajor, MinKubectlMinor)
 }
 
 func CaptureKubectlWithTimeout(args []string, timeout time.Duration) (string, error) {
@@ -126,7 +173,7 @@ func firstVerb(args []string) string {
 }
 
 func askForConfirmation(args []string) (bool, error) {
-	if !isTerminal() {
+	if !IsTerminal() {
 		return false, fmt.Errorf("refusing mutating command in non-interactive mode without --force")
 	}
 	fmt.Fprintf(os.Stderr, "This command may mutate cluster state:\n  kubectl %s\n", strings.Join(args, " "))
@@ -143,7 +190,7 @@ func askForConfirmation(args []string) (bool, error) {
 	return ans == "y" || ans == "yes", nil
 }
 
-func isTerminal() bool {
+func IsTerminal() bool {
 	fi, err := os.Stdin.Stat()
 	if err != nil {
 		return false

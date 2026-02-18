@@ -120,8 +120,8 @@ func TestConfigValidation(t *testing.T) {
 				cfg.LLM.Provider = "openai"
 				delete(cfg.LLM.OpenAI, "api_key")
 			},
-			wantError: true,
-			errorMsg:  "OpenAI API key is required",
+			wantError: false, // Now allowed for degraded mode
+			errorMsg:  "",
 		},
 		{
 			name: "missing Anthropic model",

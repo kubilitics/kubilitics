@@ -14,6 +14,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { PageLoadingState } from '@/components/PageLoadingState';
+import { ServiceUnavailableBanner } from '@/components/ServiceUnavailableBanner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DollarSign,
@@ -52,7 +54,7 @@ import {
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 // All /api/v1/cost/* endpoints live on the AI backend (port 8081), not the
-// main backend (port 8080). Use AI_BASE_URL as the single canonical source.
+// main backend (port 819). Use AI_BASE_URL as the single canonical source.
 const API_BASE = AI_BASE_URL;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -340,6 +342,10 @@ export function CostDashboard() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
+  if (isLoading && !overview) {
+    return <PageLoadingState message="Analyzing cost data..." />;
+  }
+
   return (
     <div className="container mx-auto p-6 space-y-6">
 
@@ -376,13 +382,12 @@ export function CostDashboard() {
 
       {/* ── Backend status banner ─────────────────────────────────────────── */}
       {!backendConnected && (
-        <div className="flex items-center gap-2 p-3 rounded-md bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>
-            Cost backend not reachable at <code>{API_BASE}</code>. Showing any cached data.
-            Start the Kubilitics backend to see live cluster costs.
-          </span>
-        </div>
+        <ServiceUnavailableBanner
+          serviceName="Cost Service"
+          message={`Cost backend not reachable at ${API_BASE}. Showing available cached data.`}
+          retryAction={loadAll}
+          isRetrying={isLoading}
+        />
       )}
 
       {/* ── Overview Cards ─────────────────────────────────────────────────── */}
@@ -782,10 +787,10 @@ export function CostDashboard() {
                   {isLoading
                     ? <span className="flex justify-center items-center gap-2"><Loader2 className="h-5 w-5 animate-spin" /> Loading…</span>
                     : <>
-                        <Layers className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                        <p>No namespace cost data available.</p>
-                        <p className="text-xs mt-1">Make sure the Kubilitics backend is running and connected to your cluster.</p>
-                      </>
+                      <Layers className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                      <p>No namespace cost data available.</p>
+                      <p className="text-xs mt-1">Make sure the Kubilitics backend is running and connected to your cluster.</p>
+                    </>
                   }
                 </div>
               ) : (
@@ -937,10 +942,10 @@ export function CostDashboard() {
                   {isLoading
                     ? <span className="flex justify-center items-center gap-2"><Loader2 className="h-5 w-5 animate-spin" /> Analysing…</span>
                     : <>
-                        <AlertCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                        <p>No cost recommendations available.</p>
-                        <p className="text-xs mt-1">Connect the backend to your cluster to receive live recommendations.</p>
-                      </>
+                      <AlertCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                      <p>No cost recommendations available.</p>
+                      <p className="text-xs mt-1">Connect the backend to your cluster to receive live recommendations.</p>
+                    </>
                   }
                 </div>
               )}

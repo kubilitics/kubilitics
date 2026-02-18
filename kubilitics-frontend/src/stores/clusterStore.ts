@@ -15,6 +15,7 @@ export interface Cluster {
   pods: { running: number; pending: number; failed: number };
   cpu: { used: number; total: number };
   memory: { used: number; total: number };
+  kubeconfig?: string; // Kubeconfig content for this cluster (desktop mode)
 }
 
 export interface Namespace {
@@ -22,6 +23,13 @@ export interface Namespace {
   status: 'Active' | 'Terminating';
   pods: number;
   services: number;
+}
+
+export interface KubeconfigContext {
+  name: string;
+  cluster: string;
+  user: string;
+  namespace?: string;
 }
 
 interface ClusterState {
@@ -32,6 +40,9 @@ interface ClusterState {
   isDemo: boolean;
   appMode: 'desktop' | 'in-cluster' | null;
   isOnboarded: boolean;
+  kubeconfigPath?: string; // Path to kubeconfig file (desktop mode)
+  kubeconfigContent?: string; // Full kubeconfig content (desktop mode)
+  detectedClusters?: KubeconfigContext[]; // Auto-detected clusters from kubeconfig
   setClusters: (clusters: Cluster[]) => void;
   setActiveCluster: (cluster: Cluster) => void;
   setActiveNamespace: (namespace: string) => void;
@@ -39,6 +50,9 @@ interface ClusterState {
   setDemo: (isDemo: boolean) => void;
   setAppMode: (mode: 'desktop' | 'in-cluster' | null) => void;
   setOnboarded: (onboarded: boolean) => void;
+  setKubeconfigContent: (content: string, path?: string) => void;
+  setDetectedClusters: (clusters: KubeconfigContext[]) => void;
+  autoDetectClusters: () => Promise<void>; // Auto-detect clusters from kubeconfig (Tauri only)
   signOut: () => void;
 }
 
@@ -101,7 +115,7 @@ const demoNamespaces: Namespace[] = [
 
 export const useClusterStore = create<ClusterState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       clusters: [],
       activeCluster: null,
       activeNamespace: 'all',
@@ -109,12 +123,45 @@ export const useClusterStore = create<ClusterState>()(
       isDemo: false,
       appMode: null,
       isOnboarded: false,
+      kubeconfigPath: undefined,
+      kubeconfigContent: undefined,
+      detectedClusters: undefined,
       setClusters: (clusters) => set({ clusters }),
       setActiveCluster: (cluster) => set({ activeCluster: cluster }),
       setActiveNamespace: (namespace) => set({ activeNamespace: namespace }),
       setNamespaces: (namespaces) => set({ namespaces }),
       setAppMode: (appMode) => set({ appMode }),
       setOnboarded: (isOnboarded) => set({ isOnboarded }),
+      setKubeconfigContent: (content, path) => set({ kubeconfigContent: content, kubeconfigPath: path }),
+      setDetectedClusters: (clusters) => set({ detectedClusters: clusters }),
+      autoDetectClusters: async () => {
+        // Only works in Tauri desktop mode
+        if (typeof window === 'undefined') return;
+        const w = window as Window & { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown };
+        const isTauri = !!(w.__TAURI_INTERNALS__ ?? w.__TAURI__);
+
+        if (!isTauri) return;
+
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+
+          // Get kubeconfig info (path defaults to ~/.kube/config)
+          const kubeconfigInfo = await invoke<{
+            path: string;
+            current_context?: string;
+            contexts: Array<{ name: string; cluster: string; user: string; namespace?: string }>;
+          }>('get_kubeconfig_info', { path: null });
+
+          if (kubeconfigInfo.contexts.length > 0) {
+            set({
+              detectedClusters: kubeconfigInfo.contexts,
+              kubeconfigPath: kubeconfigInfo.path,
+            });
+          }
+        } catch (error) {
+          console.error('Failed to auto-detect kubeconfig:', error);
+        }
+      },
       setDemo: (isDemo) => {
         if (isDemo) {
           set({
@@ -136,6 +183,9 @@ export const useClusterStore = create<ClusterState>()(
           isDemo: false,
           appMode: null,
           isOnboarded: false,
+          kubeconfigPath: undefined,
+          kubeconfigContent: undefined,
+          detectedClusters: undefined,
         }),
     }),
     {

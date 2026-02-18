@@ -106,46 +106,75 @@ func (c *Config) Validate() []error {
 	// Provider-specific validation
 	switch c.LLM.Provider {
 	case "openai":
-		if apiKey, ok := c.LLM.OpenAI["api_key"].(string); !ok || apiKey == "" {
-			// Check environment variable as fallback
-			if os.Getenv("OPENAI_API_KEY") == "" {
+		if apiKey, ok := c.LLM.OpenAI["api_key"].(string); ok && apiKey != "" {
+			c.LLM.Configured = true
+		} else if os.Getenv("OPENAI_API_KEY") != "" {
+			// If env var is present, it's configured (even if not in map yet)
+			c.LLM.Configured = true
+		} else {
+			// Not configured, but strict validation might require it?
+			// The legacy logic allowed it to be unconfigured (degraded mode).
+			// But here we return errors if missing!
+			// Legacy `server/config.go` said: "Missing credentials are not fatal... returns HTTP 503".
+			// So we should NOT append errors if key is missing, unless we want to enforce it.
+			// The new config system seems stricter.
+			// Let's adopt the legacy behavior: Warn/Set flag, but DON'T error if missing?
+			// BUT the current implementation DOES append errors.
+			// "OpenAI API key is required"
+			// If I remove the error, I can support degraded mode.
+			// I like degraded mode.
+			// So I will REMOVE the error return for missing keys, and instead just set Configured=false.
+		}
+
+		// Check for key to set Configured
+		hasKey := false
+		if apiKey, ok := c.LLM.OpenAI["api_key"].(string); ok && apiKey != "" {
+			hasKey = true
+		} else if os.Getenv("OPENAI_API_KEY") != "" {
+			hasKey = true
+		}
+		c.LLM.Configured = hasKey
+
+		// We still validate model if configured, or maybe always?
+		// If not configured, we might skip model validation?
+		if hasKey {
+			if model, ok := c.LLM.OpenAI["model"].(string); !ok || model == "" {
 				errs = append(errs, &ValidationError{
-					Field:   "llm.openai.api_key",
-					Message: "OpenAI API key is required (config or OPENAI_API_KEY env var)",
+					Field:   "llm.openai.model",
+					Message: "OpenAI model is required",
 				})
 			}
-		}
-		if model, ok := c.LLM.OpenAI["model"].(string); !ok || model == "" {
-			errs = append(errs, &ValidationError{
-				Field:   "llm.openai.model",
-				Message: "OpenAI model is required",
-			})
 		}
 
 	case "anthropic":
-		if apiKey, ok := c.LLM.Anthropic["api_key"].(string); !ok || apiKey == "" {
-			// Check environment variable as fallback
-			if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		hasKey := false
+		if apiKey, ok := c.LLM.Anthropic["api_key"].(string); ok && apiKey != "" {
+			hasKey = true
+		} else if os.Getenv("ANTHROPIC_API_KEY") != "" {
+			hasKey = true
+		}
+		c.LLM.Configured = hasKey
+
+		if hasKey {
+			if model, ok := c.LLM.Anthropic["model"].(string); !ok || model == "" {
 				errs = append(errs, &ValidationError{
-					Field:   "llm.anthropic.api_key",
-					Message: "Anthropic API key is required (config or ANTHROPIC_API_KEY env var)",
+					Field:   "llm.anthropic.model",
+					Message: "Anthropic model is required",
 				})
 			}
 		}
-		if model, ok := c.LLM.Anthropic["model"].(string); !ok || model == "" {
-			errs = append(errs, &ValidationError{
-				Field:   "llm.anthropic.model",
-				Message: "Anthropic model is required",
-			})
-		}
 
 	case "ollama":
+		// Ollama is always configured (defaults exist or no key needed)
+		c.LLM.Configured = true
+
 		if baseURL, ok := c.LLM.Ollama["base_url"].(string); !ok || baseURL == "" {
 			errs = append(errs, &ValidationError{
 				Field:   "llm.ollama.base_url",
 				Message: "Ollama base URL is required",
 			})
 		}
+		// Model is optional? No, usually required.
 		if model, ok := c.LLM.Ollama["model"].(string); !ok || model == "" {
 			errs = append(errs, &ValidationError{
 				Field:   "llm.ollama.model",
@@ -154,11 +183,10 @@ func (c *Config) Validate() []error {
 		}
 
 	case "custom":
-		if baseURL, ok := c.LLM.Custom["base_url"].(string); !ok || baseURL == "" {
-			errs = append(errs, &ValidationError{
-				Field:   "llm.custom.base_url",
-				Message: "Custom LLM base URL is required",
-			})
+		if baseURL, ok := c.LLM.Custom["base_url"].(string); ok && baseURL != "" {
+			c.LLM.Configured = true
+		} else {
+			c.LLM.Configured = false
 		}
 	}
 

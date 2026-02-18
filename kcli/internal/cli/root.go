@@ -82,11 +82,14 @@ func newRootCommand(in io.Reader, out, errOut io.Writer) *cobra.Command {
 		newKubectlVerbCmd(a, "create", "Create resources from a file or stdin", "cr"),
 		newKubectlVerbCmd(a, "delete", "Delete resources", "del"),
 		newLogsCmd(a),
-		newKubectlVerbCmd(a, "exec", "Execute command in a container"),
-		newKubectlVerbCmd(a, "port-forward", "Forward one or more local ports to a pod"),
+		newExecCmd(a),
+		newPortForwardCmd(a),
 		newKubectlVerbCmd(a, "top", "Display resource usage"),
 		newKubectlVerbCmd(a, "rollout", "Manage rollout of resources"),
 		newKubectlVerbCmd(a, "diff", "Diff live and local objects"),
+		newKubectlVerbCmd(a, "cp", "Copy files and directories to and from containers"),
+		newKubectlVerbCmd(a, "proxy", "Run a proxy to the Kubernetes API server"),
+		newKubectlVerbCmd(a, "attach", "Attach to a running container"),
 		newKubectlVerbCmd(a, "explain", "Show documentation for resource fields"),
 		newKubectlVerbCmd(a, "wait", "Wait for a specific condition"),
 		newKubectlVerbCmd(a, "scale", "Set a new size for a workload"),
@@ -129,6 +132,20 @@ func newRootCommand(in io.Reader, out, errOut io.Writer) *cobra.Command {
 	)
 
 	cmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		// CI/CD Mode Enforcement
+		if os.Getenv("KCLI_CI") == "true" {
+			a.force = true
+			if a.cfg != nil {
+				a.cfg.TUI.Animations = false
+			}
+		}
+
+		// Kubernetes Dependency Check
+		if err := checkKubectlDependency(); err != nil {
+			return fmt.Errorf("dependency check failed: %w", err)
+		}
+		runner.WarnKubectlVersionSkew(a.stderr)
+
 		if a.cfgErr != nil {
 			return fmt.Errorf("invalid %s: %w", configPathSafe(), a.cfgErr)
 		}
@@ -142,6 +159,11 @@ func newRootCommand(in io.Reader, out, errOut io.Writer) *cobra.Command {
 	cmd.SetOut(a.stdout)
 	cmd.SetErr(a.stderr)
 	return cmd
+}
+
+func checkKubectlDependency() error {
+	_, err := runner.CaptureKubectl([]string{"version", "--client", "--output=json"})
+	return err
 }
 
 func IsBuiltinFirstArg(name string) bool {

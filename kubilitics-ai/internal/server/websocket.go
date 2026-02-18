@@ -46,7 +46,6 @@ type WSRequest struct {
 var defaultAllowedOrigins = []string{
 	"http://localhost:3000",
 	"http://localhost:5173",
-	"http://localhost:8080",
 }
 
 // newUpgrader creates a WebSocket upgrader with origin checking.
@@ -95,8 +94,15 @@ type WSConnection struct {
 
 // handleWebSocket handles WebSocket connections for AI chat
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	// AI-017: Enforce TLS for WebSocket connections
+	if s.config.Server.RequireTLS && r.TLS == nil {
+		http.Error(w, "TLS required for WebSocket connections", http.StatusUpgradeRequired)
+		log.Printf("WebSocket connection rejected: TLS required but not used (remote: %s)", r.RemoteAddr)
+		return
+	}
+
 	// Upgrade HTTP connection to WebSocket with origin checking.
-	up := newUpgrader(s.config.AllowedOrigins)
+	up := newUpgrader(s.config.Server.AllowedOrigins)
 	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)

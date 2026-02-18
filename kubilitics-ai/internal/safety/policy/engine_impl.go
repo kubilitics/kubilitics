@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/kubilitics/kubilitics-ai/internal/db"
+	"github.com/kubilitics/kubilitics-ai/internal/metrics"
 )
 
 // ─── Immutable safety rules (always enforced, cannot be overridden) ───────────
 
 var immutableRules = []struct {
-	name    string
-	check   func(action interface{}) (bool, string) // returns (violated, reason)
-	risk    string
+	name  string
+	check func(action interface{}) (bool, string) // returns (violated, reason)
+	risk  string
 }{
 	{
 		name: "no_production_namespace_delete",
@@ -60,7 +63,7 @@ var immutableRules = []struct {
 			ns := strings.ToLower(a.namespace())
 			op := a.operation()
 			if ns == "kube-system" && (op == "delete" || op == "patch" || op == "scale") {
-				return true, fmt.Sprintf("Mutations to kube-system namespace require manual review")
+				return true, "Mutations to kube-system namespace require manual review"
 			}
 			return false, ""
 		},
@@ -80,11 +83,11 @@ type actionMap interface {
 
 // safetyAction wraps the generic action interface for policy evaluation.
 type safetyAction struct {
-	op        string
-	ns        string
-	resType   string
-	resName   string
-	replicas  int
+	op       string
+	ns       string
+	resType  string
+	resName  string
+	replicas int
 }
 
 func (a *safetyAction) operation() string    { return a.op }
@@ -161,6 +164,8 @@ func extractFromAnyAction(action interface{}) *safetyAction {
 
 // ─── policyEngineImpl ─────────────────────────────────────────────────────────
 
+// ─── policyEngineImpl ─────────────────────────────────────────────────────────
+
 type configPolicy struct {
 	Name      string `json:"name"`
 	Condition string `json:"condition"` // e.g. "namespace=staging"
@@ -168,14 +173,22 @@ type configPolicy struct {
 	Reason    string `json:"reason"`
 }
 
-type policyEngineImpl struct {
-	mu       sync.RWMutex
-	policies []configPolicy
+type Store interface {
+	ListPolicies(ctx context.Context) ([]*db.SafetyPolicyRecord, error)
+	GetPolicy(ctx context.Context, name string) (*db.SafetyPolicyRecord, error)
+	CreatePolicy(ctx context.Context, rec *db.SafetyPolicyRecord) error
+	UpdatePolicy(ctx context.Context, rec *db.SafetyPolicyRecord) error
+	DeletePolicy(ctx context.Context, name string) error
 }
 
-func NewPolicyEngine() PolicyEngine {
+type policyEngineImpl struct {
+	mu    sync.RWMutex
+	store Store // db.SafetyPolicyStore
+}
+
+func NewPolicyEngine(store Store) PolicyEngine {
 	return &policyEngineImpl{
-		policies: []configPolicy{},
+		store: store,
 	}
 }
 
@@ -194,14 +207,23 @@ func (e *policyEngineImpl) Evaluate(ctx context.Context, _ string, action interf
 		}
 		violated, reason := rule.check(wrapper)
 		if violated {
+			metrics.SafetyPolicyEvaluations.WithLabelValues(rule.name, "deny").Inc()
+			metrics.SafetyBlocked.WithLabelValues(rule.name, sa.op).Inc()
 			return ResultDeny, reason, rule.risk, nil
 		}
 	}
 
-	// Check configurable policies
-	e.mu.RLock()
-	policies := e.policies
-	e.mu.RUnlock()
+	// Fetch configurable policies from DB
+	// Note: For high traffic, we would cache this. But for now, direct DB query is fine and safer.
+	records, err := e.store.ListPolicies(ctx)
+	if err != nil {
+		// If DB fails, we should probably fail safe (deny) or warn?
+		// For safety, let's log and warn, but maybe not block unless critical?
+		// Actually, if we can't load safety rules, failing open is dangerous.
+		// Failing closed (deny) is safer.
+		metrics.SafetyPolicyEvaluations.WithLabelValues("db_load_error", "deny").Inc()
+		return ResultDeny, "Failed to load safety policies", "critical", err
+	}
 
 	riskLevel := "low"
 	// Escalate risk based on operation type
@@ -216,9 +238,10 @@ func (e *policyEngineImpl) Evaluate(ctx context.Context, _ string, action interf
 		riskLevel = "low"
 	}
 
-	for _, p := range policies {
+	for _, r := range records {
 		// Simple condition matching: "namespace=X"
-		parts := strings.SplitN(p.Condition, "=", 2)
+		// Only supporting simple equality for now, as per original implementation
+		parts := strings.SplitN(r.Condition, "=", 2)
 		if len(parts) == 2 {
 			field, value := parts[0], parts[1]
 			var actual string
@@ -231,14 +254,18 @@ func (e *policyEngineImpl) Evaluate(ctx context.Context, _ string, action interf
 				actual = sa.resType
 			}
 			if strings.EqualFold(actual, value) {
-				if p.Effect == "deny" {
-					return ResultDeny, p.Reason, "high", nil
+				if r.Effect == "deny" {
+					metrics.SafetyPolicyEvaluations.WithLabelValues(r.Name, "deny").Inc()
+					metrics.SafetyBlocked.WithLabelValues(r.Name, sa.op).Inc()
+					return ResultDeny, r.Reason, "high", nil
 				}
-				return ResultWarn, p.Reason, riskLevel, nil
+				metrics.SafetyPolicyEvaluations.WithLabelValues(r.Name, "warn").Inc()
+				return ResultWarn, r.Reason, riskLevel, nil
 			}
 		}
 	}
 
+	metrics.SafetyPolicyEvaluations.WithLabelValues("default", "allow").Inc()
 	return ResultApprove, "Action approved by policy engine", riskLevel, nil
 }
 
@@ -257,69 +284,73 @@ func (e *policyEngineImpl) ValidateAction(_ context.Context, action interface{})
 	return len(violations) == 0, violations, nil
 }
 
-func (e *policyEngineImpl) GetPolicies(_ context.Context) ([]interface{}, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	result := make([]interface{}, len(e.policies))
-	for i, p := range e.policies {
-		result[i] = p
+func (e *policyEngineImpl) GetPolicies(ctx context.Context) ([]interface{}, error) {
+	records, err := e.store.ListPolicies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Convert to interface slice as expected by interface
+	result := make([]interface{}, len(records))
+	for i, r := range records {
+		result[i] = map[string]interface{}{
+			"name":       r.Name,
+			"condition":  r.Condition,
+			"effect":     r.Effect,
+			"reason":     r.Reason,
+			"updated_at": r.UpdatedAt,
+		}
 	}
 	return result, nil
 }
 
-func (e *policyEngineImpl) CreatePolicy(_ context.Context, policyName string, policyRule interface{}) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	// Simple implementation — cast to configPolicy if possible
-	if m, ok := policyRule.(map[string]interface{}); ok {
-		p := configPolicy{Name: policyName}
-		if v, ok := m["condition"].(string); ok {
-			p.Condition = v
-		}
-		if v, ok := m["effect"].(string); ok {
-			p.Effect = v
-		}
-		if v, ok := m["reason"].(string); ok {
-			p.Reason = v
-		}
-		e.policies = append(e.policies, p)
-		return nil
+func (e *policyEngineImpl) CreatePolicy(ctx context.Context, policyName string, policyRule interface{}) error {
+	// Cast rule to map
+	m, ok := policyRule.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid policy rule format: expected map")
 	}
-	return fmt.Errorf("invalid policy rule format")
+
+	rec := &db.SafetyPolicyRecord{
+		Name: policyName,
+	}
+	if v, ok := m["condition"].(string); ok {
+		rec.Condition = v
+	}
+	if v, ok := m["effect"].(string); ok {
+		rec.Effect = v
+	}
+	if v, ok := m["reason"].(string); ok {
+		rec.Reason = v
+	}
+
+	return e.store.CreatePolicy(ctx, rec)
 }
 
-func (e *policyEngineImpl) UpdatePolicy(_ context.Context, policyName string, policyRule interface{}) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	for i, p := range e.policies {
-		if p.Name == policyName {
-			if m, ok := policyRule.(map[string]interface{}); ok {
-				if v, ok := m["condition"].(string); ok {
-					e.policies[i].Condition = v
-				}
-				if v, ok := m["effect"].(string); ok {
-					e.policies[i].Effect = v
-				}
-				if v, ok := m["reason"].(string); ok {
-					e.policies[i].Reason = v
-				}
-				return nil
-			}
-		}
+func (e *policyEngineImpl) UpdatePolicy(ctx context.Context, policyName string, policyRule interface{}) error {
+	// Cast rule to map
+	m, ok := policyRule.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid policy rule format: expected map")
 	}
-	return fmt.Errorf("policy not found: %s", policyName)
+
+	rec := &db.SafetyPolicyRecord{
+		Name: policyName,
+	}
+	if v, ok := m["condition"].(string); ok {
+		rec.Condition = v
+	}
+	if v, ok := m["effect"].(string); ok {
+		rec.Effect = v
+	}
+	if v, ok := m["reason"].(string); ok {
+		rec.Reason = v
+	}
+
+	return e.store.UpdatePolicy(ctx, rec)
 }
 
-func (e *policyEngineImpl) DeletePolicy(_ context.Context, policyName string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	for i, p := range e.policies {
-		if p.Name == policyName {
-			e.policies = append(e.policies[:i], e.policies[i+1:]...)
-			return nil
-		}
-	}
-	return fmt.Errorf("policy not found: %s", policyName)
+func (e *policyEngineImpl) DeletePolicy(ctx context.Context, policyName string) error {
+	return e.store.DeletePolicy(ctx, policyName)
 }
 
 func (e *policyEngineImpl) ListImmutableRules(_ context.Context) ([]string, error) {

@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Cost Intelligence Dashboard', () => {
   test.beforeEach(async ({ page }) => {
     // Navigate to cost dashboard
-    await page.goto('http://localhost:3000/cost');
+    await page.goto('/cost');
   });
 
   test('should display cost dashboard page', async ({ page }) => {

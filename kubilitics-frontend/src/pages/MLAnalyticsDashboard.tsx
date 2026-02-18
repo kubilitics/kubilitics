@@ -14,6 +14,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { PageLoadingState } from '@/components/PageLoadingState';
+import { ServiceUnavailableBanner } from '@/components/ServiceUnavailableBanner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -242,7 +244,11 @@ export function MLAnalyticsDashboard() {
     ? Math.max(0, 1 - (forecastStdError / 10))
     : null;
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ─── Render ─────────────────────────────────────────────────────────────────
+
+  if (aiLoading && aiAnomalies.length === 0) {
+    return <PageLoadingState message="Analyzing cluster metrics..." />;
+  }
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -278,14 +284,12 @@ export function MLAnalyticsDashboard() {
 
       {/* Connection banner */}
       {!connected && (
-        <Alert className="border-amber-500/30 bg-amber-500/5">
-          <Info className="h-4 w-4 text-amber-600" />
-          <AlertDescription className="text-amber-700">
-            Connect the Kubilitics AI backend to see real anomaly data. Configure in{' '}
-            <a href="/settings" className="underline font-medium">Settings → Backend</a>.
-            Anomaly detection and forecasting require real cluster metrics.
-          </AlertDescription>
-        </Alert>
+        <ServiceUnavailableBanner
+          serviceName="AI Analytics Engine"
+          message="Anomaly detection requires real-time cluster metrics. Please connect the backend."
+          retryAction={handleRefreshAll}
+          isRetrying={aiLoading}
+        />
       )}
 
       {/* AI error */}
@@ -680,34 +684,32 @@ export function MLAnalyticsDashboard() {
         <TabsContent value="models" className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Isolation Forest Model */}
+            {/* Isolation Forest Model */}
             <ModelExplainabilityPanel
               modelType="isolation_forest"
               modelInfo={mlModelInfo || {
                 algorithm: 'Isolation Forest',
                 num_trees: 100,
-                contamination: 0.1,
-                max_depth: 10,
+                sample_size: 256,
+                threshold: 0.6,
+                total_points: metricData.length,
               }}
-              features={[
-                { name: `${selectedMetric}_usage`, importance: 0.85 },
-                { name: 'timestamp', importance: 0.15 },
-              ]}
+            /* features prop removed as it is not part of the component props */
             />
 
             {/* ARIMA Model */}
             <ModelExplainabilityPanel
               modelType="arima"
-              modelInfo={{
-                algorithm: 'ARIMA',
-                p: 2,
-                d: 1,
-                q: 2,
-                confidence_level: forecastConfidence ?? 0.95,
+              modelInfo={forecastModelInfo || {
+                order: [2, 1, 2],
+                fitted: false,
+                ar_coeffs: [],
+                ma_coeffs: [],
+                constant: 0,
+                std_error: 0,
+                n_residuals: 0,
               }}
-              features={[
-                { name: 'autoregressive_terms', importance: 0.6 },
-                { name: 'moving_average', importance: 0.4 },
-              ]}
+            /* features prop removed as it is not part of the component props */
             />
           </div>
 

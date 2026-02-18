@@ -1,5 +1,6 @@
 // A-CORE-013: Persistence layer hooks — backed by real /api/v1/persistence/* endpoints.
-// Persistence endpoints live on the AI backend (port 8081), not the main backend (port 8080).
+// Persistence endpoints live on the AI backend (port 8081), not the main backend (port 819).
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { AI_BASE_URL } from '@/services/aiService';
 
@@ -291,7 +292,7 @@ export function useAnomalyHistory(query: AnomalyQuery = {}, opts: { pollInterval
       setLoading(false);
     }
   }, [query.resource_id, query.namespace, query.kind, query.anomaly_type,
-      query.severity, query.from, query.to, query.limit, query.offset]);
+  query.severity, query.from, query.to, query.limit, query.offset]);
 
   useEffect(() => {
     fetchData();

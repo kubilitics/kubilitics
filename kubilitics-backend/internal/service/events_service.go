@@ -12,7 +12,7 @@ import (
 
 // EventsService provides access to Kubernetes events
 type EventsService interface {
-	ListEvents(ctx context.Context, clusterID, namespace string, limit int) ([]*models.Event, error)
+	ListEvents(ctx context.Context, clusterID, namespace string, opts metav1.ListOptions) (*metav1.List, []*models.Event, error)
 	ListEventsAllNamespaces(ctx context.Context, clusterID string, limit int) ([]*models.Event, error)
 	GetResourceEvents(ctx context.Context, clusterID, namespace, resourceKind, resourceName string) ([]*models.Event, error)
 	WatchEvents(ctx context.Context, clusterID, namespace string, eventChan chan<- *models.Event, errChan chan<- error)
@@ -29,20 +29,16 @@ func NewEventsService(cs ClusterService) EventsService {
 	}
 }
 
-func (s *eventsService) ListEvents(ctx context.Context, clusterID, namespace string, limit int) ([]*models.Event, error) {
+// ListEvents lists events with pagination support (BE-FUNC-002). Returns list metadata and events.
+func (s *eventsService) ListEvents(ctx context.Context, clusterID, namespace string, opts metav1.ListOptions) (*metav1.List, []*models.Event, error) {
 	client, err := s.clusterService.GetClient(clusterID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	listOpts := metav1.ListOptions{}
-	if limit > 0 {
-		listOpts.Limit = int64(limit)
-	}
-
-	eventList, err := client.Clientset.CoreV1().Events(namespace).List(ctx, listOpts)
+	eventList, err := client.Clientset.CoreV1().Events(namespace).List(ctx, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list events: %w", err)
+		return nil, nil, fmt.Errorf("failed to list events: %w", err)
 	}
 
 	events := make([]*models.Event, 0, len(eventList.Items))
@@ -50,7 +46,11 @@ func (s *eventsService) ListEvents(ctx context.Context, clusterID, namespace str
 		events = append(events, k8sEventToModel(&event))
 	}
 
-	return events, nil
+	listMeta := &metav1.List{
+		TypeMeta:      eventList.TypeMeta,
+		ListMeta:      eventList.ListMeta,
+	}
+	return listMeta, events, nil
 }
 
 // ListEventsAllNamespaces lists events from all namespaces, merged and sorted by LastTimestamp descending, limited to limit.

@@ -49,14 +49,9 @@ func (h *Handler) GetDeploymentRolloutHistory(w http.ResponseWriter, r *http.Req
 	}
 
 	ctx := r.Context()
-	resolvedID, err := h.resolveClusterID(ctx, clusterID)
+	client, err := h.getClientFromRequest(ctx, r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		respondErrorWithRequestID(w, r, http.StatusNotFound, ErrCodeNotFound, err.Error())
 		return
 	}
 
@@ -169,8 +164,7 @@ func (h *Handler) GetDeploymentRolloutHistory(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	logger.StdLogger().Info("rollout-history: returned revisions from cluster",
-		"cluster_id", resolvedID, "namespace", namespace, "deployment", name, "revision_count", len(entries))
+	// Logged via StructuredLog middleware
 	w.Header().Set("X-Rollout-Source", "cluster")
 	w.Header().Set("X-Revision-Count", strconv.Itoa(len(entries)))
 	respondJSON(w, http.StatusOK, map[string]interface{}{"revisions": entries})
@@ -194,14 +188,11 @@ func (h *Handler) PostDeploymentRollback(w http.ResponseWriter, r *http.Request)
 	}
 
 	ctx := r.Context()
-	resolvedID, err := h.resolveClusterID(ctx, clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(ctx, r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(ctx)
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
@@ -316,7 +307,7 @@ func (h *Handler) PostDeploymentRollback(w http.ResponseWriter, r *http.Request)
 	requestID := logger.FromContext(r.Context())
 	if err != nil {
 		audit.LogMutation(requestID, clusterID, "rollback", "deployments", namespace, name, "failure", err.Error())
-		logger.StdLogger().Warn("rollback: patch failed", "cluster_id", resolvedID, "namespace", namespace, "deployment", name, "revision", *req.Revision, "error", err.Error())
+		// Error logged via StructuredLog middleware
 		if apierrors.IsNotFound(err) {
 			respondError(w, http.StatusNotFound, err.Error())
 			return
@@ -325,8 +316,7 @@ func (h *Handler) PostDeploymentRollback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	audit.LogMutation(requestID, clusterID, "rollback", "deployments", namespace, name, "success", "")
-	logger.StdLogger().Info("rollback: deployment patched to revision (live cluster)",
-		"cluster_id", resolvedID, "namespace", namespace, "deployment", name, "revision", *req.Revision)
+	// Success logged via StructuredLog middleware
 	w.Header().Set("X-Rollout-Source", "cluster")
 	respondJSON(w, http.StatusOK, updated.Object)
 }

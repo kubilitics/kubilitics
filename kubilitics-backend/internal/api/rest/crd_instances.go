@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
 
@@ -20,26 +21,29 @@ func (h *Handler) ListCRDInstances(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("namespace")
 
 	if !validate.ClusterID(clusterID) || crdName == "" || !validate.Namespace(namespace) {
-		respondError(w, http.StatusBadRequest, "Invalid clusterId, crdName, or namespace")
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid clusterId, crdName, or namespace", requestID)
 		return
 	}
 
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
+	// BE-FUNC-002: Pagination support (limit, continue token)
 	opts := metav1.ListOptions{}
-	const defaultLimit = 5000
+	const defaultLimit = 100
+	const maxLimit = 500
 	opts.Limit = int64(defaultLimit)
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if n, err := strconv.ParseInt(limitStr, 10, 64); err == nil && n > 0 {
+			if n > maxLimit {
+				n = maxLimit
+			}
 			opts.Limit = n
 		}
 	}
@@ -67,19 +71,23 @@ func (h *Handler) ListCRDInstances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// BE-FUNC-002: Return pagination metadata: items + metadata with continue token and total
 	itemsRaw := listItemsToRaw(list.Items)
+	total := int64(len(itemsRaw))
+	if list.GetRemainingItemCount() != nil {
+		total = int64(len(itemsRaw)) + *list.GetRemainingItemCount()
+	}
 	meta := map[string]interface{}{
 		"resourceVersion": list.GetResourceVersion(),
 		"continue":        list.GetContinue(),
+		"total":           total,
 	}
 	if list.GetRemainingItemCount() != nil {
 		meta["remainingItemCount"] = *list.GetRemainingItemCount()
 	}
 	out := map[string]interface{}{
-		"kind":       "List",
-		"apiVersion": "v1",
-		"metadata":   meta,
-		"items":      itemsRaw,
+		"items":    itemsRaw,
+		"metadata": meta,
 	}
 	respondJSON(w, http.StatusOK, out)
 }

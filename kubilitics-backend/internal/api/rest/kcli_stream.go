@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/audit"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
 
@@ -81,10 +82,25 @@ func (h *Handler) GetKCLIStream(w http.ResponseWriter, r *http.Request) {
 		cluster.Context,
 		mode,
 	)
+	metrics.KCLIStreamConnectionsTotal.WithLabelValues(mode).Inc()
+	metrics.KCLIStreamConnectionsActive.WithLabelValues(mode).Inc()
 	audit.LogCommand(requestID, resolvedID, "kcli_stream", "mode="+mode, "success", "connected", 0, time.Since(start))
+	
+	// Decrement active connections when stream closes
+	defer func() {
+		metrics.KCLIStreamConnectionsActive.WithLabelValues(mode).Dec()
+	}()
 
 	cmd, err := h.makeKCLIStreamCommand(r.Context(), cluster.Context, cluster.KubeconfigPath, mode, namespace)
 	if err != nil {
+		// Log binary resolution failure with context
+		if requestID != "" {
+			fmt.Fprintf(os.Stderr, "[%s] ERROR: kcli stream command creation failed: %v (cluster_id=%s, mode=%s)\n", requestID, err, resolvedID, mode)
+		} else {
+			fmt.Fprintf(os.Stderr, "ERROR: kcli stream command creation failed: %v (cluster_id=%s, mode=%s)\n", err, resolvedID, mode)
+		}
+		metrics.KCLIErrorsTotal.WithLabelValues("stream_creation_failed").Inc()
+		metrics.KCLIStreamConnectionsActive.WithLabelValues(mode).Dec() // Decrement since we're not creating a connection
 		audit.LogCommand(requestID, resolvedID, "kcli_stream", "mode="+mode, "failure", err.Error(), -1, time.Since(start))
 		_ = conn.WriteJSON(wsOutMessage{T: wsMsgError, D: err.Error()})
 		return
@@ -230,6 +246,8 @@ func (h *Handler) GetKCLIStream(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) makeKCLIStreamCommand(ctx context.Context, clusterContext, kubeconfigPath, mode, namespace string) (*exec.Cmd, error) {
 	env := append(os.Environ(), "KUBECONFIG="+kubeconfigPath)
+	// Add AI backend env vars for kcli AI commands
+	env = append(env, h.buildKCLIAIEnvVars()...)
 	workDir := "/tmp"
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		workDir = home
@@ -239,6 +257,8 @@ func (h *Handler) makeKCLIStreamCommand(ctx context.Context, clusterContext, kub
 	case "ui":
 		kcliBin, err := resolveKCLIBinary()
 		if err != nil {
+			// Log binary resolution failure
+			fmt.Fprintf(os.Stderr, "ERROR: kcli binary resolution failed in stream mode: %v\n", err)
 			return nil, err
 		}
 		args := []string{"ui"}

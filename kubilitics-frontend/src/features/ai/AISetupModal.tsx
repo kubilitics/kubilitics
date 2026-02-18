@@ -28,8 +28,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-    saveLLMProviderConfig,
-    loadLLMProviderConfig,
+    updateAIConfiguration,
+    getAIConfiguration,
     getAIInfo,
     type LLMProviderConfig,
 } from '@/services/aiService';
@@ -54,16 +54,25 @@ export function AISetupModal({ open, onOpenChange, onComplete }: AISetupModalPro
     const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
     useEffect(() => {
-        const saved = loadLLMProviderConfig();
-        if (saved && saved.provider !== 'none') {
-            setAiConfig(saved);
-        }
+        if (!open) return;
+        // Hydrate from backend on open (GET /api/v1/config/provider)
+        getAIConfiguration()
+            .then((saved) => {
+                if (saved && saved.provider && saved.provider !== 'none') {
+                    setAiConfig(saved);
+                }
+            })
+            .catch(() => {
+                // AI backend may not be running yet — stay with defaults
+            });
     }, [open]);
 
     const handleSave = async () => {
         setTestStatus('loading');
         try {
-            saveLLMProviderConfig(aiConfig);
+            // POST provider config to backend (hot-wires the LLM adapter at runtime)
+            await updateAIConfiguration(aiConfig);
+            // Verify the connection is live after the config change
             await getAIInfo();
             setTestStatus('success');
             toast.success('AI Engine connected successfully!');

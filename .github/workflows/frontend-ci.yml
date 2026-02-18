@@ -30,6 +30,10 @@ jobs:
         working-directory: kubilitics-frontend
         run: npm ci
 
+      - name: NPM audit
+        working-directory: kubilitics-frontend
+        run: npm audit --audit-level=high
+
       - name: Run tests
         run: |
           mkdir -p test_reports/frontend

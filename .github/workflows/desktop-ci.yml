@@ -96,12 +96,47 @@ jobs:
       working-directory: kubilitics-desktop
       run: npm ci
 
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
     - name: Build Go backend (sidecar)
       run: |
         mkdir -p kubilitics-desktop/src-tauri/binaries
         cd kubilitics-backend
         if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then GOOS=linux GOARCH=arm64 go build -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend ./cmd/server; else go build -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend ./cmd/server; fi
       working-directory: .
+
+    - name: Build kcli binary for desktop
+      run: |
+        # Tauri externalBin paths are resolved relative to src-tauri/, so all
+        # sidecar binaries (kubilitics-backend, kubilitics-ai, kcli) must land in
+        # kubilitics-desktop/src-tauri/binaries/ with the platform-triple suffix.
+        mkdir -p kubilitics-desktop/src-tauri/binaries
+        cd kcli
+        if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-aarch64-unknown-linux-gnu ./cmd/kcli
+        elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-x86_64-apple-darwin ./cmd/kcli
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-aarch64-apple-darwin ./cmd/kcli
+        elif [ "${{ matrix.os }}" = "windows-latest" ]; then
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-x86_64-pc-windows-msvc.exe ./cmd/kcli
+        else
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-x86_64-unknown-linux-gnu ./cmd/kcli
+        fi
+        chmod +x ../kubilitics-desktop/src-tauri/binaries/kcli-* || true
+      working-directory: .
+
+    - name: Verify kcli binary exists
+      run: |
+        KCLI_BINARIES=$(find kubilitics-desktop/src-tauri/binaries -name "kcli*" -type f 2>/dev/null || echo "")
+        if [ -z "$KCLI_BINARIES" ]; then
+          echo "❌ Error: No kcli binaries found in src-tauri/binaries/"
+          exit 1
+        fi
+        echo "✅ Found kcli binaries:"
+        echo "$KCLI_BINARIES"
 
     - name: Build Tauri app
       working-directory: kubilitics-desktop

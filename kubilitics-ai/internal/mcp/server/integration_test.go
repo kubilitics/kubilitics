@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubilitics/kubilitics-ai/internal/audit"
 	"github.com/kubilitics/kubilitics-ai/internal/config"
+	"github.com/kubilitics/kubilitics-ai/internal/db"
 	"github.com/kubilitics/kubilitics-ai/internal/integration/backend"
 )
 
@@ -41,8 +42,14 @@ func TestMCPServerIntegration(t *testing.T) {
 		t.Fatalf("Failed to create backend proxy: %v", err)
 	}
 
+	// Create in-memory DB
+	store, err := db.NewSQLiteStore(":memory:")
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+
 	// Create MCP server with all dependencies
-	server, err := NewMCPServer(cfg, proxy, auditLog)
+	server, err := NewMCPServer(cfg, proxy, auditLog, store)
 	if err != nil {
 		t.Fatalf("Failed to create MCP server: %v", err)
 	}
@@ -175,7 +182,8 @@ func TestMCPServerToolCategoryCoverage(t *testing.T) {
 		t.Fatalf("Failed to create backend proxy: %v", err)
 	}
 
-	server, err := NewMCPServer(cfg, proxy, auditLog)
+	store, _ := db.NewSQLiteStore(":memory:")
+	server, err := NewMCPServer(cfg, proxy, auditLog, store)
 	if err != nil {
 		t.Fatalf("Failed to create MCP server: %v", err)
 	}
@@ -202,7 +210,7 @@ func TestMCPServerToolCategoryCoverage(t *testing.T) {
 		"cost":            4,
 		"action":          5,
 		"automation":      4,
-		"execution":      9,
+		"execution":       9,
 	}
 
 	for category, expectedCount := range expected {
@@ -238,7 +246,8 @@ func TestMCPServerObservationToolsWiring(t *testing.T) {
 		t.Fatalf("Failed to create backend proxy: %v", err)
 	}
 
-	server, err := NewMCPServer(cfg, proxy, auditLog)
+	store, _ := db.NewSQLiteStore(":memory:")
+	server, err := NewMCPServer(cfg, proxy, auditLog, store)
 	if err != nil {
 		t.Fatalf("Failed to create MCP server: %v", err)
 	}

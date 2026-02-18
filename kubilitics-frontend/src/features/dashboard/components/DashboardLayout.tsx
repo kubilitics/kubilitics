@@ -15,6 +15,9 @@ export const DashboardLayout = () => {
     <div className="h-full w-full flex flex-col min-h-0 bg-background text-foreground animate-fade-in">
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-6 pb-28 scroll-smooth w-full">
         <div className="w-full space-y-6">
+          {/* Page Title for A11y & Semantics */}
+          <h1 className="sr-only">Dashboard</h1>
+
           {/* Row 1: Hero — Cluster Health | Pod Status Distribution */}
           <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
             <div className="lg:col-span-4 flex flex-col">

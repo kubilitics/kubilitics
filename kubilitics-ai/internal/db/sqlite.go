@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -111,6 +112,147 @@ CREATE INDEX IF NOT EXISTS idx_cost_snapshots_cluster     ON cost_snapshots(clus
 CREATE INDEX IF NOT EXISTS idx_cost_snapshots_recorded_at ON cost_snapshots(recorded_at DESC);
 `,
 	},
+	// Migration 3: investigation_findings + investigation_tool_calls + investigation_steps (AI-006)
+	{
+		version: 3,
+		sql: `
+CREATE TABLE IF NOT EXISTS investigation_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    investigation_id TEXT NOT NULL,
+    statement TEXT NOT NULL,
+    evidence TEXT,
+    confidence INTEGER DEFAULT 70,
+    severity TEXT NOT NULL,
+    timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (investigation_id) REFERENCES investigations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_findings_investigation_id ON investigation_findings(investigation_id);
+
+CREATE TABLE IF NOT EXISTS investigation_tool_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    investigation_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    args TEXT,
+    result TEXT,
+    turn_index INTEGER NOT NULL,
+    timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (investigation_id) REFERENCES investigations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_investigation_id ON investigation_tool_calls(investigation_id);
+
+CREATE TABLE IF NOT EXISTS investigation_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    investigation_id TEXT NOT NULL,
+    step_number INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    result TEXT,
+    timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (investigation_id) REFERENCES investigations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_steps_investigation_id ON investigation_steps(investigation_id);
+`,
+	},
+	// Migration 4: budget_limits + token_usage (A-CORE-014)
+	{
+		version: 4,
+		sql: `
+CREATE TABLE IF NOT EXISTS budget_limits (
+    user_id TEXT PRIMARY KEY,
+    limit_usd REAL NOT NULL DEFAULT 0.0,
+    period_start DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS token_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    investigation_id TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL NOT NULL DEFAULT 0.0,
+    recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_token_usage_user_date ON token_usage(user_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_token_usage_investigation ON token_usage(investigation_id);
+`,
+	},
+	// Migration 5: safety_policies (A-CORE-011)
+	{
+		version: 5,
+		sql: `
+CREATE TABLE IF NOT EXISTS safety_policies (
+    name TEXT PRIMARY KEY,
+    component_config TEXT NOT NULL, -- JSON blob (condition, effect, reason)
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`,
+	},
+	// Migration 7: llm_config — singleton row that persists the active LLM
+	// provider across process restarts (set via POST /api/v1/config/provider).
+	{
+		version: 7,
+		sql: `
+CREATE TABLE IF NOT EXISTS llm_config (
+    id         INTEGER PRIMARY KEY CHECK(id = 1), -- singleton: only row 1 allowed
+    provider   TEXT NOT NULL DEFAULT '',
+    model      TEXT NOT NULL DEFAULT '',
+    api_key    TEXT NOT NULL DEFAULT '',
+    base_url   TEXT NOT NULL DEFAULT '',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`,
+	},
+	// Migration 6: custom_policies + policy_evaluations (AI-008)
+	{
+		version: 6,
+		sql: `
+CREATE TABLE IF NOT EXISTS custom_policies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    condition TEXT NOT NULL,
+    effect TEXT NOT NULL CHECK(effect IN ('ALLOW', 'DENY', 'REQUEST_APPROVAL')),
+    reason TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 100,
+    created_by TEXT DEFAULT 'admin',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_policies_enabled ON custom_policies(enabled, priority DESC);
+CREATE INDEX IF NOT EXISTS idx_policies_name ON custom_policies(name);
+
+CREATE TABLE IF NOT EXISTS policy_evaluations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    policy_id INTEGER NOT NULL,
+    investigation_id TEXT,
+    action TEXT NOT NULL,
+    result TEXT NOT NULL CHECK(result IN ('ALLOW', 'DENY', 'REQUEST_APPROVAL')),
+    reason TEXT,
+    timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (policy_id) REFERENCES custom_policies(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_policy_evaluations_policy_id ON policy_evaluations(policy_id);
+CREATE INDEX IF NOT EXISTS idx_policy_evaluations_investigation_id ON policy_evaluations(investigation_id);
+CREATE INDEX IF NOT EXISTS idx_policy_evaluations_timestamp ON policy_evaluations(timestamp DESC);
+
+INSERT OR IGNORE INTO custom_policies (name, description, condition, effect, reason, priority)
+VALUES 
+    ('block-production-deletion', 
+     'Prevent deletion of resources in production namespace',
+     '{"namespace": "production", "operation": "delete"}',
+     'DENY',
+     'Production resources require manual approval for deletion',
+     1000),
+    ('require-approval-scaling',
+     'Require approval for scaling deployments beyond 10 replicas',
+     '{"resource_type": "deployment", "operation": "scale", "min_replicas": 10}',
+     'REQUEST_APPROVAL',
+     'Large-scale operations require human review',
+     500);
+`,
+	},
 }
 
 // sqliteStore is the SQLite-backed implementation of Store.
@@ -184,7 +326,13 @@ func (s *sqliteStore) Ping(ctx context.Context) error { return s.db.PingContext(
 // ─── Investigations ───────────────────────────────────────────────────────────
 
 func (s *sqliteStore) SaveInvestigation(ctx context.Context, rec *InvestigationRecord) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
         INSERT INTO investigations(id, type, state, description, context, conclusion, confidence, metadata, created_at, updated_at)
         VALUES(?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
@@ -199,12 +347,114 @@ func (s *sqliteStore) SaveInvestigation(ctx context.Context, rec *InvestigationR
 		rec.Conclusion, rec.Confidence, rec.Metadata,
 		rec.CreatedAt.UTC(), rec.UpdatedAt.UTC(),
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("upsert investigation: %w", err)
+	}
+
+	// findings
+	if _, err := tx.ExecContext(ctx, `DELETE FROM investigation_findings WHERE investigation_id=?`, rec.ID); err != nil {
+		return fmt.Errorf("delete findings: %w", err)
+	}
+	for _, f := range rec.Findings {
+		_, err := tx.ExecContext(ctx, `
+            INSERT INTO investigation_findings(investigation_id, statement, evidence, confidence, severity, timestamp)
+            VALUES(?,?,?,?,?,?)
+        `, rec.ID, f.Statement, f.Evidence, f.Confidence, f.Severity, f.Timestamp.UTC())
+		if err != nil {
+			return fmt.Errorf("insert finding: %w", err)
+		}
+	}
+
+	// tool calls
+	if _, err := tx.ExecContext(ctx, `DELETE FROM investigation_tool_calls WHERE investigation_id=?`, rec.ID); err != nil {
+		return fmt.Errorf("delete tool_calls: %w", err)
+	}
+	for _, tc := range rec.ToolCalls {
+		_, err := tx.ExecContext(ctx, `
+            INSERT INTO investigation_tool_calls(investigation_id, tool_name, args, result, turn_index, timestamp)
+            VALUES(?,?,?,?,?,?)
+        `, rec.ID, tc.ToolName, tc.Args, tc.Result, tc.TurnIndex, tc.Timestamp.UTC())
+		if err != nil {
+			return fmt.Errorf("insert tool_call: %w", err)
+		}
+	}
+
+	// steps
+	if _, err := tx.ExecContext(ctx, `DELETE FROM investigation_steps WHERE investigation_id=?`, rec.ID); err != nil {
+		return fmt.Errorf("delete steps: %w", err)
+	}
+	for _, st := range rec.Steps {
+		_, err := tx.ExecContext(ctx, `
+            INSERT INTO investigation_steps(investigation_id, step_number, description, result, timestamp)
+            VALUES(?,?,?,?,?)
+        `, rec.ID, st.Number, st.Description, st.Result, st.Timestamp.UTC())
+		if err != nil {
+			return fmt.Errorf("insert step: %w", err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (s *sqliteStore) GetInvestigation(ctx context.Context, id string) (*InvestigationRecord, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT id,type,state,description,context,conclusion,confidence,metadata,created_at,updated_at FROM investigations WHERE id=?`, id)
-	return scanInvestigation(row)
+	rec, err := scanInvestigation(row)
+	if err != nil {
+		return nil, err
+	}
+
+	// findings
+	fRows, err := s.db.QueryContext(ctx, `SELECT statement,evidence,confidence,severity,timestamp FROM investigation_findings WHERE investigation_id=? ORDER BY id ASC`, id)
+	if err != nil {
+		return nil, fmt.Errorf("query findings: %w", err)
+	}
+	defer fRows.Close()
+	for fRows.Next() {
+		var f FindingRecord
+		var ts string
+		f.InvestigationID = id
+		if err := fRows.Scan(&f.Statement, &f.Evidence, &f.Confidence, &f.Severity, &ts); err != nil {
+			return nil, err
+		}
+		f.Timestamp, _ = parseTime(ts)
+		rec.Findings = append(rec.Findings, f)
+	}
+
+	// tool calls
+	tcRows, err := s.db.QueryContext(ctx, `SELECT tool_name,args,result,turn_index,timestamp FROM investigation_tool_calls WHERE investigation_id=? ORDER BY turn_index ASC`, id)
+	if err != nil {
+		return nil, fmt.Errorf("query tool_calls: %w", err)
+	}
+	defer tcRows.Close()
+	for tcRows.Next() {
+		var tc ToolCallRecord
+		var ts string
+		tc.InvestigationID = id
+		if err := tcRows.Scan(&tc.ToolName, &tc.Args, &tc.Result, &tc.TurnIndex, &ts); err != nil {
+			return nil, err
+		}
+		tc.Timestamp, _ = parseTime(ts)
+		rec.ToolCalls = append(rec.ToolCalls, tc)
+	}
+
+	// steps
+	sRows, err := s.db.QueryContext(ctx, `SELECT step_number,description,result,timestamp FROM investigation_steps WHERE investigation_id=? ORDER BY step_number ASC`, id)
+	if err != nil {
+		return nil, fmt.Errorf("query steps: %w", err)
+	}
+	defer sRows.Close()
+	for sRows.Next() {
+		var st StepRecord
+		var ts string
+		st.InvestigationID = id
+		if err := sRows.Scan(&st.Number, &st.Description, &st.Result, &ts); err != nil {
+			return nil, err
+		}
+		st.Timestamp, _ = parseTime(ts)
+		rec.Steps = append(rec.Steps, st)
+	}
+
+	return rec, nil
 }
 
 func (s *sqliteStore) ListInvestigations(ctx context.Context, limit, offset int) ([]*InvestigationRecord, error) {
@@ -636,6 +886,44 @@ func (s *sqliteStore) LatestCostSnapshot(ctx context.Context, clusterID string) 
 		return nil, err
 	}
 	rec.RecordedAt, _ = parseTime(ts)
+	return rec, nil
+}
+
+// ─── LLM Config (migration 7) ─────────────────────────────────────────────────
+
+// SaveLLMConfig upserts the singleton LLM config row (id=1).
+// Called after every successful POST /api/v1/config/provider so the config
+// survives kubilitics-ai process restarts.
+func (s *sqliteStore) SaveLLMConfig(ctx context.Context, rec *LLMConfigRecord) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO llm_config(id, provider, model, api_key, base_url, updated_at)
+		VALUES(1, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			provider   = excluded.provider,
+			model      = excluded.model,
+			api_key    = excluded.api_key,
+			base_url   = excluded.base_url,
+			updated_at = excluded.updated_at
+	`, rec.Provider, rec.Model, rec.APIKey, rec.BaseURL, rec.UpdatedAt.UTC())
+	return err
+}
+
+// LoadLLMConfig reads the singleton LLM config row.
+// Returns nil, nil when no config has been saved yet (fresh install).
+func (s *sqliteStore) LoadLLMConfig(ctx context.Context) (*LLMConfigRecord, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT provider, model, api_key, base_url, updated_at FROM llm_config WHERE id = 1`)
+
+	rec := &LLMConfigRecord{}
+	var updatedAt string
+	err := row.Scan(&rec.Provider, &rec.Model, &rec.APIKey, &rec.BaseURL, &updatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // no config saved yet — fresh install
+		}
+		return nil, fmt.Errorf("load llm_config: %w", err)
+	}
+	rec.UpdatedAt, _ = parseTime(updatedAt)
 	return rec, nil
 }
 

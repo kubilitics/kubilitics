@@ -3,6 +3,14 @@ use tauri::command;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::process::Command;
+use std::fs;
+use std::io::Write;
+use aes_gcm::{
+    aead::{Aead, AeadCore, KeyInit, OsRng},
+    Aes256Gcm, Nonce,
+};
+use base64::{engine::general_purpose, Engine as _};
+use sha2::{Sha256, Digest};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KubeconfigContext {
@@ -32,14 +40,14 @@ fn kubeconfig_write_error() -> String {
 
 #[command]
 pub async fn read_kubeconfig(path: Option<String>) -> Result<String, String> {
-    let kubeconfig_path = get_kubeconfig_path(path)?;
+    let kubeconfig_path = get_kubeconfig_path(path).await?;
 
     std::fs::read_to_string(kubeconfig_path).map_err(|_| kubeconfig_read_error())
 }
 
 #[command]
 pub async fn get_kubeconfig_info(path: Option<String>) -> Result<KubeconfigInfo, String> {
-    let kubeconfig_path = get_kubeconfig_path(path.clone())?;
+    let kubeconfig_path = get_kubeconfig_path(path.clone()).await?;
     let content = std::fs::read_to_string(&kubeconfig_path).map_err(|_| kubeconfig_read_error())?;
     
     let config: Value = serde_yaml::from_str(&content).map_err(|_| kubeconfig_parse_error())?;
@@ -59,7 +67,7 @@ pub async fn get_kubeconfig_info(path: Option<String>) -> Result<KubeconfigInfo,
 
 #[command]
 pub async fn switch_context(context_name: String) -> Result<(), String> {
-    let kubeconfig_path = get_kubeconfig_path(None)?;
+    let kubeconfig_path = get_kubeconfig_path(None).await?;
     let content = std::fs::read_to_string(&kubeconfig_path).map_err(|_| kubeconfig_read_error())?;
     
     let mut config: Value = serde_yaml::from_str(&content).map_err(|_| kubeconfig_parse_error())?;
@@ -85,7 +93,7 @@ pub async fn switch_context(context_name: String) -> Result<(), String> {
 
 #[command]
 pub async fn validate_kubeconfig(path: Option<String>) -> Result<bool, String> {
-    let kubeconfig_path = get_kubeconfig_path(path)?;
+    let kubeconfig_path = get_kubeconfig_path(path).await?;
     
     if !kubeconfig_path.exists() {
         return Ok(false);
@@ -282,14 +290,519 @@ pub async fn get_recent_exports() -> Result<Vec<String>, String> {
 }
 
 #[command]
-pub async fn select_kubeconfig_file() -> Result<Option<String>, String> {
-    // This will be called from frontend using dialog plugin
-    Ok(None)
+pub async fn select_kubeconfig_file(app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    
+    let file_path = app_handle.dialog()
+        .file()
+        .set_title("Select Kubeconfig File")
+        .add_filter("Kubeconfig", &["yaml", "yml"])
+        .add_filter("All Files", &["*"])
+        .pick_file()
+        .await;
+    
+    Ok(file_path.map(|p| p.to_string_lossy().to_string()))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KubeconfigSecuritySettings {
+    pub selected_contexts: Vec<String>,
+    pub kubeconfig_path: Option<String>,
+    pub encrypted_kubeconfig: Option<String>, // Base64 encoded encrypted kubeconfig
+    pub first_launch_completed: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnalyticsSettings {
+    pub consent_given: bool,
+    pub consent_timestamp: Option<u64>,
+    pub opt_out: bool,
+}
+
+async fn get_security_settings_path() -> Result<PathBuf, String> {
+    let app_data_dir = get_app_data_dir().await?;
+    Ok(app_data_dir.join("kubeconfig_security.json"))
+}
+
+async fn load_security_settings() -> Result<KubeconfigSecuritySettings, String> {
+    let settings_path = get_security_settings_path().await?;
+    
+    if !settings_path.exists() {
+        return Ok(KubeconfigSecuritySettings {
+            selected_contexts: Vec::new(),
+            kubeconfig_path: None,
+            encrypted_kubeconfig: None,
+            first_launch_completed: false,
+        });
+    }
+    
+    let content = fs::read_to_string(&settings_path)
+        .map_err(|_| "Failed to read security settings".to_string())?;
+    
+    serde_json::from_str(&content)
+        .map_err(|_| "Failed to parse security settings".to_string())
+}
+
+#[command]
+pub async fn get_selected_contexts() -> Result<Vec<String>, String> {
+    let settings = load_security_settings().await?;
+    Ok(settings.selected_contexts)
+}
+
+async fn save_security_settings(settings: &KubeconfigSecuritySettings) -> Result<(), String> {
+    let settings_path = get_security_settings_path().await?;
+    
+    // Ensure parent directory exists
+    if let Some(parent) = settings_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|_| "Failed to create settings directory".to_string())?;
+    }
+    
+    let content = serde_json::to_string_pretty(settings)
+        .map_err(|_| "Failed to serialize settings".to_string())?;
+    
+    fs::write(&settings_path, content)
+        .map_err(|_| "Failed to write security settings".to_string())?;
+    
+    Ok(())
+}
+
+#[command]
+pub async fn save_selected_contexts(contexts: Vec<String>) -> Result<(), String> {
+    let mut settings = load_security_settings().await?;
+    settings.selected_contexts = contexts;
+    save_security_settings(&settings).await
+}
+
+#[command]
+pub async fn is_first_launch() -> Result<bool, String> {
+    let settings = load_security_settings().await?;
+    Ok(!settings.first_launch_completed)
+}
+
+#[command]
+pub async fn mark_first_launch_complete() -> Result<(), String> {
+    let mut settings = load_security_settings().await?;
+    settings.first_launch_completed = true;
+    save_security_settings(&settings).await
+}
+
+#[command]
+pub async fn save_custom_kubeconfig_path(path: String) -> Result<(), String> {
+    let mut settings = load_security_settings().await?;
+    settings.kubeconfig_path = Some(path);
+    save_security_settings(&settings).await
+}
+
+#[command]
+pub async fn get_custom_kubeconfig_path() -> Result<Option<String>, String> {
+    let settings = load_security_settings().await?;
+    Ok(settings.kubeconfig_path)
+}
+
+// Kubeconfig Encryption Functions
+
+fn get_encryption_key() -> Result<Vec<u8>, String> {
+    // Derive key from app data directory path (device-specific)
+    // In production, consider using OS keychain or secure storage
+    let app_data_dir = dirs::data_local_dir()
+        .ok_or("Could not find data directory")?
+        .join("kubilitics");
+    
+    let key_material = format!("{}{}", app_data_dir.to_string_lossy(), "kubilitics-kubeconfig-key");
+    
+    // Use SHA-256 to derive a 32-byte key
+    let mut hasher = Sha256::new();
+    hasher.update(key_material.as_bytes());
+    Ok(hasher.finalize().to_vec())
+}
+
+#[command]
+pub async fn encrypt_kubeconfig(kubeconfig_content: String) -> Result<String, String> {
+    let key_bytes = get_encryption_key()?;
+    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
+    let cipher = Aes256Gcm::new(key);
+    
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    
+    let ciphertext = cipher
+        .encrypt(&nonce, kubeconfig_content.as_bytes())
+        .map_err(|e| format!("Encryption failed: {}", e))?;
+    
+    // Combine nonce and ciphertext, then base64 encode
+    let mut combined = nonce.to_vec();
+    combined.extend_from_slice(&ciphertext);
+    
+    Ok(general_purpose::STANDARD.encode(&combined))
+}
+
+#[command]
+pub async fn decrypt_kubeconfig(encrypted_content: String) -> Result<String, String> {
+    let key_bytes = get_encryption_key()?;
+    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
+    let cipher = Aes256Gcm::new(key);
+    
+    // Decode base64
+    let combined = general_purpose::STANDARD
+        .decode(encrypted_content)
+        .map_err(|e| format!("Base64 decode failed: {}", e))?;
+    
+    if combined.len() < 12 {
+        return Err("Invalid encrypted data".to_string());
+    }
+    
+    // Extract nonce (first 12 bytes) and ciphertext (rest)
+    let nonce = Nonce::from_slice(&combined[..12]);
+    let ciphertext = &combined[12..];
+    
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| format!("Decryption failed: {}", e))?;
+    
+    String::from_utf8(plaintext)
+        .map_err(|e| format!("UTF-8 decode failed: {}", e))
+}
+
+#[command]
+pub async fn save_encrypted_kubeconfig(kubeconfig_content: String) -> Result<(), String> {
+    let encrypted = encrypt_kubeconfig(kubeconfig_content).await?;
+    
+    let mut settings = load_security_settings().await?;
+    settings.encrypted_kubeconfig = Some(encrypted);
+    save_security_settings(&settings).await
+}
+
+#[command]
+pub async fn load_encrypted_kubeconfig() -> Result<Option<String>, String> {
+    let settings = load_security_settings().await?;
+    
+    if let Some(encrypted) = settings.encrypted_kubeconfig {
+        let decrypted = decrypt_kubeconfig(encrypted).await?;
+        Ok(Some(decrypted))
+    } else {
+        Ok(None)
+    }
+}
+
+#[command]
+pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<Option<tauri_plugin_updater::Update>, String> {
+    use tauri::Manager;
+    
+    let builder = tauri_plugin_updater::UpdaterBuilder::new();
+    match builder.check().await {
+        Ok(Some(update)) => {
+            // Check if update is available
+            if update.version != app_handle.package_info().version.to_string() {
+                Ok(Some(update))
+            } else {
+                Ok(None)
+            }
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(format!("Failed to check for updates: {}", e)),
+    }
+}
+
+#[command]
+pub async fn install_update(app_handle: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    
+    let builder = tauri_plugin_updater::UpdaterBuilder::new();
+    match builder.check().await {
+        Ok(Some(update)) => {
+            update.download_and_install(|chunk_length, content_length| {
+                // Progress callback
+                let _ = app_handle.emit("update-progress", serde_json::json!({
+                    "chunk_length": chunk_length,
+                    "content_length": content_length,
+                    "progress": if content_length > 0 {
+                        (chunk_length as f64 / content_length as f64) * 100.0
+                    } else {
+                        0.0
+                    }
+                }));
+            }, || {
+                // Finished callback
+                let _ = app_handle.emit("update-ready", ());
+            }).await
+            .map_err(|e| format!("Failed to install update: {}", e))?;
+            Ok(())
+        }
+        Ok(None) => Err("No update available".to_string()),
+        Err(e) => Err(format!("Failed to check for updates: {}", e)),
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DesktopInfo {
+    pub app_version: String,
+    pub backend_port: u16,
+    pub backend_version: Option<String>,
+    pub backend_uptime_seconds: Option<u64>,
+    pub kubeconfig_path: String,
+    pub app_data_dir: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConnectivityStatus {
+    pub is_online: bool,
+    pub backend_reachable: bool,
+    pub ai_backend_reachable: bool,
+    pub last_check: u64, // Unix timestamp
+}
+
+#[command]
+pub async fn check_connectivity() -> Result<ConnectivityStatus, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    
+    // Check basic internet connectivity
+    let is_online = check_internet_connectivity().await;
+    
+    // Check backend connectivity
+    let backend_reachable = check_backend_connectivity().await;
+    
+    // Check AI backend connectivity
+    let ai_backend_reachable = check_ai_backend_connectivity().await;
+    
+    Ok(ConnectivityStatus {
+        is_online,
+        backend_reachable,
+        ai_backend_reachable,
+        last_check: now,
+    })
+}
+
+async fn check_internet_connectivity() -> bool {
+    // Try to connect to a reliable external service
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .ok()?;
+    
+    // Try multiple endpoints for reliability
+    let endpoints = vec![
+        "https://www.google.com",
+        "https://1.1.1.1", // Cloudflare DNS
+        "https://8.8.8.8", // Google DNS
+    ];
+    
+    for endpoint in endpoints {
+        if client.get(endpoint).send().await.is_ok() {
+            return true;
+        }
+    }
+    
+    false
+}
+
+async fn check_backend_connectivity() -> bool {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .ok()?;
+    
+    client.get("http://localhost:819/health")
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+async fn check_ai_backend_connectivity() -> bool {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .ok()?;
+    
+    client.get("http://localhost:8081/health")
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+async fn get_analytics_settings_path() -> Result<PathBuf, String> {
+    let app_data_dir = get_app_data_dir().await?;
+    Ok(app_data_dir.join("analytics_settings.json"))
+}
+
+async fn load_analytics_settings() -> Result<AnalyticsSettings, String> {
+    let settings_path = get_analytics_settings_path().await?;
+    
+    if !settings_path.exists() {
+        return Ok(AnalyticsSettings {
+            consent_given: false,
+            consent_timestamp: None,
+            opt_out: false,
+        });
+    }
+    
+    let content = fs::read_to_string(&settings_path)
+        .map_err(|_| "Failed to read analytics settings".to_string())?;
+    
+    serde_json::from_str(&content)
+        .map_err(|_| "Failed to parse analytics settings".to_string())
+}
+
+async fn save_analytics_settings(settings: &AnalyticsSettings) -> Result<(), String> {
+    let settings_path = get_analytics_settings_path().await?;
+    
+    if let Some(parent) = settings_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|_| "Failed to create settings directory".to_string())?;
+    }
+    
+    let content = serde_json::to_string_pretty(settings)
+        .map_err(|_| "Failed to serialize analytics settings".to_string())?;
+    
+    fs::write(&settings_path, content)
+        .map_err(|_| "Failed to write analytics settings".to_string())?;
+    
+    Ok(())
+}
+
+#[command]
+pub async fn get_analytics_consent() -> Result<bool, String> {
+    let settings = load_analytics_settings().await?;
+    Ok(settings.consent_given && !settings.opt_out)
+}
+
+#[command]
+pub async fn set_analytics_consent(consent: bool) -> Result<(), String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    
+    let mut settings = load_analytics_settings().await?;
+    settings.consent_given = consent;
+    settings.opt_out = !consent;
+    
+    if consent {
+        settings.consent_timestamp = Some(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
+    }
+    
+    save_analytics_settings(&settings).await
+}
+
+#[command]
+pub async fn has_analytics_consent_been_asked() -> Result<bool, String> {
+    let settings = load_analytics_settings().await?;
+    Ok(settings.consent_timestamp.is_some())
+}
+
+#[command]
+pub async fn get_desktop_info() -> Result<DesktopInfo, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    
+    let app_data_dir = get_app_data_dir().await?;
+    let kubeconfig_path = get_kubeconfig_path(None)?.to_string_lossy().to_string();
+    
+    // Get app version from package info (would need to pass AppHandle)
+    // For now, use a placeholder - this should be passed from main.rs
+    let app_version = env!("CARGO_PKG_VERSION").to_string();
+    
+    // Try to get backend health info
+    let backend_port = 819u16;
+    let backend_version = None; // Would need to call /api/v1/version endpoint
+    let backend_uptime_seconds = None; // Would need to call /api/v1/health and parse uptime
+    
+    Ok(DesktopInfo {
+        app_version,
+        backend_port,
+        backend_version,
+        backend_uptime_seconds,
+        kubeconfig_path,
+        app_data_dir,
+    })
+}
+
+#[command]
+pub async fn restart_sidecar(_app_handle: tauri::AppHandle) -> Result<(), String> {
+    // TODO: Implement restart logic
+    // This requires access to BackendManager which is stored in app state
+    // For now, return success - actual implementation needs to be done in sidecar module
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KubectlStatus {
+    pub installed: bool,
+    pub version: Option<String>,
+    pub path: Option<String>,
+}
+
+#[command]
+pub async fn check_kubectl_installed() -> Result<KubectlStatus, String> {
+    // Check if kubectl is in PATH
+    let which_output = if cfg!(target_os = "windows") {
+        // On Windows, use "where.exe" or "where" command
+        std::process::Command::new("where.exe")
+            .arg("kubectl")
+            .output()
+            .or_else(|_| {
+                // Fallback to "where" if where.exe not found
+                std::process::Command::new("where")
+                    .arg("kubectl")
+                    .output()
+            })
+    } else {
+        std::process::Command::new("which")
+            .arg("kubectl")
+            .output()
+    };
+
+    match which_output {
+        Ok(output) if output.status.success() => {
+            let path = String::from_utf8(output.stdout)
+                .ok()
+                .map(|s| s.trim().to_string());
+            
+            // Try to get version
+            let version_output = std::process::Command::new("kubectl")
+                .args(&["version", "--client", "--short"])
+                .output();
+            
+            let version = version_output
+                .ok()
+                .and_then(|v| String::from_utf8(v.stdout).ok())
+                .map(|s| s.trim().to_string());
+
+            Ok(KubectlStatus {
+                installed: true,
+                version,
+                path,
+            })
+        }
+        _ => {
+            Ok(KubectlStatus {
+                installed: false,
+                version: None,
+                path: None,
+            })
+        }
+    }
 }
 
 // Helper functions
 
-fn get_kubeconfig_path(path: Option<String>) -> Result<PathBuf, String> {
+async fn get_kubeconfig_path(path: Option<String>) -> Result<PathBuf, String> {
+    // First check if custom path is set
+    if path.is_none() {
+        if let Ok(settings) = load_security_settings().await {
+            if let Some(custom_path) = settings.kubeconfig_path {
+                return Ok(PathBuf::from(custom_path));
+            }
+        }
+    }
+    
     match path {
         Some(p) => Ok(PathBuf::from(p)),
         None => {

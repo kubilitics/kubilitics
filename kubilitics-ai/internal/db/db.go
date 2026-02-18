@@ -12,6 +12,9 @@ type Store interface {
 	ConversationStore
 	AnomalyStore
 	CostSnapshotStore
+	BudgetStore
+	SafetyPolicyStore
+	LLMConfigStore
 
 	// Close releases database resources.
 	Close() error
@@ -20,20 +23,145 @@ type Store interface {
 	Ping(ctx context.Context) error
 }
 
+// ─── LLM Config store ─────────────────────────────────────────────────────────
+
+// LLMConfigRecord holds the persisted LLM provider configuration.
+// The api_key is stored as-is in the local SQLite file (which lives inside the
+// app data directory, readable only by the current OS user on all platforms).
+// It is NEVER sent over the network or echoed in API responses.
+type LLMConfigRecord struct {
+	Provider  string    `json:"provider"`   // openai | anthropic | ollama | custom
+	Model     string    `json:"model"`      // e.g. gpt-4o
+	APIKey    string    `json:"api_key"`    // sensitive — local DB only
+	BaseURL   string    `json:"base_url"`   // for ollama / custom
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// LLMConfigStore persists the active LLM provider configuration so it survives
+// process restarts without requiring the user to re-enter their API key.
+type LLMConfigStore interface {
+	// SaveLLMConfig writes (or overwrites) the singleton LLM config row.
+	SaveLLMConfig(ctx context.Context, rec *LLMConfigRecord) error
+
+	// LoadLLMConfig reads the singleton LLM config row.
+	// Returns nil, nil when no config has been saved yet.
+	LoadLLMConfig(ctx context.Context) (*LLMConfigRecord, error)
+}
+
+// ─── Budget store (AI-006) ────────────────────────────────────────────────────
+
+// BudgetRecord is a persisted LLM token usage entry for budget tracking.
+type BudgetRecord struct {
+	ID              int64     `json:"id"`
+	UserID          string    `json:"user_id"`
+	InvestigationID string    `json:"investigation_id"`
+	Provider        string    `json:"provider"`
+	InputTokens     int       `json:"input_tokens"`
+	OutputTokens    int       `json:"output_tokens"`
+	CostUSD         float64   `json:"cost_usd"`
+	RecordedAt      time.Time `json:"recorded_at"`
+}
+
+// BudgetStore persists LLM token usage for budget tracking across restarts.
+type BudgetStore interface {
+	// AppendBudgetRecord writes a single token usage record.
+	AppendBudgetRecord(ctx context.Context, rec *BudgetRecord) error
+
+	// QueryBudgetRecords retrieves records for a user within a time window.
+	QueryBudgetRecords(ctx context.Context, userID string, from, to time.Time) ([]*BudgetRecord, error)
+
+	// GlobalBudgetTotal returns total cost in USD for all users within the window.
+	GlobalBudgetTotal(ctx context.Context, from, to time.Time) (float64, error)
+
+	// GetUserBudget retrieval a user's budget limit.
+	GetUserBudget(ctx context.Context, userID string) (float64, time.Time, error)
+
+	SetUserBudget(ctx context.Context, userID string, limitUSD float64) error
+	ResetUserBudget(ctx context.Context, userID string) error
+
+	// RolloverAllBudgets advances period_start to now for every user in budget_limits.
+	// Called by the monthly rollover cron so counters reset without a service restart (AI-016).
+	RolloverAllBudgets(ctx context.Context) error
+}
+
+// ─── Safety Policy store (A-CORE-011) ─────────────────────────────────────────
+
+// SafetyPolicyRecord represents a user-configurable safety rule.
+type SafetyPolicyRecord struct {
+	Name      string    `json:"name"`
+	Condition string    `json:"condition"`
+	Effect    string    `json:"effect"` // "deny", "warn"
+	Reason    string    `json:"reason"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// SafetyPolicyStore persists configurable safety policies.
+type SafetyPolicyStore interface {
+	// ListPolicies returns all active policies.
+	ListPolicies(ctx context.Context) ([]*SafetyPolicyRecord, error)
+
+	// GetPolicy returns a single policy by name.
+	GetPolicy(ctx context.Context, name string) (*SafetyPolicyRecord, error)
+
+	// CreatePolicy creates a new policy.
+	CreatePolicy(ctx context.Context, rec *SafetyPolicyRecord) error
+
+	// UpdatePolicy updates an existing policy.
+	UpdatePolicy(ctx context.Context, rec *SafetyPolicyRecord) error
+
+	// DeletePolicy removes a policy.
+	DeletePolicy(ctx context.Context, name string) error
+}
+
 // ─── Investigation store ──────────────────────────────────────────────────────
 
 // InvestigationRecord is the DB representation of an investigation session.
 type InvestigationRecord struct {
-	ID          string    `json:"id"`
-	Type        string    `json:"type"`
-	State       string    `json:"state"`
-	Description string    `json:"description"`
-	Context     string    `json:"context"`
-	Conclusion  string    `json:"conclusion"`
-	Confidence  int       `json:"confidence"`
-	Metadata    string    `json:"metadata"` // JSON blob
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string           `json:"id"`
+	Type        string           `json:"type"`
+	State       string           `json:"state"`
+	Description string           `json:"description"`
+	Context     string           `json:"context"`
+	Conclusion  string           `json:"conclusion"`
+	Confidence  int              `json:"confidence"`
+	Metadata    string           `json:"metadata"` // JSON blob
+	CreatedAt   time.Time        `json:"created_at"`
+	UpdatedAt   time.Time        `json:"updated_at"`
+	Findings    []FindingRecord  `json:"findings"`
+	ToolCalls   []ToolCallRecord `json:"tool_calls"`
+	Steps       []StepRecord     `json:"steps"`
+}
+
+// FindingRecord is a discovered fact.
+type FindingRecord struct {
+	ID              int64     `json:"id"`
+	InvestigationID string    `json:"investigation_id"`
+	Statement       string    `json:"statement"`
+	Evidence        string    `json:"evidence"`
+	Confidence      int       `json:"confidence"`
+	Severity        string    `json:"severity"`
+	Timestamp       time.Time `json:"timestamp"`
+}
+
+// ToolCallRecord is a record of a tool execution.
+type ToolCallRecord struct {
+	ID              int64     `json:"id"`
+	InvestigationID string    `json:"investigation_id"`
+	ToolName        string    `json:"tool_name"`
+	Args            string    `json:"args"` // JSON blob
+	Result          string    `json:"result"`
+	TurnIndex       int       `json:"turn_index"`
+	Timestamp       time.Time `json:"timestamp"`
+}
+
+// StepRecord is a high-level step in the investigation.
+type StepRecord struct {
+	ID              int64     `json:"id"`
+	InvestigationID string    `json:"investigation_id"`
+	Number          int       `json:"number"`
+	Description     string    `json:"description"`
+	Result          string    `json:"result"`
+	Timestamp       time.Time `json:"timestamp"`
 }
 
 // InvestigationStore persists investigation sessions.
@@ -78,13 +206,13 @@ type AuditStore interface {
 
 // AuditQuery filters audit event queries.
 type AuditQuery struct {
-	Resource  string
-	Action    string
-	UserID    string
-	From      time.Time
-	To        time.Time
-	Limit     int
-	Offset    int
+	Resource string
+	Action   string
+	UserID   string
+	From     time.Time
+	To       time.Time
+	Limit    int
+	Offset   int
 }
 
 // ─── Conversation store ───────────────────────────────────────────────────────
@@ -178,15 +306,15 @@ type AnomalyStore interface {
 
 // CostSnapshotRecord is a persisted cost pipeline snapshot for trending.
 type CostSnapshotRecord struct {
-	ID          int64     `json:"id"`
-	ClusterID   string    `json:"cluster_id"`
-	TotalCost   float64   `json:"total_cost"`
-	WasteCost   float64   `json:"waste_cost"`
-	Efficiency  float64   `json:"efficiency"` // 0–100
-	Grade       string    `json:"grade"`
-	Breakdown   string    `json:"breakdown"`  // JSON: map[kind]cost
-	Namespaces  string    `json:"namespaces"` // JSON: []NamespaceCost summary
-	RecordedAt  time.Time `json:"recorded_at"`
+	ID         int64     `json:"id"`
+	ClusterID  string    `json:"cluster_id"`
+	TotalCost  float64   `json:"total_cost"`
+	WasteCost  float64   `json:"waste_cost"`
+	Efficiency float64   `json:"efficiency"` // 0–100
+	Grade      string    `json:"grade"`
+	Breakdown  string    `json:"breakdown"`  // JSON: map[kind]cost
+	Namespaces string    `json:"namespaces"` // JSON: []NamespaceCost summary
+	RecordedAt time.Time `json:"recorded_at"`
 }
 
 // CostTrendPoint is a single point in a cost trend query.

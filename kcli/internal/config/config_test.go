@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -9,12 +10,15 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cfg, err := Load()
+	s, err := LoadStore()
 	if err != nil {
-		t.Fatalf("Load error: %v", err)
+		t.Fatalf("LoadStore error: %v", err)
 	}
-	if cfg.General.Theme != "ocean" {
-		t.Fatalf("expected default theme ocean, got %q", cfg.General.Theme)
+	if s.ActiveProfile != "default" {
+		t.Fatalf("expected default active profile, got %q", s.ActiveProfile)
+	}
+	if s.Current().General.Theme != "ocean" {
+		t.Fatalf("expected default theme ocean, got %q", s.Current().General.Theme)
 	}
 }
 
@@ -107,5 +111,51 @@ func TestAIConfigRoundTrip(t *testing.T) {
 	}
 	if loaded.AI.BudgetMonthlyUSD != 75 || loaded.AI.SoftLimitPercent != 85 {
 		t.Fatalf("unexpected ai budget config: %+v", loaded.AI)
+	}
+}
+func TestMultiProfileSwitching(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	s := DefaultStore()
+	s.Profiles["prod"] = Default()
+	s.Profiles["prod"].General.Theme = "amber"
+	if err := SaveStore(s); err != nil {
+		t.Fatalf("SaveStore error: %v", err)
+	}
+
+	loaded, err := LoadStore()
+	if err != nil {
+		t.Fatalf("LoadStore error: %v", err)
+	}
+	if _, ok := loaded.Profiles["prod"]; !ok {
+		t.Fatal("prod profile missing")
+	}
+
+	loaded.ActiveProfile = "prod"
+	if loaded.Current().General.Theme != "amber" {
+		t.Fatalf("expected amber theme in prod, got %q", loaded.Current().General.Theme)
+	}
+}
+
+func TestLegacyConfigMigration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Write old format config
+	path, _ := FilePath()
+	_ = os.MkdirAll(filepath.Dir(path), 0755)
+	legacy := `general: {theme: forest}`
+	_ = os.WriteFile(path, []byte(legacy), 0644)
+
+	s, err := LoadStore()
+	if err != nil {
+		t.Fatalf("LoadStore migration error: %v", err)
+	}
+	if s.ActiveProfile != "default" {
+		t.Fatal("expected default profile after migration")
+	}
+	if s.Current().General.Theme != "forest" {
+		t.Fatalf("expected theme forest after migration, got %q", s.Current().General.Theme)
 	}
 }

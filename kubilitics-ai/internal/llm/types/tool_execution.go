@@ -9,7 +9,13 @@ type ToolExecutor interface {
 	// Execute runs a named tool with the given arguments and returns the result.
 	// The result is a string that will be fed back to the LLM as the tool output.
 	// Implementations must be safe for concurrent execution (parallel tool calls).
+	// Execute runs a named tool with the given arguments and returns the result.
+	// The result is a string that will be fed back to the LLM as the tool output.
+	// Implementations must be safe for concurrent execution (parallel tool calls).
 	Execute(ctx context.Context, toolName string, args map[string]interface{}) (string, error)
+
+	// WithAutonomyLevel returns a copy of the executor with the specified autonomy level.
+	WithAutonomyLevel(level int) ToolExecutor
 }
 
 // ToolEvent is sent to the WebSocket client during a tool-calling turn,

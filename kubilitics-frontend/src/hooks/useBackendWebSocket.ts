@@ -3,6 +3,7 @@
  * Primary for real-time updates (topology, resources); polling is fallback when disconnected.
  */
 import { useEffect, useRef, useCallback, useState } from 'react';
+import { toast } from 'sonner';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 
 const DEFAULT_MAX_RETRIES = 10;
@@ -44,6 +45,27 @@ export function useBackendWebSocket(options: UseBackendWebSocketOptions = {}) {
   const retryCountRef = useRef(0);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const reconnect = useCallback(() => {
+    // Reset retry count and attempt reconnection
+    retryCountRef.current = 0;
+    setError(null);
+
+    // Clear any pending reconnect timeout
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    // Close existing connection if any
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    // Attempt to reconnect
+    connect();
+  }, [connect]);
+
   const connect = useCallback(() => {
     if (!isConfigured() || !enabled) return;
 
@@ -80,7 +102,21 @@ export function useBackendWebSocket(options: UseBackendWebSocketOptions = {}) {
 
       if (!enabled) return;
       if (retryCountRef.current >= maxRetries) {
-        setError(`WebSocket disconnected after ${maxRetries} retries`);
+        const errorMsg = `WebSocket disconnected after ${maxRetries} retries`;
+        setError(errorMsg);
+
+        // Show persistent toast with manual reconnect button
+        toast.error('WebSocket connection lost', {
+          description: 'Real-time updates are disabled. Click to reconnect.',
+          duration: Infinity, // Persist until user dismisses or reconnects
+          action: {
+            label: 'Reconnect',
+            onClick: () => {
+              reconnect();
+              toast.dismiss();
+            },
+          },
+        });
         return;
       }
 
@@ -100,7 +136,7 @@ export function useBackendWebSocket(options: UseBackendWebSocketOptions = {}) {
     ws.onerror = () => {
       setError('WebSocket error');
     };
-  }, [backendBaseUrl, clusterId, enabled, isConfigured, maxRetries, onMessage]);
+  }, [backendBaseUrl, clusterId, enabled, isConfigured, maxRetries, onMessage, reconnect]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -127,7 +163,7 @@ export function useBackendWebSocket(options: UseBackendWebSocketOptions = {}) {
     connected,
     lastMessage,
     error,
-    reconnect: connect,
+    reconnect, // Manual reconnect function
     disconnect,
   };
 }

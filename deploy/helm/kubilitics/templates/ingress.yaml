@@ -5,10 +5,24 @@ metadata:
   name: {{ include "kubilitics.fullname" . }}
   labels:
     {{- include "kubilitics.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- if .Values.ingress.certManager.enabled }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer | default "letsencrypt-prod" }}
+    {{- if .Values.ingress.certManager.issuer }}
+    cert-manager.io/issuer: {{ .Values.ingress.certManager.issuer }}
+    {{- end }}
+    {{- end }}
+    {{- if .Values.ingress.annotations }}
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+    {{- end }}
+    {{- if not .Values.ingress.annotations }}
+    # Default annotations for production
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    {{- end }}
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
@@ -20,7 +34,12 @@ spec:
         {{- range .hosts }}
         - {{ . | quote }}
         {{- end }}
+      {{- if .secretName }}
       secretName: {{ .secretName }}
+      {{- else if $.Values.ingress.certManager.enabled }}
+      # cert-manager will create the secret automatically
+      secretName: {{ $.Values.ingress.certManager.secretName | default (printf "%s-tls" (include "kubilitics.fullname" $)) }}
+      {{- end }}
     {{- end }}
   {{- end }}
   rules:
@@ -28,6 +47,17 @@ spec:
     - host: {{ .host | quote }}
       http:
         paths:
+          {{- if $.Values.frontend.enabled }}
+          # Frontend route (serves static files and proxies API)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "kubilitics.fullname" $ }}-frontend
+                port:
+                  number: {{ $.Values.frontend.service.port }}
+          {{- else }}
+          # Backend-only route
           {{- range .paths }}
           - path: {{ .path }}
             pathType: {{ .pathType }}
@@ -36,6 +66,7 @@ spec:
                 name: {{ include "kubilitics.fullname" $ }}
                 port:
                   number: {{ $.Values.service.port }}
+          {{- end }}
           {{- end }}
     {{- end }}
 {{- end }}

@@ -55,6 +55,7 @@ import {
   TableSkeletonRows,
   CopyNameDropdownItem,
   ResourceListTableToolbar,
+  VirtualTableBody,
 } from '@/components/list';
 import { NodeIcon } from '@/components/icons/KubernetesIcons';
 import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
@@ -172,17 +173,17 @@ function transformNodeResource(resource: NodeResource): Node {
   const roles = Object.keys(labels)
     .filter(k => k.startsWith('node-role.kubernetes.io/'))
     .map(k => k.replace('node-role.kubernetes.io/', ''));
-  
+
   if (roles.length === 0) roles.push('worker');
-  
+
   const readyCondition = resource.status?.conditions?.find(c => c.type === 'Ready');
   const isReady = readyCondition?.status === 'True';
   const isSchedulable = !resource.spec?.unschedulable;
-  
+
   let status = 'NotReady';
   if (isReady && isSchedulable) status = 'Ready';
   else if (isReady && !isSchedulable) status = 'SchedulingDisabled';
-  
+
   const conditions = (resource.status?.conditions || [])
     .filter(c => c.status === 'True' || (c.type === 'Ready' && c.status === 'False'))
     .map(c => c.type);
@@ -265,6 +266,7 @@ export default function Nodes() {
   const [listView, setListView] = useState<ListView>('flat');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const allItems = (data?.allItems ?? []) as NodeResource[];
+  const tableContainerRef = useRef<HTMLDivElement>(null);
   const nodes: Node[] = useMemo(() => (isConnected ? allItems.map(transformNodeResource) : []), [isConnected, allItems]);
 
   const podsListQuery = useK8sResourceList<KubernetesResource & { spec?: { nodeName?: string } }>('pods', undefined, { limit: 5000, enabled: isConnected });
@@ -374,11 +376,43 @@ export default function Nodes() {
     return { total, ready, notReady, controlPlane, unschedulable };
   }, [nodesWithMetrics]);
 
-  const totalFiltered = searchFiltered.length;
-  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
-  const safePageIndex = Math.min(pageIndex, totalPages - 1);
-  const start = safePageIndex * pageSize;
-  const itemsOnPage = searchFiltered.slice(start, start + pageSize);
+  type NodeListItem = { type: 'node'; data: Node } | { type: 'header'; label: string; count: number; groupKey: string; isCollapsed: boolean };
+
+  const itemsToRender = useMemo<NodeListItem[]>(() => {
+    if (listView === 'flat') {
+      return searchFiltered.map(n => ({ type: 'node', data: n }));
+    }
+
+    const groupByKey = (item: Node) => (item.roles.some((r) => r === 'control-plane' || r === 'master') ? 'control-plane' : 'worker');
+    const map = new Map<string, Node[]>();
+    for (const item of searchFiltered) {
+      const k = groupByKey(item);
+      const list = map.get(k) ?? [];
+      list.push(item);
+      map.set(k, list);
+    }
+
+    const order = ['control-plane', 'worker'];
+    const result: NodeListItem[] = [];
+
+    for (const k of order) {
+      if (!map.has(k)) continue;
+      const nodes = map.get(k)!;
+      const groupKey = `byRole:${k}`;
+      const isCollapsed = collapsedGroups.has(groupKey);
+      result.push({
+        type: 'header',
+        label: k === 'control-plane' ? 'Control Plane' : 'Worker',
+        count: nodes.length,
+        groupKey,
+        isCollapsed
+      });
+      if (!isCollapsed) {
+        result.push(...nodes.map(n => ({ type: 'node', data: n } as NodeListItem)));
+      }
+    }
+    return result;
+  }, [searchFiltered, listView, collapsedGroups]);
 
   const toggleStatFilter = (columnId: 'status' | 'roleType', value: string) => {
     const current = columnFilters[columnId];
@@ -389,26 +423,6 @@ export default function Nodes() {
     }
   };
 
-  const groupedOnPage = useMemo(() => {
-    if (listView !== 'byRole' || itemsOnPage.length === 0) return [];
-    const groupByKey = (item: Node) => (item.roles.some((r) => r === 'control-plane' || r === 'master') ? 'control-plane' : 'worker');
-    const map = new Map<string, Node[]>();
-    for (const item of itemsOnPage) {
-      const k = groupByKey(item);
-      const list = map.get(k) ?? [];
-      list.push(item);
-      map.set(k, list);
-    }
-    const order = ['control-plane', 'worker'];
-    return order
-      .filter((k) => map.has(k))
-      .map((k) => ({
-        groupKey: `byRole:${k}`,
-        label: k === 'control-plane' ? 'Control Plane' : 'Worker',
-        nodes: map.get(k)!,
-      }));
-  }, [listView, itemsOnPage]);
-
   const toggleGroup = (groupKey: string) => {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -416,28 +430,6 @@ export default function Nodes() {
       else next.add(groupKey);
       return next;
     });
-  };
-
-  useEffect(() => {
-    if (safePageIndex !== pageIndex) setPageIndex(safePageIndex);
-  }, [safePageIndex, pageIndex]);
-
-  const handlePageSizeChange = (size: number) => {
-    setPageSize(size);
-    setPageIndex(0);
-  };
-
-  const pagination = {
-    rangeLabel: totalFiltered > 0 ? `Showing ${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered}` : 'No nodes',
-    hasPrev: safePageIndex > 0,
-    hasNext: start + pageSize < totalFiltered,
-    onPrev: () => setPageIndex((i) => Math.max(0, i - 1)),
-    onNext: () => setPageIndex((i) => Math.min(totalPages - 1, i + 1)),
-    currentPage: safePageIndex + 1,
-    totalPages: Math.max(1, totalPages),
-    onPageChange: (p: number) => setPageIndex(Math.max(0, Math.min(p - 1, totalPages - 1))),
-    dataUpdatedAt: hookPagination?.dataUpdatedAt,
-    isFetching: hookPagination?.isFetching,
   };
 
   const handleDelete = async () => {
@@ -469,8 +461,8 @@ export default function Nodes() {
   };
 
   const toggleAllNodesSelection = () => {
-    const keys = itemsOnPage.map((n) => n.name);
-    const allSelected = keys.every((k) => selectedNodes.has(k));
+    const keys = searchFiltered.map((n) => n.name);
+    const allSelected = keys.length > 0 && keys.every((k) => selectedNodes.has(k));
     if (allSelected) {
       const next = new Set(selectedNodes);
       keys.forEach((k) => next.delete(k));
@@ -596,27 +588,27 @@ export default function Nodes() {
 
         <ResourceListTableToolbar
           globalFilterBar={
-        <ResourceCommandBar
-          scope={<ClusterScopedScope />}
-          search={
-            <div className="relative w-full min-w-0">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search by name or labels..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full h-10 pl-9 rounded-lg border border-border bg-background text-sm font-medium shadow-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/20" aria-label="Search nodes" />
-            </div>
-          }
-          structure={
-            <ListViewSegmentedControl
-              value={listView}
-              onChange={(v) => setListView(v as ListView)}
-              options={[
-                { id: 'flat', label: 'Flat', icon: List },
-                { id: 'byRole', label: 'By Role', icon: Layers },
-              ]}
-              label=""
-              ariaLabel="List structure"
+            <ResourceCommandBar
+              scope={<ClusterScopedScope />}
+              search={
+                <div className="relative w-full min-w-0">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input placeholder="Search by name or labels..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full h-10 pl-9 rounded-lg border border-border bg-background text-sm font-medium shadow-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/20" aria-label="Search nodes" />
+                </div>
+              }
+              structure={
+                <ListViewSegmentedControl
+                  value={listView}
+                  onChange={(v) => setListView(v as ListView)}
+                  options={[
+                    { id: 'flat', label: 'Flat', icon: List },
+                    { id: 'byRole', label: 'By Role', icon: Layers },
+                  ]}
+                  label=""
+                  ariaLabel="List structure"
+                />
+              }
             />
-          }
-        />
           }
           hasActiveFilters={hasActiveFilters}
           onClearAllFilters={clearAllFilters}
@@ -626,232 +618,161 @@ export default function Nodes() {
           visibleColumns={columnVisibility.visibleColumns}
           onColumnToggle={columnVisibility.setColumnVisible}
           footer={
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-muted-foreground">{pagination.rangeLabel}</span>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="gap-2">{pageSize} per page<ChevronDown className="h-4 w-4 opacity-50" /></Button></DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  {PAGE_SIZE_OPTIONS.map((size) => <DropdownMenuItem key={size} onClick={() => handlePageSizeChange(size)} className={cn(pageSize === size && 'bg-accent')}>{size} per page</DropdownMenuItem>)}
-                </DropdownMenuContent>
-              </DropdownMenu>
+            <div className="flex items-center justify-between flex-wrap gap-2 text-sm text-muted-foreground px-1">
+              <span>Showing {searchFiltered.length} nodes</span>
             </div>
-            <ListPagination hasPrev={pagination.hasPrev} hasNext={pagination.hasNext} onPrev={pagination.onPrev} onNext={pagination.onNext} rangeLabel={undefined} currentPage={pagination.currentPage} totalPages={pagination.totalPages} onPageChange={pagination.onPageChange} dataUpdatedAt={pagination.dataUpdatedAt} isFetching={pagination.isFetching} />
-          </div>
           }
         >
           <ResizableTableProvider tableId="nodes" columnConfig={NODES_TABLE_COLUMNS}>
-            <Table className="table-fixed" style={{ minWidth: 1100 }}>
-              <TableHeader>
-                <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
-                  <TableHead className="w-12 px-2 text-center">
-                    <Checkbox
-                      checked={itemsOnPage.length > 0 && itemsOnPage.every((n) => selectedNodes.has(n.name))}
-                      onCheckedChange={toggleAllNodesSelection}
-                      aria-label="Select all nodes on page"
-                    />
-                  </TableHead>
-                  <ResizableTableHead columnId="name"><TableColumnHeaderWithFilterAndSort columnId="name" label="Name" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
-                  <ResizableTableHead columnId="status"><TableColumnHeaderWithFilterAndSort columnId="status" label="Status" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
-                  <ResizableTableHead columnId="roles"><TableColumnHeaderWithFilterAndSort columnId="roles" label="Roles" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
-                  <ResizableTableHead columnId="conditions"><TableColumnHeaderWithFilterAndSort columnId="conditions" label="Conditions" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
-                  <ResizableTableHead columnId="cpu"><TableColumnHeaderWithFilterAndSort columnId="cpu" label="CPU" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
-                  <ResizableTableHead columnId="memory"><TableColumnHeaderWithFilterAndSort columnId="memory" label="Memory" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
-                  <ResizableTableHead columnId="pods"><TableColumnHeaderWithFilterAndSort columnId="pods" label="Pods" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
-                  <ResizableTableHead columnId="version"><TableColumnHeaderWithFilterAndSort columnId="version" label="Version" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
-                  <ResizableTableHead columnId="osArch"><TableColumnHeaderWithFilterAndSort columnId="osArch" label="OS / Arch" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
-                  <ResizableTableHead columnId="taints"><TableColumnHeaderWithFilterAndSort columnId="taints" label="Taints" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
-                  <ResizableTableHead columnId="age"><TableColumnHeaderWithFilterAndSort columnId="age" label="Age" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => {}} /></ResizableTableHead>
-                  <TableHead className="w-12 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>
-                </TableRow>
-                {showTableFilters && (
-                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-b-2 border-border">
-                    <TableCell className="w-12 p-1.5" />
-                    <ResizableTableCell columnId="name" className="p-1.5" />
-                    <ResizableTableCell columnId="status" className="p-1.5"><TableFilterCell columnId="status" label="Status" distinctValues={distinctValuesByColumn.status ?? []} selectedFilterValues={columnFilters.status ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.status} /></ResizableTableCell>
-                    <ResizableTableCell columnId="roles" className="p-1.5"><TableFilterCell columnId="roles" label="Roles" distinctValues={distinctValuesByColumn.roles ?? []} selectedFilterValues={columnFilters.roles ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.roles} /></ResizableTableCell>
-                    <ResizableTableCell columnId="conditions" className="p-1.5" />
-                    <ResizableTableCell columnId="cpu" className="p-1.5" />
-                    <ResizableTableCell columnId="memory" className="p-1.5" />
-                    <ResizableTableCell columnId="pods" className="p-1.5" />
-                    <ResizableTableCell columnId="version" className="p-1.5"><TableFilterCell columnId="version" label="Version" distinctValues={distinctValuesByColumn.version ?? []} selectedFilterValues={columnFilters.version ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.version} /></ResizableTableCell>
-                    <ResizableTableCell columnId="osArch" className="p-1.5" />
-                    <ResizableTableCell columnId="taints" className="p-1.5" />
-                    <ResizableTableCell columnId="age" className="p-1.5" />
-                    <TableCell className="w-12 p-1.5" />
-                  </TableRow>
-                )}
-              </TableHeader>
-              <TableBody>
-                {isLoading && isConnected ? (
-                  <TableSkeletonRows columnCount={13} />
-                ) : searchFiltered.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={13} className="h-40 text-center">
-                      <TableEmptyState
-                        icon={<Server className="h-8 w-8" />}
-                        title="No nodes found"
-                        subtitle={searchQuery || hasActiveFilters ? 'Clear filters to see resources.' : 'Nodes are created by the cluster; connect to a cluster to see nodes.'}
-                        hasActiveFilters={!!(searchQuery || hasActiveFilters)}
-                        onClearFilters={() => { setSearchQuery(''); clearAllFilters(); }}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ) : listView === 'flat' ? (
-                  itemsOnPage.map((item, idx) => (
-                    <motion.tr key={item.name} initial={ROW_MOTION.initial} animate={ROW_MOTION.animate} transition={ROW_MOTION.transition(idx)} className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5')}>
-                      <TableCell className="w-12 px-2 text-center">
+            <div className="rounded-md border relative flex flex-col h-[calc(100vh-220px)] overflow-hidden">
+              <div className="overflow-auto flex-1 relative" ref={tableContainerRef}>
+                <Table className="table-fixed" style={{ minWidth: 1100 }}>
+                  <TableHeader className="sticky top-0 z-10 bg-background shadow-sm">
+                    <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
+                      <TableHead className="w-12 px-2 text-center">
                         <Checkbox
-                          checked={selectedNodes.has(item.name)}
-                          onCheckedChange={() => toggleNodeSelection(item)}
-                          aria-label={`Select ${item.name}`}
+                          checked={searchFiltered.length > 0 && searchFiltered.every((n) => selectedNodes.has(n.name))}
+                          onCheckedChange={toggleAllNodesSelection}
+                          aria-label="Select all nodes"
                         />
-                      </TableCell>
-                      <ResizableTableCell columnId="name">
-                        <Link to={`/nodes/${item.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate">
-                          <Server className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                          <span className="truncate">{item.name}</span>
-                        </Link>
-                      </ResizableTableCell>
-                      <ResizableTableCell columnId="status"><StatusPill label={item.status} variant={nodeStatusVariant[item.status] || 'error'} /></ResizableTableCell>
-                      <ResizableTableCell columnId="roles">
-                        <div className="flex flex-wrap gap-1">
-                          {item.roles.map((role) => <Badge key={role} variant="outline" className="text-xs">{role}</Badge>)}
-                        </div>
-                      </ResizableTableCell>
-                      <ResizableTableCell columnId="conditions">
-                        <div className="flex flex-wrap gap-1">
-                          {item.conditions.slice(0, 2).map((cond) => <Badge key={cond} variant={cond === 'Ready' ? 'default' : 'destructive'} className="text-xs">{cond}</Badge>)}
-                          {item.conditions.length > 2 && <Badge variant="outline" className="text-xs">+{item.conditions.length - 2}</Badge>}
-                        </div>
-                      </ResizableTableCell>
-                      <ResizableTableCell columnId="cpu">
-                        <div className="min-w-0 overflow-hidden">
-                          <UsageBar
-                            variant="sparkline"
-                            value={item.cpuRaw}
-                            kind="cpu"
-                            displayFormat="compact"
-                            width={56}
-                            max={parseCpuCapacityToMilli(item.cpuCapacity) ?? undefined}
-                          />
-                        </div>
-                      </ResizableTableCell>
-                      <ResizableTableCell columnId="memory">
-                        <div className="min-w-0 overflow-hidden">
-                          <UsageBar
-                            variant="sparkline"
-                            value={item.memoryRaw}
-                            kind="memory"
-                            displayFormat="compact"
-                            width={56}
-                            max={parseMemoryCapacityToMi(item.memoryCapacity) ?? undefined}
-                          />
-                        </div>
-                      </ResizableTableCell>
-                      <ResizableTableCell columnId="pods" className="font-mono text-sm">{item.pods}</ResizableTableCell>
-                      <ResizableTableCell columnId="version"><Badge variant="secondary" className="font-mono text-xs">{item.version}</Badge></ResizableTableCell>
-                      <ResizableTableCell columnId="osArch" className="text-sm text-muted-foreground">{item.osArch}</ResizableTableCell>
-                      <ResizableTableCell columnId="taints">{item.taintsCount > 0 ? <Badge variant="outline">{item.taintsCount}</Badge> : '–'}</ResizableTableCell>
-                      <ResizableTableCell columnId="age" className="text-muted-foreground whitespace-nowrap"><AgeCell age={item.age} timestamp={item.creationTimestamp} /></ResizableTableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60" aria-label="Node actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-52">
-                            <CopyNameDropdownItem name={item.name} />
-                            <DropdownMenuItem onClick={() => navigate(`/nodes/${item.name}`)} className="gap-2">View Details</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => navigate(`/pods?node=${encodeURIComponent(item.name)}`)} className="gap-2">View Pods on Node</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleCordon(item)} className="gap-2">Cordon</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleCordon(item)} className="gap-2">Uncordon</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleDrain(item)} className="gap-2">Drain</DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => navigate(`/nodes/${item.name}?tab=yaml`)} className="gap-2">Download YAML</DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}>Delete</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </motion.tr>
-                  ))
-                ) : (
-                  groupedOnPage.flatMap((group) => {
-                    const isCollapsed = collapsedGroups.has(group.groupKey);
-                    return [
-                      <TableRow key={group.groupKey} className="bg-muted/30 hover:bg-muted/40 cursor-pointer border-b border-border/60" onClick={() => toggleGroup(group.groupKey)}>
-                        <TableCell colSpan={13} className="py-2">
-                          <div className="flex items-center gap-2 font-medium">
-                            {isCollapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
-                            {group.label}
-                            <span className="text-muted-foreground font-normal">({group.nodes.length})</span>
-                          </div>
-                        </TableCell>
-                      </TableRow>,
-                      ...(isCollapsed ? [] : group.nodes.map((item, idx) => (
-                        <motion.tr key={item.name} initial={ROW_MOTION.initial} animate={ROW_MOTION.animate} transition={ROW_MOTION.transition(idx)} className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5')}>
+                      </TableHead>
+                      <ResizableTableHead columnId="name"><TableColumnHeaderWithFilterAndSort columnId="name" label="Name" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => { }} /></ResizableTableHead>
+                      <ResizableTableHead columnId="status"><TableColumnHeaderWithFilterAndSort columnId="status" label="Status" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => { }} /></ResizableTableHead>
+                      <ResizableTableHead columnId="roles"><TableColumnHeaderWithFilterAndSort columnId="roles" label="Roles" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => { }} /></ResizableTableHead>
+                      <ResizableTableHead columnId="conditions"><TableColumnHeaderWithFilterAndSort columnId="conditions" label="Conditions" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => { }} /></ResizableTableHead>
+                      <ResizableTableHead columnId="cpu"><TableColumnHeaderWithFilterAndSort columnId="cpu" label="CPU" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => { }} /></ResizableTableHead>
+                      <ResizableTableHead columnId="memory"><TableColumnHeaderWithFilterAndSort columnId="memory" label="Memory" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => { }} /></ResizableTableHead>
+                      <ResizableTableHead columnId="pods"><TableColumnHeaderWithFilterAndSort columnId="pods" label="Pods" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => { }} /></ResizableTableHead>
+                      <ResizableTableHead columnId="version"><TableColumnHeaderWithFilterAndSort columnId="version" label="Version" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => { }} /></ResizableTableHead>
+                      <ResizableTableHead columnId="osArch"><TableColumnHeaderWithFilterAndSort columnId="osArch" label="OS / Arch" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => { }} /></ResizableTableHead>
+                      <ResizableTableHead columnId="taints"><TableColumnHeaderWithFilterAndSort columnId="taints" label="Taints" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => { }} /></ResizableTableHead>
+                      <ResizableTableHead columnId="age"><TableColumnHeaderWithFilterAndSort columnId="age" label="Age" sortKey={sortKey} sortOrder={sortOrder} onSort={setSort} filterable={false} distinctValues={[]} selectedFilterValues={new Set()} onFilterChange={() => { }} /></ResizableTableHead>
+                      <TableHead className="w-12 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>
+                    </TableRow>
+                    {showTableFilters && (
+                      <TableRow className="bg-muted/30 hover:bg-muted/30 border-b-2 border-border">
+                        <TableCell className="w-12 p-1.5" />
+                        <ResizableTableCell columnId="name" className="p-1.5" />
+                        <ResizableTableCell columnId="status" className="p-1.5"><TableFilterCell columnId="status" label="Status" distinctValues={distinctValuesByColumn.status ?? []} selectedFilterValues={columnFilters.status ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.status} /></ResizableTableCell>
+                        <ResizableTableCell columnId="roles" className="p-1.5"><TableFilterCell columnId="roles" label="Roles" distinctValues={distinctValuesByColumn.roles ?? []} selectedFilterValues={columnFilters.roles ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.roles} /></ResizableTableCell>
+                        <ResizableTableCell columnId="conditions" className="p-1.5" />
+                        <ResizableTableCell columnId="cpu" className="p-1.5" />
+                        <ResizableTableCell columnId="memory" className="p-1.5" />
+                        <ResizableTableCell columnId="pods" className="p-1.5" />
+                        <ResizableTableCell columnId="version" className="p-1.5"><TableFilterCell columnId="version" label="Version" distinctValues={distinctValuesByColumn.version ?? []} selectedFilterValues={columnFilters.version ?? new Set()} onFilterChange={setColumnFilter} valueCounts={valueCountsByColumn.version} /></ResizableTableCell>
+                        <ResizableTableCell columnId="osArch" className="p-1.5" />
+                        <ResizableTableCell columnId="taints" className="p-1.5" />
+                        <ResizableTableCell columnId="age" className="p-1.5" />
+                        <TableCell className="w-12 p-1.5" />
+                      </TableRow>
+                    )}
+                  </TableHeader>
+                  <VirtualTableBody
+                    data={itemsToRender}
+                    tableContainerRef={tableContainerRef}
+                    rowHeight={48}
+                    renderRow={(item) => {
+                      if (item.type === 'header') {
+                        return (
+                          <TableRow key={item.groupKey} className="bg-muted/30 hover:bg-muted/40 cursor-pointer border-b border-border/60" onClick={() => toggleGroup(item.groupKey)}>
+                            <TableCell colSpan={13} className="py-2">
+                              <div className="flex items-center gap-2 font-medium">
+                                {item.isCollapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
+                                {item.label}
+                                <span className="text-muted-foreground font-normal">({item.count})</span>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+
+                      const node = item.data;
+                      const isSelected = selectedNodes.has(node.name);
+
+                      return (
+                        <motion.tr
+                          key={node.name}
+                          initial={false}
+                          className={cn(resourceTableRowClassName, isSelected && 'bg-primary/5')}
+                        >
                           <TableCell className="w-12 px-2 text-center">
                             <Checkbox
-                              checked={selectedNodes.has(item.name)}
-                              onCheckedChange={() => toggleNodeSelection(item)}
-                              aria-label={`Select ${item.name}`}
+                              checked={isSelected}
+                              onCheckedChange={() => toggleNodeSelection(node)}
+                              aria-label={`Select ${node.name}`}
                             />
                           </TableCell>
                           <ResizableTableCell columnId="name">
-                            <Link to={`/nodes/${item.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate">
+                            <Link to={`/nodes/${node.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate">
                               <Server className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                              <span className="truncate">{item.name}</span>
+                              <span className="truncate">{node.name}</span>
                             </Link>
                           </ResizableTableCell>
-                          <ResizableTableCell columnId="status"><StatusPill label={item.status} variant={nodeStatusVariant[item.status] || 'error'} /></ResizableTableCell>
+                          <ResizableTableCell columnId="status"><StatusPill label={node.status} variant={nodeStatusVariant[node.status] || 'error'} /></ResizableTableCell>
                           <ResizableTableCell columnId="roles">
                             <div className="flex flex-wrap gap-1">
-                              {item.roles.map((role) => <Badge key={role} variant="outline" className="text-xs">{role}</Badge>)}
+                              {node.roles.map((role) => <Badge key={role} variant="outline" className="text-xs">{role}</Badge>)}
                             </div>
                           </ResizableTableCell>
                           <ResizableTableCell columnId="conditions">
                             <div className="flex flex-wrap gap-1">
-                              {item.conditions.slice(0, 2).map((cond) => <Badge key={cond} variant={cond === 'Ready' ? 'default' : 'destructive'} className="text-xs">{cond}</Badge>)}
-                              {item.conditions.length > 2 && <Badge variant="outline" className="text-xs">+{item.conditions.length - 2}</Badge>}
+                              {node.conditions.slice(0, 2).map((cond) => <Badge key={cond} variant={cond === 'Ready' ? 'default' : 'destructive'} className="text-xs">{cond}</Badge>)}
+                              {node.conditions.length > 2 && <Badge variant="outline" className="text-xs">+{node.conditions.length - 2}</Badge>}
                             </div>
                           </ResizableTableCell>
                           <ResizableTableCell columnId="cpu">
                             <div className="min-w-0 overflow-hidden">
-                              <UsageBar variant="sparkline" value={item.cpuRaw} kind="cpu" displayFormat="compact" width={56} max={parseCpuCapacityToMilli(item.cpuCapacity) ?? undefined} />
+                              <UsageBar
+                                variant="sparkline"
+                                value={node.cpuRaw}
+                                kind="cpu"
+                                displayFormat="compact"
+                                width={56}
+                                max={parseCpuCapacityToMilli(node.cpuCapacity) ?? undefined}
+                              />
                             </div>
                           </ResizableTableCell>
                           <ResizableTableCell columnId="memory">
                             <div className="min-w-0 overflow-hidden">
-                              <UsageBar variant="sparkline" value={item.memoryRaw} kind="memory" displayFormat="compact" width={56} max={parseMemoryCapacityToMi(item.memoryCapacity) ?? undefined} />
+                              <UsageBar
+                                variant="sparkline"
+                                value={node.memoryRaw}
+                                kind="memory"
+                                displayFormat="compact"
+                                width={56}
+                                max={parseMemoryCapacityToMi(node.memoryCapacity) ?? undefined}
+                              />
                             </div>
                           </ResizableTableCell>
-                          <ResizableTableCell columnId="pods" className="font-mono text-sm">{item.pods}</ResizableTableCell>
-                          <ResizableTableCell columnId="version"><Badge variant="secondary" className="font-mono text-xs">{item.version}</Badge></ResizableTableCell>
-                          <ResizableTableCell columnId="osArch" className="text-sm text-muted-foreground">{item.osArch}</ResizableTableCell>
-                          <ResizableTableCell columnId="taints">{item.taintsCount > 0 ? <Badge variant="outline">{item.taintsCount}</Badge> : '–'}</ResizableTableCell>
-                          <ResizableTableCell columnId="age" className="text-muted-foreground whitespace-nowrap"><AgeCell age={item.age} timestamp={item.creationTimestamp} /></ResizableTableCell>
+                          <ResizableTableCell columnId="pods" className="font-mono text-sm">{node.pods}</ResizableTableCell>
+                          <ResizableTableCell columnId="version"><Badge variant="secondary" className="font-mono text-xs">{node.version}</Badge></ResizableTableCell>
+                          <ResizableTableCell columnId="osArch" className="text-sm text-muted-foreground">{node.osArch}</ResizableTableCell>
+                          <ResizableTableCell columnId="taints">{node.taintsCount > 0 ? <Badge variant="outline">{node.taintsCount}</Badge> : '–'}</ResizableTableCell>
+                          <ResizableTableCell columnId="age" className="text-muted-foreground whitespace-nowrap"><AgeCell age={node.age} timestamp={node.creationTimestamp} /></ResizableTableCell>
                           <TableCell>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60" aria-label="Node actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-52">
-                                <CopyNameDropdownItem name={item.name} />
-                                <DropdownMenuItem onClick={() => navigate(`/nodes/${item.name}`)} className="gap-2">View Details</DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => navigate(`/pods?node=${encodeURIComponent(item.name)}`)} className="gap-2">View Pods on Node</DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleCordon(item)} className="gap-2">Cordon</DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleCordon(item)} className="gap-2">Uncordon</DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleDrain(item)} className="gap-2">Drain</DropdownMenuItem>
+                                <CopyNameDropdownItem name={node.name} />
+                                <DropdownMenuItem onClick={() => navigate(`/nodes/${node.name}`)} className="gap-2">View Details</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => navigate(`/pods?node=${encodeURIComponent(node.name)}`)} className="gap-2">View Pods on Node</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleCordon(node)} className="gap-2">Cordon</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleCordon(node)} className="gap-2">Uncordon</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleDrain(node)} className="gap-2">Drain</DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => navigate(`/nodes/${item.name}?tab=yaml`)} className="gap-2">Download YAML</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => navigate(`/nodes/${node.name}?tab=yaml`)} className="gap-2">Download YAML</DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}>Delete</DropdownMenuItem>
+                                <DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item: node })} disabled={!isConnected}>Delete</DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </TableCell>
                         </motion.tr>
-                      ))),
-                    ];
-                  })
-                )}
-              </TableBody>
-            </Table>
+                      );
+                    }}
+                  />
+                </Table>
+              </div>
+            </div>
           </ResizableTableProvider>
         </ResourceListTableToolbar>
       </motion.div>

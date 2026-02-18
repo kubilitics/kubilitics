@@ -140,7 +140,7 @@ export interface SecurityAnalysisResult {
 
 // ─── API base ─────────────────────────────────────────────────────────────────
 // Security endpoints live on the AI backend. Use absolute URL to avoid Vite
-// proxy routing them to the main backend (port 8080).
+// proxy routing them to the main backend (port 819).
 const API_BASE = `${AI_BASE_URL}/api/v1/security`;
 
 // ─── useSecurityPosture — polls cluster-wide security posture ─────────────────

@@ -2,17 +2,36 @@ package budget
 
 import (
 	"context"
+	"os"
 	"testing"
+
+	"github.com/kubilitics/kubilitics-ai/internal/db"
 )
 
-func newTracker(limitUSD float64) BudgetTracker {
+func newTestStore(t *testing.T) db.Store {
+	f, err := os.CreateTemp("", "kubilitics-ai-budget-test-*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	name := f.Name()
+	f.Close()
+	t.Cleanup(func() { os.Remove(name) })
+
+	s, err := db.NewSQLiteStore(name)
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	return s
+}
+
+func newTracker(t *testing.T, limitUSD float64) BudgetTracker {
 	cfg := DefaultBudgetConfig()
 	cfg.DefaultPerUserLimitUSD = limitUSD
-	return NewBudgetTrackerWithConfig(cfg)
+	return NewBudgetTrackerWithConfig(cfg, newTestStore(t))
 }
 
 func TestRecordAndSummary(t *testing.T) {
-	tr := newTracker(0) // unlimited
+	tr := newTracker(t, 0) // unlimited
 	ctx := context.Background()
 
 	if err := tr.RecordTokenUsage(ctx, "user-1", "inv-1", 1000, 500, "anthropic"); err != nil {
@@ -46,7 +65,8 @@ func TestRecordAndSummary(t *testing.T) {
 }
 
 func TestBudgetEnforcement(t *testing.T) {
-	tr := newTracker(0.01) // $0.01 limit
+
+	tr := newTracker(t, 0.01) // $0.01 limit
 	ctx := context.Background()
 
 	// Record enough to exceed limit
@@ -62,7 +82,7 @@ func TestBudgetEnforcement(t *testing.T) {
 }
 
 func TestBudgetAvailableUnlimited(t *testing.T) {
-	tr := newTracker(0) // unlimited
+	tr := newTracker(t, 0) // unlimited
 	ctx := context.Background()
 
 	ok, _ := tr.CheckBudgetAvailable(ctx, "user-unlimited", 100000)
@@ -72,7 +92,7 @@ func TestBudgetAvailableUnlimited(t *testing.T) {
 }
 
 func TestBudgetAvailableInsufficient(t *testing.T) {
-	tr := newTracker(0.001) // tiny limit
+	tr := newTracker(t, 0.001) // tiny limit
 	ctx := context.Background()
 
 	// Spend most of the budget
@@ -85,7 +105,7 @@ func TestBudgetAvailableInsufficient(t *testing.T) {
 }
 
 func TestEstimatedCost(t *testing.T) {
-	tr := newTracker(0)
+	tr := newTracker(t, 0)
 	ctx := context.Background()
 
 	cost, err := tr.GetEstimatedCost(ctx, 1000, 500, "anthropic")
@@ -105,7 +125,7 @@ func TestEstimatedCost(t *testing.T) {
 }
 
 func TestResetBudget(t *testing.T) {
-	tr := newTracker(0.05)
+	tr := newTracker(t, 0.05)
 	ctx := context.Background()
 
 	_ = tr.RecordTokenUsage(ctx, "user-reset", "inv-1", 10000, 5000, "openai")
@@ -129,7 +149,7 @@ func TestResetBudget(t *testing.T) {
 }
 
 func TestSetBudgetLimit(t *testing.T) {
-	tr := newTracker(0)
+	tr := newTracker(t, 0)
 	ctx := context.Background()
 
 	if err := tr.SetBudgetLimit(ctx, "user-limited", 5.00); err != nil {
@@ -150,7 +170,7 @@ func TestSetBudgetLimit(t *testing.T) {
 }
 
 func TestGetUsageDetails(t *testing.T) {
-	tr := newTracker(0)
+	tr := newTracker(t, 0)
 	ctx := context.Background()
 
 	_ = tr.RecordTokenUsage(ctx, "user-detail", "inv-A", 500, 200, "anthropic")

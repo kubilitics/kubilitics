@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import { ConnectionPage } from '../page-objects/ConnectionPage';
 
 test.describe('Performance & Stability Validation', () => {
@@ -35,6 +36,14 @@ test.describe('Performance & Stability Validation', () => {
         await connectionPage.goto();
         await connectionPage.selectDesktopMode();
         await page.locator('text=Explore Demo Mode').click();
+
+        // Accessibility Check (FE-051)
+        const accessibilityScanResults = await new AxeBuilder({ page }).analyze();
+        // Log violations for debugging but don't fail yet if many exist (soft assertion)
+        if (accessibilityScanResults.violations.length > 0) {
+            console.log('A11y Violations:', accessibilityScanResults.violations);
+        }
+        // expect(accessibilityScanResults.violations).toEqual([]); // Uncomment to enforce
 
         const startMemory = await page.evaluate(() => (performance as any).memory?.usedJSHeapSize);
 

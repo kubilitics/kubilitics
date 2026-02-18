@@ -24,7 +24,7 @@ func TestOriginChecking(t *testing.T) {
 		// Default / development origins
 		{"allow localhost:3000", nil, "http://localhost:3000", true},
 		{"allow localhost:5173", nil, "http://localhost:5173", true},
-		{"allow localhost:8080", nil, "http://localhost:8080", true},
+		{"block localhost:8080 by default", nil, "http://localhost:8080", false},
 		{"block external by default", nil, "https://evil.example.com", false},
 
 		// Wildcard mode

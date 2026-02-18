@@ -5,10 +5,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kubilitics/kubilitics-ai/internal/db"
 )
 
 func TestNewEngine_AllComponentsInitialized(t *testing.T) {
-	engine, err := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, err := NewEngine(store)
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
 	}
@@ -27,7 +30,8 @@ func TestNewEngine_AllComponentsInitialized(t *testing.T) {
 }
 
 func TestEvaluateAction_DenyKubeSystemDelete(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, _ := NewEngine(store)
 	action := &Action{
 		ID:           "test-001",
 		Operation:    "delete",
@@ -52,7 +56,8 @@ func TestEvaluateAction_DenyKubeSystemDelete(t *testing.T) {
 }
 
 func TestEvaluateAction_DenyProductionScaleToZero(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, _ := NewEngine(store)
 	action := &Action{
 		ID:           "test-002",
 		Operation:    "scale",
@@ -77,7 +82,8 @@ func TestEvaluateAction_DenyProductionScaleToZero(t *testing.T) {
 }
 
 func TestEvaluateAction_SafeRestartApproved(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, _ := NewEngine(store)
 	// Set high autonomy level so restart is auto-approved
 	_ = engine.SetAutonomyLevel(context.Background(), "user-1", 4) // LevelActWithGuard
 	action := &Action{
@@ -101,7 +107,8 @@ func TestEvaluateAction_SafeRestartApproved(t *testing.T) {
 }
 
 func TestEvaluateAction_RequiresApproval_LowAutonomy(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, _ := NewEngine(store)
 	// Level 0 (below LevelObserve=1) — requires approval for everything
 	_ = engine.SetAutonomyLevel(context.Background(), "user-2", 0)
 	action := &Action{
@@ -128,7 +135,8 @@ func TestEvaluateAction_RequiresApproval_LowAutonomy(t *testing.T) {
 }
 
 func TestEvaluateAction_PolicyChecksPopulated(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, _ := NewEngine(store)
 	action := &Action{
 		ID:           "test-005",
 		Operation:    "restart",
@@ -150,7 +158,8 @@ func TestEvaluateAction_PolicyChecksPopulated(t *testing.T) {
 }
 
 func TestEvaluateAction_RiskLevelSet(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, _ := NewEngine(store)
 	action := &Action{
 		ID:           "test-006",
 		Operation:    "delete",
@@ -172,7 +181,8 @@ func TestEvaluateAction_RiskLevelSet(t *testing.T) {
 }
 
 func TestSetAndGetAutonomyLevel(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, _ := NewEngine(store)
 	ctx := context.Background()
 
 	tests := []struct {
@@ -198,7 +208,8 @@ func TestSetAndGetAutonomyLevel(t *testing.T) {
 }
 
 func TestGetImmutableRules_NonEmpty(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, _ := NewEngine(store)
 	rules, err := engine.GetImmutableRules(context.Background())
 	if err != nil {
 		t.Fatalf("GetImmutableRules error: %v", err)
@@ -214,7 +225,11 @@ func TestGetImmutableRules_NonEmpty(t *testing.T) {
 }
 
 func TestCreatePolicy_And_Evaluate(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	sStore := store.(db.SafetyPolicyStore)
+	_ = sStore.CreatePolicy(context.Background(), &db.SafetyPolicyRecord{Name: "init_schema_hack"}) // Hack to ensure table created? No, migration runs on NewSQLiteStore
+
+	engine, _ := NewEngine(store)
 	ctx := context.Background()
 
 	// Create a policy that denies actions in namespace "blocked"
@@ -254,7 +269,8 @@ func TestCreatePolicy_And_Evaluate(t *testing.T) {
 }
 
 func TestDeletePolicy(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, _ := NewEngine(store)
 	ctx := context.Background()
 
 	_ = engine.CreatePolicy(ctx, "temp-policy", map[string]interface{}{
@@ -290,7 +306,8 @@ func TestDeletePolicy(t *testing.T) {
 }
 
 func TestCreateRollbackCheckpoint(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, _ := NewEngine(store)
 	action := &Action{
 		ID:           "test-rollback",
 		Operation:    "scale",
@@ -312,7 +329,8 @@ func TestCreateRollbackCheckpoint(t *testing.T) {
 }
 
 func TestEstimateDowntime(t *testing.T) {
-	engine, _ := NewEngine()
+	store, _ := db.NewSQLiteStore(":memory:")
+	engine, _ := NewEngine(store)
 	action := &Action{
 		ID:           "test-downtime",
 		Operation:    "drain",

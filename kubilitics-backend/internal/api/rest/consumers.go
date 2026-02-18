@@ -7,6 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
 
@@ -140,17 +141,15 @@ func (h *Handler) GetConfigMapConsumers(w http.ResponseWriter, r *http.Request) 
 	namespace := vars["namespace"]
 	name := vars["name"]
 	if !validate.ClusterID(clusterID) || !validate.Namespace(namespace) || !validate.Name(name) {
-		respondError(w, http.StatusBadRequest, "Invalid clusterId, namespace, or name")
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid clusterId, namespace, or name", requestID)
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
@@ -198,17 +197,15 @@ func (h *Handler) GetSecretConsumers(w http.ResponseWriter, r *http.Request) {
 	namespace := vars["namespace"]
 	name := vars["name"]
 	if !validate.ClusterID(clusterID) || !validate.Namespace(namespace) || !validate.Name(name) {
-		respondError(w, http.StatusBadRequest, "Invalid clusterId, namespace, or name")
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid clusterId, namespace, or name", requestID)
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
@@ -257,17 +254,15 @@ func (h *Handler) GetPVCConsumers(w http.ResponseWriter, r *http.Request) {
 	namespace := vars["namespace"]
 	name := vars["name"]
 	if !validate.ClusterID(clusterID) || !validate.Namespace(namespace) || !validate.Name(name) {
-		respondError(w, http.StatusBadRequest, "Invalid clusterId, namespace, or name")
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid clusterId, namespace, or name", requestID)
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 

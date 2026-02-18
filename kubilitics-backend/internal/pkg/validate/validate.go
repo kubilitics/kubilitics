@@ -1,9 +1,12 @@
-// Package validate provides input validation for API path and body parameters (D1.1, D1.2).
+// Package validate provides input validation for API path and body parameters (D1.1, D1.2, BE-DATA-001).
 package validate
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ClusterIDMaxLen is the maximum allowed length for clusterId (stored in DB, used in paths).
@@ -58,4 +61,67 @@ func Name(name string) bool {
 		return false
 	}
 	return k8sNameRe.MatchString(strings.ToLower(name))
+}
+
+// ApplyYAMLDangerousWarnings parses YAML (single or multi-doc) and returns warnings for dangerous pod/container settings (BE-DATA-001).
+// Example: hostPID: true, privileged: true. Caller may log and optionally reject.
+func ApplyYAMLDangerousWarnings(yamlContent string) []string {
+	var warnings []string
+	docs := splitYAMLDocs(yamlContent)
+	for _, doc := range docs {
+		doc = strings.TrimSpace(doc)
+		if doc == "" {
+			continue
+		}
+		var m map[string]interface{}
+		if err := yaml.Unmarshal([]byte(doc), &m); err != nil {
+			continue // invalid YAML fragment; apply will fail later
+		}
+		walkForDangerous(m, "", &warnings)
+	}
+	return warnings
+}
+
+func splitYAMLDocs(content string) []string {
+	return strings.Split(content, "---")
+}
+
+func walkForDangerous(node interface{}, path string, warnings *[]string) {
+	switch n := node.(type) {
+	case map[string]interface{}:
+		for k, v := range n {
+			p := path + "/" + k
+			switch strings.ToLower(k) {
+			case "hostpid":
+				if b, ok := toBool(v); ok && b {
+					*warnings = append(*warnings, pathKey(p)+"hostPID: true (pod can see host PID namespace)")
+				}
+			case "privileged":
+				if b, ok := toBool(v); ok && b {
+					*warnings = append(*warnings, pathKey(p)+"privileged: true (container runs privileged)")
+				}
+			case "hostnetwork":
+				if b, ok := toBool(v); ok && b {
+					*warnings = append(*warnings, pathKey(p)+"hostNetwork: true (pod uses host network)")
+				}
+			}
+			walkForDangerous(v, p, warnings)
+		}
+	case []interface{}:
+		for i, v := range n {
+			walkForDangerous(v, path+"/["+strconv.Itoa(i)+"]", warnings)
+		}
+	}
+}
+
+func pathKey(p string) string {
+	if p == "" {
+		return ""
+	}
+	return p + " "
+}
+
+func toBool(v interface{}) (bool, bool) {
+	b, ok := v.(bool)
+	return b, ok
 }

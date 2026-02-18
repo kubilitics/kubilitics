@@ -8,7 +8,7 @@ dev: env-example
 	@chmod +x scripts/dev.sh 2>/dev/null || true
 	@./scripts/dev.sh
 
-# Build backend, then kill processes on 8080/5173 and start backend + frontend.
+# Build backend, then kill processes on 819/5173 and start backend + frontend.
 restart:
 	@chmod +x scripts/restart.sh 2>/dev/null || true
 	@./scripts/restart.sh

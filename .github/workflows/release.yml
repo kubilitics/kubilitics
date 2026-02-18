@@ -8,8 +8,94 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
+  kcli:
+    name: kcli Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: kcli/go.sum
+      - name: Build kcli Linux amd64
+        working-directory: kcli
+        run: GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../kcli-linux-amd64 ./cmd/kcli
+      - name: Build kcli Linux arm64
+        working-directory: kcli
+        run: GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o ../kcli-linux-arm64 ./cmd/kcli
+      - name: Build kcli macOS amd64
+        working-directory: kcli
+        run: GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ../kcli-darwin-amd64 ./cmd/kcli
+      - name: Build kcli macOS arm64
+        working-directory: kcli
+        run: GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../kcli-darwin-arm64 ./cmd/kcli
+      - name: Build kcli Windows amd64
+        working-directory: kcli
+        run: GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o ../kcli-windows-amd64.exe ./cmd/kcli
+      - name: Make binaries executable (Unix)
+        run: |
+          chmod +x kcli-linux-amd64 kcli-linux-arm64 kcli-darwin-amd64 kcli-darwin-arm64 || true
+      - name: Upload kcli artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kcli-${{ github.ref_name }}
+          path: |
+            kcli-linux-amd64
+            kcli-linux-arm64
+            kcli-darwin-amd64
+            kcli-darwin-arm64
+            kcli-windows-amd64.exe
+
+  kubilitics-ai:
+    name: kubilitics-ai Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: ""
+          - goos: linux
+            goarch: arm64
+            suffix: ""
+          - goos: darwin
+            goarch: amd64
+            suffix: ""
+          - goos: darwin
+            goarch: arm64
+            suffix: ""
+          - goos: windows
+            goarch: amd64
+            suffix: ".exe"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: kubilitics-ai/go.sum
+      - name: Build kubilitics-ai (${{ matrix.goos }}/${{ matrix.goarch }})
+        working-directory: kubilitics-ai
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p bin
+          go build -ldflags="-s -w" \
+            -o bin/kubilitics-ai-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }} \
+            ./cmd/server/main.go
+      - name: Make binary executable (Unix)
+        if: matrix.goos != 'windows'
+        run: chmod +x kubilitics-ai/bin/kubilitics-ai-${{ matrix.goos }}-${{ matrix.goarch }} || true
+      - name: Upload kubilitics-ai artifact (${{ matrix.goos }}-${{ matrix.goarch }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubilitics-ai-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.ref_name }}
+          path: kubilitics-ai/bin/kubilitics-ai-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
+
   backend:
     name: Backend
     runs-on: ubuntu-latest
@@ -32,6 +118,80 @@ jobs:
           path: |
             kubilitics-backend/kubilitics-backend-linux-amd64
             kubilitics-backend/kubilitics-backend-linux-arm64
+
+  docker-backend:
+    name: Build and Push Backend Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "major=$(echo $VERSION | cut -d. -f1)" >> $GITHUB_OUTPUT
+          echo "minor=$(echo $VERSION | cut -d. -f1-2)" >> $GITHUB_OUTPUT
+      
+      - name: Build and push backend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./kubilitics-backend
+          file: ./kubilitics-backend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/kubilitics-backend:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/kubilitics-backend:${{ steps.version.outputs.minor }}
+            ghcr.io/${{ github.repository_owner }}/kubilitics-backend:${{ steps.version.outputs.major }}
+            ghcr.io/${{ github.repository_owner }}/kubilitics-backend:latest
+          platforms: linux/amd64,linux/arm64
+
+  docker-ai:
+    name: Build and Push AI Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "major=$(echo $VERSION | cut -d. -f1)" >> $GITHUB_OUTPUT
+          echo "minor=$(echo $VERSION | cut -d. -f1-2)" >> $GITHUB_OUTPUT
+      
+      - name: Build and push AI Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./kubilitics-ai
+          file: ./kubilitics-ai/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/kubilitics-ai:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/kubilitics-ai:${{ steps.version.outputs.minor }}
+            ghcr.io/${{ github.repository_owner }}/kubilitics-ai:${{ steps.version.outputs.major }}
+            ghcr.io/${{ github.repository_owner }}/kubilitics-ai:latest
+          platforms: linux/amd64,linux/arm64
 
   desktop:
     name: Desktop
@@ -61,13 +221,103 @@ jobs:
       - name: Install frontend deps
         working-directory: kubilitics-desktop
         run: npm ci
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
       - name: Build Go backend for sidecar
         run: |
           mkdir -p kubilitics-desktop/src-tauri/binaries
           cd kubilitics-backend && go build -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend ./cmd/server
-      - name: Build Tauri app
+      - name: Build kcli binary for desktop
+        run: |
+          # Tauri externalBin resolves paths relative to src-tauri/; binaries MUST
+          # land in src-tauri/binaries/ (same directory as kubilitics-backend and
+          # kubilitics-ai sidecars) so Tauri can bundle them correctly.
+          mkdir -p kubilitics-desktop/src-tauri/binaries
+          cd kcli
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-x86_64-apple-darwin ./cmd/kcli
+            GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-aarch64-apple-darwin ./cmd/kcli
+            chmod +x ../kubilitics-desktop/src-tauri/binaries/kcli-*
+          elif [ "${{ matrix.os }}" == "windows-latest" ]; then
+            GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-x86_64-pc-windows-msvc.exe ./cmd/kcli
+          else
+            GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-x86_64-unknown-linux-gnu ./cmd/kcli
+            GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-aarch64-unknown-linux-gnu ./cmd/kcli
+            chmod +x ../kubilitics-desktop/src-tauri/binaries/kcli-*
+          fi
+      - name: Build Go AI backend for sidecar (if exists)
+        continue-on-error: true
+        run: |
+          if [ -d "kubilitics-ai" ]; then
+            cd kubilitics-ai && go build -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-ai ./cmd/server
+          fi
+      - name: Setup macOS code signing
+        if: matrix.os == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+            security create-keychain -p "" build.keychain || true
+            security default-keychain -s build.keychain
+            security unlock-keychain -p "" build.keychain
+            security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign || true
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          fi
+      - name: Build Tauri app (macOS universal)
+        if: matrix.os == 'macos-latest'
         working-directory: kubilitics-desktop
-        run: cargo tauri build
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build --target universal-apple-darwin
+      - name: Notarize macOS app
+        if: matrix.os == 'macos-latest'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        continue-on-error: true
+        run: |
+          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ]; then
+            xcrun notarytool submit kubilitics-desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Kubilitics.app \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait || echo "Notarization skipped or failed"
+            xcrun stapler staple kubilitics-desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Kubilitics.app || true
+          fi
+      - name: Build Tauri app (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: kubilitics-desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build --target x86_64-pc-windows-msvc
+      - name: Build Tauri app (Linux - AppImage)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: kubilitics-desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build --target x86_64-unknown-linux-gnu --bundles appimage
+      - name: Build Tauri app (Linux - DEB)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: kubilitics-desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build --target x86_64-unknown-linux-gnu --bundles deb
+      - name: Build Tauri app (Linux - RPM)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: kubilitics-desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build --target x86_64-unknown-linux-gnu --bundles rpm
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -76,17 +326,28 @@ jobs:
 
   release:
     name: Create Release
-    needs: [backend, desktop]
+    # Wait for all binary + docker jobs.  kcli and kubilitics-ai are now included
+    # so their artifacts are present before the release is created.
+    needs: [kcli, kubilitics-ai, backend, desktop, docker-backend, docker-ai]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Flatten artifacts for release upload
+        # actions/download-artifact@v4 nests each artifact in its own sub-directory;
+        # flatten to a single level so softprops/action-gh-release picks them all up.
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f -exec cp {} release-assets/ \;
+          ls -lh release-assets/
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           generate_release_notes: true
-          files: artifacts/**/*
+          files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

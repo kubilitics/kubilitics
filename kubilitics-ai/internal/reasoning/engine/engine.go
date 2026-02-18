@@ -88,7 +88,8 @@ import "context"
 type ReasoningEngine interface {
 	// Investigate starts a new investigation with the given trigger description.
 	// Returns investigation ID for tracking.
-	Investigate(ctx context.Context, description string, investigationType string) (string, error)
+	// autonomyLevel: optional override (0 = use server default).
+	Investigate(ctx context.Context, description string, investigationType string, autonomyLevel int) (string, error)
 
 	// GetInvestigation retrieves the current state and findings of an investigation.
 	GetInvestigation(ctx context.Context, id string) (interface{}, error)

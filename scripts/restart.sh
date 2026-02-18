@@ -2,12 +2,12 @@
 # Kill anything on backend/frontend ports, build backend, then start backend + frontend.
 # Backend is always rebuilt so the running process includes latest Go code (e.g. topology for Jobs/CronJobs).
 # If you see "resource topology not implemented for kind Node" (500), do a clean rebuild first: make clean && make backend, then run this script.
-# If you see ECONNREFUSED 127.0.0.1:8080, the backend is not listening — run this script from repo root (./scripts/restart.sh or make restart). Do not run two copies at once.
+# If you see ECONNREFUSED 127.0.0.1:819, the backend is not listening — run this script from repo root (./scripts/restart.sh or make restart). Do not run two copies at once.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-BACKEND_PORT=8080
+BACKEND_PORT=819
 FRONTEND_PORT=5173
 
 kill_port() {

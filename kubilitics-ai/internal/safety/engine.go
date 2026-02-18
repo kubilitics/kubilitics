@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kubilitics/kubilitics-ai/internal/db"
 	"github.com/kubilitics/kubilitics-ai/internal/safety/autonomy"
 	"github.com/kubilitics/kubilitics-ai/internal/safety/blastradius"
 	"github.com/kubilitics/kubilitics-ai/internal/safety/policy"
@@ -140,9 +141,9 @@ type Engine struct {
 }
 
 // NewEngine creates a new safety engine with all components
-func NewEngine() (*Engine, error) {
+func NewEngine(store db.Store) (*Engine, error) {
 	return &Engine{
-		policyEngine:       policy.NewPolicyEngine(),
+		policyEngine:       policy.NewPolicyEngine(store),
 		blastCalculator:    blastradius.NewBlastRadiusCalculator(),
 		autonomyController: autonomy.NewAutonomyController(),
 		rollbackManager:    rollback.NewRollbackManager(),

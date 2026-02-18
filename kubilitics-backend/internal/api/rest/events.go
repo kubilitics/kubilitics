@@ -6,8 +6,10 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
 
@@ -32,15 +34,24 @@ func (h *Handler) GetEvents(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid clusterId")
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	_, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
+	// Events service uses clusterID (resolved internally for stored clusters; for kubeconfig-per-request same clusterID is used as identifier)
 	namespace := r.URL.Query().Get("namespace")
-	limit := 100
+	// BE-FUNC-002: Pagination support for events
+	const defaultLimit = 100
+	const maxLimit = 500
+	limit := defaultLimit
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 500 {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			if n > maxLimit {
+				n = maxLimit
+			}
 			limit = n
 		}
 	}
@@ -53,7 +64,9 @@ func (h *Handler) GetEvents(w http.ResponseWriter, r *http.Request) {
 			ns = "default"
 		}
 		// Pod-scoped (or any resource) events: last N events for the resource (most recent first)
-		events, err := h.eventsService.GetResourceEvents(r.Context(), resolvedID, ns, involvedObjectKind, involvedObjectName)
+		// Note: GetResourceEvents doesn't support pagination yet (uses fieldSelector)
+		// For Headlamp/Lens: use clusterID as identifier (events service needs updating separately)
+		events, err := h.eventsService.GetResourceEvents(r.Context(), clusterID, ns, involvedObjectKind, involvedObjectName)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -66,9 +79,10 @@ func (h *Handler) GetEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// All namespaces: namespace empty, "*", or "_all"
+	// All namespaces: namespace empty, "*", or "_all" (no pagination support for multi-namespace)
 	if namespace == "" || namespace == "*" || namespace == "_all" {
-		events, err := h.eventsService.ListEventsAllNamespaces(r.Context(), resolvedID, limit)
+		// For Headlamp/Lens: use clusterID as identifier (events service needs updating separately)
+		events, err := h.eventsService.ListEventsAllNamespaces(r.Context(), clusterID, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -77,12 +91,32 @@ func (h *Handler) GetEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Single namespace
-	events, err := h.eventsService.ListEvents(r.Context(), resolvedID, namespace, limit)
+	// Single namespace: BE-FUNC-002 pagination support
+	opts := metav1.ListOptions{Limit: int64(limit)}
+	if continueToken := r.URL.Query().Get("continue"); continueToken != "" {
+		opts.Continue = continueToken
+	}
+	// For Headlamp/Lens: use clusterID as identifier (events service needs updating separately)
+	listMeta, events, err := h.eventsService.ListEvents(r.Context(), clusterID, namespace, opts)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	respondJSON(w, http.StatusOK, events)
+	// Return pagination metadata
+	total := int64(len(events))
+	if listMeta != nil && listMeta.GetRemainingItemCount() != nil {
+		total = int64(len(events)) + *listMeta.GetRemainingItemCount()
+	}
+	meta := map[string]interface{}{
+		"continue": listMeta.GetContinue(),
+		"total":    total,
+	}
+	if listMeta != nil && listMeta.GetRemainingItemCount() != nil {
+		meta["remainingItemCount"] = *listMeta.GetRemainingItemCount()
+	}
+	out := map[string]interface{}{
+		"items":    events,
+		"metadata": meta,
+	}
+	respondJSON(w, http.StatusOK, out)
 }

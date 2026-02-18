@@ -289,6 +289,38 @@ func TestLargeGraphPerformance(t *testing.T) {
 	}
 }
 
+// TestTopologyBuild_5000Nodes tests topology build performance with 5000 nodes (BE-030 requirement)
+func TestTopologyBuild_5000Nodes(t *testing.T) {
+	// Target: <1s for 5000 nodes (BE-030 requirement)
+	const targetTime = 1 * time.Second
+	const nodeCount = 5000
+
+	graph := generateLargeGraph(nodeCount)
+	
+	start := time.Now()
+	err := graph.Validate()
+	elapsed := time.Since(start)
+	
+	if err != nil {
+		t.Fatalf("Validation failed: %v", err)
+	}
+	
+	// Convert to topology graph (more realistic test)
+	start = time.Now()
+	topology := graph.ToTopologyGraph("test-cluster")
+	elapsed = time.Since(start)
+	
+	if topology.Metadata.NodeCount != nodeCount {
+		t.Errorf("Expected %d nodes, got %d", nodeCount, topology.Metadata.NodeCount)
+	}
+	
+	if elapsed > targetTime {
+		t.Errorf("Performance target not met: %v > %v (for %d nodes)", elapsed, targetTime, nodeCount)
+	} else {
+		t.Logf("✅ Performance target met: %v < %v (for %d nodes)", elapsed, targetTime, nodeCount)
+	}
+}
+
 // Test graph memory efficiency
 func TestGraphMemoryEfficiency(t *testing.T) {
 	ctx := context.Background()

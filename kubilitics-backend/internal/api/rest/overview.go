@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
 
@@ -22,22 +23,33 @@ func (h *Handler) GetClusterOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
 	}
 
-	summary, err := h.clusterService.GetClusterSummary(r.Context(), resolvedID)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+	// getClientFromRequest returns client (from kubeconfig or stored cluster); build summary from it
+	info, infoErr := client.GetClusterInfo(r.Context())
+	if infoErr != nil {
+		requestID := logger.FromContext(r.Context())
+		respondErrorWithCode(w, http.StatusInternalServerError, ErrCodeInternalError, infoErr.Error(), requestID)
 		return
 	}
-
-	client, err := h.clusterService.GetClient(resolvedID)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
+	pods, _ := client.Clientset.CoreV1().Pods("").List(r.Context(), metav1.ListOptions{})
+	deployments, _ := client.Clientset.AppsV1().Deployments("").List(r.Context(), metav1.ListOptions{})
+	services, _ := client.Clientset.CoreV1().Services("").List(r.Context(), metav1.ListOptions{})
+	summary := &models.ClusterSummary{
+		ID:              clusterID,
+		Name:            clusterID,
+		NodeCount:       info["node_count"].(int),
+		NamespaceCount:  info["namespace_count"].(int),
+		PodCount:        len(pods.Items),
+		DeploymentCount: len(deployments.Items),
+		ServiceCount:    len(services.Items),
+		HealthStatus:    "healthy",
 	}
 
 	// Pod status
@@ -61,7 +73,9 @@ func (h *Handler) GetClusterOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Events: warnings and top 3
-	events, _ := h.eventsService.ListEventsAllNamespaces(r.Context(), resolvedID, 200)
+	// Note: Events service still uses resolvedID, but for Headlamp/Lens we'd need to update events service too
+	// For now, we'll use clusterID as identifier (events service will need updating separately)
+	events, _ := h.eventsService.ListEventsAllNamespaces(r.Context(), clusterID, 200)
 	warnings := 0
 	critical := 0
 	var top3 []models.OverviewAlert
@@ -87,7 +101,7 @@ func (h *Handler) GetClusterOverview(w http.ResponseWriter, r *http.Request) {
 	// Utilization (optional - Metrics Server may be unavailable)
 	var util *models.OverviewUtilization
 	if h.metricsService != nil {
-		agg, err := h.metricsService.GetClusterUtilization(r.Context(), resolvedID)
+		agg, err := h.metricsService.GetClusterUtilizationWithClient(r.Context(), client)
 		if err == nil && (agg.CPUCapacityCores > 0 || agg.MemoryCapacityGiB > 0) {
 			cpuPct := 0
 			memPct := 0

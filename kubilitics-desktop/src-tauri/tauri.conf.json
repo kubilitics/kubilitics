@@ -12,12 +12,42 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/kubilitics-backend"],
+    "externalBin": ["binaries/kubilitics-backend", "binaries/kubilitics-ai", "binaries/kcli"],
     "resources": [],
     "copyright": "© 2026 Kubilitics",
     "category": "DeveloperTool",
     "shortDescription": "The Kubernetes OS",
-    "longDescription": "Making Kubernetes finally human-friendly"
+    "longDescription": "Making Kubernetes finally human-friendly",
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "signingIdentity": null,
+      "providerShortName": null,
+      "entitlements": null,
+      "frameworks": null,
+      "exceptionDomain": null,
+      "minimumSystemVersion": "10.13"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.comodoca.com"
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": ["https://releases.kubilitics.dev/update/{{target}}/{{arch}}/{{current_version}}"],
+      "dialog": true,
+      "pubkey": null
+    }
   },
   "app": {
     "windows": [
@@ -33,7 +63,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:8080 ws://localhost:8080"
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:819 ws://localhost:819 http://localhost:8081 ws://localhost:8081; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
     }
   }
 }

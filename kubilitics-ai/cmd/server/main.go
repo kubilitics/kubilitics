@@ -21,7 +21,7 @@ package main
 //
 // Port Configuration:
 //   - kubilitics-ai server: 8081
-//   - kubilitics-backend server: 8080 (separate service)
+//   - kubilitics-backend server: 819 (separate service)
 //
 // Graceful Shutdown:
 //   - Cancels all in-flight investigations
@@ -30,21 +30,30 @@ package main
 //   - Finalizes audit logs
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/kubilitics/kubilitics-ai/internal/config"
 	"github.com/kubilitics/kubilitics-ai/internal/server"
 )
 
 func main() {
-	// Load configuration from environment variables
-	cfg, err := server.LoadConfig()
+	// Load configuration
+	cfgMgr, err := config.NewConfigManagerWithDefaults()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create config manager: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := cfgMgr.Load(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
 		os.Exit(1)
 	}
+
+	cfg := cfgMgr.Get(context.Background())
 
 	// Create server with all components wired together
 	srv, err := server.NewServer(cfg)
@@ -59,12 +68,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup signal handling for graceful shutdown
+	// Setup signal handling for graceful shutdown and config hot-reload.
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	// AI-015: SIGHUP triggers a configuration reload so operators can rotate the
+	// LLM API key without restarting the service.
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 
-	// Wait for shutdown signal (Ctrl+C or SIGTERM)
-	<-sigChan
+	for {
+		sig := <-sigChan
+		if sig == syscall.SIGHUP {
+			// Hot-reload configuration (env vars + config file) and rebuild the LLM adapter.
+			fmt.Println("Received SIGHUP — reloading configuration and rotating LLM credentials...")
+			if err := cfgMgr.Reload(context.Background()); err != nil {
+				fmt.Fprintf(os.Stderr, "Config reload failed: %v\n", err)
+				continue
+			}
+			newCfg := cfgMgr.Get(context.Background())
+			if err := srv.ReloadLLMAdapter(newCfg); err != nil {
+				fmt.Fprintf(os.Stderr, "LLM adapter reload failed: %v\n", err)
+			} else {
+				fmt.Println("LLM adapter reloaded successfully.")
+			}
+			continue
+		}
+		// SIGINT or SIGTERM — graceful shutdown.
+		break
+	}
+
 	fmt.Println("\nReceived shutdown signal...")
 
 	// Stop server gracefully

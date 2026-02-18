@@ -19,6 +19,11 @@ type Client struct {
 	cache    map[string]cacheEntry
 	usageMu  sync.Mutex
 	usage    Usage
+
+	// Rate Limiting
+	rateLimit time.Duration
+	lastCall  time.Time
+	rateMu    sync.Mutex
 }
 
 type Request struct {
@@ -59,11 +64,12 @@ func New(cfg Config) *Client {
 	}
 	provider, err := NewProvider(cfg)
 	return &Client{
-		provider: provider,
-		cfg:      cfg,
-		initErr:  err,
-		cacheTTL: 5 * time.Minute,
-		cache:    map[string]cacheEntry{},
+		provider:  provider,
+		cfg:       cfg,
+		initErr:   err,
+		cacheTTL:  5 * time.Minute,
+		cache:     map[string]cacheEntry{},
+		rateLimit: 1 * time.Second, // Default 1s between calls
 	}
 }
 
@@ -100,6 +106,19 @@ func (c *Client) Analyze(ctx context.Context, action, target string) (string, er
 		Target: target,
 		Query:  target,
 	})
+
+	// Rate Limiting Enforcement
+	c.rateMu.Lock()
+	elapsed := time.Since(c.lastCall)
+	if elapsed < c.rateLimit {
+		wait := c.rateLimit - elapsed
+		c.rateMu.Unlock()
+		time.Sleep(wait)
+		c.rateMu.Lock()
+	}
+	c.lastCall = time.Now()
+	c.rateMu.Unlock()
+
 	monthly, err := LoadMonthlyUsage(time.Now())
 	if err == nil && c.cfg.BudgetMonthlyUSD > 0 && monthly.EstimatedCostUSD >= c.cfg.BudgetMonthlyUSD {
 		return "", fmt.Errorf("ai monthly budget exceeded: $%.2f/$%.2f", monthly.EstimatedCostUSD, c.cfg.BudgetMonthlyUSD)

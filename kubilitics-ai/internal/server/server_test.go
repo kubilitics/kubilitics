@@ -4,93 +4,32 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"os"
 	"testing"
 	"time"
+
+	appconfig "github.com/kubilitics/kubilitics-ai/internal/config"
 )
 
-func TestLoadConfig(t *testing.T) {
-	// Set minimal required environment variables
-	os.Setenv("KUBILITICS_LLM_PROVIDER", "openai")
-	os.Setenv("KUBILITICS_LLM_API_KEY", "test-key")
-	defer os.Unsetenv("KUBILITICS_LLM_PROVIDER")
-	defer os.Unsetenv("KUBILITICS_LLM_API_KEY")
-
-	cfg, err := LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig() error: %v", err)
+func createServerTestConfig() *appconfig.Config {
+	var cfg appconfig.Config
+	cfg.Server.Port = 8081
+	cfg.Server.Host = "localhost"
+	cfg.LLM.Provider = "openai"
+	cfg.LLM.OpenAI = map[string]interface{}{
+		"api_key": "test-key",
+		"model":   "gpt-4o",
 	}
-
-	if cfg.LLMProvider != "openai" {
-		t.Errorf("Expected LLMProvider 'openai', got '%s'", cfg.LLMProvider)
-	}
-
-	if cfg.HTTPPort != 8080 {
-		t.Errorf("Expected default HTTPPort 8080, got %d", cfg.HTTPPort)
-	}
-
-	if cfg.DefaultAutonomyLevel != 3 {
-		t.Errorf("Expected default autonomy level 3, got %d", cfg.DefaultAutonomyLevel)
-	}
-}
-
-func TestLoadConfig_CustomPorts(t *testing.T) {
-	os.Setenv("KUBILITICS_HTTP_PORT", "9000")
-	os.Setenv("KUBILITICS_GRPC_PORT", "9001")
-	os.Setenv("KUBILITICS_LLM_PROVIDER", "openai")
-	os.Setenv("KUBILITICS_LLM_API_KEY", "test-key")
-	defer os.Unsetenv("KUBILITICS_HTTP_PORT")
-	defer os.Unsetenv("KUBILITICS_GRPC_PORT")
-	defer os.Unsetenv("KUBILITICS_LLM_PROVIDER")
-	defer os.Unsetenv("KUBILITICS_LLM_API_KEY")
-
-	cfg, err := LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig() error: %v", err)
-	}
-
-	if cfg.HTTPPort != 9000 {
-		t.Errorf("Expected HTTPPort 9000, got %d", cfg.HTTPPort)
-	}
-
-	if cfg.GRPCPort != 9001 {
-		t.Errorf("Expected GRPCPort 9001, got %d", cfg.GRPCPort)
-	}
-}
-
-func TestConfigValidation_InvalidProvider(t *testing.T) {
-	os.Setenv("KUBILITICS_LLM_PROVIDER", "invalid-provider")
-	defer os.Unsetenv("KUBILITICS_LLM_PROVIDER")
-
-	_, err := LoadConfig()
-	if err == nil {
-		t.Error("Expected error for invalid provider, got nil")
-	}
-}
-
-func TestConfigValidation_MissingAPIKey(t *testing.T) {
-	os.Setenv("KUBILITICS_LLM_PROVIDER", "openai")
-	os.Unsetenv("KUBILITICS_LLM_API_KEY")
-	defer os.Unsetenv("KUBILITICS_LLM_PROVIDER")
-
-	_, err := LoadConfig()
-	if err == nil {
-		t.Error("Expected error for missing API key, got nil")
-	}
+	cfg.LLM.Configured = true
+	cfg.Safety.Enabled = false
+	cfg.Analytics.Enabled = false
+	cfg.Autonomy.DefaultLevel = 3
+	return &cfg
 }
 
 func TestNewServer(t *testing.T) {
-	cfg := &Config{
-		HTTPPort:             8080,
-		GRPCPort:             9090,
-		Host:                 "localhost",
-		LLMProvider:          "openai",
-		LLMAPIKey:            "test-key",
-		LLMModel:             "gpt-4o",
-		DefaultAutonomyLevel: 3,
-		EnableSafetyEngine:   true,
-		AnalyticsEnabled:     true,
-	}
+	cfg := createServerTestConfig()
+	cfg.Safety.Enabled = true
+	cfg.Analytics.Enabled = true
 
 	srv, err := NewServer(cfg)
 	if err != nil {
@@ -124,17 +63,10 @@ func TestNewServer_NilConfig(t *testing.T) {
 
 func TestServerLifecycle(t *testing.T) {
 	// Use a different port to avoid conflicts
-	cfg := &Config{
-		HTTPPort:             18080,
-		GRPCPort:             19090,
-		Host:                 "localhost",
-		LLMProvider:          "openai",
-		LLMAPIKey:            "test-key",
-		LLMModel:             "gpt-4o",
-		DefaultAutonomyLevel: 3,
-		EnableSafetyEngine:   true,
-		AnalyticsEnabled:     true,
-	}
+	cfg := createServerTestConfig()
+	cfg.Server.Port = 18080
+	cfg.Safety.Enabled = true
+	cfg.Analytics.Enabled = true
 
 	srv, err := NewServer(cfg)
 	if err != nil {
@@ -177,17 +109,8 @@ func TestServerLifecycle(t *testing.T) {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	cfg := &Config{
-		HTTPPort:             18081,
-		GRPCPort:             19091,
-		Host:                 "localhost",
-		LLMProvider:          "openai",
-		LLMAPIKey:            "test-key",
-		LLMModel:             "gpt-4o",
-		DefaultAutonomyLevel: 3,
-		EnableSafetyEngine:   false,
-		AnalyticsEnabled:     false,
-	}
+	cfg := createServerTestConfig()
+	cfg.Server.Port = 18081
 
 	srv, err := NewServer(cfg)
 	if err != nil {
@@ -216,17 +139,8 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestReadyEndpoint(t *testing.T) {
-	cfg := &Config{
-		HTTPPort:             18082,
-		GRPCPort:             19092,
-		Host:                 "localhost",
-		LLMProvider:          "openai",
-		LLMAPIKey:            "test-key",
-		LLMModel:             "gpt-4o",
-		DefaultAutonomyLevel: 3,
-		EnableSafetyEngine:   false,
-		AnalyticsEnabled:     false,
-	}
+	cfg := createServerTestConfig()
+	cfg.Server.Port = 18082
 
 	srv, err := NewServer(cfg)
 	if err != nil {
@@ -256,17 +170,10 @@ func TestReadyEndpoint(t *testing.T) {
 
 func TestInfoEndpoint(t *testing.T) {
 	// Use OpenAI instead of Ollama to avoid connection issues in tests
-	cfg := &Config{
-		HTTPPort:             18083,
-		GRPCPort:             19093,
-		Host:                 "localhost",
-		LLMProvider:          "openai",
-		LLMAPIKey:            "test-key",
-		LLMModel:             "gpt-4o",
-		DefaultAutonomyLevel: 3,
-		EnableSafetyEngine:   true,
-		AnalyticsEnabled:     true,
-	}
+	cfg := createServerTestConfig()
+	cfg.Server.Port = 18083
+	cfg.Safety.Enabled = true
+	cfg.Analytics.Enabled = true
 
 	srv, err := NewServer(cfg)
 	if err != nil {
@@ -295,17 +202,10 @@ func TestInfoEndpoint(t *testing.T) {
 }
 
 func TestGetComponents(t *testing.T) {
-	cfg := &Config{
-		HTTPPort:             18084,
-		GRPCPort:             19094,
-		Host:                 "localhost",
-		LLMProvider:          "openai",
-		LLMAPIKey:            "test-key",
-		LLMModel:             "gpt-4o",
-		DefaultAutonomyLevel: 3,
-		EnableSafetyEngine:   true,
-		AnalyticsEnabled:     true,
-	}
+	cfg := createServerTestConfig()
+	cfg.Server.Port = 18084
+	cfg.Safety.Enabled = true
+	cfg.Analytics.Enabled = true
 
 	srv, err := NewServer(cfg)
 	if err != nil {
@@ -330,16 +230,12 @@ func TestOllamaProvider(t *testing.T) {
 	// Skip if Ollama is not running
 	t.Skip("Skipping Ollama test - requires Ollama running on localhost:11434")
 
-	cfg := &Config{
-		HTTPPort:   18085,
-		GRPCPort:   19095,
-		Host:       "localhost",
-		LLMProvider: "ollama",
-		LLMModel:   "llama3",
-		LLMBaseURL: "http://localhost:11434",
-		DefaultAutonomyLevel: 3,
-		EnableSafetyEngine:   false,
-		AnalyticsEnabled:     false,
+	cfg := createServerTestConfig()
+	cfg.Server.Port = 18085
+	cfg.LLM.Provider = "ollama"
+	cfg.LLM.Ollama = map[string]interface{}{
+		"model":    "llama3",
+		"base_url": "http://localhost:11434",
 	}
 
 	// This will work even if Ollama is not running
@@ -355,17 +251,8 @@ func TestOllamaProvider(t *testing.T) {
 }
 
 func TestServerDoubleStart(t *testing.T) {
-	cfg := &Config{
-		HTTPPort:             18086,
-		GRPCPort:             19096,
-		Host:                 "localhost",
-		LLMProvider:          "openai",
-		LLMAPIKey:            "test-key",
-		LLMModel:             "gpt-4o",
-		DefaultAutonomyLevel: 3,
-		EnableSafetyEngine:   false,
-		AnalyticsEnabled:     false,
-	}
+	cfg := createServerTestConfig()
+	cfg.Server.Port = 18086
 
 	srv, err := NewServer(cfg)
 	if err != nil {
@@ -386,17 +273,8 @@ func TestServerDoubleStart(t *testing.T) {
 }
 
 func TestServerStopBeforeStart(t *testing.T) {
-	cfg := &Config{
-		HTTPPort:             18087,
-		GRPCPort:             19097,
-		Host:                 "localhost",
-		LLMProvider:          "openai",
-		LLMAPIKey:            "test-key",
-		LLMModel:             "gpt-4o",
-		DefaultAutonomyLevel: 3,
-		EnableSafetyEngine:   false,
-		AnalyticsEnabled:     false,
-	}
+	cfg := createServerTestConfig()
+	cfg.Server.Port = 18087
 
 	srv, err := NewServer(cfg)
 	if err != nil {
@@ -411,17 +289,8 @@ func TestServerStopBeforeStart(t *testing.T) {
 }
 
 func TestServerContext(t *testing.T) {
-	cfg := &Config{
-		HTTPPort:             18088,
-		GRPCPort:             19098,
-		Host:                 "localhost",
-		LLMProvider:          "openai",
-		LLMAPIKey:            "test-key",
-		LLMModel:             "gpt-4o",
-		DefaultAutonomyLevel: 3,
-		EnableSafetyEngine:   false,
-		AnalyticsEnabled:     false,
-	}
+	cfg := createServerTestConfig()
+	cfg.Server.Port = 18088
 
 	srv, err := NewServer(cfg)
 	if err != nil {

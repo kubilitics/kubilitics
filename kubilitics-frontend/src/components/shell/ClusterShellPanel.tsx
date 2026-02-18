@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Terminal as TerminalIcon, X, GripHorizontal, Maximize2, Minimize2, Trash2, Copy, RefreshCw } from 'lucide-react';
+import { Terminal as TerminalIcon, X, GripHorizontal, Maximize2, Minimize2, Trash2, Copy, RefreshCw, AlertCircle, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getKCLIComplete, getKCLIShellStreamUrl, getKCLITUIState, getKubectlShellStreamUrl, getShellComplete, type ShellStatusResult } from '@/services/backendApiClient';
 import { useNavigate } from 'react-router-dom';
@@ -9,6 +9,7 @@ import { useClusterStore } from '@/stores/clusterStore';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 
 const MIN_HEIGHT_PX = 160;
 const MAX_HEIGHT_PERCENT = 85;
@@ -94,6 +95,7 @@ export function ClusterShellPanel({
     return saved === 'shell' ? 'shell' : 'ui';
   });
   const [reconnectNonce, setReconnectNonce] = useState(0);
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -109,6 +111,11 @@ export function ClusterShellPanel({
   const syncTimerRef = useRef<number | null>(null);
   const syncBackoffRef = useRef({ intervalMs: SHELL_STATE_SYNC_INTERVAL_MS, failures: 0 });
   const syncTimeoutRef = useRef<number | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const intentionalCloseRef = useRef(false);
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const RECONNECT_BASE_DELAY_MS = 1000;
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -341,6 +348,7 @@ export function ClusterShellPanel({
   // WS connection lifecycle.
   useEffect(() => {
     if (!open || !clusterId) {
+      intentionalCloseRef.current = true; // Mark as intentional when panel closes
       wsSessionRef.current += 1;
       if (wsRef.current) {
         wsRef.current.close();
@@ -348,6 +356,13 @@ export function ClusterShellPanel({
       }
       setConnecting(false);
       setConnected(false);
+      setIsReconnecting(false);
+      // Clear reconnect timer if panel is closed
+      if (reconnectTimerRef.current != null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      reconnectAttemptRef.current = 0;
       return;
     }
 
@@ -369,7 +384,16 @@ export function ClusterShellPanel({
       if (wsSessionRef.current !== sessionId || wsRef.current !== ws) return;
       setConnecting(false);
       setConnected(true);
+      setIsReconnecting(false);
       setError(null);
+      reconnectAttemptRef.current = 0;
+      intentionalCloseRef.current = false;
+
+      // Clear any pending reconnect timer
+      if (reconnectTimerRef.current != null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
 
       const term = termRef.current;
       if (term) {
@@ -401,7 +425,13 @@ export function ClusterShellPanel({
           setConnected(false);
           setConnecting(false);
         } else if (msg.t === 'error' && msg.d) {
-          setError(msg.d);
+          // Check if this is a kcli binary not found error
+          const errorMsg = msg.d.toLowerCase();
+          if (errorMsg.includes('kcli binary not found') || errorMsg.includes('kcli binary resolution failed')) {
+            setError('kcli binary not found. Please check backend configuration or contact administrator.');
+          } else {
+            setError(msg.d);
+          }
           termRef.current?.write(`\r\n[Error: ${msg.d}]\r\n`);
         }
       } catch {
@@ -415,17 +445,56 @@ export function ClusterShellPanel({
       setConnected(false);
       wsRef.current = null;
       lineBufferRef.current = '';
+
+      // Auto-reconnect logic (similar to useWebSocket.ts)
+      if (!intentionalCloseRef.current && open && clusterId) {
+        if (reconnectAttemptRef.current < MAX_RECONNECT_ATTEMPTS) {
+          const attempt = reconnectAttemptRef.current + 1;
+          const delay = Math.min(
+            RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttemptRef.current),
+            30000
+          );
+
+          console.log(`Shell WebSocket disconnected. Attempting to reconnect (${attempt}/${MAX_RECONNECT_ATTEMPTS}) in ${delay}ms...`);
+          setIsReconnecting(true);
+          setError(null);
+
+          reconnectTimerRef.current = window.setTimeout(() => {
+            reconnectAttemptRef.current = attempt;
+            setReconnectNonce((n) => n + 1);
+          }, delay);
+        } else {
+          console.error('Max reconnect attempts reached. Giving up.');
+          setIsReconnecting(false);
+          setError('Connection lost. Please reopen the shell panel.');
+        }
+      } else {
+        setIsReconnecting(false);
+      }
     };
 
-    ws.onerror = () => {
+    ws.onerror = (event) => {
       if (wsSessionRef.current !== sessionId || wsRef.current !== ws) return;
       setConnecting(false);
       setConnected(false);
-      setError(`${engine.toUpperCase()} WebSocket connection failed.`);
+      // Enhanced error message for kcli-specific issues
+      if (engine === 'kcli') {
+        setError('kcli WebSocket connection failed. This may indicate kcli binary is missing or backend configuration issue.');
+      } else {
+        setError(`${engine.toUpperCase()} WebSocket connection failed.`);
+      }
       lineBufferRef.current = '';
     };
 
     return () => {
+      intentionalCloseRef.current = true;
+      if (reconnectTimerRef.current != null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      reconnectAttemptRef.current = 0;
+      setIsReconnecting(false);
+
       if (wsSessionRef.current === sessionId) {
         wsSessionRef.current += 1;
       }
@@ -481,6 +550,10 @@ export function ClusterShellPanel({
   }, []);
 
   const handleReconnect = useCallback(() => {
+    intentionalCloseRef.current = false;
+    reconnectAttemptRef.current = 0;
+    setIsReconnecting(false);
+    setError(null);
     setReconnectNonce((n) => n + 1);
     scheduleStateSync(50);
   }, [scheduleStateSync]);
@@ -601,6 +674,11 @@ export function ClusterShellPanel({
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" />
               Connecting
             </span>
+          ) : isReconnecting ? (
+            <span className="flex items-center gap-1.5 rounded border border-blue-400/20 bg-blue-400/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-300">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-300" />
+              Reconnecting...
+            </span>
           ) : (
             <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60">
               <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30" />
@@ -608,9 +686,24 @@ export function ClusterShellPanel({
             </span>
           )}
           {error && (
-            <span className="rounded border border-red-400/20 bg-red-400/10 px-2 py-0.5 text-xs font-medium text-red-400">
-              {error}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="rounded border border-red-400/20 bg-red-400/10 px-2 py-0.5 text-xs font-medium text-red-400">
+                {error}
+              </span>
+              {error.toLowerCase().includes('kcli binary') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    window.open('https://github.com/kubilitics/kubilitics-os-emergent/docs/DEPLOYMENT_KCLI.md', '_blank');
+                  }}
+                  className="h-6 text-xs border-red-400/20 text-red-400 hover:bg-red-400/20"
+                >
+                  <ExternalLink className="h-3 w-3 mr-1" />
+                  Help
+                </Button>
+              )}
+            </div>
           )}
           <span
             className={cn(

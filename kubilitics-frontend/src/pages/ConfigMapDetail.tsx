@@ -33,6 +33,7 @@ import { toast } from 'sonner';
 interface ConfigMapResource extends KubernetesResource {
   data?: Record<string, string>;
   binaryData?: Record<string, string>;
+  immutable?: boolean;
 }
 
 const PREVIEW_LEN = 200;
@@ -83,7 +84,8 @@ export default function ConfigMapDetail() {
   const [expandKey, setExpandKey] = useState<string | null>(null);
   const [expandValue, setExpandValue] = useState<string>('');
 
-  const baseUrl = getEffectiveBackendBaseUrl();
+  const backendBaseUrl = useBackendConfigStore((s) => s.backendBaseUrl);
+  const baseUrl = getEffectiveBackendBaseUrl(backendBaseUrl);
   const consumersQuery = useQuery({
     queryKey: ['configmap-consumers', clusterId, namespace, name],
     queryFn: () => getConfigMapConsumers(baseUrl!, clusterId!, namespace ?? '', name!),
@@ -135,7 +137,7 @@ export default function ConfigMapDetail() {
       <div className="space-y-6">
         <Skeleton className="h-20 w-full" />
         <div className="grid grid-cols-2 gap-4">
-          {[1,2].map(i => <Skeleton key={i} className="h-24" />)}
+          {[1, 2].map(i => <Skeleton key={i} className="h-24" />)}
         </div>
         <Skeleton className="h-96" />
       </div>
@@ -152,7 +154,7 @@ export default function ConfigMapDetail() {
             <p className="text-muted-foreground font-medium">Could not load ConfigMap.</p>
             <p className="text-sm text-muted-foreground">
               {isBackend404
-                ? 'The backend returned 404. Ensure the Kubilitics backend is running (e.g. port 8080) and the cluster is registered in Settings.'
+                ? 'The backend returned 404. Ensure the Kubilitics backend is running (e.g. port 819) and the cluster is registered in Settings.'
                 : resourceError instanceof Error ? resourceError.message : String(resourceError)}
             </p>
             <div className="flex gap-2">

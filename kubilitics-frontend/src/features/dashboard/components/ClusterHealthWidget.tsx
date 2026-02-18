@@ -62,9 +62,9 @@ export const ClusterHealthWidget = () => {
 
       <CardHeader className="pb-2 pt-5 px-6 relative z-10 shrink-0">
         <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-lg font-bold text-foreground">
+          <h2 className="text-lg font-bold text-foreground">
             Cluster Health
-          </CardTitle>
+          </h2>
           <div className="flex items-center gap-2">
             <div className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold shadow-sm backdrop-blur-sm", config.badge)}>
               <StatusIcon className="w-3 h-3" />
@@ -83,7 +83,7 @@ export const ClusterHealthWidget = () => {
       <CardContent className="flex-1 flex flex-col pt-2 pb-6 px-6 relative z-10">
         <div className="flex items-center justify-center shrink-0" style={{ height: "180px" }}>
           <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
+            <PieChart aria-label="Cluster health score chart">
               <defs>
                 <linearGradient id="colorGradient" x1="0" y1="0" x2="1" y2="1">
                   <stop offset="0%" stopColor="hsl(var(--primary))" />
@@ -104,7 +104,7 @@ export const ClusterHealthWidget = () => {
                 paddingAngle={4}
               >
                 {data.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
+                  <Cell key={`cell-${index}`} fill={entry.color} aria-label={`${entry.name}: ${entry.value}%`} />
                 ))}
                 <Label
                   content={({ viewBox }) => {

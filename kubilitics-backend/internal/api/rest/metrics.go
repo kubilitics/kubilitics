@@ -46,13 +46,10 @@ func (h *Handler) GetMetricsSummary(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "namespace is required for namespaced resource types")
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
+	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster
+	// Note: UnifiedMetricsService uses clusterID internally, so we use clusterID as identifier
 	id := models.ResourceIdentity{
-		ClusterID:    resolvedID,
+		ClusterID:    clusterID,
 		Namespace:    namespace,
 		ResourceType: rt,
 		ResourceName: resourceName,
@@ -86,12 +83,12 @@ func (h *Handler) GetClusterMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if namespace != "" {
-		resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+		client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 		if err != nil {
 			respondError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		nsMetrics, err := h.metricsService.GetNamespaceMetrics(r.Context(), resolvedID, namespace)
+		nsMetrics, err := h.metricsService.GetNamespaceMetricsWithClient(r.Context(), client, namespace)
 		if err != nil {
 			respondError(w, http.StatusServiceUnavailable, "Metrics Server unavailable or not installed: "+err.Error())
 			return
@@ -122,12 +119,12 @@ func (h *Handler) GetPodMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid clusterId, namespace, or pod")
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	metrics, err := h.metricsService.GetPodMetrics(r.Context(), resolvedID, namespace, pod)
+	metrics, err := h.metricsService.GetPodMetricsWithClient(r.Context(), client, namespace, pod)
 	if err != nil {
 		respondError(w, http.StatusServiceUnavailable, "Metrics Server unavailable or pod not found: "+err.Error())
 		return
@@ -151,12 +148,12 @@ func (h *Handler) GetNodeMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid clusterId or nodeName")
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	metrics, err := h.metricsService.GetNodeMetrics(r.Context(), resolvedID, nodeName)
+	metrics, err := h.metricsService.GetNodeMetricsWithClient(r.Context(), client, nodeName)
 	if err != nil {
 		respondError(w, http.StatusServiceUnavailable, "Metrics Server unavailable or node not found: "+err.Error())
 		return
@@ -181,12 +178,12 @@ func (h *Handler) GetDeploymentMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid clusterId, namespace, or deployment name")
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	metrics, err := h.metricsService.GetDeploymentMetrics(r.Context(), resolvedID, namespace, name)
+	metrics, err := h.metricsService.GetDeploymentMetricsWithClient(r.Context(), client, namespace, name)
 	if err != nil {
 		respondError(w, http.StatusServiceUnavailable, "Metrics Server unavailable or deployment not found: "+err.Error())
 		return
@@ -206,12 +203,12 @@ func (h *Handler) GetReplicaSetMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid clusterId, namespace, or name")
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	metrics, err := h.metricsService.GetReplicaSetMetrics(r.Context(), resolvedID, namespace, name)
+	metrics, err := h.metricsService.GetReplicaSetMetricsWithClient(r.Context(), client, namespace, name)
 	if err != nil {
 		respondError(w, http.StatusServiceUnavailable, "Metrics Server unavailable or replicaset not found: "+err.Error())
 		return
@@ -230,12 +227,12 @@ func (h *Handler) GetStatefulSetMetrics(w http.ResponseWriter, r *http.Request) 
 		respondError(w, http.StatusBadRequest, "Invalid clusterId, namespace, or name")
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	metrics, err := h.metricsService.GetStatefulSetMetrics(r.Context(), resolvedID, namespace, name)
+	metrics, err := h.metricsService.GetStatefulSetMetricsWithClient(r.Context(), client, namespace, name)
 	if err != nil {
 		respondError(w, http.StatusServiceUnavailable, "Metrics Server unavailable or statefulset not found: "+err.Error())
 		return
@@ -254,12 +251,12 @@ func (h *Handler) GetDaemonSetMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid clusterId, namespace, or name")
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	metrics, err := h.metricsService.GetDaemonSetMetrics(r.Context(), resolvedID, namespace, name)
+	metrics, err := h.metricsService.GetDaemonSetMetricsWithClient(r.Context(), client, namespace, name)
 	if err != nil {
 		respondError(w, http.StatusServiceUnavailable, "Metrics Server unavailable or daemonset not found: "+err.Error())
 		return
@@ -278,12 +275,12 @@ func (h *Handler) GetJobMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid clusterId, namespace, or name")
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	metrics, err := h.metricsService.GetJobMetrics(r.Context(), resolvedID, namespace, name)
+	metrics, err := h.metricsService.GetJobMetricsWithClient(r.Context(), client, namespace, name)
 	if err != nil {
 		respondError(w, http.StatusServiceUnavailable, "Metrics Server unavailable or job not found: "+err.Error())
 		return
@@ -302,12 +299,12 @@ func (h *Handler) GetCronJobMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid clusterId, namespace, or name")
 		return
 	}
-	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	metrics, err := h.metricsService.GetCronJobMetrics(r.Context(), resolvedID, namespace, name)
+	metrics, err := h.metricsService.GetCronJobMetricsWithClient(r.Context(), client, namespace, name)
 	if err != nil {
 		respondError(w, http.StatusServiceUnavailable, "Metrics Server unavailable or cronjob not found: "+err.Error())
 		return

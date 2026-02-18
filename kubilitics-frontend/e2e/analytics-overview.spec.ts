@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Analytics Overview Dashboard', () => {
   test.beforeEach(async ({ page }) => {
     // Navigate to analytics overview
-    await page.goto('http://localhost:3000/analytics');
+    await page.goto('/analytics');
   });
 
   test('should display analytics overview page', async ({ page }) => {

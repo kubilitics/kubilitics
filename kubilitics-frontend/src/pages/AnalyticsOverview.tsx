@@ -15,6 +15,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { PageLoadingState } from '@/components/PageLoadingState';
+import { ServiceUnavailableBanner } from '@/components/ServiceUnavailableBanner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -172,15 +174,15 @@ export function AnalyticsOverview() {
       case 'C': return 'text-yellow-600';
       case 'D': return 'text-orange-600';
       case 'F': return 'text-red-600';
-      default:  return 'text-gray-400';
+      default: return 'text-gray-400';
     }
   };
 
   const getImpactBadge = (impact: string) => {
     const variants: Record<string, 'destructive' | 'default' | 'secondary'> = {
-      high:   'destructive',
+      high: 'destructive',
       medium: 'default',
-      low:    'secondary',
+      low: 'secondary',
     };
     return <Badge variant={variants[impact] ?? 'default'}>{impact.toUpperCase()}</Badge>;
   };
@@ -204,16 +206,7 @@ export function AnalyticsOverview() {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   if (isLoading) {
-    return (
-      <div className="container mx-auto p-6">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <Loader2 className="animate-spin rounded-full h-12 w-12 text-blue-600 mx-auto mb-4" />
-            <p className="text-muted-foreground">Loading analytics…</p>
-          </div>
-        </div>
-      </div>
-    );
+    return <PageLoadingState message="Aggregating analytics..." />;
   }
 
   const health = systemHealth!;
@@ -239,6 +232,16 @@ export function AnalyticsOverview() {
           Refresh
         </Button>
       </div>
+
+      {/* Service Status Banner */}
+      {!health.ai_reachable && (
+        <ServiceUnavailableBanner
+          serviceName="AI Backend"
+          message="Analytics intelligence is limited. Connect the AI backend to enable full insights."
+          retryAction={fetchAll}
+          isRetrying={isLoading}
+        />
+      )}
 
       {/* ── System Health Cards ───────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -326,10 +329,9 @@ export function AnalyticsOverview() {
                   ? `$${health.monthly_cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
                   : '—'}
               </div>
-              <div className={`flex items-center gap-1 text-xs ${
-                health.cost_trend === 'up' ? 'text-red-600' :
+              <div className={`flex items-center gap-1 text-xs ${health.cost_trend === 'up' ? 'text-red-600' :
                 health.cost_trend === 'down' ? 'text-green-600' : 'text-gray-500'
-              }`}>
+                }`}>
                 {health.cost_trend === 'up' ? (
                   <><TrendingUp className="h-3 w-3" /> Savings opportunities available</>
                 ) : health.cost_trend === 'down' ? (
@@ -514,9 +516,8 @@ export function AnalyticsOverview() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
             {/* AI backend */}
-            <div className={`flex items-center justify-between p-3 rounded ${
-              health.ai_reachable ? 'bg-green-50 dark:bg-green-900/20' : 'bg-yellow-50 dark:bg-yellow-900/20'
-            }`}>
+            <div className={`flex items-center justify-between p-3 rounded ${health.ai_reachable ? 'bg-green-50 dark:bg-green-900/20' : 'bg-yellow-50 dark:bg-yellow-900/20'
+              }`}>
               <div className="flex items-center gap-2">
                 {health.ai_reachable
                   ? <CheckCircle2 className="h-5 w-5 text-green-600" />
@@ -536,9 +537,8 @@ export function AnalyticsOverview() {
             </div>
 
             {/* ML Models */}
-            <div className={`flex items-center justify-between p-3 rounded ${
-              health.ml_models_active > 0 ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-gray-50 dark:bg-gray-800'
-            }`}>
+            <div className={`flex items-center justify-between p-3 rounded ${health.ml_models_active > 0 ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-gray-50 dark:bg-gray-800'
+              }`}>
               <div className="flex items-center gap-2">
                 <Activity className="h-5 w-5 text-blue-600" />
                 <div>
@@ -556,9 +556,8 @@ export function AnalyticsOverview() {
             </div>
 
             {/* Backend / Data Collection */}
-            <div className={`flex items-center justify-between p-3 rounded ${
-              health.backend_reachable ? 'bg-purple-50 dark:bg-purple-900/20' : 'bg-gray-50 dark:bg-gray-800'
-            }`}>
+            <div className={`flex items-center justify-between p-3 rounded ${health.backend_reachable ? 'bg-purple-50 dark:bg-purple-900/20' : 'bg-gray-50 dark:bg-gray-800'
+              }`}>
               <div className="flex items-center gap-2">
                 <Brain className="h-5 w-5 text-purple-600" />
                 <div>

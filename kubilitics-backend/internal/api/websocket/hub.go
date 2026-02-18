@@ -73,14 +73,21 @@ func (h *Hub) Run() {
 
 		case message := <-h.broadcast:
 			h.mu.RLock()
+			clientCount := len(h.clients)
+			messageSize := float64(len(message))
 			for client := range h.clients {
 				select {
 				case client.send <- message:
+					metrics.WebSocketMessageSizeBytes.WithLabelValues("sent").Observe(messageSize)
 				default:
 					// Client buffer full, close connection
 					close(client.send)
 					delete(h.clients, client)
 				}
+			}
+			// Track total messages sent (one per client that received it)
+			if clientCount > 0 {
+				metrics.WebSocketMessagesSentTotal.Add(float64(clientCount))
 			}
 			h.mu.RUnlock()
 		}

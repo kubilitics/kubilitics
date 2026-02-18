@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
 
@@ -24,6 +25,10 @@ var (
 // Returns JSON: { "completions": ["..."] }.
 func (h *Handler) GetKCLIComplete(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	metrics.KCLICompletionRequestsTotal.Inc()
+	defer func() {
+		metrics.KCLICompletionDurationSeconds.Observe(time.Since(start).Seconds())
+	}()
 	vars := mux.Vars(r)
 	clusterID := vars["clusterId"]
 	if !validate.ClusterID(clusterID) {

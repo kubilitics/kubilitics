@@ -2,6 +2,8 @@ package plugin
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -924,6 +926,21 @@ func hasCommandAlias(commands []string, command string) bool {
 		}
 	}
 	return false
+}
+
+// FileSHA256 returns the SHA256 checksum of the file at path in hex format.
+// Used by plugin verify for integrity checking.
+func FileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func validateSandbox(binaryPath string) error {

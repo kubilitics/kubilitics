@@ -34,5 +34,6 @@ export {
 export { TableFilterCell, type TableFilterCellProps } from './TableFilterCell';
 export { TableFilterProvider, useTableFilterVisible } from './TableFilterContext';
 
-/** Default page size options for list pagination (Pods-style). */
+// ...
+export * from './VirtualDataTable';
 export const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;

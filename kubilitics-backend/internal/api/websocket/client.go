@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kubilitics/kubilitics-backend/internal/auth"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
 )
 
 const (
@@ -40,12 +42,15 @@ type Client struct {
 	// Client ID for tracking
 	id string
 
+	// Authentication claims (nil if unauthenticated)
+	claims *auth.Claims
+
 	// Subscription filters
 	filters map[string]interface{}
 }
 
 // NewClient creates a new WebSocket client
-func NewClient(ctx context.Context, hub *Hub, conn *websocket.Conn, id string) *Client {
+func NewClient(ctx context.Context, hub *Hub, conn *websocket.Conn, id string, claims *auth.Claims) *Client {
 	clientCtx, cancel := context.WithCancel(ctx)
 	return &Client{
 		conn:    conn,
@@ -54,8 +59,38 @@ func NewClient(ctx context.Context, hub *Hub, conn *websocket.Conn, id string) *
 		ctx:     clientCtx,
 		cancel:  cancel,
 		id:      id,
+		claims:  claims,
 		filters: make(map[string]interface{}),
 	}
+}
+
+// IsAuthenticated returns true if the client is authenticated
+func (c *Client) IsAuthenticated() bool {
+	return c.claims != nil
+}
+
+// UserID returns the authenticated user's ID, or empty string if not authenticated
+func (c *Client) UserID() string {
+	if c.claims == nil {
+		return ""
+	}
+	return c.claims.UserID
+}
+
+// Username returns the authenticated user's username, or empty string if not authenticated
+func (c *Client) Username() string {
+	if c.claims == nil {
+		return ""
+	}
+	return c.claims.Username
+}
+
+// Role returns the authenticated user's role, or empty string if not authenticated
+func (c *Client) Role() string {
+	if c.claims == nil {
+		return ""
+	}
+	return c.claims.Role
 }
 
 // ReadPump pumps messages from the websocket connection to the hub
@@ -84,6 +119,10 @@ func (c *Client) ReadPump() {
 				}
 				return
 			}
+
+			// Track received messages
+			metrics.WebSocketMessagesReceivedTotal.Inc()
+			metrics.WebSocketMessageSizeBytes.WithLabelValues("received").Observe(float64(len(message)))
 
 			// Handle client messages (e.g., subscription updates)
 			c.handleMessage(message)

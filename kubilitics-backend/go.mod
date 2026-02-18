@@ -5,7 +5,7 @@ go 1.24.0
 toolchain go1.24.5
 
 require (
-	github.com/google/uuid v1.4.0
+	github.com/google/uuid v1.6.0
 
 	// HTTP & WebSocket
 	github.com/gorilla/mux v1.8.1
@@ -22,6 +22,17 @@ require (
 
 	// Testing
 	github.com/stretchr/testify v1.11.1
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.57.0
+
+	// OpenTelemetry (BE-OBS-001)
+	go.opentelemetry.io/otel v1.32.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.32.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.32.0
+	go.opentelemetry.io/otel/sdk v1.32.0
+	go.opentelemetry.io/otel/trace v1.32.0
+
+	// gRPC (for kubilitics-ai integration; grpc_health_v1 is a subpackage of this module)
+	google.golang.org/grpc v1.67.1
 	k8s.io/api v0.30.0
 	k8s.io/apimachinery v0.30.0
 	// Kubernetes
@@ -33,7 +44,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
-	github.com/go-logr/logr v1.4.1 // indirect
+	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.22.3 // indirect
@@ -63,17 +74,17 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
-	golang.org/x/net v0.43.0 // indirect
-	golang.org/x/oauth2 v0.30.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
-	golang.org/x/term v0.34.0 // indirect
-	golang.org/x/text v0.28.0 // indirect
+	golang.org/x/net v0.49.0 // indirect
+	golang.org/x/oauth2 v0.30.0
+	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/term v0.40.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/time v0.14.0
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/klog/v2 v2.120.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340 // indirect
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b // indirect
@@ -85,19 +96,40 @@ require (
 )
 
 require (
+	github.com/coreos/go-oidc/v3 v3.11.0
 	github.com/creack/pty v1.1.24
+	github.com/crewjam/saml v0.5.1
+	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.23.2
+	golang.org/x/crypto v0.48.0
 )
 
 require (
+	github.com/beevik/etree v1.5.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
+	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
+	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.0.2 // indirect
+	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.23.0 // indirect
+	github.com/jonboulle/clockwork v0.2.2 // indirect
+	github.com/mattermost/xml-roundtrip-validator v0.1.0 // indirect
 	github.com/moby/spdystream v0.2.0 // indirect
 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
+	github.com/russellhaering/goxmldsig v1.4.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.32.0 // indirect
+	go.opentelemetry.io/otel/metric v1.32.0 // indirect
+	go.opentelemetry.io/proto/otlp v1.3.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20241104194629-dd2ea8efbc28 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20241104194629-dd2ea8efbc28 // indirect
 )

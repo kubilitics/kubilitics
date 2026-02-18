@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	kcfg "github.com/kubilitics/kcli/internal/config"
@@ -22,6 +23,7 @@ func newConfigCmd(a *app) *cobra.Command {
 		newConfigSetCmd(a),
 		newConfigResetCmd(a),
 		newConfigEditCmd(),
+		newConfigProfileCmd(a),
 	)
 	return cmd
 }
@@ -36,16 +38,18 @@ func newConfigViewCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Use redacted config for display so AI API key is never shown
+			disp := cfg.Redacted()
 			switch strings.ToLower(strings.TrimSpace(output)) {
 			case "", "yaml":
-				v, err := cfg.ToYAML()
+				v, err := disp.ToYAML()
 				if err != nil {
 					return err
 				}
 				fmt.Fprint(cmd.OutOrStdout(), v)
 				return nil
 			case "json":
-				v, err := cfg.ToJSON()
+				v, err := disp.ToJSON()
 				if err != nil {
 					return err
 				}
@@ -178,4 +182,130 @@ func newConfigEditCmd() *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func newConfigProfileCmd(a *app) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "profile",
+		Short: "Manage configuration profiles",
+	}
+	cmd.AddCommand(
+		newConfigProfileListCmd(),
+		newConfigProfileUseCmd(a),
+		newConfigProfileAddCmd(),
+		newConfigProfileRmCmd(),
+	)
+	return cmd
+}
+
+func newConfigProfileListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List all profiles",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := kcfg.LoadStore()
+			if err != nil {
+				return err
+			}
+			names := make([]string, 0, len(s.Profiles))
+			for name := range s.Profiles {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				prefix := "  "
+				if name == s.ActiveProfile {
+					prefix = "* "
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s%s\n", prefix, name)
+			}
+			return nil
+		},
+	}
+}
+
+func newConfigProfileUseCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "use <name>",
+		Short: "Switch to a different profile",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+			s, err := kcfg.LoadStore()
+			if err != nil {
+				return err
+			}
+			if _, ok := s.Profiles[name]; !ok {
+				return fmt.Errorf("profile %q not found", name)
+			}
+			s.ActiveProfile = name
+			if err := kcfg.SaveStore(s); err != nil {
+				return err
+			}
+			a.cfg = s.Current()
+			a.resetAIClient() // Reset AI client to pick up new profile settings
+			fmt.Fprintf(cmd.OutOrStdout(), "Switched to profile %q\n", name)
+			return nil
+		},
+	}
+}
+
+func newConfigProfileAddCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "add <name>",
+		Short: "Create a new profile with default settings",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+			if name == "" {
+				return fmt.Errorf("profile name cannot be empty")
+			}
+			s, err := kcfg.LoadStore()
+			if err != nil {
+				return err
+			}
+			if _, ok := s.Profiles[name]; ok {
+				return fmt.Errorf("profile %q already exists", name)
+			}
+			if s.Profiles == nil {
+				s.Profiles = make(map[string]*kcfg.Config)
+			}
+			s.Profiles[name] = kcfg.Default()
+			if err := kcfg.SaveStore(s); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Created profile %q\n", name)
+			return nil
+		},
+	}
+}
+
+func newConfigProfileRmCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rm <name>",
+		Short: "Delete a profile",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+			if name == "default" {
+				return fmt.Errorf("cannot remove 'default' profile")
+			}
+			s, err := kcfg.LoadStore()
+			if err != nil {
+				return err
+			}
+			if _, ok := s.Profiles[name]; !ok {
+				return fmt.Errorf("profile %q not found", name)
+			}
+			if s.ActiveProfile == name {
+				return fmt.Errorf("cannot remove currently active profile; switch to another one first")
+			}
+			delete(s.Profiles, name)
+			if err := kcfg.SaveStore(s); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed profile %q\n", name)
+			return nil
+		},
+	}
 }

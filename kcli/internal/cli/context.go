@@ -14,6 +14,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// kubeconfig view output for context extraction
+type kubeContextEntry struct {
+	Name    string `json:"name"`
+	Context struct {
+		Cluster   string `json:"cluster"`
+		User      string `json:"user"`
+		Namespace string `json:"namespace,omitempty"`
+	} `json:"context"`
+}
+
 func newContextCmd(a *app) *cobra.Command {
 	var onlyFavorites bool
 	var pick bool
@@ -55,6 +65,9 @@ func newContextCmd(a *app) *cobra.Command {
 	}
 	ctxCmd.Flags().BoolVarP(&onlyFavorites, "favorites", "f", false, "show favorite contexts only")
 	ctxCmd.Flags().BoolVar(&pick, "pick", false, "interactive fuzzy-like context picker")
+
+	ctxCmd.AddCommand(newContextRenameCmd(a))
+	ctxCmd.AddCommand(newContextDeleteCmd(a))
 
 	favCmd := &cobra.Command{Use: "fav", Short: "Manage favorite contexts"}
 	favCmd.AddCommand(
@@ -122,6 +135,173 @@ func newContextCmd(a *app) *cobra.Command {
 	}
 
 	return ctxCmd
+}
+
+func newContextDeleteCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete <name>",
+		Short: "Delete a context from kubeconfig",
+		Long:  "Removes the context from kubeconfig. Cannot delete the current context; switch to another context first.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+			if name == "" {
+				return fmt.Errorf("context name is required")
+			}
+			current, err := currentContext(a)
+			if err != nil {
+				return err
+			}
+			if current == name {
+				return fmt.Errorf("cannot delete current context %q; switch to another context first (e.g. kcli ctx <other>)", name)
+			}
+			if err := a.runKubectl([]string{"config", "delete-context", name}); err != nil {
+				return err
+			}
+			// Update state: remove from favorites and clear last if deleted
+			s, err := state.Load()
+			if err != nil {
+				return err
+			}
+			s.RemoveFavorite(name)
+			if s.LastContext == name {
+				s.LastContext = ""
+			}
+			if s.RecentContexts != nil {
+				out := make([]string, 0, len(s.RecentContexts))
+				for _, c := range s.RecentContexts {
+					if c != name {
+						out = append(out, c)
+					}
+				}
+				s.RecentContexts = out
+			}
+			_ = state.Save(s)
+			fmt.Fprintf(cmd.OutOrStdout(), "Deleted context %q\n", name)
+			return nil
+		},
+	}
+}
+
+func newContextRenameCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rename <old-name> <new-name>",
+		Short: "Rename a context in kubeconfig",
+		Long:  "Creates a new context with the same cluster/user/namespace and removes the old one. Switches current context if the renamed context was active.",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			oldName := strings.TrimSpace(args[0])
+			newName := strings.TrimSpace(args[1])
+			if oldName == "" || newName == "" {
+				return fmt.Errorf("both old and new context names are required")
+			}
+			if oldName == newName {
+				return fmt.Errorf("old and new names are the same")
+			}
+			ctxs, err := listContexts(a)
+			if err != nil {
+				return err
+			}
+			hasOld := false
+			for _, c := range ctxs {
+				if c == oldName {
+					hasOld = true
+					break
+				}
+			}
+			if !hasOld {
+				return fmt.Errorf("context %q not found", oldName)
+			}
+			for _, c := range ctxs {
+				if c == newName {
+					return fmt.Errorf("context %q already exists", newName)
+				}
+			}
+			// Get context details: cluster, user, namespace
+			out, err := a.captureKubectl([]string{"config", "view", "-o", "json"})
+			if err != nil {
+				return fmt.Errorf("failed to read kubeconfig: %w", err)
+			}
+			var view struct {
+				Contexts []kubeContextEntry `json:"contexts"`
+			}
+			if err := json.Unmarshal([]byte(out), &view); err != nil {
+				return fmt.Errorf("failed to parse kubeconfig: %w", err)
+			}
+			var cluster, user, namespace string
+			for _, e := range view.Contexts {
+				if e.Name == oldName {
+					cluster = strings.TrimSpace(e.Context.Cluster)
+					user = strings.TrimSpace(e.Context.User)
+					namespace = strings.TrimSpace(e.Context.Namespace)
+					break
+				}
+			}
+			if cluster == "" || user == "" {
+				return fmt.Errorf("context %q has no cluster or user (invalid kubeconfig entry)", oldName)
+			}
+			// set-context newName --cluster=... --user=...
+			setArgs := []string{"config", "set-context", newName, "--cluster=" + cluster, "--user=" + user}
+			if namespace != "" {
+				setArgs = append(setArgs, "--namespace="+namespace)
+			}
+			if err := a.runKubectl(setArgs); err != nil {
+				return fmt.Errorf("failed to create renamed context: %w", err)
+			}
+			if err := a.runKubectl([]string{"config", "delete-context", oldName}); err != nil {
+				return fmt.Errorf("failed to remove old context: %w", err)
+			}
+			current, _ := currentContext(a)
+			if current == oldName {
+				if err := a.runKubectl([]string{"config", "use-context", newName}); err != nil {
+					return fmt.Errorf("renamed context but failed to switch current: %w", err)
+				}
+				s, _ := state.Load()
+				if s != nil {
+					s.MarkContextSwitched(oldName, newName)
+					_ = state.Save(s)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Renamed context %q to %q and switched to %q\n", oldName, newName, newName)
+			} else {
+				// Update state: rename in favorites and recent
+				s, err := state.Load()
+				if err != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "Renamed context %q to %q\n", oldName, newName)
+					return nil
+				}
+				// Replace old with new in favorites
+				for i, f := range s.Favorites {
+					if f == oldName {
+						s.Favorites[i] = newName
+						break
+					}
+				}
+				if s.LastContext == oldName {
+					s.LastContext = newName
+				}
+				if s.RecentContexts != nil {
+					for i, c := range s.RecentContexts {
+						if c == oldName {
+							s.RecentContexts[i] = newName
+							break
+						}
+					}
+				}
+				if s.ContextGroups != nil {
+					for g, members := range s.ContextGroups {
+						for i, m := range members {
+							if m == oldName {
+								s.ContextGroups[g][i] = newName
+							}
+						}
+					}
+				}
+				_ = state.Save(s)
+				fmt.Fprintf(cmd.OutOrStdout(), "Renamed context %q to %q\n", oldName, newName)
+			}
+			return nil
+		},
+	}
 }
 
 func newContextGroupCmd(a *app) *cobra.Command {

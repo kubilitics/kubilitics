@@ -270,6 +270,11 @@ func (m *viperConfigManager) applyEnvOverrides() {
 		m.config.Backend.Address = addr
 	}
 
+	// Backend HTTP URL from environment
+	if httpURL := os.Getenv("KUBILITICS_BACKEND_URL"); httpURL != "" {
+		m.config.Backend.HTTPBaseURL = httpURL
+	}
+
 	// Port from environment - only override if explicitly set
 	if portEnv := os.Getenv("KUBILITICS_PORT"); portEnv != "" {
 		// Port was explicitly set via environment, so viper has the value

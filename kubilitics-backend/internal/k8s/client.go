@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -51,6 +52,12 @@ type Client struct {
 	Timeout time.Duration
 	// Limiter optionally rate-limits outbound API calls per cluster (C1.5). Nil = no limit.
 	limiter *rate.Limiter
+	// CircuitBreaker protects against cascading failures (BE-SCALE-001).
+	circuitBreaker *CircuitBreaker
+	// Health status: last successful call time, last error, etc.
+	lastSuccessTime time.Time
+	lastError       error
+	healthMu        sync.RWMutex
 }
 
 // NewClient creates a new Kubernetes client
@@ -93,12 +100,21 @@ func NewClient(kubeconfigPath, context string) (*Client, error) {
 		Config:         config,
 		Context:        context,
 		kubeconfigPath: kubeconfigPath,
+		circuitBreaker: NewCircuitBreaker(""), // clusterID will be set via SetClusterID if available
+		lastSuccessTime: time.Now(),
 	}, nil
 }
 
 // SetTimeout sets the timeout for outbound K8s API calls. Call after NewClient when config is available.
 func (c *Client) SetTimeout(d time.Duration) {
 	c.Timeout = d
+}
+
+// SetClusterID sets the cluster ID for circuit breaker metrics labeling.
+func (c *Client) SetClusterID(clusterID string) {
+	if c.circuitBreaker != nil {
+		c.circuitBreaker.clusterID = clusterID
+	}
 }
 
 // SetLimiter sets a token-bucket rate limiter for outbound K8s API calls (C1.5). Call after NewClient when config is available.
@@ -129,6 +145,61 @@ func buildConfigFromFlags(context, kubeconfigPath string) (*rest.Config, error) 
 		}).ClientConfig()
 }
 
+// NewClientFromBytes creates a Kubernetes client from kubeconfig bytes (Headlamp/Lens model).
+// This allows client-side cluster management without storing kubeconfig on backend.
+func NewClientFromBytes(kubeconfigBytes []byte, context string) (*Client, error) {
+	// Load kubeconfig from bytes
+	rawConfig, err := clientcmd.Load(kubeconfigBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
+	}
+
+	// Determine context to use
+	contextToUse := context
+	if contextToUse == "" {
+		contextToUse = rawConfig.CurrentContext
+	}
+	if contextToUse == "" {
+		return nil, fmt.Errorf("no context specified and no current context in kubeconfig")
+	}
+
+	// Verify context exists
+	if _, exists := rawConfig.Contexts[contextToUse]; !exists {
+		return nil, fmt.Errorf("context %s not found in kubeconfig", contextToUse)
+	}
+
+	// Create config with context override
+	config, err := clientcmd.NewNonInteractiveClientConfig(
+		*rawConfig,
+		contextToUse,
+		&clientcmd.ConfigOverrides{},
+		&clientcmd.ClientConfigLoadingRules{},
+	).ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build config for context %s: %w", contextToUse, err)
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create clientset: %w", err)
+	}
+
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
+	}
+
+	return &Client{
+		Clientset:      clientset,
+		Dynamic:        dynamicClient,
+		Config:         config,
+		Context:        contextToUse,
+		kubeconfigPath: "", // Not stored when using bytes
+		circuitBreaker: NewCircuitBreaker(""), // clusterID will be set via SetClusterID if available
+		lastSuccessTime: time.Now(),
+	}, nil
+}
+
 // GetServerVersion returns Kubernetes server version
 func (c *Client) GetServerVersion(ctx context.Context) (string, error) {
 	version, err := c.Clientset.Discovery().ServerVersion()
@@ -138,50 +209,103 @@ func (c *Client) GetServerVersion(ctx context.Context) (string, error) {
 	return version.GitVersion, nil
 }
 
-// TestConnection verifies connectivity to the cluster (with timeout and retry).
+// TestConnection verifies connectivity to the cluster (with timeout, retry, and circuit breaker).
+// BE-SCALE-001: Uses circuit breaker to prevent cascading failures.
 func (c *Client) TestConnection(ctx context.Context) error {
 	if err := c.waitRateLimit(ctx); err != nil {
 		return err
 	}
-	ctx, cancel := c.withTimeout(ctx)
-	defer cancel()
-	return doWithRetry(ctx, defaultRetryAttempts, func() error {
-		_, err := c.Clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 1})
-		return err
+
+	// Use circuit breaker
+	err := c.circuitBreaker.Execute(ctx, func() error {
+		ctx, cancel := c.withTimeout(ctx)
+		defer cancel()
+		return doWithRetry(ctx, defaultRetryAttempts, func() error {
+			_, err := c.Clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 1})
+			return err
+		})
 	})
+
+	c.updateHealth(err)
+	return err
 }
 
-// GetClusterInfo returns basic cluster information (with timeout and retry).
+// GetClusterInfo returns basic cluster information (with timeout, retry, and circuit breaker).
+// BE-SCALE-001: Uses circuit breaker to prevent cascading failures.
 func (c *Client) GetClusterInfo(ctx context.Context) (map[string]interface{}, error) {
 	if err := c.waitRateLimit(ctx); err != nil {
 		return nil, err
 	}
-	ctx, cancel := c.withTimeout(ctx)
-	defer cancel()
-	return doWithRetryValue(ctx, defaultRetryAttempts, func() (map[string]interface{}, error) {
-		version, err := c.GetServerVersion(ctx)
-		if err != nil {
-			return nil, err
-		}
-		nodes, err := c.Clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return nil, err
-		}
-		namespaces, err := c.Clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return nil, err
-		}
-		return map[string]interface{}{
-			"version":         version,
-			"node_count":      len(nodes.Items),
-			"namespace_count": len(namespaces.Items),
-			"server_url":      c.Config.Host,
-		}, nil
+
+	var result map[string]interface{}
+	err := c.circuitBreaker.Execute(ctx, func() error {
+		ctx, cancel := c.withTimeout(ctx)
+		defer cancel()
+		var fnErr error
+		result, fnErr = doWithRetryValue(ctx, defaultRetryAttempts, func() (map[string]interface{}, error) {
+			version, err := c.GetServerVersion(ctx)
+			if err != nil {
+				return nil, err
+			}
+			nodes, err := c.Clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			namespaces, err := c.Clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			serverURL := ""
+			if c.Config != nil {
+				serverURL = c.Config.Host
+			}
+			return map[string]interface{}{
+				"version":         version,
+				"node_count":      len(nodes.Items),
+				"namespace_count": len(namespaces.Items),
+				"server_url":      serverURL,
+			}, nil
+		})
+		return fnErr
 	})
+
+	c.updateHealth(err)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// updateHealth updates the health status of the client.
+func (c *Client) updateHealth(err error) {
+	c.healthMu.Lock()
+	defer c.healthMu.Unlock()
+	if err == nil {
+		c.lastSuccessTime = time.Now()
+		c.lastError = nil
+	} else {
+		c.lastError = err
+	}
+}
+
+// HealthStatus returns the health status of the cluster connection.
+// BE-SCALE-001: Per-cluster connection health monitoring.
+func (c *Client) HealthStatus() (isHealthy bool, lastSuccess time.Time, lastErr error, circuitState CircuitBreakerState) {
+	c.healthMu.RLock()
+	defer c.healthMu.RUnlock()
+
+	state := c.circuitBreaker.State()
+	isHealthy = state == StateClosed && c.lastError == nil
+	return isHealthy, c.lastSuccessTime, c.lastError, state
 }
 
 // NewClientForTest creates a Client that uses the given Clientset. Used by tests (e.g. topology)
 // that only need Clientset. Config and Dynamic are nil; callers must not use client methods that need them.
 func NewClientForTest(clientset kubernetes.Interface) *Client {
-	return &Client{Clientset: clientset}
+	client := &Client{
+		Clientset:      clientset,
+		circuitBreaker: NewCircuitBreaker(""), // clusterID will be set via SetClusterID if available
+		lastSuccessTime: time.Now(),
+	}
+	return client
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -76,19 +77,51 @@ func (h *Handler) GetShellStream(w http.ResponseWriter, r *http.Request) {
 	if d, err := os.UserHomeDir(); err == nil && d != "" {
 		workDir = d
 	}
-	// Wrapper: source kubectl completion (bash only), set context if needed, then exec interactive shell.
-	// This gives native Tab completion for kubectl (e.g. kubectl get pod<Tab>).
+	// Wrapper: source kcli completion (bash only), set context if needed, then exec interactive shell.
+	// This gives native Tab completion for kcli and aliases k/kubectl to kcli.
+	// We must ensure kcli is in the PATH. If not, we try to use the absolute path.
+	kcliPath := "kcli"
+	if _, err := exec.LookPath("kcli"); err != nil {
+		// Fallback to absolute path in dev environment
+		devPath := "/Users/koti/myFuture/Kubernetes/kubilitics-os-emergent/kcli/kcli"
+		if _, err := os.Stat(devPath); err == nil {
+			kcliPath = devPath
+		}
+	}
+
 	ctxArg := strings.ReplaceAll(cluster.Context, "'", "'\"'\"'")
 	var wrapper string
+
+	// Phase 5: Fix Shell Instability - Strict kcli requirement.
+	// We MUST ensure kcli is runnable. If not, we fail the shell session immediately.
+	// We do NOT want to fall back to a raw zsh/bash if kcli is missing.
+
+	// Common preamble: Check kcli, setup aliases.
+	// If kcli is missing, print error and exit immediately.
+	preamble := fmt.Sprintf(`
+		if ! command -v %s &> /dev/null; then
+			echo "❌ Critical Error: kcli binary not found at '%s'"
+			echo "The shell cannot start without the Kubilitics backend CLI."
+			exit 1
+		fi
+		alias k=%s
+		alias kubectl=%s
+		alias kcl=%s
+		alias kubectx='%s ctx'
+		alias kubens='%s ns'
+		alias k9s='%s ui'
+	`, kcliPath, kcliPath, kcliPath, kcliPath, kcliPath, kcliPath, kcliPath, kcliPath)
+
 	if shell == "/bin/bash" {
-		wrapper = "source <(kubectl completion bash) 2>/dev/null; "
+		wrapper = preamble + fmt.Sprintf("source <(%s completion bash) 2>/dev/null; ", kcliPath)
 		if cluster.Context != "" {
-			wrapper += "kubectl config use-context '" + ctxArg + "' 2>/dev/null; "
+			wrapper += fmt.Sprintf("%s config use-context '%s' 2>/dev/null || exit 1; ", kcliPath, ctxArg)
 		}
 		wrapper += "exec bash -i"
 	} else {
+		wrapper = preamble
 		if cluster.Context != "" {
-			wrapper = "kubectl config use-context '" + ctxArg + "' 2>/dev/null; "
+			wrapper += fmt.Sprintf("%s config use-context '%s' 2>/dev/null || exit 1; ", kcliPath, ctxArg)
 		}
 		wrapper += "exec sh -i"
 	}

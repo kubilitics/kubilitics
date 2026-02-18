@@ -26,7 +26,7 @@ var jsonUnmarshal = json.Unmarshal
 func (s *mcpServerImpl) http() *backendHTTP {
 	baseURL := s.config.Backend.HTTPBaseURL
 	if baseURL == "" {
-		baseURL = "http://localhost:8080"
+		baseURL = "http://localhost:819"
 	}
 	return newBackendHTTP(baseURL)
 }

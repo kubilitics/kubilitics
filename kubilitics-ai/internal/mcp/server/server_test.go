@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubilitics/kubilitics-ai/internal/audit"
 	"github.com/kubilitics/kubilitics-ai/internal/config"
+	"github.com/kubilitics/kubilitics-ai/internal/db"
 	"github.com/kubilitics/kubilitics-ai/internal/integration/backend"
 )
 
@@ -35,8 +36,13 @@ func setupTestServer(t *testing.T) (MCPServer, *backend.Proxy, audit.Logger) {
 		t.Fatalf("Failed to create backend proxy: %v", err)
 	}
 
+	store, err := db.NewSQLiteStore(":memory:")
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+
 	// Create MCP server
-	server, err := NewMCPServer(cfg, proxy, auditLog)
+	server, err := NewMCPServer(cfg, proxy, auditLog, store)
 	if err != nil {
 		t.Fatalf("Failed to create MCP server: %v", err)
 	}
@@ -80,23 +86,30 @@ func TestNewMCPServerValidation(t *testing.T) {
 	auditLog, _ := audit.NewLogger(auditCfg)
 
 	proxy, _ := backend.NewProxy(cfg, auditLog)
+	store, _ := db.NewSQLiteStore(":memory:")
 
 	// Test nil config
-	_, err := NewMCPServer(nil, proxy, auditLog)
+	_, err := NewMCPServer(nil, proxy, auditLog, store)
 	if err == nil {
 		t.Error("Expected error for nil config")
 	}
 
 	// Test nil proxy
-	_, err = NewMCPServer(cfg, nil, auditLog)
+	_, err = NewMCPServer(cfg, nil, auditLog, store)
 	if err == nil {
 		t.Error("Expected error for nil proxy")
 	}
 
 	// Test nil audit log
-	_, err = NewMCPServer(cfg, proxy, nil)
+	_, err = NewMCPServer(cfg, proxy, nil, store)
 	if err == nil {
 		t.Error("Expected error for nil audit log")
+	}
+
+	// Test nil store
+	_, err = NewMCPServer(cfg, proxy, auditLog, nil)
+	if err == nil {
+		t.Error("Expected error for nil store")
 	}
 }
 

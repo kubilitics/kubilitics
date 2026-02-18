@@ -10,13 +10,32 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"os"
+
+	"github.com/kubilitics/kubilitics-ai/internal/db"
 	"github.com/kubilitics/kubilitics-ai/internal/llm/budget"
 )
 
+func newTestStore(t *testing.T) db.Store {
+	f, err := os.CreateTemp("", "kubilitics-ai-budget-handler-test-*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	name := f.Name()
+	f.Close()
+	t.Cleanup(func() { os.Remove(name) })
+
+	s, err := db.NewSQLiteStore(name)
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	return s
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-func buildBudgetServer() *Server {
-	return &Server{budgetTracker: budget.NewBudgetTracker()}
+func buildBudgetServer(t *testing.T) *Server {
+	return &Server{budgetTracker: budget.NewBudgetTracker(newTestStore(t))}
 }
 
 func buildBudgetServerNoTracker() *Server {
@@ -53,7 +72,7 @@ func decodeJSON(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 func TestHandleBudgetSummary_Empty(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetGET(t, srv, "/api/v1/budget/summary?user_id=user-1")
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
@@ -68,7 +87,7 @@ func TestHandleBudgetSummary_Empty(t *testing.T) {
 }
 
 func TestHandleBudgetSummary_AfterRecord(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 
 	// Record some usage
 	budgetPOST(t, srv, "/api/v1/budget/record", map[string]any{
@@ -100,7 +119,7 @@ func TestHandleBudgetSummary_NoTracker(t *testing.T) {
 }
 
 func TestHandleBudgetSummary_DefaultUserGlobal(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetGET(t, srv, "/api/v1/budget/summary") // no user_id param
 	resp := decodeJSON(t, w)
 	if resp["user_id"] != "global" {
@@ -111,7 +130,7 @@ func TestHandleBudgetSummary_DefaultUserGlobal(t *testing.T) {
 // ─── Details ─────────────────────────────────────────────────────────────────
 
 func TestHandleBudgetDetails_Empty(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetGET(t, srv, "/api/v1/budget/details?user_id=user-3")
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
@@ -119,7 +138,7 @@ func TestHandleBudgetDetails_Empty(t *testing.T) {
 }
 
 func TestHandleBudgetDetails_WithInvestigation(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	budgetPOST(t, srv, "/api/v1/budget/record", map[string]any{
 		"user_id":          "user-4",
 		"investigation_id": "inv-abc",
@@ -142,7 +161,7 @@ func TestHandleBudgetDetails_WithInvestigation(t *testing.T) {
 // ─── Limits ───────────────────────────────────────────────────────────────────
 
 func TestHandleBudgetGetLimits_Default(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetGET(t, srv, "/api/v1/budget/limits?user_id=user-5")
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
@@ -154,7 +173,7 @@ func TestHandleBudgetGetLimits_Default(t *testing.T) {
 }
 
 func TestHandleBudgetSetLimit_OK(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetPOST(t, srv, "/api/v1/budget/limits", map[string]any{
 		"user_id":   "user-6",
 		"limit_usd": 25.0,
@@ -172,7 +191,7 @@ func TestHandleBudgetSetLimit_OK(t *testing.T) {
 }
 
 func TestHandleBudgetSetLimit_Negative(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetPOST(t, srv, "/api/v1/budget/limits", map[string]any{
 		"user_id":   "user-7",
 		"limit_usd": -5.0,
@@ -193,7 +212,7 @@ func TestHandleBudgetGetLimits_NoTracker(t *testing.T) {
 // ─── Record ───────────────────────────────────────────────────────────────────
 
 func TestHandleBudgetRecord_OK(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetPOST(t, srv, "/api/v1/budget/record", map[string]any{
 		"user_id":       "user-8",
 		"input_tokens":  500,
@@ -213,7 +232,7 @@ func TestHandleBudgetRecord_OK(t *testing.T) {
 }
 
 func TestHandleBudgetRecord_NegativeTokens(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetPOST(t, srv, "/api/v1/budget/record", map[string]any{
 		"input_tokens":  -10,
 		"output_tokens": 100,
@@ -224,7 +243,7 @@ func TestHandleBudgetRecord_NegativeTokens(t *testing.T) {
 }
 
 func TestHandleBudgetRecord_MethodNotAllowed(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/budget/record", nil)
 	w := httptest.NewRecorder()
 	srv.handleBudgetDispatch(w, req)
@@ -236,7 +255,7 @@ func TestHandleBudgetRecord_MethodNotAllowed(t *testing.T) {
 // ─── Check ────────────────────────────────────────────────────────────────────
 
 func TestHandleBudgetCheck_Unlimited(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetPOST(t, srv, "/api/v1/budget/check", map[string]any{
 		"user_id":          "user-9",
 		"estimated_tokens": 5000,
@@ -251,7 +270,7 @@ func TestHandleBudgetCheck_Unlimited(t *testing.T) {
 }
 
 func TestHandleBudgetCheck_ExceededLimit(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 
 	// Set tight limit
 	budgetPOST(t, srv, "/api/v1/budget/limits", map[string]any{
@@ -282,7 +301,13 @@ func TestHandleBudgetCheck_ExceededLimit(t *testing.T) {
 // ─── Reset ────────────────────────────────────────────────────────────────────
 
 func TestHandleBudgetReset_OK(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
+
+	// Set a limit explicitly to ensure the user row exists in DB types.
+	budgetPOST(t, srv, "/api/v1/budget/limits", map[string]any{
+		"user_id":   "user-11",
+		"limit_usd": 10.0,
+	})
 
 	// Record usage then reset
 	budgetPOST(t, srv, "/api/v1/budget/record", map[string]any{
@@ -304,13 +329,14 @@ func TestHandleBudgetReset_OK(t *testing.T) {
 	// Verify usage is cleared
 	w2 := budgetGET(t, srv, "/api/v1/budget/summary?user_id=user-11")
 	resp2 := decodeJSON(t, w2)
+	// total_tokens should be 0 because period_start is now AFTER the record
 	if tokens, _ := resp2["total_tokens"].(float64); int(tokens) != 0 {
 		t.Errorf("expected 0 tokens after reset, got %v", resp2["total_tokens"])
 	}
 }
 
 func TestHandleBudgetReset_MethodNotAllowed(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/budget/reset", nil)
 	w := httptest.NewRecorder()
 	srv.handleBudgetDispatch(w, req)
@@ -322,7 +348,7 @@ func TestHandleBudgetReset_MethodNotAllowed(t *testing.T) {
 // ─── Estimate ────────────────────────────────────────────────────────────────
 
 func TestHandleBudgetEstimate_OpenAI(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetGET(t, srv, "/api/v1/budget/estimate?input_tokens=1000&output_tokens=500&provider=openai")
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -337,7 +363,7 @@ func TestHandleBudgetEstimate_OpenAI(t *testing.T) {
 }
 
 func TestHandleBudgetEstimate_Ollama(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetGET(t, srv, "/api/v1/budget/estimate?input_tokens=5000&output_tokens=2000&provider=ollama")
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -351,7 +377,7 @@ func TestHandleBudgetEstimate_Ollama(t *testing.T) {
 // ─── Dispatch routing ─────────────────────────────────────────────────────────
 
 func TestHandleBudgetDispatch_NotFound(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	w := budgetGET(t, srv, "/api/v1/budget/unknown-route")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", w.Code)
@@ -359,7 +385,7 @@ func TestHandleBudgetDispatch_NotFound(t *testing.T) {
 }
 
 func TestHandleBudgetDispatch_AllGetRoutes(t *testing.T) {
-	srv := buildBudgetServer()
+	srv := buildBudgetServer(t)
 	routes := []string{
 		"/api/v1/budget/summary",
 		"/api/v1/budget/details",

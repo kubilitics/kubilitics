@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kubilitics/kubilitics-ai/internal/db"
 	reasoningengine "github.com/kubilitics/kubilitics-ai/internal/reasoning/engine"
 )
 
@@ -45,8 +47,9 @@ func (s *Server) handleCreateInvestigation(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req struct {
-		Description string `json:"description"`
-		Type        string `json:"type"`
+		Description   string `json:"description"`
+		Type          string `json:"type"`
+		AutonomyLevel int    `json:"autonomy_level"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
@@ -60,10 +63,39 @@ func (s *Server) handleCreateInvestigation(w http.ResponseWriter, r *http.Reques
 		req.Type = "general"
 	}
 
-	id, err := s.reasoningEngine.Investigate(r.Context(), req.Description, req.Type)
+	id, err := s.reasoningEngine.Investigate(r.Context(), req.Description, req.Type, req.AutonomyLevel)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// AI-007: Persist investigation result to SQLite when concluded.
+	// Subscribe in a detached goroutine; drain events until done, then save.
+	// Use a structural interface to avoid importing engineImpl directly.
+	type engineSubscriber interface {
+		Subscribe(id string) *reasoningengine.Subscriber
+	}
+	if s.store != nil {
+		if eng, ok := s.reasoningEngine.(engineSubscriber); ok {
+			sub := eng.Subscribe(id)
+			go func(store db.Store, invID, invType, invDesc string) {
+				for ev := range sub.Ch {
+					if ev.Type == "done" || ev.State == "CONCLUDED" || ev.State == "FAILED" || ev.State == "CANCELLED" {
+						rec := &db.InvestigationRecord{
+							ID:          invID,
+							Type:        invType,
+							State:       string(ev.State),
+							Description: invDesc,
+							Conclusion:  ev.Conclusion,
+							UpdatedAt:   time.Now(),
+							CreatedAt:   time.Now(),
+						}
+						_ = store.SaveInvestigation(context.Background(), rec)
+						return
+					}
+				}
+			}(s.store, id, req.Type, req.Description)
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -151,7 +183,18 @@ func (s *Server) handleInvestigationStream(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	upgrader := newUpgrader(s.config.AllowedOrigins)
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			// Check against allowed origins in config
+			origin := r.Header.Get("Origin")
+			for _, allowed := range s.config.Server.AllowedOrigins {
+				if allowed == "*" || allowed == origin {
+					return true
+				}
+			}
+			return false
+		},
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
