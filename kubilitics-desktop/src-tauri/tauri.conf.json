@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2.0",
   "productName": "Kubilitics",
   "version": "0.1.0",
-  "identifier": "com.kubilitics.app",
+  "identifier": "com.kubilitics.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "",
@@ -12,6 +12,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icons": [
+      "icons/32x32.png",
+      "icons/32x32@2x.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
     "externalBin": [
       "binaries/kubilitics-backend",
       "binaries/kubilitics-ai",
@@ -52,7 +59,7 @@
         "https://releases.kubilitics.dev/update/{{target}}/{{arch}}/{{current_version}}"
       ],
       "dialog": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVFNzcxQjIyQkVGMDlCQ0YKUldUUG0vQytJaHQzWGdoMEk1Uld4SUVibmIvTFg4YVNOWE5sTW82ZGJTOUh3ZkordStDd0Q3VXAK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXkgNDc2NTIwMjRGQkQ4MTY5RgpSV1NmRnRqN0pDQmxSOXFrTFdoUG1Ba2t0S2x3eXNvUGE0RVhvVDh3TVFnYzJvQ1EyMURha3VXVQo="
     }
   },
   "app": {

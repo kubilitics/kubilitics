@@ -522,20 +522,22 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SKIP_DEVSERVER_CHECK: "true"
-        shell: pwsh
+        shell: bash
         run: |
           # Verify dist exists before building
-          if (-not (Test-Path "../dist") -or ((Get-ChildItem "../dist" -ErrorAction SilentlyContinue | Measure-Object).Count -eq 0)) {
-            Write-Host "❌ ERROR: Frontend dist not found at ../dist"
+          if [ ! -d "../dist" ] || [ -z "$(ls -A ../dist 2>/dev/null)" ]; then
+            echo "❌ ERROR: Frontend dist not found at ../dist"
             exit 1
-          }
+          fi
           # Verify binaries exist
-          if (-not (Test-Path "binaries") -or ((Get-ChildItem "binaries" -ErrorAction SilentlyContinue | Measure-Object).Count -eq 0)) {
-            Write-Host "❌ ERROR: Binaries directory is empty"
+          if [ ! -d "binaries" ] || [ -z "$(ls -A binaries 2>/dev/null)" ]; then
+            echo "❌ ERROR: Binaries directory is empty"
             exit 1
-          }
-          Write-Host "✅ Pre-build checks passed"
-          cargo tauri build --target x86_64-pc-windows-msvc --config '{\"build\":{\"beforeBuildCommand\":\"\"}}'
+          fi
+          echo "✅ Pre-build checks passed"
+          # Write config to file to avoid shell quoting issues on Windows
+          echo '{"build":{"beforeBuildCommand":""}}' > /tmp/tauri-build-config.json
+          cargo tauri build --target x86_64-pc-windows-msvc --config /tmp/tauri-build-config.json
       - name: Build Tauri app (Linux - AppImage)
         if: matrix.os == 'ubuntu-latest'
         working-directory: kubilitics-desktop/src-tauri
