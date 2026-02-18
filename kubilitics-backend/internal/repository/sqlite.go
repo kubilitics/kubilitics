@@ -12,7 +12,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/auth"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 	mfa "github.com/kubilitics/kubilitics-backend/internal/auth/mfa"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite" // pure-Go SQLite driver (no CGO required)
 )
 
 // SQLiteRepository implements repositories using SQLite
@@ -25,7 +25,7 @@ type SQLiteRepository struct {
 func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	// Use connection string with WAL mode and other optimizations
 	dsn := dbPath + "?_journal_mode=WAL&_foreign_keys=ON&_busy_timeout=5000"
-	db, err := sqlx.Connect("sqlite3", dsn)
+	db, err := sqlx.Connect("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to SQLite: %w", err)
 	}

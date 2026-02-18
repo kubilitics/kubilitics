@@ -103,8 +103,8 @@ jobs:
         run: |
           IMAGE_TAG=$(echo "${{ steps.meta-backend.outputs.tags }}" | head -1)
           echo "Verifying kcli binary in image: $IMAGE_TAG"
-          docker run --rm --platform linux/amd64 "$IMAGE_TAG" test -f /usr/local/bin/kcli || (echo "❌ kcli not found" && exit 1)
-          docker run --rm --platform linux/amd64 "$IMAGE_TAG" test -x /usr/local/bin/kcli || (echo "❌ kcli not executable" && exit 1)
+          docker run --rm --platform linux/amd64 --entrypoint "" "$IMAGE_TAG" sh -c "test -f /usr/local/bin/kcli" || (echo "❌ kcli not found" && exit 1)
+          docker run --rm --platform linux/amd64 --entrypoint "" "$IMAGE_TAG" sh -c "test -x /usr/local/bin/kcli" || (echo "❌ kcli not executable" && exit 1)
           echo "✅ kcli binary verification passed"
           # Trivy scanning is handled by security-scan.yml to avoid duplication
 
