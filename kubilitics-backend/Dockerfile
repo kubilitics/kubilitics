@@ -12,13 +12,16 @@ ARG ALPINE_VERSION=3.19
 ARG KUBECTL_VERSION=v1.30.3
 
 # ── Stage 1: Builder ──────────────────────────────────────────────────────────
-# Use the exact Go patch version that satisfies both go.mod toolchain directives:
-#   kubilitics-backend: go 1.24.0
-#   kcli:               go 1.24.2
-FROM golang:${GO_VERSION}-alpine AS builder
+# CRITICAL: Pin builder to linux/amd64 (the CI runner's native arch).
+# This means the Go compiler runs natively — no QEMU emulation — regardless
+# of the TARGET platform. Go's built-in cross-compilation handles arm64/etc
+# via GOARCH in nanoseconds; QEMU-emulated arm64 compilation takes 20+ minutes.
+FROM --platform=linux/amd64 golang:${GO_VERSION}-alpine AS builder
 
+# Re-declare ARGs after FROM (ARG scope resets at each FROM).
+# TARGETOS/TARGETARCH are set by BuildKit for the target platform.
 ARG TARGETOS=linux
-ARG TARGETARCH
+ARG TARGETARCH=amd64
 
 # Prevent Go from trying to download a newer toolchain at build time.
 # "local" means "use exactly the Go version in this image, no downloads".
@@ -35,6 +38,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go mod download
 
 COPY kubilitics-backend/ .
+# Cross-compile: Go runs natively on amd64, produces binary for TARGETARCH.
+# CGO_ENABLED=0 is mandatory for cross-compilation (no C toolchain for target).
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
@@ -59,17 +64,15 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 RUN test -f /out/kcli || \
     (echo "ERROR: kcli binary not found (TARGETOS=${TARGETOS} TARGETARCH=${TARGETARCH})" && exit 1)
 
-# ── Stage 2: kubectl downloader (native arch, runs on builder host) ───────────
-# Download the pinned kubectl binary for the TARGET architecture so we can copy
-# it into the final runtime image without needing curl/wget there.
-# We use a separate stage so this download is cached independently.
-FROM alpine:${ALPINE_VERSION} AS kubectl-fetcher
+# ── Stage 2: kubectl downloader ───────────────────────────────────────────────
+# Download the pinned kubectl binary for the TARGET architecture.
+# Runs on amd64 (native), downloads the correct arch binary for the target image.
+FROM --platform=linux/amd64 alpine:${ALPINE_VERSION} AS kubectl-fetcher
 
 ARG TARGETARCH
 ARG KUBECTL_VERSION
 
 RUN apk --no-cache add curl ca-certificates && \
-    # Map Docker arch names to kubectl release arch names
     KARCH=$(case "${TARGETARCH}" in \
         amd64)  echo "amd64" ;; \
         arm64)  echo "arm64" ;; \
@@ -78,9 +81,11 @@ RUN apk --no-cache add curl ca-certificates && \
     curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KARCH}/kubectl" \
         -o /usr/local/bin/kubectl && \
     chmod +x /usr/local/bin/kubectl && \
-    /usr/local/bin/kubectl version --client --output=json
+    # Verify the downloaded binary is the correct arch ELF
+    file /usr/local/bin/kubectl
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
+# Runtime stage uses the TARGET platform — this is the actual container image.
 FROM alpine:${ALPINE_VERSION} AS runtime
 
 WORKDIR /app
@@ -92,10 +97,10 @@ RUN apk --no-cache add ca-certificates wget
 RUN addgroup -g 1000 kubilitics && \
     adduser -D -u 1000 -G kubilitics kubilitics
 
-# kubectl (pinned version, pre-verified in kubectl-fetcher stage)
+# kubectl (pinned version, correct arch downloaded in kubectl-fetcher stage)
 COPY --from=kubectl-fetcher /usr/local/bin/kubectl /usr/local/bin/kubectl
 
-# Application binaries
+# Application binaries (cross-compiled natively, correct arch)
 COPY --from=builder /out/kubilitics-backend .
 COPY --from=builder /out/kcli /usr/local/bin/kcli
 

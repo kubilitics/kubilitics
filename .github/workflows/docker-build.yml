@@ -178,7 +178,9 @@ jobs:
           labels: ${{ steps.meta-ai.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: ${{ env.PLATFORMS }}
+          # AI uses CGO_ENABLED=1 (sqlite/pty) — cross-compilation requires a
+          # cross-compiler toolchain. Build amd64 only; arm64 support deferred.
+          platforms: linux/amd64
           provenance: false
 
       # Trivy scanning is handled by security-scan.yml to avoid duplication
