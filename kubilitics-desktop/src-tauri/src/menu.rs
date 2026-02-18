@@ -1,7 +1,7 @@
 // Native app menu (R1.4): File, Edit, View, Help
 use tauri::menu::{MenuBuilder, PredefinedMenuItem, SubmenuBuilder};
 
-pub fn build_app_menu(app: &tauri::AppHandle) -> Result<tauri::menu::Menu, Box<dyn std::error::Error + Send + Sync>> {
+pub fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<tauri::menu::Menu<R>, Box<dyn std::error::Error + Send + Sync>> {
     let quit = PredefinedMenuItem::quit(app, Some("Quit"))?;
     let close = PredefinedMenuItem::close_window(app, Some("Close"))?;
     let file_menu = SubmenuBuilder::new(app, "File")

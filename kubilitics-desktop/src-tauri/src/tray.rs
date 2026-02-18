@@ -1,37 +1,16 @@
-use tauri::{AppHandle, Manager};
-use tauri::tray::{TrayIconBuilder, TrayIconEvent, ClickType};
+use tauri::{AppHandle, Emitter, Manager};
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 
 pub fn setup_system_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Create tray icon menu
     let menu = tauri::menu::MenuBuilder::new(app)
-        .text("open", "Open Kubilitics")?
-        .text("status", "Show Cluster Status")?
-        .separator()?
-        .text("quit", "Quit")?
+        .text("open", "Open Kubilitics")
+        .text("status", "Show Cluster Status")
+        .separator()
+        .text("quit", "Quit")
         .build()?;
 
-    // Handle menu events
-    menu.on_menu_event(move |app_handle, event| {
-        match event.id().0.as_str() {
-            "open" => {
-                // Show main window
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }
-            "status" => {
-                // Emit event to show cluster status
-                let _ = app_handle.emit("tray-show-status", ());
-            }
-            "quit" => {
-                app_handle.exit(0);
-            }
-            _ => {}
-        }
-    });
-
-    // Create tray icon
+    // Create tray icon with menu event handling
     let _tray = TrayIconBuilder::new()
         .menu(&menu)
         .icon(app.default_window_icon().unwrap().clone())
@@ -52,8 +31,24 @@ pub fn setup_system_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
                 _ => {}
             }
         })
-        .on_menu_event(|_tray, event| {
-            // Menu events are handled above
+        .on_menu_event(|tray, event| {
+            match event.id().0.as_str() {
+                "open" => {
+                    // Show main window
+                    if let Some(window) = tray.app_handle().get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+                "status" => {
+                    // Emit event to show cluster status
+                    let _ = tray.app_handle().emit("tray-show-status", ());
+                }
+                "quit" => {
+                    tray.app_handle().exit(0);
+                }
+                _ => {}
+            }
         })
         .build(app)?;
 

@@ -304,6 +304,9 @@ jobs:
             CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend-x86_64-apple-darwin       ./cmd/server
             CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend-aarch64-apple-darwin      ./cmd/server
             chmod +x ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend-*
+            # Create universal binary for universal-apple-darwin target
+            lipo -create ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend-x86_64-apple-darwin ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend-aarch64-apple-darwin -output ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend-universal-apple-darwin
+            chmod +x ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend-universal-apple-darwin
           elif [ "${{ matrix.os }}" == "windows-latest" ]; then
             CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-backend-x86_64-pc-windows-msvc.exe ./cmd/server
           else
@@ -320,6 +323,9 @@ jobs:
             CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-x86_64-apple-darwin       ./cmd/kcli
             CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-aarch64-apple-darwin      ./cmd/kcli
             chmod +x ../kubilitics-desktop/src-tauri/binaries/kcli-*
+            # Create universal binary for universal-apple-darwin target
+            lipo -create ../kubilitics-desktop/src-tauri/binaries/kcli-x86_64-apple-darwin ../kubilitics-desktop/src-tauri/binaries/kcli-aarch64-apple-darwin -output ../kubilitics-desktop/src-tauri/binaries/kcli-universal-apple-darwin
+            chmod +x ../kubilitics-desktop/src-tauri/binaries/kcli-universal-apple-darwin
           elif [ "${{ matrix.os }}" == "windows-latest" ]; then
             CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kcli-x86_64-pc-windows-msvc.exe ./cmd/kcli
           else
@@ -339,6 +345,9 @@ jobs:
               CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-ai-x86_64-apple-darwin       ./cmd/server/main.go
               CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-ai-aarch64-apple-darwin      ./cmd/server/main.go
               chmod +x ../kubilitics-desktop/src-tauri/binaries/kubilitics-ai-*
+              # Create universal binary for universal-apple-darwin target
+              lipo -create ../kubilitics-desktop/src-tauri/binaries/kubilitics-ai-x86_64-apple-darwin ../kubilitics-desktop/src-tauri/binaries/kubilitics-ai-aarch64-apple-darwin -output ../kubilitics-desktop/src-tauri/binaries/kubilitics-ai-universal-apple-darwin
+              chmod +x ../kubilitics-desktop/src-tauri/binaries/kubilitics-ai-universal-apple-darwin
             elif [ "${{ matrix.os }}" == "windows-latest" ]; then
               CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o ../kubilitics-desktop/src-tauri/binaries/kubilitics-ai-x86_64-pc-windows-msvc.exe ./cmd/server/main.go
             else
@@ -357,12 +366,14 @@ jobs:
             REQUIRED_BINS=(
               "kubilitics-backend-x86_64-apple-darwin"
               "kubilitics-backend-aarch64-apple-darwin"
+              "kubilitics-backend-universal-apple-darwin"
               "kcli-x86_64-apple-darwin"
               "kcli-aarch64-apple-darwin"
+              "kcli-universal-apple-darwin"
             )
             # AI binary is optional
             if [ -f "$BINARIES_DIR/kubilitics-ai-x86_64-apple-darwin" ]; then
-              REQUIRED_BINS+=("kubilitics-ai-x86_64-apple-darwin" "kubilitics-ai-aarch64-apple-darwin")
+              REQUIRED_BINS+=("kubilitics-ai-x86_64-apple-darwin" "kubilitics-ai-aarch64-apple-darwin" "kubilitics-ai-universal-apple-darwin")
             fi
           elif [ "${{ matrix.os }}" == "windows-latest" ]; then
             REQUIRED_BINS=(

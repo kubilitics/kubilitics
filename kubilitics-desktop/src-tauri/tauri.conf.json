@@ -12,7 +12,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/kubilitics-backend", "binaries/kubilitics-ai", "binaries/kcli"],
+    "externalBin": [
+      "binaries/kubilitics-backend",
+      "binaries/kubilitics-ai",
+      "binaries/kcli"
+    ],
     "resources": [],
     "copyright": "© 2026 Kubilitics",
     "category": "DeveloperTool",
@@ -43,10 +47,12 @@
   },
   "plugins": {
     "updater": {
-      "active": true,
-      "endpoints": ["https://releases.kubilitics.dev/update/{{target}}/{{arch}}/{{current_version}}"],
+      "active": false,
+      "endpoints": [
+        "https://releases.kubilitics.dev/update/{{target}}/{{arch}}/{{current_version}}"
+      ],
       "dialog": true,
-      "pubkey": null
+      "pubkey": ""
     }
   },
   "app": {
@@ -63,6 +69,9 @@
       }
     ],
     "security": {
+      "capabilities": [
+        "default"
+      ],
       "csp": "default-src 'self'; connect-src 'self' http://localhost:819 ws://localhost:819 http://localhost:8081 ws://localhost:8081; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
     }
   }

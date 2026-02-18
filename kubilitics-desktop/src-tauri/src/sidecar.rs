@@ -3,7 +3,7 @@ use tauri_plugin_shell::ShellExt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::sleep;
-use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 const BACKEND_PORT: u16 = 819;
@@ -208,7 +208,7 @@ impl BackendManager {
     async fn check_ai_binary_exists(&self) -> bool {
         // Check if kubilitics-ai binary exists in the sidecar binaries directory
         // Tauri bundles external binaries, so we check via sidecar command
-        let sidecar_command = match self.app_handle.shell().sidecar("kubilitics-ai") {
+        let _sidecar_command = match self.app_handle.shell().sidecar("kubilitics-ai") {
             Ok(cmd) => cmd,
             Err(_) => return false,
         };
@@ -268,7 +268,7 @@ impl BackendManager {
         let ai_restart_count = self.ai_restart_count.clone();
         let ai_is_running = self.ai_is_running.clone();
         let ai_available = self.ai_available.clone();
-        let ai_process = self.ai_process.clone();
+        let _ai_process = self.ai_process.clone();
         
         tokio::spawn(async move {
             loop {

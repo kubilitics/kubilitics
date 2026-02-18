@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use tauri::{Emitter, Manager};
+
 mod commands;
 mod menu;
 mod sidecar;
@@ -47,8 +49,10 @@ fn main() {
             sidecar::get_ai_status,
         ])
         .setup(|app| {
+            let handle = app.handle().clone();
+
             // Native menu (R1.4): File, Edit, View, Help
-            if let Ok(menu) = menu::build_app_menu(&app.handle()) {
+            if let Ok(menu) = menu::build_app_menu(&handle) {
                 let _ = app.set_menu(menu.clone());
                 app.on_menu_event(move |app_handle, event| {
                     match event.id().0.as_str() {
@@ -66,19 +70,20 @@ fn main() {
                 });
             }
             // Start Go backend sidecar (and AI backend if available)
-            sidecar::start_backend(&app.handle())?;
+            sidecar::start_backend(&handle)?;
             
             // Setup system tray
-            if let Err(e) = tray::setup_system_tray(&app.handle()) {
+            if let Err(e) = tray::setup_system_tray(&handle) {
                 eprintln!("Failed to setup system tray: {}", e);
             }
             
             // Configure window to minimize to tray instead of closing
             if let Some(window) = app.get_webview_window("main") {
-                window.on_window_event(|event| {
+                let window_clone = window.clone();
+                window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         // Hide window instead of closing
-                        event.window().hide().unwrap();
+                        window_clone.hide().unwrap();
                         api.prevent_close();
                     }
                 });
