@@ -53,6 +53,7 @@ import (
 
 	"github.com/kubilitics/kubilitics-ai/internal/db"
 	"github.com/kubilitics/kubilitics-ai/internal/llm/adapter"
+	"github.com/kubilitics/kubilitics-ai/internal/llm/types"
 )
 
 // configProviderRequest is the JSON body accepted by POST /api/v1/config/provider.
@@ -330,4 +331,147 @@ func defaultModelForProvider(provider string) string {
 	default:
 		return ""
 	}
+}
+
+// validateAPIKeyRequest is the JSON body accepted by POST /api/v1/config/validate.
+type validateAPIKeyRequest struct {
+	Provider string `json:"provider"` // anthropic | openai | ollama | custom
+	APIKey   string `json:"api_key"`   // API key to validate
+	Model    string `json:"model"`    // optional; empty ⇒ provider default
+	BaseURL  string `json:"base_url"` // required for ollama / custom
+}
+
+// validateAPIKeyResponse is the JSON body returned by POST /api/v1/config/validate.
+type validateAPIKeyResponse struct {
+	Valid   bool   `json:"valid"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// handleValidateAPIKey handles POST /api/v1/config/validate.
+// It validates an API key by creating a temporary adapter and making a test API call,
+// without saving the configuration.
+func (s *Server) handleValidateAPIKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// ── Loopback-only guard ─────────────────────────────────────────────────────
+	if !isLoopback(r) {
+		http.Error(w, `{"error":"forbidden: endpoint only available from loopback"}`, http.StatusForbidden)
+		return
+	}
+
+	// ── Parse request ─────────────────────────────────────────────────────────
+	var req validateAPIKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"invalid JSON: %s"}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	req.Provider = strings.TrimSpace(strings.ToLower(req.Provider))
+	req.Model = strings.TrimSpace(req.Model)
+	req.BaseURL = strings.TrimSpace(req.BaseURL)
+	req.APIKey = strings.TrimSpace(req.APIKey)
+
+	// ── Validate provider ─────────────────────────────────────────────────────
+	switch req.Provider {
+	case "anthropic", "openai", "ollama", "custom":
+		// valid
+	case "":
+		http.Error(w, `{"error":"provider is required"}`, http.StatusBadRequest)
+		return
+	default:
+		http.Error(w, fmt.Sprintf(`{"error":"unsupported provider %q; valid values: anthropic, openai, ollama, custom"}`, req.Provider), http.StatusBadRequest)
+		return
+	}
+
+	// ── Provider-specific validation ──────────────────────────────────────────
+	switch req.Provider {
+	case "ollama", "custom":
+		if req.BaseURL == "" {
+			http.Error(w, fmt.Sprintf(`{"error":"base_url is required for provider %q"}`, req.Provider), http.StatusBadRequest)
+			return
+		}
+	case "anthropic", "openai":
+		if req.APIKey == "" {
+			http.Error(w, `{"error":"api_key is required"}`, http.StatusBadRequest)
+			return
+		}
+	}
+
+	// ── Resolve model default ─────────────────────────────────────────────────
+	model := req.Model
+	if model == "" {
+		model = defaultModelForProvider(req.Provider)
+	}
+
+	// ── Build temporary LLM adapter ───────────────────────────────────────────
+	llmConfig := &adapter.Config{
+		Provider: adapter.ProviderType(req.Provider),
+		APIKey:   req.APIKey,
+		Model:    model,
+		BaseURL:  req.BaseURL,
+	}
+
+	tempAdapter, err := adapter.NewLLMAdapter(llmConfig)
+	if err != nil {
+		resp := validateAPIKeyResponse{
+			Valid: false,
+			Error: fmt.Sprintf("failed to create adapter: %s", err.Error()),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// ── Make a test API call to validate the key ──────────────────────────────
+	// Use a minimal test message to avoid unnecessary costs
+	testCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testMessages := []types.Message{
+		{
+			Role:    "user",
+			Content: "test",
+		},
+	}
+
+	_, _, err = tempAdapter.Complete(testCtx, testMessages, nil)
+	if err != nil {
+		// Check if it's an authentication error
+		errMsg := err.Error()
+		isAuthError := strings.Contains(errMsg, "401") ||
+			strings.Contains(errMsg, "403") ||
+			strings.Contains(errMsg, "unauthorized") ||
+			strings.Contains(errMsg, "forbidden") ||
+			strings.Contains(errMsg, "invalid") ||
+			strings.Contains(errMsg, "authentication")
+
+		resp := validateAPIKeyResponse{
+			Valid: false,
+			Error: errMsg,
+		}
+		if isAuthError {
+			resp.Message = "API key appears to be invalid or expired"
+		} else {
+			resp.Message = "API key validation failed"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// ── Success ───────────────────────────────────────────────────────────────
+	resp := validateAPIKeyResponse{
+		Valid:   true,
+		Message: "API key is valid",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
 }

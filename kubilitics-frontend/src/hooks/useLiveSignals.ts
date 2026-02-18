@@ -96,7 +96,8 @@ export function useLiveSignals(): LiveSignals {
       return !ready || pressure;
     }).length;
 
-    const events = eventsQuery.data ?? [];
+    const eventsValue = eventsQuery.data;
+    const events = Array.isArray(eventsValue) ? eventsValue : [];
     let warningEvents = 0;
     let errorEvents = 0;
     for (const e of events) {

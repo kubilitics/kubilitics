@@ -249,27 +249,32 @@ jobs:
             rm -rf kubilitics-desktop/src-tauri/target/universal-apple-darwin
           fi
           echo "✅ Cleaned build artifacts"
-      - name: Decode signing key
+      - name: Prepare signing key
         shell: bash
         env:
-          SIGNING_KEY_BASE64: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SIGNING_KEY_SECRET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          if [ -n "$SIGNING_KEY_BASE64" ]; then
-            echo "$SIGNING_KEY_BASE64" | base64 --decode > kubilitics-desktop/src-tauri/kubilitics.key
-            echo "✅ Key decoded to kubilitics-desktop/src-tauri/kubilitics.key"
-          else
-            echo "⚠️ No signing key secret found"
+          if [ -z "$SIGNING_KEY_SECRET" ]; then
+            echo "⚠️ No TAURI_SIGNING_PRIVATE_KEY secret found — updater artifacts will not be signed"
+            exit 0
           fi
-      - name: Decode signing key
-        shell: bash
-        env:
-          SIGNING_KEY_BASE64: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if [ -n "$SIGNING_KEY_BASE64" ]; then
-            echo "$SIGNING_KEY_BASE64" | base64 --decode > kubilitics-desktop/src-tauri/kubilitics.key
-            echo "✅ Key decoded to kubilitics-desktop/src-tauri/kubilitics.key"
+          # Auto-detect whether the secret is base64-encoded or raw minisign key.
+          # A raw minisign key starts with "untrusted comment:" so if the secret
+          # starts with that prefix it is already raw; otherwise try base64-decode.
+          KEY_DEST="kubilitics-desktop/src-tauri/kubilitics.key"
+          if echo "$SIGNING_KEY_SECRET" | grep -q "^untrusted comment:"; then
+            printf '%s' "$SIGNING_KEY_SECRET" > "$KEY_DEST"
+            echo "✅ Raw minisign key written to $KEY_DEST"
           else
-            echo "⚠️ No signing key secret found"
+            # Treat as base64-encoded; decode to get the raw key
+            DECODED=$(echo "$SIGNING_KEY_SECRET" | base64 --decode 2>/dev/null) || true
+            if echo "$DECODED" | grep -q "^untrusted comment:"; then
+              printf '%s' "$DECODED" > "$KEY_DEST"
+              echo "✅ Base64-decoded minisign key written to $KEY_DEST"
+            else
+              echo "❌ ERROR: TAURI_SIGNING_PRIVATE_KEY does not appear to be a valid minisign key (raw or base64-encoded)"
+              exit 1
+            fi
           fi
       - uses: actions/setup-node@v4
         with:
@@ -278,7 +283,24 @@ jobs:
         with:
           # macOS universal build requires both targets; harmless on Windows/Linux (ignored)
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kubilitics-desktop/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('kubilitics-desktop/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Cache tauri-cli install
+        id: cache-tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: ${{ runner.os }}-tauri-cli-2
       - name: Install Tauri CLI
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version ^2.0
       - name: Install deps (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
@@ -461,7 +483,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         working-directory: kubilitics-desktop/src-tauri
         env:
-          TAURI_SIGNING_PRIVATE_KEY: kubilitics.key
+          TAURI_SIGNING_PRIVATE_KEY: ${{ github.workspace }}/kubilitics-desktop/src-tauri/kubilitics.key
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_SKIP_DEVSERVER_CHECK: "true"
         # --config overrides beforeBuildCommand to "" so Tauri doesn't try to run
@@ -516,7 +538,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         working-directory: kubilitics-desktop/src-tauri
         env:
-          TAURI_SIGNING_PRIVATE_KEY: kubilitics.key
+          TAURI_SIGNING_PRIVATE_KEY: ${{ github.workspace }}/kubilitics-desktop/src-tauri/kubilitics.key
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_SKIP_DEVSERVER_CHECK: "true"
         shell: pwsh
@@ -537,7 +559,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         working-directory: kubilitics-desktop/src-tauri
         env:
-          TAURI_SIGNING_PRIVATE_KEY: kubilitics.key
+          TAURI_SIGNING_PRIVATE_KEY: ${{ github.workspace }}/kubilitics-desktop/src-tauri/kubilitics.key
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_SKIP_DEVSERVER_CHECK: "true"
         shell: bash
@@ -558,7 +580,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         working-directory: kubilitics-desktop/src-tauri
         env:
-          TAURI_SIGNING_PRIVATE_KEY: kubilitics.key
+          TAURI_SIGNING_PRIVATE_KEY: ${{ github.workspace }}/kubilitics-desktop/src-tauri/kubilitics.key
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_SKIP_DEVSERVER_CHECK: "true"
         shell: bash
@@ -579,7 +601,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         working-directory: kubilitics-desktop/src-tauri
         env:
-          TAURI_SIGNING_PRIVATE_KEY: kubilitics.key
+          TAURI_SIGNING_PRIVATE_KEY: ${{ github.workspace }}/kubilitics-desktop/src-tauri/kubilitics.key
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_SKIP_DEVSERVER_CHECK: "true"
         shell: bash

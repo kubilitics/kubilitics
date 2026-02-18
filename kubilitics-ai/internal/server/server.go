@@ -528,6 +528,10 @@ func (s *Server) registerHandlers(mux *http.ServeMux) {
 	// Runtime LLM provider configuration (doc 06 — BYOLLM, loopback-only).
 	// POST /api/v1/config/provider — hot-wires a new LLM adapter without restart.
 	mux.HandleFunc("/api/v1/config/provider", s.handleConfigProvider)
+	
+	// API key validation endpoint (loopback-only).
+	// POST /api/v1/config/validate — validates an API key without saving it.
+	mux.HandleFunc("/api/v1/config/validate", s.handleValidateAPIKey)
 }
 
 // handleHealth handles health check requests.
