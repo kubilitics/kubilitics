@@ -106,3 +106,13 @@ KUBERNETES-TOOLS-MARKET-ANALYSIS-2026.md
 # Environment files
 *.env
 *.env.*
+
+# CI/test log artifacts
+*.log
+suite_*.log
+kcli-*.log
+test_result*.md
+test_output*.txt
+server_test_output*.txt
+kubilitics-ai/server
+kcli/kcli
