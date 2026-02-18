@@ -16,6 +16,12 @@ on:
     # Run weekly on Mondays at 00:00 UTC
     - cron: '0 0 * * 1'
 
+# Cancel in-progress runs for the same branch/PR.
+# Scheduled runs are not cancelled (each is independent).
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -23,6 +29,7 @@ jobs:
   trivy-backend:
     name: Trivy Scan - Backend
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +38,8 @@ jobs:
         run: docker build -t kubilitics-backend:test -f kubilitics-backend/Dockerfile .
 
       - name: Run Trivy vulnerability scanner (table output)
-        uses: aquasecurity/trivy-action@master
+        # FIX: pin to a specific version instead of @master to ensure reproducible scans
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: 'kubilitics-backend:test'
           format: 'table'
@@ -41,6 +49,7 @@ jobs:
   trivy-ai:
     name: Trivy Scan - AI Backend
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +58,8 @@ jobs:
         run: docker build -t kubilitics-ai:test -f Dockerfile .
 
       - name: Run Trivy vulnerability scanner (table output)
-        uses: aquasecurity/trivy-action@master
+        # FIX: pin to a specific version instead of @master to ensure reproducible scans
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: 'kubilitics-ai:test'
           format: 'table'

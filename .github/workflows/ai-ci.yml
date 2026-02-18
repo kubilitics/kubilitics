@@ -11,69 +11,79 @@ on:
     paths:
       - 'kubilitics-ai/**'
 
+# Cancel in-progress runs for the same branch/PR.
+concurrency:
+  group: ai-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
           cache-dependency-path: kubilitics-ai/go.sum
-      
+
       - name: Install deps
         working-directory: kubilitics-ai
         run: go mod download
-      
+
       - name: Run tests
-        working-directory: kubilitics-ai
+        # FIX: create report dir at repo root before entering working-directory
         run: |
           mkdir -p test_reports/ai
-          go test -race -cover -coverprofile=coverage.out ./... 2>&1 | tee ../test_reports/ai/test.log
-      
+          cd kubilitics-ai && go test -race -cover -coverprofile=coverage.out ./... 2>&1 | tee ../test_reports/ai/test.log
+
       - name: Upload test report
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ai-test-report
           path: test_reports/ai/
-      
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: ./kubilitics-ai/coverage.out
           flags: ai
           name: ai-coverage
-      
+
       - name: Run govulncheck
         working-directory: kubilitics-ai
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
-  
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-      
+          cache-dependency-path: kubilitics-ai/go.sum
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v4
         with:
           version: latest
           working-directory: kubilitics-ai
-  
+
   build:
     name: Build (${{ matrix.goos }}-${{ matrix.goarch }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [test, lint]
     strategy:
+      fail-fast: false
       matrix:
         include:
           - goos: linux

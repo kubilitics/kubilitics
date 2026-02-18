@@ -1,4 +1,4 @@
-# Frontend CI — test and build (R3.1)
+# Frontend CI — test and build
 name: Frontend CI
 
 on:
@@ -12,10 +12,16 @@ on:
     paths:
       - 'kubilitics-frontend/**'
 
+# Cancel in-progress runs for the same branch/PR.
+concurrency:
+  group: frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -52,6 +58,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [test]
     steps:
       - uses: actions/checkout@v4
@@ -61,6 +68,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          # FIX: was missing cache-dependency-path, causing a cache miss on every build run
           cache-dependency-path: kubilitics-frontend/package-lock.json
 
       - name: Install dependencies

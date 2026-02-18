@@ -26,6 +26,11 @@ on:
         type: boolean
         default: true
 
+# Cancel in-progress runs for the same branch/PR.
+concurrency:
+  group: integration-test-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -33,6 +38,7 @@ jobs:
   integration-test-backend-only:
     name: Integration Test - Backend Only
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -58,14 +64,15 @@ jobs:
           EOF
 
       - name: Start backend service
+        # FIX: use 'docker compose' (v2 plugin) — 'docker-compose' (v1) is removed from GitHub runners
         run: |
-          docker-compose -f docker-compose.test.yml up -d --build backend
+          docker compose -f docker-compose.test.yml up -d --build backend
           echo "Started backend service"
 
       - name: Wait for backend to be healthy
         run: |
           echo "Waiting for backend to be healthy..."
-          timeout 120 bash -c 'until docker-compose -f docker-compose.test.yml exec -T backend wget --quiet --tries=1 --spider http://localhost:819/health; do sleep 2; done'
+          timeout 120 bash -c 'until docker compose -f docker-compose.test.yml exec -T backend wget --quiet --tries=1 --spider http://localhost:819/health; do sleep 2; done'
           echo "✓ Backend is healthy"
 
       - name: Run backend API tests
@@ -79,11 +86,12 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          docker-compose -f docker-compose.test.yml down -v
+          docker compose -f docker-compose.test.yml down -v
 
   integration-test-backend-frontend:
     name: Integration Test - Backend + Frontend
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -109,20 +117,21 @@ jobs:
           EOF
 
       - name: Start services
+        # FIX: use 'docker compose' (v2 plugin)
         run: |
-          docker-compose -f docker-compose.test.yml --profile with-frontend up -d --build
+          docker compose -f docker-compose.test.yml --profile with-frontend up -d --build
           echo "Started backend + frontend services"
 
       - name: Wait for backend to be healthy
         run: |
           echo "Waiting for backend to be healthy..."
-          timeout 120 bash -c 'until docker-compose -f docker-compose.test.yml exec -T backend wget --quiet --tries=1 --spider http://localhost:819/health; do sleep 2; done'
+          timeout 120 bash -c 'until docker compose -f docker-compose.test.yml exec -T backend wget --quiet --tries=1 --spider http://localhost:819/health; do sleep 2; done'
           echo "✓ Backend is healthy"
 
       - name: Wait for frontend to be ready
         run: |
           echo "Waiting for frontend to be ready..."
-          timeout 120 bash -c 'until docker-compose -f docker-compose.test.yml exec -T frontend wget --quiet --tries=1 --spider http://localhost/; do sleep 2; done'
+          timeout 120 bash -c 'until docker compose -f docker-compose.test.yml exec -T frontend wget --quiet --tries=1 --spider http://localhost/; do sleep 2; done'
           echo "✓ Frontend is ready"
 
       - name: Run backend API tests
@@ -142,11 +151,12 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          docker-compose -f docker-compose.test.yml down -v
+          docker compose -f docker-compose.test.yml down -v
 
   integration-test-full-stack:
     name: Integration Test - Full Stack
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -172,15 +182,16 @@ jobs:
           EOF
 
       - name: Start all services
+        # FIX: use 'docker compose' (v2 plugin)
         run: |
-          docker-compose -f docker-compose.test.yml --profile with-frontend --profile with-ai up -d --build
+          docker compose -f docker-compose.test.yml --profile with-frontend --profile with-ai up -d --build
           echo "Started full stack services"
 
       - name: Wait for all services
         run: |
-          timeout 180 bash -c 'until docker-compose -f docker-compose.test.yml exec -T backend wget --quiet --tries=1 --spider http://localhost:819/health && \
-            docker-compose -f docker-compose.test.yml exec -T frontend wget --quiet --tries=1 --spider http://localhost/ && \
-            docker-compose -f docker-compose.test.yml exec -T ai wget --quiet --tries=1 --spider http://localhost:8081/health; do sleep 3; done'
+          timeout 180 bash -c 'until docker compose -f docker-compose.test.yml exec -T backend wget --quiet --tries=1 --spider http://localhost:819/health && \
+            docker compose -f docker-compose.test.yml exec -T frontend wget --quiet --tries=1 --spider http://localhost/ && \
+            docker compose -f docker-compose.test.yml exec -T ai wget --quiet --tries=1 --spider http://localhost:8081/health; do sleep 3; done'
           echo "✓ All services are ready"
 
       - name: Test service connectivity
@@ -203,11 +214,11 @@ jobs:
         if: always()
         run: |
           echo "=== Backend logs ==="
-          docker-compose -f docker-compose.test.yml logs backend --tail=50 || true
+          docker compose -f docker-compose.test.yml logs backend --tail=50 || true
           echo "=== Frontend logs ==="
-          docker-compose -f docker-compose.test.yml logs frontend --tail=50 || true
+          docker compose -f docker-compose.test.yml logs frontend --tail=50 || true
           echo "=== AI Backend logs ==="
-          docker-compose -f docker-compose.test.yml logs ai --tail=50 || true
+          docker compose -f docker-compose.test.yml logs ai --tail=50 || true
 
       - name: Upload Playwright report
         if: always()
@@ -221,4 +232,4 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          docker-compose -f docker-compose.test.yml down -v
+          docker compose -f docker-compose.test.yml down -v

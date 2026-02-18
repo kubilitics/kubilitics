@@ -1,4 +1,4 @@
-# Build and deploy website (W1.3). Optional: deploy to GitHub Pages or use Vercel/Netlify.
+# Build and deploy website. Optional: deploy to GitHub Pages or use Vercel/Netlify.
 name: Website
 
 on:
@@ -9,15 +9,27 @@ on:
       - '.github/workflows/website.yml'
   workflow_dispatch:
 
+# Cancel in-progress runs for the same branch.
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: true
+
+# Workflow-level permissions are minimal; job-level grants override as needed.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: kubilitics-website/package-lock.json
       - name: Install
         working-directory: kubilitics-website
         run: npm ci
@@ -34,6 +46,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Job-level permissions for OIDC-based Pages deployment
     permissions:
       pages: write
       id-token: write
