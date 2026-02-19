@@ -499,7 +499,10 @@ jobs:
             echo "⚠️  No APPLE_CERTIFICATE secret found — building unsigned (ad-hoc) app"
           fi
 
-          cargo tauri build --target universal-apple-darwin --config "$CONFIG"
+          # CI=true tells bundle_dmg.sh to skip AppleScript Finder customization
+          # which always fails on GH Actions runners (not authorised to send Apple events).
+          # --bundles app,dmg still produces both the .app and the .dmg.
+          CI=true cargo tauri build --target universal-apple-darwin --bundles app,dmg --config "$CONFIG"
       - name: Notarize macOS app
         if: matrix.os == 'macos-latest'
         env:
