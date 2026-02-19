@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.24.2'
+  GO_VERSION: '1.24.13'  # bumped: fixes GO-2026-4341 (net/url), GO-2026-4340, GO-2026-4337 (crypto/tls), GO-2025-4175, GO-2025-4155, GO-2025-4013 (crypto/x509)
   # Pinned kubectl — keep aligned with k8s.io/client-go in go.mod
   KUBECTL_VERSION: 'v1.30.3'
 

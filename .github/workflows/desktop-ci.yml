@@ -45,6 +45,23 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('kubilitics-desktop/src-tauri/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Create stub sidecar binaries for Linux CI
+        # tauri_build::build() validates that every externalBin path in tauri.conf.json
+        # exists on disk for the current target triple — it runs even during `cargo test`.
+        # Only macOS binaries are committed; we create empty Linux stubs so the build
+        # script passes without requiring a full cross-compile of the Go backends.
+        run: |
+          TRIPLE="x86_64-unknown-linux-gnu"
+          mkdir -p kubilitics-desktop/src-tauri/binaries
+          for bin in kubilitics-backend kubilitics-ai kcli; do
+            stub="kubilitics-desktop/src-tauri/binaries/${bin}-${TRIPLE}"
+            if [ ! -f "$stub" ]; then
+              echo "#!/bin/sh" > "$stub"
+              chmod +x "$stub"
+              echo "Created stub: $stub"
+            fi
+          done
+
       - name: Run Rust tests
         working-directory: kubilitics-desktop/src-tauri
         run: cargo test

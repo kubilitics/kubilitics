@@ -18,7 +18,7 @@ WORKDIR /app
 # Layer: deps — only invalidated when package*.json changes
 COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --prefer-offline
+    npm ci
 
 # Layer: source — invalidated on any source change
 COPY . .
