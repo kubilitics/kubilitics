@@ -158,7 +158,14 @@ func (m *viperConfigManager) setDefaults() {
 	m.viper.SetDefault("database.sqlite_path", defaults.Database.SQLitePath)
 	m.viper.SetDefault("database.postgres_url", defaults.Database.PostgresURL)
 
+	// MCP defaults — enable by default so the agentic tool loop is always active
+	m.viper.SetDefault("mcp.enabled", defaults.MCP.Enabled)
+
+	// Safety enabled default
+	m.viper.SetDefault("safety.enabled", defaults.Safety.Enabled)
+
 	// Analytics defaults
+	m.viper.SetDefault("analytics.enabled", defaults.Analytics.Enabled)
 	m.viper.SetDefault("analytics.timeseries_retention_days", defaults.Analytics.TimeseriesRetentionDays)
 	m.viper.SetDefault("analytics.enable_anomaly_detection", defaults.Analytics.EnableAnomalyDetection)
 	m.viper.SetDefault("analytics.enable_forecasting", defaults.Analytics.EnableForecasting)
@@ -205,7 +212,11 @@ func (m *viperConfigManager) unmarshalConfig() error {
 	cfg.Autonomy.DefaultLevel = m.viper.GetInt("autonomy.default_level")
 	cfg.Autonomy.AllowLevelOverride = m.viper.GetBool("autonomy.allow_level_override")
 
+	// MCP
+	cfg.MCP.Enabled = m.viper.GetBool("mcp.enabled")
+
 	// Safety
+	cfg.Safety.Enabled = m.viper.GetBool("safety.enabled")
 	cfg.Safety.EnableImmutableRules = m.viper.GetBool("safety.enable_immutable_rules")
 	cfg.Safety.EnableCustomPolicies = m.viper.GetBool("safety.enable_custom_policies")
 	cfg.Safety.RequireApprovalForDelet = m.viper.GetBool("safety.require_approval_for_deletions")
@@ -217,6 +228,7 @@ func (m *viperConfigManager) unmarshalConfig() error {
 	cfg.Database.PostgresURL = m.viper.GetString("database.postgres_url")
 
 	// Analytics
+	cfg.Analytics.Enabled = m.viper.GetBool("analytics.enabled")
 	cfg.Analytics.TimeseriesRetentionDays = m.viper.GetInt("analytics.timeseries_retention_days")
 	cfg.Analytics.EnableAnomalyDetection = m.viper.GetBool("analytics.enable_anomaly_detection")
 	cfg.Analytics.EnableForecasting = m.viper.GetBool("analytics.enable_forecasting")
@@ -270,8 +282,10 @@ func (m *viperConfigManager) applyEnvOverrides() {
 		m.config.Backend.Address = addr
 	}
 
-	// Backend HTTP URL from environment
-	if httpURL := os.Getenv("KUBILITICS_BACKEND_URL"); httpURL != "" {
+	// Backend HTTP URL from environment — support both naming conventions
+	if httpURL := os.Getenv("KUBILITICS_BACKEND_HTTP_BASE_URL"); httpURL != "" {
+		m.config.Backend.HTTPBaseURL = httpURL
+	} else if httpURL := os.Getenv("KUBILITICS_BACKEND_URL"); httpURL != "" {
 		m.config.Backend.HTTPBaseURL = httpURL
 	}
 
@@ -286,5 +300,14 @@ func (m *viperConfigManager) applyEnvOverrides() {
 		if level := m.viper.GetInt("autonomy_level"); level >= 0 && level <= 5 {
 			m.config.Autonomy.DefaultLevel = level
 		}
+	}
+
+	// TASK-AI-005: Database path from environment.
+	// The Tauri sidecar passes KUBILITICS_DATABASE_PATH pointing to the user-writable
+	// app-data directory (~/Library/Application Support/kubilitics/ai/kubilitics-ai.db).
+	// Without this override the server defaults to /var/lib/kubilitics/ which is
+	// read-only inside a signed/sandboxed macOS .app bundle.
+	if dbPath := os.Getenv("KUBILITICS_DATABASE_PATH"); dbPath != "" {
+		m.config.Database.SQLitePath = dbPath
 	}
 }

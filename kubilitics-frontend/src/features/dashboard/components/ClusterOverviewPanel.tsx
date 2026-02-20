@@ -81,6 +81,7 @@ export function ClusterOverviewPanel() {
     });
   }
 
+  // Show loading spinner only on initial load when no cached data exists
   if (signals.isLoading) {
     return (
       <Card className="h-full min-h-[320px] border-none glass-panel relative overflow-hidden flex flex-col" aria-label="Needs attention">
@@ -95,7 +96,26 @@ export function ClusterOverviewPanel() {
     );
   }
 
-  if (!signals.totalNodes && !signals.runningPods) {
+  // Show error message instead of empty data when queries fail
+  if (signals.isError) {
+    return (
+      <Card className="h-full min-h-[320px] border-none glass-panel relative overflow-hidden flex flex-col" aria-label="Needs attention">
+        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary/80 to-blue-500/80" />
+        <CardContent className="flex-1 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3 text-center px-4">
+            <AlertCircle className="h-8 w-8 text-destructive" />
+            <p className="text-sm font-medium text-foreground">Unable to load cluster data</p>
+            <p className="text-xs text-muted-foreground">
+              {signals.error?.message || 'Failed to fetch cluster information'}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Show "connect cluster" message only if no nodes/pods AND no error (genuinely empty)
+  if (!signals.totalNodes && !signals.runningPods && !signals.isError) {
     return (
       <Card className="h-full min-h-[320px] border-none glass-panel relative overflow-hidden flex flex-col" aria-label="Needs attention">
         <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary/80 to-blue-500/80" />

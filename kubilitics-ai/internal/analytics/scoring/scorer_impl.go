@@ -127,13 +127,13 @@ func (s *scorerImpl) ComputeOverallScore(ctx context.Context, resourceID string)
 	overall := int(float64(healthScore)*0.4 + float64(effScore)*0.3 + float64(costScore)*0.2 + float64(secScore)*0.1)
 
 	details := map[string]interface{}{
-		"overall":        overall,
-		"health":         map[string]interface{}{"score": healthScore, "status": healthStatus, "details": healthDetails},
-		"efficiency":     map[string]interface{}{"score": effScore, "utilization_pct": utilPct, "recommendations": effRecs},
-		"cost":           map[string]interface{}{"score": costScore, "cost_per_unit": costPerUnit, "percentile": percentile},
-		"security":       map[string]interface{}{"score": secScore, "issues": secIssues, "recommendations": secRecs},
-		"resource_id":    resourceID,
-		"computed_at":    time.Now(),
+		"overall":     overall,
+		"health":      map[string]interface{}{"score": healthScore, "status": healthStatus, "details": healthDetails},
+		"efficiency":  map[string]interface{}{"score": effScore, "utilization_pct": utilPct, "recommendations": effRecs},
+		"cost":        map[string]interface{}{"score": costScore, "cost_per_unit": costPerUnit, "percentile": percentile},
+		"security":    map[string]interface{}{"score": secScore, "issues": secIssues, "recommendations": secRecs},
+		"resource_id": resourceID,
+		"computed_at": time.Now(),
 	}
 	return overall, details, nil
 }

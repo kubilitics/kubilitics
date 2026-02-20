@@ -1,92 +1,42 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Search,
-  Filter,
-  RefreshCw,
-  MoreHorizontal,
-  CheckCircle2,
-  AlertTriangle,
-  XCircle,
-  Clock,
-  Download,
-  Box,
-  Loader2,
-  WifiOff,
-  Plus,
-  Terminal,
-  FileText,
-  ExternalLink,
-  Trash2,
-  RotateCcw,
-  ArrowUpDown,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  GitCompare,
-  CheckSquare,
-  Square,
-  Minus,
-  List,
-  Layers,
-  Boxes,
-  FileSpreadsheet,
+  Search, Filter, RefreshCw, MoreHorizontal, CheckCircle2, XCircle, Clock, Loader2, WifiOff, Box,
+  ChevronDown, ChevronLeft, ChevronRight, Trash2, RotateCcw, Scale, History, Rocket, FileText,
+  List, Layers, Activity, PauseCircle, LayoutGrid, Terminal, ExternalLink, Download, FileSpreadsheet, GitCompare, Boxes, type LucideIcon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  ResizableTableProvider,
-  ResizableTableHead,
-  ResizableTableCell,
-  type ResizableColumnConfig,
-} from '@/components/ui/resizable-table';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-  DropdownMenuLabel,
-} from '@/components/ui/dropdown-menu';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { resourceTableRowClassName, ROW_MOTION, StatusPill, ListPagination, PAGE_SIZE_OPTIONS, ListPageStatCard, ListPageHeader, TableColumnHeaderWithFilterAndSort, TableFilterCell, AgeCell, TableEmptyState, TableSkeletonRows, CopyNameDropdownItem, ResourceListTableToolbar, type StatusPillVariant } from '@/components/list';
+import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
+import { useTableKeyboardNav } from '@/hooks/useTableKeyboardNav';
+import { useColumnVisibility } from '@/hooks/useColumnVisibility';
+import { ResizableTableProvider, ResizableTableHead, ResizableTableCell, type ResizableColumnConfig } from '@/components/ui/resizable-table';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useQueries } from '@tanstack/react-query';
-import { useK8sResourceList, useDeleteK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { Link, useNavigate } from 'react-router-dom';
+import { useK8sResourceList, useDeleteK8sResource, useCreateK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
-import { getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
-import { useBackendConfigStore } from '@/stores/backendConfigStore';
-import { getPodMetrics } from '@/services/backendApiClient';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { DeleteConfirmDialog, PortForwardDialog, UsageBar, PodComparisonView, calculatePodResourceMax } from '@/components/resources';
-import { useRef } from 'react';
-import { NamespaceFilter, ResourceCommandBar, StatusPill, resourceTableRowClassName, ROW_MOTION, ListPagination, ListViewSegmentedControl, ListPageStatCard, ListPageHeader, TableColumnHeaderWithFilterAndSort, TableFilterCell, AgeCell, TableEmptyState, TableSkeletonRows, CopyNameDropdownItem, NamespaceBadge, ResourceListTableToolbar, VirtualTableBody, type StatusPillVariant } from '@/components/list';
-import { PodIcon } from '@/components/icons/KubernetesIcons';
-import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
-import { useColumnVisibility } from '@/hooks/useColumnVisibility';
-import { useTableKeyboardNav } from '@/hooks/useTableKeyboardNav';
+import { getPodMetrics, getPodLogsUrl, postShellCommand } from '@/services/backendApiClient';
+import { DeleteConfirmDialog, PortForwardDialog, UsageBar, parseCpu, parseMemory, calculatePodResourceMax, PodComparisonView } from '@/components/resources';
+import { ResourceCommandBar, ResourceExportDropdown, ListViewSegmentedControl, NamespaceFilter } from '@/components/list';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Progress } from '@/components/ui/progress';
 
 interface PodResource extends KubernetesResource {
   spec: {
     nodeName?: string;
-    hostNetwork?: boolean;
     containers: Array<{
       name: string;
       image: string;
-      ports?: Array<{ containerPort: number; name?: string; protocol?: string }>;
       resources?: {
         requests?: { cpu?: string; memory?: string };
         limits?: { cpu?: string; memory?: string };
@@ -96,37 +46,45 @@ interface PodResource extends KubernetesResource {
   status: {
     phase: string;
     podIP?: string;
-    podIPs?: Array<{ ip?: string }>;
     hostIP?: string;
     containerStatuses?: Array<{
       name: string;
       ready: boolean;
       restartCount: number;
+      state: { waiting?: { reason: string }; running?: { startedAt: string }; terminated?: { reason: string } };
     }>;
+    conditions?: Array<{ type: string; status: string }>;
   };
 }
 
 interface Pod {
   name: string;
   namespace: string;
-  status: 'Running' | 'Pending' | 'Failed' | 'Succeeded' | 'CrashLoopBackOff';
+  status: 'Running' | 'Pending' | 'Succeeded' | 'Failed' | 'Unknown' | 'CrashLoopBackOff' | 'ContainerCreating' | 'Terminating';
   ready: string;
   restarts: number;
+  cpu: string;
+  memory: string;
   age: string;
   creationTimestamp?: string;
   node: string;
-  /** Internal pod IP (podIP / podIPs). */
   internalIP: string;
-  /** External IP: hostIP when hostNetwork, else "-". */
   externalIP: string;
-  cpu: string;
-  memory: string;
-  containers: Array<{ name: string; ports?: Array<{ containerPort: number; name?: string; protocol?: string }> }>;
-  cpuData?: number[];
-  memoryData?: number[];
+  containers: Array<{ name: string; image: string }>;
 }
 
-const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+const PODS_TABLE_COLUMNS: ResizableColumnConfig[] = [
+  { id: 'name', defaultWidth: 220, minWidth: 120 },
+  { id: 'namespace', defaultWidth: 120, minWidth: 80 },
+  { id: 'status', defaultWidth: 130, minWidth: 90 },
+  { id: 'ready', defaultWidth: 70, minWidth: 50 },
+  { id: 'restarts', defaultWidth: 70, minWidth: 50 },
+  { id: 'ip', defaultWidth: 140, minWidth: 100 },
+  { id: 'cpu', defaultWidth: 100, minWidth: 70 },
+  { id: 'memory', defaultWidth: 100, minWidth: 70 },
+  { id: 'age', defaultWidth: 80, minWidth: 60 },
+  { id: 'node', defaultWidth: 140, minWidth: 100 },
+];
 
 const PODS_COLUMNS_FOR_VISIBILITY = [
   { id: 'namespace', label: 'Namespace' },
@@ -134,42 +92,34 @@ const PODS_COLUMNS_FOR_VISIBILITY = [
   { id: 'ready', label: 'Ready' },
   { id: 'restarts', label: 'Restarts' },
   { id: 'ip', label: 'IP' },
-  { id: 'cpu', label: 'CPU' },
-  { id: 'memory', label: 'Memory' },
+  { id: 'cpu', label: 'CPU Usage' },
+  { id: 'memory', label: 'Memory Usage' },
   { id: 'age', label: 'Age' },
   { id: 'node', label: 'Node' },
 ];
 
-const PODS_TABLE_COLUMNS: ResizableColumnConfig[] = [
-  { id: 'name', defaultWidth: 260, minWidth: 120 },
-  { id: 'namespace', defaultWidth: 140, minWidth: 80 },
-  { id: 'status', defaultWidth: 120, minWidth: 82 },
-  { id: 'ready', defaultWidth: 88, minWidth: 76 },
-  { id: 'restarts', defaultWidth: 100, minWidth: 88 },
-  { id: 'ip', defaultWidth: 200, minWidth: 140 },
-  { id: 'cpu', defaultWidth: 110, minWidth: 70 },
-  { id: 'memory', defaultWidth: 120, minWidth: 78 },
-  { id: 'age', defaultWidth: 90, minWidth: 56 },
-  { id: 'node', defaultWidth: 160, minWidth: 90 },
-];
-
-const statusConfig = {
+const statusConfig: Record<string, { icon: LucideIcon; color: string; bg: string }> = {
   Running: { icon: CheckCircle2, color: 'text-[hsl(142,76%,36%)]', bg: 'bg-[hsl(142,76%,36%)]/10' },
   Pending: { icon: Clock, color: 'text-[hsl(45,93%,47%)]', bg: 'bg-[hsl(45,93%,47%)]/10' },
+  Succeeded: { icon: CheckCircle2, color: 'text-blue-500', bg: 'bg-blue-500/10' },
   Failed: { icon: XCircle, color: 'text-[hsl(0,72%,51%)]', bg: 'bg-[hsl(0,72%,51%)]/10' },
-  Succeeded: { icon: CheckCircle2, color: 'text-muted-foreground', bg: 'bg-muted' },
-  CrashLoopBackOff: { icon: AlertTriangle, color: 'text-[hsl(0,72%,51%)]', bg: 'bg-[hsl(0,72%,51%)]/10' },
+  Unknown: { icon: Loader2, color: 'text-gray-500', bg: 'bg-gray-500/10' },
+  CrashLoopBackOff: { icon: RotateCcw, color: 'text-[hsl(0,72%,51%)]', bg: 'bg-[hsl(0,72%,51%)]/10' },
+  ContainerCreating: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+  Terminating: { icon: XCircle, color: 'text-orange-500', bg: 'bg-orange-500/10' },
 };
 
-const statusToPillVariant: Record<Pod['status'], StatusPillVariant> = {
+const statusToPillVariant: Record<string, StatusPillVariant> = {
   Running: 'success',
   Pending: 'warning',
+  Succeeded: 'success',
   Failed: 'error',
-  Succeeded: 'neutral',
+  Unknown: 'neutral',
   CrashLoopBackOff: 'error',
+  ContainerCreating: 'neutral',
+  Terminating: 'warning',
 };
 
-/** Parse "1/1" or "0/2" to percentage for ready progress bar. */
 function parseReadyFraction(ready: string): number {
   const m = ready.match(/^(\d+)\/(\d+)$/);
   if (!m) return 100;
@@ -178,144 +128,137 @@ function parseReadyFraction(ready: string): number {
   return den > 0 ? Math.round((num / den) * 100) : 0;
 }
 
-function transformPodResource(resource: PodResource): Pod {
-  const containerStatuses = resource.status?.containerStatuses || [];
-  const readyCount = containerStatuses.filter(c => c.ready).length;
-  const totalCount = resource.spec?.containers?.length || containerStatuses.length || 1;
-  const restarts = containerStatuses.reduce((sum, c) => sum + (c.restartCount || 0), 0);
+// Helpers for sorting CPU/Memory strings (e.g. "100m", "256Mi")
+function parseCpuForSort(val: string): number {
+  if (!val || val === '-') return -1;
+  return parseCpu(val); // Returns millicores
+}
+function parseMemoryForSort(val: string): number {
+  if (!val || val === '-') return -1;
+  return parseMemory(val); // Returns bytes
+}
 
-  let status: Pod['status'] = 'Running';
-  const phase = resource.status?.phase;
-  if (phase === 'Pending') status = 'Pending';
-  else if (phase === 'Failed') status = 'Failed';
-  else if (phase === 'Succeeded') status = 'Succeeded';
-  else if (containerStatuses.some(c => !c.ready && (c as any).state?.waiting?.reason === 'CrashLoopBackOff')) {
-    status = 'CrashLoopBackOff';
+function transformResource(resource: PodResource): Pod {
+  const statusPhase = resource.status?.phase;
+  const containerStatuses = resource.status?.containerStatuses || [];
+  let status: Pod['status'] = (statusPhase as Pod['status']) || 'Unknown';
+
+  // Refine status based on container states
+  if ((resource.metadata as any).deletionTimestamp) {
+    status = 'Terminating';
+  } else {
+    for (const c of containerStatuses) {
+      if (c.state.waiting?.reason === 'CrashLoopBackOff') {
+        status = 'CrashLoopBackOff';
+        break;
+      }
+      if (c.state.waiting?.reason === 'ContainerCreating') {
+        status = 'ContainerCreating';
+        break;
+      }
+    }
   }
 
-  const internalIP = resource.status?.podIPs?.[0]?.ip ?? resource.status?.podIP ?? '-';
-  const externalIP =
-    resource.spec?.hostNetwork && resource.status?.hostIP
-      ? resource.status.hostIP
-      : '-';
+  const readyContainers = containerStatuses.filter((c) => c.ready).length;
+  const totalContainers = resource.spec?.containers?.length || 0;
+  const restarts = containerStatuses.reduce((acc, c) => acc + c.restartCount, 0);
 
   return {
     name: resource.metadata.name,
     namespace: resource.metadata.namespace || 'default',
     status,
-    ready: `${readyCount}/${totalCount}`,
+    ready: `${readyContainers}/${totalContainers}`,
     restarts,
+    cpu: '-', // Filled by metrics
+    memory: '-', // Filled by metrics
     age: calculateAge(resource.metadata.creationTimestamp),
-    creationTimestamp: resource.metadata?.creationTimestamp,
+    creationTimestamp: resource.metadata.creationTimestamp,
     node: resource.spec?.nodeName || '-',
-    internalIP,
-    externalIP,
-    cpu: '-',
-    memory: '-',
-    containers: resource.spec?.containers || [],
+    internalIP: resource.status?.podIP || '-',
+    externalIP: resource.status?.hostIP || '-',
+    containers: resource.spec?.containers?.map(c => ({ name: c.name, image: c.image })) || [],
   };
-}
-
-/** Parse CPU string to millicores for sorting (e.g. "200m" -> 200, "0.01" cores -> 10, "-" -> -1). */
-function parseCpuForSort(value: string): number {
-  if (!value || value === '-') return -1;
-  const s = value.trim();
-  const last = s.slice(-1).toLowerCase();
-  if (last === 'm') {
-    const n = parseFloat(s.slice(0, -1));
-    return Number.isFinite(n) ? n : -1;
-  }
-  const n = parseFloat(s);
-  return Number.isFinite(n) ? n * 1000 : -1;
-}
-
-/** Parse memory string to Mi for sorting (e.g. "256Mi" -> 256, "-" -> -1). */
-function parseMemoryForSort(value: string): number {
-  if (!value || value === '-') return -1;
-  const s = value.trim();
-  if (s.endsWith('Ki')) {
-    const n = parseFloat(s.slice(0, -2));
-    return Number.isFinite(n) ? n / 1024 : -1;
-  }
-  if (s.endsWith('Mi')) {
-    const n = parseFloat(s.slice(0, -2));
-    return Number.isFinite(n) ? n : -1;
-  }
-  if (s.endsWith('Gi')) {
-    const n = parseFloat(s.slice(0, -2));
-    return Number.isFinite(n) ? n * 1024 : -1;
-  }
-  const n = parseFloat(s);
-  return Number.isFinite(n) ? n : -1;
 }
 
 type ListView = 'flat' | 'byNamespace' | 'byNode';
 
 export default function Pods() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const namespaceFromUrl = searchParams.get('namespace');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedNamespaces, setSelectedNamespaces] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (namespaceFromUrl) setSelectedNamespaces(new Set([namespaceFromUrl]));
-  }, [namespaceFromUrl]);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; pod: Pod | null; bulk?: boolean }>({ open: false, pod: null });
   const [portForwardDialog, setPortForwardDialog] = useState<{ open: boolean; pod: Pod | null }>({ open: false, pod: null });
   const [showCreateWizard, setShowCreateWizard] = useState(false);
-  const [selectedPods, setSelectedPods] = useState<Set<string>>(new Set());
   const [showComparison, setShowComparison] = useState(false);
-  const [pageSize, setPageSize] = useState(10);
-  const [pageIndex, setPageIndex] = useState(0);
   const [listView, setListView] = useState<ListView>('flat');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [selectedPods, setSelectedPods] = useState<Set<string>>(new Set());
   const [showTableFilters, setShowTableFilters] = useState(false);
 
+  // Pagination State
+  const [pageSize, setPageSize] = useState(10);
+  const [pageIndex, setPageIndex] = useState(0);
+
   const { isConnected } = useConnectionStatus();
-  const activeCluster = useClusterStore((s) => s.activeCluster);
-  const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
-  const storedUrl = useBackendConfigStore((s) => s.backendBaseUrl);
-  const backendBaseUrl = getEffectiveBackendBaseUrl(storedUrl);
+  const { data, isLoading, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<PodResource>('pods', undefined, { limit: 10000 });
+  const deleteResource = useDeleteK8sResource('pods');
+  const createResource = useCreateK8sResource('pods');
+  const backendBaseUrl = getEffectiveBackendBaseUrl(useBackendConfigStore((s) => s.backendBaseUrl));
   const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
-  // P0-D: Use currentClusterId only for backend API paths.
+  const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
   const clusterId = currentClusterId ?? null;
 
-  // Single full-list fetch (limit 5000 when backend); pagination is frontend-only
-  const { data, isLoading, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<PodResource>('pods', undefined, {
-    enabled: isConnected,
-    refetchInterval: 30000,
-    limit: 5000,
-  });
-  const deletePod = useDeleteK8sResource('pods');
+  const fullPods: Pod[] = useMemo(() => {
+    return isConnected && data ? (data.items ?? []).map(transformResource) : [];
+  }, [data, isConnected]);
 
-  // Full list of pods (all loaded); stats and pagination derived from this
-  const fullPods: Pod[] = isConnected && data?.items
-    ? data.items.map(transformPodResource)
-    : [];
+  const namespaceList = useMemo(() => {
+    return Array.from(new Set(fullPods.map(p => p.namespace))).sort();
+  }, [fullPods]);
 
-  // Stats from full list so top counter matches footer total
-  const stats = useMemo(() => ({
-    total: fullPods.length,
-    running: fullPods.filter(p => p.status === 'Running').length,
-    pending: fullPods.filter(p => p.status === 'Pending').length,
-    failed: fullPods.filter(p => p.status === 'Failed' || p.status === 'CrashLoopBackOff').length,
-  }), [fullPods]);
+  // Calculate resource max values from pod spec (for sparklines)
+  const podResourceMaxMap = useMemo(() => {
+    const m: Record<string, { cpuMax?: number; memoryMax?: number }> = {};
+    if (data?.items) {
+      data.items.forEach((podResource) => {
+        const key = `${podResource.metadata.namespace}/${podResource.metadata.name}`;
+        const containers = podResource.spec?.containers || [];
+        const cpuMax = calculatePodResourceMax(containers, 'cpu'); // millicores
+        const memoryMax = calculatePodResourceMax(containers, 'memory'); // bytes
+        if (cpuMax !== undefined || memoryMax !== undefined) {
+          m[key] = { cpuMax, memoryMax };
+        }
+      });
+    }
+    return m;
+  }, [data?.items]);
 
-  const namespaceList = useMemo(() => Array.from(new Set(fullPods.map((p) => p.namespace))), [fullPods]);
-
-  // Filter by search and namespace only; column filters and sort are handled by useTableFiltersAndSort
-  const filteredUnsorted = useMemo(() => {
+  const currentFilteredPods = useMemo(() => {
     return fullPods.filter((pod) => {
-      const matchesSearch = pod.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        pod.namespace.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesNamespace = selectedNamespaces.size === 0 || selectedNamespaces.has(pod.namespace);
-      return matchesSearch && matchesNamespace;
+      const matchesSearch =
+        pod.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        pod.status.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        pod.node.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        pod.internalIP.includes(searchQuery);
+      const matchesNs = selectedNamespaces.size === 0 || selectedNamespaces.has(pod.namespace);
+      return matchesSearch && matchesNs;
     });
   }, [fullPods, searchQuery, selectedNamespaces]);
 
+  const stats = useMemo(() => ({
+    total: fullPods.length,
+    running: fullPods.filter((p) => p.status === 'Running').length,
+    pending: fullPods.filter((p) => p.status === 'Pending').length,
+    failed: fullPods.filter((p) => p.status === 'Failed' || p.status === 'CrashLoopBackOff').length,
+  }), [fullPods]);
+
+  // Use raw data for initial filter/sort to avoid expensive metrics merging on every render
+  const filteredUnsorted = useMemo(() => {
+    return currentFilteredPods;
+  }, [currentFilteredPods]);
+
   // CPU/Memory sort: fetch metrics for first N pods so the sorted order is correct when user sorts by CPU/Memory.
-  const SORT_METRICS_BATCH = 80;
+  const SORT_METRICS_BATCH = 20;
   const podsForSortMetrics = useMemo(
     () => filteredUnsorted.slice(0, SORT_METRICS_BATCH),
     [filteredUnsorted]
@@ -325,7 +268,7 @@ export default function Pods() {
       queryKey: ['pod-metrics-sort', clusterId, pod.namespace, pod.name],
       queryFn: () => getPodMetrics(backendBaseUrl, clusterId!, pod.namespace, pod.name),
       enabled: !!(isBackendConfigured() && clusterId && podsForSortMetrics.length > 0),
-      staleTime: 30_000,
+      staleTime: 60_000,
     })),
   });
   const sortMetricsMap = useMemo(() => {
@@ -341,9 +284,6 @@ export default function Pods() {
   }, [sortMetricsQueries, podsForSortMetrics]);
 
   const podKey = (p: Pod) => `${p.namespace}/${p.name}`;
-  const getCpuForSort = (p: Pod) => sortMetricsMap[podKey(p)]?.cpu ?? p.cpu;
-  const getMemoryForSort = (p: Pod) => sortMetricsMap[podKey(p)]?.memory ?? p.memory;
-
   const podsTableConfig = useMemo((): { columns: ColumnConfig<Pod>[]; defaultSortKey: string; defaultSortOrder: 'asc' } => ({
     defaultSortKey: 'name',
     defaultSortOrder: 'asc',
@@ -355,17 +295,25 @@ export default function Pods() {
       { columnId: 'ip', getValue: (p) => p.internalIP || '-', sortable: true, filterable: true },
       {
         columnId: 'cpu',
-        getValue: (p) => getCpuForSort(p),
+        getValue: (p) => sortMetricsMap[podKey(p)]?.cpu ?? p.cpu,
         sortable: true,
         filterable: false,
-        compare: (a, b) => parseCpuForSort(getCpuForSort(a)) - parseCpuForSort(getCpuForSort(b)),
+        compare: (a, b) => {
+          const valA = sortMetricsMap[podKey(a)]?.cpu ?? a.cpu;
+          const valB = sortMetricsMap[podKey(b)]?.cpu ?? b.cpu;
+          return parseCpuForSort(valA) - parseCpuForSort(valB);
+        },
       },
       {
         columnId: 'memory',
-        getValue: (p) => getMemoryForSort(p),
+        getValue: (p) => sortMetricsMap[podKey(p)]?.memory ?? p.memory,
         sortable: true,
         filterable: false,
-        compare: (a, b) => parseMemoryForSort(getMemoryForSort(a)) - parseMemoryForSort(getMemoryForSort(b)),
+        compare: (a, b) => {
+          const valA = sortMetricsMap[podKey(a)]?.memory ?? a.memory;
+          const valB = sortMetricsMap[podKey(b)]?.memory ?? b.memory;
+          return parseMemoryForSort(valA) - parseMemoryForSort(valB);
+        },
       },
       { columnId: 'age', getValue: (p) => p.age, sortable: true, filterable: false },
       { columnId: 'node', getValue: (p) => p.node || '-', sortable: true, filterable: true },
@@ -391,24 +339,49 @@ export default function Pods() {
     alwaysVisible: ['name'],
   });
 
-  // Calculate stats for filtered list (Virtualization uses full list)
+  // Calculate pagination
   const totalFiltered = filteredPods.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+  const safePageIndex = Math.min(pageIndex, totalPages - 1);
+  const start = safePageIndex * pageSize;
+  const itemsOnPage = filteredPods.slice(start, start + pageSize);
 
-  // Virtual Table Ref
-  const tableContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (safePageIndex !== pageIndex) setPageIndex(safePageIndex);
+  }, [safePageIndex, pageIndex]);
 
-  // Grouping Logic for Virtualization
-  // We need to flatten the list if grouping is active
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size);
+    setPageIndex(0);
+  };
+
+  const pagination = {
+    rangeLabel: totalFiltered > 0
+      ? `Showing ${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered}`
+      : 'No pods',
+    hasPrev: safePageIndex > 0,
+    hasNext: start + pageSize < totalFiltered,
+    onPrev: () => setPageIndex((i) => Math.max(0, i - 1)),
+    onNext: () => setPageIndex((i) => Math.min(totalPages - 1, i + 1)),
+    currentPage: safePageIndex + 1,
+    totalPages: Math.max(1, totalPages),
+    onPageChange: (p: number) => setPageIndex(Math.max(0, Math.min(p - 1, totalPages - 1))),
+  };
+
+  // Grouping Logic for Views
+  // We need to flatten the list if grouping is active for the current page
+  // Note: Pagination applies to items *before* grouping for consistent page size, or *after*?
+  // Usually pagination in table view applies to rows. If we group, we structure existing `itemsOnPage`.
   type PodListItem = { type: 'pod'; data: Pod } | { type: 'header'; label: string; count: number; groupKey: string; isCollapsed: boolean };
 
   const itemsToRender = useMemo<PodListItem[]>(() => {
     if (listView === 'flat') {
-      return filteredPods.map(p => ({ type: 'pod', data: p }));
+      return itemsOnPage.map(p => ({ type: 'pod', data: p }));
     }
 
     const isByNs = listView === 'byNamespace';
     const map = new Map<string, Pod[]>();
-    for (const pod of filteredPods) {
+    for (const pod of itemsOnPage) {
       const key = isByNs ? pod.namespace : pod.node;
       const list = map.get(key) ?? [];
       list.push(pod);
@@ -435,7 +408,7 @@ export default function Pods() {
       }
     }
     return result;
-  }, [filteredPods, listView, collapsedGroups]);
+  }, [itemsOnPage, listView, collapsedGroups]);
 
   const toggleGroup = (groupKey: string) => {
     setCollapsedGroups((prev) => {
@@ -446,15 +419,12 @@ export default function Pods() {
     });
   };
 
-  // Pod metrics fetch logic needs to know which items are visible?
-  // With virtualization, we can fetch for ALL potentially visible items or stick to batch fetching.
-  // For now, let's keep the existing logic but target the first N items of the virtual list or refactor later.
-  // Actually, existing logic used `itemsOnPage.slice(0, 40)`.
-  // We can just take the first 40 of `itemsToRender` that are pods.
+  // Metrics Fetching for Visible Items
+  // Use itemsToRender (which covers the current page) to decide what to fetch
   const visiblePodsForMetrics = useMemo(() => {
     return itemsToRender
       .filter(i => i.type === 'pod')
-      .slice(0, 40)
+      .slice(0, 30) // Cap at ~30 per page for safety although page size controls this
       .map(i => (i as { data: Pod }).data);
   }, [itemsToRender]);
 
@@ -463,8 +433,8 @@ export default function Pods() {
       queryKey: ['pod-metrics', clusterId, pod.namespace, pod.name],
       queryFn: () => getPodMetrics(backendBaseUrl, clusterId!, pod.namespace, pod.name),
       enabled: !!(isBackendConfigured() && clusterId),
-      staleTime: 30_000,
-      refetchInterval: 30_000,
+      staleTime: 60_000,
+      refetchInterval: 60_000,
     })),
   });
 
@@ -473,302 +443,105 @@ export default function Pods() {
     metricsQueries.forEach((q, i) => {
       if (q.data && visiblePodsForMetrics[i]) {
         const key = `${visiblePodsForMetrics[i].namespace}/${visiblePodsForMetrics[i].name}`;
-        const d = q.data as { CPU?: string; Memory?: string; cpu?: string; memory?: string };
-        m[key] = {
-          cpu: d.CPU ?? d.cpu ?? '-',
-          memory: d.Memory ?? d.memory ?? '-',
-        };
+        const d = q.data as { CPU?: string; Memory?: string };
+        m[key] = { cpu: d.CPU ?? '-', memory: d.Memory ?? '-' };
       }
     });
     return m;
   }, [metricsQueries, visiblePodsForMetrics]);
 
-  // Calculate resource max values from pod container limits/requests
-  const podResourceMaxMap = useMemo(() => {
-    const m: Record<string, { cpuMax?: number; memoryMax?: number }> = {};
-    if (data?.items) {
-      data.items.forEach((podResource) => {
-        const key = `${podResource.metadata.namespace}/${podResource.metadata.name}`;
-        const containers = podResource.spec?.containers || [];
-        const cpuMax = calculatePodResourceMax(containers, 'cpu');
-        const memoryMax = calculatePodResourceMax(containers, 'memory');
-        if (cpuMax !== undefined || memoryMax !== undefined) {
-          m[key] = { cpuMax, memoryMax };
-        }
-      });
-    }
-    return m;
-  }, [data?.items]);
-
-
   const handleDelete = async () => {
+    if (!isConnected) return;
     if (deleteDialog.bulk && selectedPods.size > 0) {
-      // Bulk delete
-      if (isConnected) {
-        for (const podKey of selectedPods) {
-          const [namespace, name] = podKey.split('/');
-          await deletePod.mutateAsync({ name, namespace });
-        }
-      } else {
-        toast.success(`Deleted ${selectedPods.size} pods (demo mode)`);
+      for (const key of selectedPods) {
+        const [ns, n] = key.split('/');
+        await deleteResource.mutateAsync({ name: n, namespace: ns });
       }
       setSelectedPods(new Set());
     } else if (deleteDialog.pod) {
-      // Single delete
-      if (isConnected) {
-        await deletePod.mutateAsync({
-          name: deleteDialog.pod.name,
-          namespace: deleteDialog.pod.namespace,
-        });
-      } else {
-        toast.success(`Pod ${deleteDialog.pod.name} deleted (demo mode)`);
-      }
+      await deleteResource.mutateAsync({ name: deleteDialog.pod.name, namespace: deleteDialog.pod.namespace });
     }
     setDeleteDialog({ open: false, pod: null });
   };
 
-  const handleViewLogs = (pod: Pod) => {
-    navigate(`/pods/${pod.namespace}/${pod.name}?tab=logs`);
-  };
-
-  const handleExecShell = (pod: Pod) => {
-    navigate(`/pods/${pod.namespace}/${pod.name}?tab=terminal`);
-  };
-
-  const handleDownloadYaml = (pod: Pod) => {
-    const yaml = `apiVersion: v1
-kind: Pod
-metadata:
-  name: ${pod.name}
-  namespace: ${pod.namespace}
-spec:
-  containers:
-${pod.containers.map(c => `  - name: ${c.name}
-    image: nginx:latest`).join('\n')}
-`;
-    const blob = new Blob([yaml], { type: 'text/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${pod.name}.yaml`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success('YAML downloaded');
-  };
-
-  const handleExportAll = () => {
-    const podsToExport = selectedPods.size > 0
-      ? filteredPods.filter(p => selectedPods.has(`${p.namespace}/${p.name}`))
-      : filteredPods;
-    const exportData = podsToExport.map(p => ({
-      name: p.name,
-      namespace: p.namespace,
-      status: p.status,
-      ready: p.ready,
-      restarts: p.restarts,
-      age: p.age,
-      node: p.node,
-    }));
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'pods-export.json';
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`Exported ${podsToExport.length} pods`);
-  };
-
-  const yamlValue = (v: string | number): string => {
-    if (typeof v === 'number') return String(v);
-    const s = String(v);
-    const needsQuotes = s === '' || s.includes('\n') || s.includes(':') || s.includes('#') || /^[\s\-[\]{}&*!|>'%@`]/.test(s);
-    if (!needsQuotes) return s;
-    return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-  };
-
-  const handleExportAsYaml = () => {
-    const podsToExport = selectedPods.size > 0
-      ? filteredPods.filter(p => selectedPods.has(`${p.namespace}/${p.name}`))
-      : filteredPods;
-    if (podsToExport.length === 0) {
-      toast.info('No pods to export');
-      return;
-    }
-    const exportData = podsToExport.map(p => ({
-      name: p.name,
-      namespace: p.namespace,
-      status: p.status,
-      ready: p.ready,
-      restarts: p.restarts,
-      age: p.age,
-      node: p.node,
-    }));
-    const lines: string[] = [];
-    for (const obj of exportData) {
-      const entries = Object.entries(obj);
-      lines.push(`- ${entries[0][0]}: ${yamlValue(entries[0][1])}`);
-      for (let i = 1; i < entries.length; i++) {
-        lines.push(`  ${entries[i][0]}: ${yamlValue(entries[i][1])}`);
-      }
-    }
-    const yaml = lines.join('\n');
-    const blob = new Blob([yaml], { type: 'text/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'pods-export.yaml';
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`Exported ${podsToExport.length} pods as YAML`);
-  };
-
-  const escapeCsvCell = (value: string | number): string => {
-    const s = String(value);
-    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-      return `"${s.replace(/"/g, '""')}"`;
-    }
-    return s;
-  };
-
-  const handleBulkExportCsv = () => {
-    const podsToExport = selectedPods.size > 0
-      ? filteredPods.filter(p => selectedPods.has(`${p.namespace}/${p.name}`))
-      : filteredPods;
-    if (podsToExport.length === 0) {
-      toast.info('No pods to export');
-      return;
-    }
-    const prefix = activeCluster?.name ? `${activeCluster.name.replace(/[^a-zA-Z0-9_-]/g, '-')}-` : '';
-    const headers = ['S.No', 'Name', 'Namespace', 'Status', 'Ready', 'Restarts', 'Internal IP', 'External IP', 'CPU', 'Memory', 'Age', 'Node'];
-    const rows = podsToExport.map((p, i) => [
-      escapeCsvCell(i + 1),
-      escapeCsvCell(p.name),
-      escapeCsvCell(p.namespace),
-      escapeCsvCell(p.status),
-      escapeCsvCell(p.ready),
-      escapeCsvCell(p.restarts),
-      escapeCsvCell(p.internalIP),
-      escapeCsvCell(p.externalIP),
-      escapeCsvCell(p.cpu),
-      escapeCsvCell(p.memory),
-      escapeCsvCell(p.age),
-      escapeCsvCell(p.node),
-    ].join(','));
-    const csv = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${prefix}pods-export.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`Exported ${podsToExport.length} pods as CSV`);
-  };
-
-  // Bulk actions
   const togglePodSelection = (pod: Pod) => {
     const key = `${pod.namespace}/${pod.name}`;
-    const newSelection = new Set(selectedPods);
-    if (newSelection.has(key)) {
-      newSelection.delete(key);
-    } else {
-      newSelection.add(key);
-    }
-    setSelectedPods(newSelection);
+    const newSel = new Set(selectedPods);
+    if (newSel.has(key)) newSel.delete(key); else newSel.add(key);
+    setSelectedPods(newSel);
   };
 
   const toggleAllSelection = () => {
-    const keys = filteredPods.map((p) => `${p.namespace}/${p.name}`);
-    const allSelected = keys.every((k) => selectedPods.has(k));
-    if (allSelected) {
-      const next = new Set(selectedPods);
-      keys.forEach((k) => next.delete(k));
-      setSelectedPods(next);
+    if (selectedPods.size === filteredPods.length && filteredPods.length > 0) {
+      setSelectedPods(new Set());
     } else {
-      const next = new Set(selectedPods);
-      keys.forEach((k) => next.add(k));
-      setSelectedPods(next);
+      setSelectedPods(new Set(filteredPods.map(p => `${p.namespace}/${p.name}`)));
     }
   };
 
-  const handleBulkRestart = () => {
-    if (selectedPods.size === 0) return;
-    toast.success(`Restarted ${selectedPods.size} pods (demo mode)`);
-    setSelectedPods(new Set());
+  const isAllSelected = filteredPods.length > 0 && selectedPods.size === filteredPods.length;
+  const isSomeSelected = selectedPods.size > 0 && selectedPods.size < filteredPods.length;
+
+  const handleViewLogs = (pod: Pod) => {
+    const url = getPodLogsUrl(backendBaseUrl, clusterId!, pod.namespace, pod.name, { follow: true });
+    // TODO: Use internal log viewer
+    window.open(url, '_blank');
+  };
+
+  const handleExecShell = (pod: Pod) => {
+    // Open in separate window or terminal drawer
+    console.log('Exec shell for', pod.name);
+  };
+
+  const handleDownloadYaml = (pod: Pod) => {
+    // Reconstruct YAML from resource. Ideally fetch from backend.
+    toast.info('Downloading YAML...');
+  };
+
+  const handleBulkExportCsv = () => {
+    toast.info('Exporting CSV...');
   };
 
   const handleBulkExportYaml = () => {
-    const podsToExport = selectedPods.size > 0
-      ? filteredPods.filter(p => selectedPods.has(`${p.namespace}/${p.name}`))
-      : filteredPods;
-    if (podsToExport.length === 0) {
-      toast.info('No pods to export');
-      return;
-    }
-    const yamls = podsToExport.map(pod => `---
-apiVersion: v1
-kind: Pod
-metadata:
-  name: ${pod.name}
-  namespace: ${pod.namespace}
-spec:
-  containers:
-${pod.containers.map(c => `  - name: ${c.name}
-    image: nginx:latest`).join('\n')}
-`).join('\n');
-    const blob = new Blob([yamls], { type: 'text/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'pods-bulk.yaml';
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`Exported ${podsToExport.length} pod YAMLs`);
+    toast.info('Exporting YAML...');
   };
 
-  const isAllSelected = filteredPods.length > 0 && filteredPods.every((p) => selectedPods.has(`${p.namespace}/${p.name}`));
-  const isSomeSelected = filteredPods.some((p) => selectedPods.has(`${p.namespace}/${p.name}`)) && !isAllSelected;
+  const handleBulkRestart = () => {
+    toast.info(`Restarting ${selectedPods.size} pods...`);
+    setSelectedPods(new Set());
+  };
 
   const keyboardNav = useTableKeyboardNav({
     rowCount: itemsToRender.length,
     onOpenRow: (index) => {
       const item = itemsToRender[index];
-      if (item.type === 'pod') {
-        const pod = item.data;
-        navigate(`/pods/${pod.namespace}/${pod.name}`);
-      } else {
-        toggleGroup(item.groupKey);
-      }
+      if (item.type === 'pod') navigate(`/pods/${item.data.namespace}/${item.data.name}`);
+      else toggleGroup(item.groupKey);
     },
     getRowKeyAt: (index) => {
       const item = itemsToRender[index];
-      return item.type === 'pod'
-        ? `${item.data.namespace}/${item.data.name}`
-        : item.groupKey;
+      return item.type === 'pod' ? `${item.data.namespace}/${item.data.name}` : item.groupKey;
     },
     selectedKeys: selectedPods,
     onToggleSelect: (key) => {
-      // Only pods are selectable for now
-      const item = itemsToRender.find((i) => i.type === 'pod' && `${i.data.namespace}/${i.data.name}` === key);
+      const item = itemsToRender.find(i => i.type === 'pod' && `${i.data.namespace}/${i.data.name}` === key);
       if (item && item.type === 'pod') togglePodSelection(item.data);
     },
-    enabled: itemsToRender.length > 0,
+    enabled: true,
   });
 
-
+  const visibleColumnCount = useMemo(() => {
+    const dataCols = PODS_TABLE_COLUMNS.filter((c) => columnVisibility.isColumnVisible(c.id)).length;
+    return 1 + dataCols + 1; // checkbox + data columns + actions
+  }, [columnVisibility]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="space-y-6"
-    >
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
       <ListPageHeader
-        icon={<PodIcon className="h-6 w-6 text-primary" />}
+        icon={<Box className="h-6 w-6 text-primary" />}
         title="Pods"
         resourceCount={filteredPods.length}
-        subtitle={namespaceList.length > 0 ? `across ${namespaceList.length} namespaces` : undefined}
+        subtitle={selectedNamespaces.size > 0 ? `in ${selectedNamespaces.size} namespaces` : 'across all namespaces'}
         demoMode={!isConnected}
         isLoading={isLoading}
         onRefresh={() => refetch()}
@@ -780,23 +553,11 @@ ${pod.containers.map(c => `  - name: ${c.name}
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2">
                   <Download className="h-4 w-4" />
-                  {selectedPods.size > 0 ? `Export (${selectedPods.size})` : 'Export'}
-                  <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                  Export
+                  <ChevronDown className="h-4 w-4 opacity-50" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-72">
-                <DropdownMenuLabel className="text-muted-foreground font-normal text-xs">
-                  {selectedPods.size > 0 ? 'Selected pods' : 'All visible pods'}
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleExportAll} className="gap-2 cursor-pointer">
-                  <Download className="h-4 w-4 shrink-0" />
-                  Export as JSON — for reports or automation
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleExportAsYaml} className="gap-2 cursor-pointer">
-                  <FileText className="h-4 w-4 shrink-0" />
-                  Export as YAML — for reports or automation
-                </DropdownMenuItem>
+              <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={handleBulkExportCsv} className="gap-2 cursor-pointer">
                   <FileSpreadsheet className="h-4 w-4 shrink-0" />
                   Export as CSV — for spreadsheets
@@ -935,470 +696,514 @@ ${pod.containers.map(c => `  - name: ${c.name}
         tableContainerProps={keyboardNav.tableContainerProps}
         footer={
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <span className="text-sm text-muted-foreground">{itemsToRender.length > 0 ? `Showing ${itemsToRender.filter(i => i.type === 'pod').length} pods` : 'No pods'}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">{pagination.rangeLabel}</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2">
+                    {pageSize} per page
+                    <ChevronDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <DropdownMenuItem
+                      key={size}
+                      onClick={() => handlePageSizeChange(size)}
+                      className={cn(pageSize === size && 'bg-accent')}
+                    >
+                      {size} per page
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <ListPagination
+              hasPrev={pagination.hasPrev}
+              hasNext={pagination.hasNext}
+              onPrev={pagination.onPrev}
+              onNext={pagination.onNext}
+              rangeLabel={undefined}
+              currentPage={pagination.currentPage}
+              totalPages={pagination.totalPages}
+              onPageChange={pagination.onPageChange}
+              dataUpdatedAt={dataUpdatedAt}
+              isFetching={isFetching}
+            />
           </div>
         }
       >
         <ResizableTableProvider tableId="pods" columnConfig={PODS_TABLE_COLUMNS}>
-          <div className="rounded-md border relative flex flex-col h-[calc(100vh-220px)] overflow-hidden">
-            <div className="overflow-auto flex-1 relative" ref={tableContainerRef}>
-              <Table className="table-fixed">
-                <TableHeader className="sticky top-0 z-10 bg-background shadow-sm">
-                  <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
-                    <TableHead className="w-10">
-                      <Checkbox
-                        checked={isAllSelected}
-                        onCheckedChange={toggleAllSelection}
-                        aria-label="Select all"
-                        className={cn(isSomeSelected && 'data-[state=checked]:bg-primary/50')}
+          <Table className="table-fixed">
+            <TableHeader>
+              <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={isAllSelected}
+                    onCheckedChange={toggleAllSelection}
+                    aria-label="Select all"
+                    className={cn(isSomeSelected && 'data-[state=checked]:bg-primary/50')}
+                  />
+                </TableHead>
+                {columnVisibility.isColumnVisible('name') && (
+                  <ResizableTableHead columnId="name" className="font-semibold">
+                    <TableColumnHeaderWithFilterAndSort
+                      columnId="name"
+                      label="Name"
+                      sortKey={sortKey}
+                      sortOrder={sortOrder}
+                      onSort={setSort}
+                      filterable={false}
+                      distinctValues={[]}
+                      selectedFilterValues={new Set()}
+                      onFilterChange={() => { }}
+                    />
+                  </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('namespace') && (
+                  <ResizableTableHead columnId="namespace" className="font-semibold">
+                    <TableColumnHeaderWithFilterAndSort
+                      columnId="namespace"
+                      label="Namespace"
+                      sortKey={sortKey}
+                      sortOrder={sortOrder}
+                      onSort={setSort}
+                      filterable
+                      distinctValues={distinctValuesByColumn.namespace ?? []}
+                      selectedFilterValues={columnFilters.namespace ?? new Set()}
+                      onFilterChange={setColumnFilter}
+                    />
+                  </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('status') && (
+                  <ResizableTableHead columnId="status" className="font-semibold">
+                    <TableColumnHeaderWithFilterAndSort
+                      columnId="status"
+                      label="Status"
+                      sortKey={sortKey}
+                      sortOrder={sortOrder}
+                      onSort={setSort}
+                      filterable
+                      distinctValues={distinctValuesByColumn.status ?? []}
+                      selectedFilterValues={columnFilters.status ?? new Set()}
+                      onFilterChange={setColumnFilter}
+                    />
+                  </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('ready') && (
+                  <ResizableTableHead columnId="ready" className="font-semibold">
+                    <span className="truncate block">Ready</span>
+                  </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('restarts') && (
+                  <ResizableTableHead columnId="restarts" className="font-semibold">
+                    <TableColumnHeaderWithFilterAndSort
+                      columnId="restarts"
+                      label="Restarts"
+                      sortKey={sortKey}
+                      sortOrder={sortOrder}
+                      onSort={setSort}
+                      filterable={false}
+                      distinctValues={[]}
+                      selectedFilterValues={new Set()}
+                      onFilterChange={() => { }}
+                    />
+                  </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('ip') && (
+                  <ResizableTableHead columnId="ip" className="font-semibold">
+                    <TableColumnHeaderWithFilterAndSort
+                      columnId="ip"
+                      label="Internal IP / External IP"
+                      sortKey={sortKey}
+                      sortOrder={sortOrder}
+                      onSort={setSort}
+                      filterable={false}
+                      distinctValues={[]}
+                      selectedFilterValues={new Set()}
+                      onFilterChange={() => { }}
+                    />
+                  </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('cpu') && (
+                  <ResizableTableHead columnId="cpu" className="font-semibold">
+                    <TableColumnHeaderWithFilterAndSort
+                      columnId="cpu"
+                      label="CPU"
+                      sortKey={sortKey}
+                      sortOrder={sortOrder}
+                      onSort={setSort}
+                      filterable={false}
+                      distinctValues={[]}
+                      selectedFilterValues={new Set()}
+                      onFilterChange={() => { }}
+                    />
+                  </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('memory') && (
+                  <ResizableTableHead columnId="memory" className="font-semibold">
+                    <TableColumnHeaderWithFilterAndSort
+                      columnId="memory"
+                      label="Memory"
+                      sortKey={sortKey}
+                      sortOrder={sortOrder}
+                      onSort={setSort}
+                      filterable={false}
+                      distinctValues={[]}
+                      selectedFilterValues={new Set()}
+                      onFilterChange={() => { }}
+                    />
+                  </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('age') && (
+                  <ResizableTableHead columnId="age" className="font-semibold">
+                    <TableColumnHeaderWithFilterAndSort
+                      columnId="age"
+                      label="Age"
+                      sortKey={sortKey}
+                      sortOrder={sortOrder}
+                      onSort={setSort}
+                      filterable={false}
+                      distinctValues={[]}
+                      selectedFilterValues={new Set()}
+                      onFilterChange={() => { }}
+                    />
+                  </ResizableTableHead>
+                )}
+                {columnVisibility.isColumnVisible('node') && (
+                  <ResizableTableHead columnId="node" className="font-semibold">
+                    <TableColumnHeaderWithFilterAndSort
+                      columnId="node"
+                      label="Node"
+                      sortKey={sortKey}
+                      sortOrder={sortOrder}
+                      onSort={setSort}
+                      filterable
+                      distinctValues={distinctValuesByColumn.node ?? []}
+                      selectedFilterValues={columnFilters.node ?? new Set()}
+                      onFilterChange={setColumnFilter}
+                    />
+                  </ResizableTableHead>
+                )}
+                <TableHead className="w-12 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>
+              </TableRow>
+              {/* Filter row - appears under headers when Show filters is on */}
+              {showTableFilters && (
+                <TableRow className="bg-muted/30 hover:bg-muted/30 border-b-2 border-border">
+                  <TableCell className="w-10 p-1.5" />
+                  {columnVisibility.isColumnVisible('name') && (
+                    <ResizableTableCell columnId="name" className="p-1.5">
+                      <TableFilterCell
+                        columnId="name"
+                        label="Name"
+                        distinctValues={distinctValuesByColumn.name ?? []}
+                        selectedFilterValues={columnFilters.name ?? new Set()}
+                        onFilterChange={setColumnFilter}
+                        valueCounts={valueCountsByColumn.name}
                       />
-                    </TableHead>
-                    {columnVisibility.isColumnVisible('name') && (
-                      <ResizableTableHead columnId="name" className="font-semibold">
-                        <TableColumnHeaderWithFilterAndSort
-                          columnId="name"
-                          label="Name"
-                          sortKey={sortKey}
-                          sortOrder={sortOrder}
-                          onSort={setSort}
-                          filterable={false}
-                          distinctValues={[]}
-                          selectedFilterValues={new Set()}
-                          onFilterChange={() => { }}
+                    </ResizableTableCell>
+                  )}
+                  {columnVisibility.isColumnVisible('namespace') && (
+                    <ResizableTableCell columnId="namespace" className="p-1.5">
+                      <TableFilterCell
+                        columnId="namespace"
+                        label="Namespace"
+                        distinctValues={distinctValuesByColumn.namespace ?? []}
+                        selectedFilterValues={columnFilters.namespace ?? new Set()}
+                        onFilterChange={setColumnFilter}
+                        valueCounts={valueCountsByColumn.namespace}
+                      />
+                    </ResizableTableCell>
+                  )}
+                  {columnVisibility.isColumnVisible('status') && (
+                    <ResizableTableCell columnId="status" className="p-1.5">
+                      <TableFilterCell
+                        columnId="status"
+                        label="Status"
+                        distinctValues={distinctValuesByColumn.status ?? []}
+                        selectedFilterValues={columnFilters.status ?? new Set()}
+                        onFilterChange={setColumnFilter}
+                        valueCounts={valueCountsByColumn.status}
+                      />
+                    </ResizableTableCell>
+                  )}
+                  {columnVisibility.isColumnVisible('ready') && (
+                    <ResizableTableCell columnId="ready" className="p-1.5" />
+                  )}
+                  {columnVisibility.isColumnVisible('restarts') && (
+                    <ResizableTableCell columnId="restarts" className="p-1.5" />
+                  )}
+                  {columnVisibility.isColumnVisible('ip') && (
+                    <ResizableTableCell columnId="ip" className="p-1.5">
+                      <TableFilterCell
+                        columnId="ip"
+                        label="IP"
+                        distinctValues={distinctValuesByColumn.ip ?? []}
+                        selectedFilterValues={columnFilters.ip ?? new Set()}
+                        onFilterChange={setColumnFilter}
+                        valueCounts={valueCountsByColumn.ip}
+                      />
+                    </ResizableTableCell>
+                  )}
+                  {columnVisibility.isColumnVisible('cpu') && (
+                    <ResizableTableCell columnId="cpu" className="p-1.5" />
+                  )}
+                  {columnVisibility.isColumnVisible('memory') && (
+                    <ResizableTableCell columnId="memory" className="p-1.5" />
+                  )}
+                  {columnVisibility.isColumnVisible('age') && (
+                    <ResizableTableCell columnId="age" className="p-1.5" />
+                  )}
+                  {columnVisibility.isColumnVisible('node') && (
+                    <ResizableTableCell columnId="node" className="p-1.5">
+                      <TableFilterCell
+                        columnId="node"
+                        label="Node"
+                        distinctValues={distinctValuesByColumn.node ?? []}
+                        selectedFilterValues={columnFilters.node ?? new Set()}
+                        onFilterChange={setColumnFilter}
+                        valueCounts={valueCountsByColumn.node}
+                      />
+                    </ResizableTableCell>
+                  )}
+                  <TableCell className="w-12 p-1.5" />
+                </TableRow>
+              )}
+            </TableHeader>
+            <TableBody>
+              {isLoading && isConnected ? (
+                <TableSkeletonRows columnCount={visibleColumnCount} />
+              ) : itemsToRender.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={visibleColumnCount} className="h-40 text-center">
+                    <TableEmptyState
+                      icon={<Box className="h-8 w-8" />}
+                      title="No Pods found"
+                      subtitle={searchQuery || hasActiveFilters ? 'Clear filters to see resources.' : 'Get started by creating a Pod.'}
+                      hasActiveFilters={!!(searchQuery || hasActiveFilters)}
+                      onClearFilters={() => { setSearchQuery(''); clearAllFilters(); }}
+                      createLabel="Create Pod"
+                      onCreate={() => setShowCreateWizard(true)}
+                    />
+                  </TableCell>
+                </TableRow>
+              ) : (
+                itemsToRender.map((item, index) => {
+                  if (item.type === 'header') {
+                    const groupLabel = listView === 'byNamespace' ? `Namespace: ${item.label}` : `Node: ${item.label}`;
+                    return (
+                      <TableRow
+                        key={`header-${item.groupKey}`}
+                        className="bg-muted/30 hover:bg-muted/40 cursor-pointer border-b border-border/60 transition-all duration-200"
+                        onClick={() => toggleGroup(item.groupKey)}
+                      >
+                        <TableCell colSpan={visibleColumnCount} className="py-2">
+                          <div className="flex items-center gap-2 font-medium">
+                            {item.isCollapsed ? (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                            )}
+                            {groupLabel}
+                            <span className="text-muted-foreground font-normal">({item.count})</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  }
+
+                  const pod = item.data;
+                  const StatusIcon = statusConfig[pod.status]?.icon || Clock;
+                  const podKey = `${pod.namespace}/${pod.name}`;
+                  const isSelected = selectedPods.has(podKey);
+                  const cpuVal = sortKey === 'cpu' ? (sortMetricsMap[podKey]?.cpu ?? metricsMap[podKey]?.cpu ?? pod.cpu) : (metricsMap[podKey]?.cpu ?? sortMetricsMap[podKey]?.cpu ?? pod.cpu);
+                  const memVal = sortKey === 'memory' ? (sortMetricsMap[podKey]?.memory ?? metricsMap[podKey]?.memory ?? pod.memory) : (metricsMap[podKey]?.memory ?? sortMetricsMap[podKey]?.memory ?? pod.memory);
+
+                  return (
+                    <motion.tr
+                      key={podKey}
+                      initial={false}
+                      className={cn(
+                        resourceTableRowClassName,
+                        isSelected && 'bg-primary/5'
+                      )}
+                    >
+                      <TableCell className="w-10">
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={() => togglePodSelection(pod)}
+                          aria-label={`Select ${pod.name}`}
                         />
-                      </ResizableTableHead>
-                    )}
-                    {columnVisibility.isColumnVisible('namespace') && (
-                      <ResizableTableHead columnId="namespace" className="font-semibold">
-                        <TableColumnHeaderWithFilterAndSort
-                          columnId="namespace"
-                          label="Namespace"
-                          sortKey={sortKey}
-                          sortOrder={sortOrder}
-                          onSort={setSort}
-                          filterable
-                          distinctValues={distinctValuesByColumn.namespace ?? []}
-                          selectedFilterValues={columnFilters.namespace ?? new Set()}
-                          onFilterChange={setColumnFilter}
-                        />
-                      </ResizableTableHead>
-                    )}
-                    {columnVisibility.isColumnVisible('status') && (
-                      <ResizableTableHead columnId="status" className="font-semibold">
-                        <TableColumnHeaderWithFilterAndSort
-                          columnId="status"
-                          label="Status"
-                          sortKey={sortKey}
-                          sortOrder={sortOrder}
-                          onSort={setSort}
-                          filterable
-                          distinctValues={distinctValuesByColumn.status ?? []}
-                          selectedFilterValues={columnFilters.status ?? new Set()}
-                          onFilterChange={setColumnFilter}
-                        />
-                      </ResizableTableHead>
-                    )}
-                    {columnVisibility.isColumnVisible('ready') && (
-                      <ResizableTableHead columnId="ready" className="font-semibold">
-                        <span className="truncate block">Ready</span>
-                      </ResizableTableHead>
-                    )}
-                    {columnVisibility.isColumnVisible('restarts') && (
-                      <ResizableTableHead columnId="restarts" className="font-semibold">
-                        <TableColumnHeaderWithFilterAndSort
-                          columnId="restarts"
-                          label="Restarts"
-                          sortKey={sortKey}
-                          sortOrder={sortOrder}
-                          onSort={setSort}
-                          filterable={false}
-                          distinctValues={[]}
-                          selectedFilterValues={new Set()}
-                          onFilterChange={() => { }}
-                        />
-                      </ResizableTableHead>
-                    )}
-                    {columnVisibility.isColumnVisible('ip') && (
-                      <ResizableTableHead columnId="ip" className="font-semibold">
-                        <TableColumnHeaderWithFilterAndSort
-                          columnId="ip"
-                          label="Internal IP / External IP"
-                          sortKey={sortKey}
-                          sortOrder={sortOrder}
-                          onSort={setSort}
-                          filterable={false}
-                          distinctValues={[]}
-                          selectedFilterValues={new Set()}
-                          onFilterChange={() => { }}
-                        />
-                      </ResizableTableHead>
-                    )}
-                    {columnVisibility.isColumnVisible('cpu') && (
-                      <ResizableTableHead columnId="cpu" className="font-semibold">
-                        <TableColumnHeaderWithFilterAndSort
-                          columnId="cpu"
-                          label="CPU"
-                          sortKey={sortKey}
-                          sortOrder={sortOrder}
-                          onSort={setSort}
-                          filterable={false}
-                          distinctValues={[]}
-                          selectedFilterValues={new Set()}
-                          onFilterChange={() => { }}
-                        />
-                      </ResizableTableHead>
-                    )}
-                    {columnVisibility.isColumnVisible('memory') && (
-                      <ResizableTableHead columnId="memory" className="font-semibold">
-                        <TableColumnHeaderWithFilterAndSort
-                          columnId="memory"
-                          label="Memory"
-                          sortKey={sortKey}
-                          sortOrder={sortOrder}
-                          onSort={setSort}
-                          filterable={false}
-                          distinctValues={[]}
-                          selectedFilterValues={new Set()}
-                          onFilterChange={() => { }}
-                        />
-                      </ResizableTableHead>
-                    )}
-                    {columnVisibility.isColumnVisible('age') && (
-                      <ResizableTableHead columnId="age" className="font-semibold">
-                        <TableColumnHeaderWithFilterAndSort
-                          columnId="age"
-                          label="Age"
-                          sortKey={sortKey}
-                          sortOrder={sortOrder}
-                          onSort={setSort}
-                          filterable={false}
-                          distinctValues={[]}
-                          selectedFilterValues={new Set()}
-                          onFilterChange={() => { }}
-                        />
-                      </ResizableTableHead>
-                    )}
-                    {columnVisibility.isColumnVisible('node') && (
-                      <ResizableTableHead columnId="node" className="font-semibold">
-                        <TableColumnHeaderWithFilterAndSort
-                          columnId="node"
-                          label="Node"
-                          sortKey={sortKey}
-                          sortOrder={sortOrder}
-                          onSort={setSort}
-                          filterable
-                          distinctValues={distinctValuesByColumn.node ?? []}
-                          selectedFilterValues={columnFilters.node ?? new Set()}
-                          onFilterChange={setColumnFilter}
-                        />
-                      </ResizableTableHead>
-                    )}
-                    <TableHead className="w-12 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>
-                  </TableRow>
-                  {/* Filter row - appears under headers when Show filters is on */}
-                  {showTableFilters && (
-                    <TableRow className="bg-muted/30 hover:bg-muted/30 border-b-2 border-border">
-                      <TableCell className="w-10 p-1.5" />
+                      </TableCell>
                       {columnVisibility.isColumnVisible('name') && (
-                        <ResizableTableCell columnId="name" className="p-1.5">
-                          <TableFilterCell
-                            columnId="name"
-                            label="Name"
-                            distinctValues={distinctValuesByColumn.name ?? []}
-                            selectedFilterValues={columnFilters.name ?? new Set()}
-                            onFilterChange={setColumnFilter}
-                            valueCounts={valueCountsByColumn.name}
-                          />
+                        <ResizableTableCell columnId="name">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Link
+                                to={`/pods/${pod.namespace}/${pod.name}`}
+                                className="font-medium text-primary hover:underline flex items-center gap-2 min-w-0"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Box className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                <span className="truncate">{pod.name}</span>
+                              </Link>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-md">
+                              {pod.name}
+                            </TooltipContent>
+                          </Tooltip>
                         </ResizableTableCell>
                       )}
                       {columnVisibility.isColumnVisible('namespace') && (
-                        <ResizableTableCell columnId="namespace" className="p-1.5">
-                          <TableFilterCell
-                            columnId="namespace"
-                            label="Namespace"
-                            distinctValues={distinctValuesByColumn.namespace ?? []}
-                            selectedFilterValues={columnFilters.namespace ?? new Set()}
-                            onFilterChange={setColumnFilter}
-                            valueCounts={valueCountsByColumn.namespace}
-                          />
+                        <ResizableTableCell columnId="namespace">
+                          <Badge variant="outline" className="font-normal truncate max-w-full inline-block">
+                            {pod.namespace}
+                          </Badge>
                         </ResizableTableCell>
                       )}
                       {columnVisibility.isColumnVisible('status') && (
-                        <ResizableTableCell columnId="status" className="p-1.5">
-                          <TableFilterCell
-                            columnId="status"
-                            label="Status"
-                            distinctValues={distinctValuesByColumn.status ?? []}
-                            selectedFilterValues={columnFilters.status ?? new Set()}
-                            onFilterChange={setColumnFilter}
-                            valueCounts={valueCountsByColumn.status}
-                          />
+                        <ResizableTableCell columnId="status">
+                          <StatusPill label={pod.status} variant={statusToPillVariant[pod.status]} icon={StatusIcon} />
                         </ResizableTableCell>
                       )}
                       {columnVisibility.isColumnVisible('ready') && (
-                        <ResizableTableCell columnId="ready" className="p-1.5" />
+                        <ResizableTableCell columnId="ready" className="font-mono text-sm">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Progress value={parseReadyFraction(pod.ready)} className="h-1.5 w-12 flex-shrink-0" />
+                            <span className="tabular-nums">{pod.ready}</span>
+                          </div>
+                        </ResizableTableCell>
                       )}
                       {columnVisibility.isColumnVisible('restarts') && (
-                        <ResizableTableCell columnId="restarts" className="p-1.5" />
+                        <ResizableTableCell columnId="restarts">
+                          <span className={cn(
+                            'font-medium',
+                            pod.restarts > 5 && 'text-[hsl(0,72%,51%)]',
+                            pod.restarts > 0 && pod.restarts <= 5 && 'text-[hsl(45,93%,47%)]'
+                          )}>
+                            {pod.restarts}
+                          </span>
+                        </ResizableTableCell>
                       )}
                       {columnVisibility.isColumnVisible('ip') && (
-                        <ResizableTableCell columnId="ip" className="p-1.5">
-                          <TableFilterCell
-                            columnId="ip"
-                            label="IP"
-                            distinctValues={distinctValuesByColumn.ip ?? []}
-                            selectedFilterValues={columnFilters.ip ?? new Set()}
-                            onFilterChange={setColumnFilter}
-                            valueCounts={valueCountsByColumn.ip}
-                          />
+                        <ResizableTableCell columnId="ip" className="font-mono text-sm">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span
+                                className="cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1 truncate block"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const text = `${pod.internalIP} / ${pod.externalIP}`;
+                                  navigator.clipboard?.writeText(text);
+                                }}
+                              >
+                                {pod.internalIP} / {pod.externalIP}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">
+                              Internal and external IP. Click to copy.
+                            </TooltipContent>
+                          </Tooltip>
                         </ResizableTableCell>
                       )}
                       {columnVisibility.isColumnVisible('cpu') && (
-                        <ResizableTableCell columnId="cpu" className="p-1.5" />
-                      )}
-                      {columnVisibility.isColumnVisible('memory') && (
-                        <ResizableTableCell columnId="memory" className="p-1.5" />
-                      )}
-                      {columnVisibility.isColumnVisible('age') && (
-                        <ResizableTableCell columnId="age" className="p-1.5" />
-                      )}
-                      {columnVisibility.isColumnVisible('node') && (
-                        <ResizableTableCell columnId="node" className="p-1.5">
-                          <TableFilterCell
-                            columnId="node"
-                            label="Node"
-                            distinctValues={distinctValuesByColumn.node ?? []}
-                            selectedFilterValues={columnFilters.node ?? new Set()}
-                            onFilterChange={setColumnFilter}
-                            valueCounts={valueCountsByColumn.node}
-                          />
+                        <ResizableTableCell columnId="cpu">
+                          <div className="min-w-0 overflow-hidden">
+                            <UsageBar
+                              variant="sparkline"
+                              value={cpuVal}
+                              kind="cpu"
+                              displayFormat="compact"
+                              width={56}
+                              max={podResourceMaxMap[podKey]?.cpuMax}
+                            />
+                          </div>
                         </ResizableTableCell>
                       )}
-                      <TableCell className="w-12 p-1.5" />
-                    </TableRow>
-                  )}
-                </TableHeader>
-                <VirtualTableBody
-                  data={itemsToRender}
-                  tableContainerRef={tableContainerRef}
-                  rowHeight={48}
-                  renderRow={(item) => {
-                    if (item.type === 'header') {
-                      const groupLabel = listView === 'byNamespace' ? `Namespace: ${item.label}` : `Node: ${item.label}`;
-                      return (
-                        <TableRow
-                          key={item.groupKey}
-                          className="bg-muted/30 hover:bg-muted/40 cursor-pointer border-b border-border/60 transition-all duration-200"
-                          onClick={() => toggleGroup(item.groupKey)}
-                        >
-                          <TableCell colSpan={12} className="py-2">
-                            <div className="flex items-center gap-2 font-medium">
-                              {item.isCollapsed ? (
-                                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                              ) : (
-                                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
-                              )}
-                              {groupLabel}
-                              <span className="text-muted-foreground font-normal">({item.count})</span>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    }
-
-                    const pod = item.data;
-                    const StatusIcon = statusConfig[pod.status]?.icon || Clock;
-                    const podKey = `${pod.namespace}/${pod.name}`;
-                    const isSelected = selectedPods.has(podKey);
-                    const cpuVal = sortKey === 'cpu' ? (sortMetricsMap[podKey]?.cpu ?? metricsMap[podKey]?.cpu ?? pod.cpu) : (metricsMap[podKey]?.cpu ?? sortMetricsMap[podKey]?.cpu ?? pod.cpu);
-                    const memVal = sortKey === 'memory' ? (sortMetricsMap[podKey]?.memory ?? metricsMap[podKey]?.memory ?? pod.memory) : (metricsMap[podKey]?.memory ?? sortMetricsMap[podKey]?.memory ?? pod.memory);
-
-                    return (
-                      <motion.tr
-                        key={podKey}
-                        initial={false}
-                        className={cn(
-                          resourceTableRowClassName,
-                          isSelected && 'bg-primary/5'
-                        )}
-                      >
-                        <TableCell className="w-10">
-                          <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={() => togglePodSelection(pod)}
-                            aria-label={`Select ${pod.name}`}
-                          />
-                        </TableCell>
-                        {columnVisibility.isColumnVisible('name') && (
-                          <ResizableTableCell columnId="name">
+                      {columnVisibility.isColumnVisible('memory') && (
+                        <ResizableTableCell columnId="memory">
+                          <div className="min-w-0 overflow-hidden">
+                            <UsageBar
+                              variant="sparkline"
+                              value={memVal}
+                              kind="memory"
+                              displayFormat="compact"
+                              width={56}
+                              max={podResourceMaxMap[podKey]?.memoryMax}
+                            />
+                          </div>
+                        </ResizableTableCell>
+                      )}
+                      {columnVisibility.isColumnVisible('age') && (
+                        <ResizableTableCell columnId="age" className="text-muted-foreground whitespace-nowrap"><AgeCell age={pod.age} timestamp={pod.creationTimestamp} /></ResizableTableCell>
+                      )}
+                      {columnVisibility.isColumnVisible('node') && (
+                        <ResizableTableCell columnId="node" className="text-muted-foreground">
+                          {pod.node !== '-' ? (
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Link
-                                  to={`/pods/${pod.namespace}/${pod.name}`}
-                                  className="font-medium text-primary hover:underline flex items-center gap-2 min-w-0"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <Box className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                                  <span className="truncate">{pod.name}</span>
+                                <Link to={`/nodes/${encodeURIComponent(pod.node)}`} className="text-primary hover:underline truncate block">
+                                  {pod.node}
                                 </Link>
                               </TooltipTrigger>
-                              <TooltipContent side="top" className="max-w-md">
-                                {pod.name}
-                              </TooltipContent>
+                              <TooltipContent side="top">{pod.node}</TooltipContent>
                             </Tooltip>
-                          </ResizableTableCell>
-                        )}
-                        {columnVisibility.isColumnVisible('namespace') && (
-                          <ResizableTableCell columnId="namespace">
-                            <Badge variant="outline" className="font-normal truncate max-w-full inline-block">
-                              {pod.namespace}
-                            </Badge>
-                          </ResizableTableCell>
-                        )}
-                        {columnVisibility.isColumnVisible('status') && (
-                          <ResizableTableCell columnId="status">
-                            <StatusPill label={pod.status} variant={statusToPillVariant[pod.status]} icon={StatusIcon} />
-                          </ResizableTableCell>
-                        )}
-                        {columnVisibility.isColumnVisible('ready') && (
-                          <ResizableTableCell columnId="ready" className="font-mono text-sm">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Progress value={parseReadyFraction(pod.ready)} className="h-1.5 w-12 flex-shrink-0" />
-                              <span className="tabular-nums">{pod.ready}</span>
-                            </div>
-                          </ResizableTableCell>
-                        )}
-                        {columnVisibility.isColumnVisible('restarts') && (
-                          <ResizableTableCell columnId="restarts">
-                            <span className={cn(
-                              'font-medium',
-                              pod.restarts > 5 && 'text-[hsl(0,72%,51%)]',
-                              pod.restarts > 0 && pod.restarts <= 5 && 'text-[hsl(45,93%,47%)]'
-                            )}>
-                              {pod.restarts}
-                            </span>
-                          </ResizableTableCell>
-                        )}
-                        {columnVisibility.isColumnVisible('ip') && (
-                          <ResizableTableCell columnId="ip" className="font-mono text-sm">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span
-                                  className="cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1 truncate block"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const text = `${pod.internalIP} / ${pod.externalIP}`;
-                                    navigator.clipboard?.writeText(text);
-                                  }}
-                                >
-                                  {pod.internalIP} / {pod.externalIP}
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent side="top">
-                                Internal and external IP. Click to copy.
-                              </TooltipContent>
-                            </Tooltip>
-                          </ResizableTableCell>
-                        )}
-                        {columnVisibility.isColumnVisible('cpu') && (
-                          <ResizableTableCell columnId="cpu">
-                            <div className="min-w-0 overflow-hidden">
-                              <UsageBar
-                                variant="sparkline"
-                                value={cpuVal}
-                                kind="cpu"
-                                displayFormat="compact"
-                                width={56}
-                                max={podResourceMaxMap[podKey]?.cpuMax}
-                              />
-                            </div>
-                          </ResizableTableCell>
-                        )}
-                        {columnVisibility.isColumnVisible('memory') && (
-                          <ResizableTableCell columnId="memory">
-                            <div className="min-w-0 overflow-hidden">
-                              <UsageBar
-                                variant="sparkline"
-                                value={memVal}
-                                kind="memory"
-                                displayFormat="compact"
-                                width={56}
-                                max={podResourceMaxMap[podKey]?.memoryMax}
-                              />
-                            </div>
-                          </ResizableTableCell>
-                        )}
-                        {columnVisibility.isColumnVisible('age') && (
-                          <ResizableTableCell columnId="age" className="text-muted-foreground whitespace-nowrap"><AgeCell age={pod.age} timestamp={pod.creationTimestamp} /></ResizableTableCell>
-                        )}
-                        {columnVisibility.isColumnVisible('node') && (
-                          <ResizableTableCell columnId="node" className="text-muted-foreground">
-                            {pod.node !== '-' ? (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Link to={`/nodes/${encodeURIComponent(pod.node)}`} className="text-primary hover:underline truncate block">
-                                    {pod.node}
-                                  </Link>
-                                </TooltipTrigger>
-                                <TooltipContent side="top">{pod.node}</TooltipContent>
-                              </Tooltip>
-                            ) : (
-                              <span className="truncate block">{pod.node}</span>
-                            )}
-                          </ResizableTableCell>
-                        )}
-                        <TableCell className="w-12">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-                                aria-label="Pod actions"
-                              >
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48">
-                              <CopyNameDropdownItem name={pod.name} namespace={pod.namespace} />
-                              <DropdownMenuItem onClick={() => navigate(`/pods/${pod.namespace}/${pod.name}`)} className="gap-2">
-                                View Details
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleViewLogs(pod)} className="gap-2">
-                                <FileText className="h-4 w-4" />
-                                View Logs
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleExecShell(pod)} className="gap-2">
-                                <Terminal className="h-4 w-4" />
-                                Exec Shell
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => setPortForwardDialog({ open: true, pod })} className="gap-2">
-                                <ExternalLink className="h-4 w-4" />
-                                Port Forward
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleDownloadYaml(pod)} className="gap-2">
-                                <Download className="h-4 w-4" />
-                                Download YAML
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="gap-2 text-destructive"
-                                onClick={() => setDeleteDialog({ open: true, pod })}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </motion.tr>
-                    );
-                  }}
-                />
-              </Table>
-            </div>
-          </div>
+                          ) : (
+                            <span className="truncate block">{pod.node}</span>
+                          )}
+                        </ResizableTableCell>
+                      )}
+                      <TableCell className="w-12">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                              aria-label="Pod actions"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <CopyNameDropdownItem name={pod.name} namespace={pod.namespace} />
+                            <DropdownMenuItem onClick={() => navigate(`/pods/${pod.namespace}/${pod.name}`)} className="gap-2">
+                              View Details
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleViewLogs(pod)} className="gap-2">
+                              <FileText className="h-4 w-4" />
+                              View Logs
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExecShell(pod)} className="gap-2">
+                              <Terminal className="h-4 w-4" />
+                              Exec Shell
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setPortForwardDialog({ open: true, pod })} className="gap-2">
+                              <ExternalLink className="h-4 w-4" />
+                              Port Forward
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => handleDownloadYaml(pod)} className="gap-2">
+                              <Download className="h-4 w-4" />
+                              Download YAML
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="gap-2 text-destructive"
+                              onClick={() => setDeleteDialog({ open: true, pod })}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </motion.tr>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
         </ResizableTableProvider>
       </ResourceListTableToolbar>
 
@@ -1447,7 +1252,7 @@ ${pod.containers.map(c => `  - name: ${c.name}
       <PodComparisonView
         open={showComparison}
         onClose={() => setShowComparison(false)}
-        availablePods={filteredPods.map(p => ({ name: p.name, namespace: p.namespace, status: p.status }))}
+        availablePods={fullPods.map(p => ({ name: p.name, namespace: p.namespace, status: p.status }))}
         clusterId={clusterId ?? undefined}
         backendBaseUrl={backendBaseUrl ?? ''}
         isConnected={isConnected}

@@ -1,24 +1,25 @@
 import { renderHook, act } from '@testing-library/react';
 import { useNaturalLanguageSearch } from './useNaturalLanguageSearch';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as backendApiClient from '../services/backendApiClient';
-
-// Mock the backend API client
-vi.mock('../services/backendApiClient', () => ({
-    searchResources: vi.fn(),
-    vectorSearch: vi.fn(),
-}));
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 describe('useNaturalLanguageSearch', () => {
+    // Save original fetch
+    const originalFetch = global.fetch;
+
     beforeEach(() => {
         vi.clearAllMocks();
+        global.fetch = vi.fn();
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
     });
 
     it('should initialize with empty results', () => {
         const { result } = renderHook(() => useNaturalLanguageSearch());
         expect(result.current.results.resources).toEqual([]);
-        expect(result.current.patterns).toEqual([]);
-        expect(result.current.isLoading).toBe(false);
+        expect(result.current.results.patterns).toEqual([]);
+        expect(result.current.results.isLoading).toBe(false);
     });
 
     it('should not search if query is empty', async () => {
@@ -28,14 +29,27 @@ describe('useNaturalLanguageSearch', () => {
             result.current.search('');
         });
 
-        // Fast-forward timers if debounce is involved, but here we expect NO call immediately
-        expect(backendApiClient.searchResources).not.toHaveBeenCalled();
+        // Fast-forward timers
+        vi.useFakeTimers();
+        vi.advanceTimersByTime(500);
+
+        expect(global.fetch).not.toHaveBeenCalled();
+        vi.useRealTimers();
     });
 
     it('should call search API when query is provided', async () => {
-        const mockResources = [{ name: 'pod-1', kind: 'Pod' }];
-        (backendApiClient.searchResources as any).mockResolvedValue({ results: mockResources });
-        (backendApiClient.vectorSearch as any).mockResolvedValue({ results: [] });
+        const mockResourcesResponse = { resources: [{ name: 'pod-1', kind: 'Pod' }] };
+        const mockPatternsResponse = { results: [] };
+
+        (global.fetch as any)
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockResourcesResponse,
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockPatternsResponse,
+            });
 
         vi.useFakeTimers();
         const { result } = renderHook(() => useNaturalLanguageSearch());
@@ -44,24 +58,21 @@ describe('useNaturalLanguageSearch', () => {
             result.current.search('pod');
         });
 
-        // Advance timers by debounce time (350ms)
+        // Advance timers by debounce time
         act(() => {
             vi.advanceTimersByTime(350);
         });
 
-        expect(result.current.isLoading).toBe(true);
+        expect(result.current.results.isLoading).toBe(true);
 
-        // Wait for promises to resolve
+        // Wait for promises
         await act(async () => {
-            await Promise.resolve(); // Flush microtasks
+            await Promise.resolve();
             await Promise.resolve();
         });
 
-        // Verify API calls
-        // Note: The hook might rely on `backendBaseUrl` from store. 
-        // We might need to mock the store if it's used directly, 
-        // but `useNaturalLanguageSearch` likely gets it or handles it.
-        // Let's assume the hook handles missing config gracefully or we need to mock the store.
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        vi.useRealTimers();
     });
 
     it('should clear results', () => {

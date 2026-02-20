@@ -88,28 +88,36 @@ export const AlertsStrip = () => {
   });
 
   const { warnings, critical, criticalAlerts, warningAlerts } = useMemo(() => {
-    if (overview.data && !overview.isError) {
+    if (overview.data && !overview.isError && overview.data.alerts) {
       const a = overview.data.alerts;
-      const topWarnings = (a.top_3 ?? []).slice(0, MAX_ALERTS_DISPLAY).map((t) => {
-        const parts = (t.resource ?? "").split("/");
+      // Ensure top_3 is an array before iterating
+      const top3Array = Array.isArray(a.top_3) ? a.top_3 : [];
+      const topWarnings = top3Array.slice(0, MAX_ALERTS_DISPLAY).map((t) => {
+        const resource = typeof t === 'object' && t !== null && 'resource' in t ? String(t.resource ?? "") : "";
+        const parts = resource.split("/");
         const kind = parts[0] ?? "";
-        const name = (parts.slice(1).join("/") || t.resource) ?? "";
-        return { ...t, kind, name };
+        const name = (parts.slice(1).join("/") || resource) ?? "";
+        return { ...(typeof t === 'object' && t !== null ? t : {}), kind, name };
       });
-      return { warnings: a.warnings, critical: a.critical, criticalAlerts: [] as AlertItem[], warningAlerts: topWarnings };
+      return { 
+        warnings: typeof a.warnings === 'number' ? a.warnings : 0, 
+        critical: typeof a.critical === 'number' ? a.critical : 0, 
+        criticalAlerts: [] as AlertItem[], 
+        warningAlerts: topWarnings 
+      };
     }
     let events: Array<BackendEvent | { type?: string; reason?: string; resource_kind?: string; resource_name?: string; namespace?: string; involvedObject?: { kind?: string; name?: string; namespace?: string } }> = [];
-    if (isBackendConfigured() && eventsQuery.data?.length) {
+    if (isBackendConfigured() && Array.isArray(eventsQuery.data) && eventsQuery.data.length > 0) {
       events = eventsQuery.data;
     } else {
       const items = (k8sEvents.data?.items ?? []) as Array<{ type?: string; reason?: string; involvedObject?: { kind?: string; name?: string; namespace?: string } }>;
-      events = items.map((i) => ({
+      events = Array.isArray(items) ? items.map((i) => ({
         type: i.type,
         reason: i.reason,
         resource_kind: i.involvedObject?.kind,
         resource_name: i.involvedObject?.name,
         namespace: i.involvedObject?.namespace,
-      }));
+      })) : [];
     }
     const warningEvents = events.filter((e) => (e as { type?: string }).type === "Warning");
     const criticalEvents = events.filter((e) => (e as { type?: string }).type === "Error" || ((e as { type?: string }).type && (e as { type?: string }).type !== "Normal" && (e as { type?: string }).type !== "Warning"));

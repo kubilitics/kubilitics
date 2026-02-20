@@ -39,7 +39,9 @@ export const PodStatusDistribution = () => {
     );
 
     const { running, pending, failed, succeeded, totalRestarts, topNamespaces, healthScore, insight } = useMemo(() => {
-        const items = (podsList as { items?: unknown[] })?.items ?? [];
+        // useK8sResourceList returns { data: { items: [] }, isLoading, ... }
+        const rawItems = podsList?.items ?? [];
+        const items = Array.isArray(rawItems) ? rawItems : [];
         const stats = { running: 0, pending: 0, failed: 0, succeeded: 0, totalRestarts: 0 };
         const nsCount: Record<string, number> = {};
         for (const pod of items as {

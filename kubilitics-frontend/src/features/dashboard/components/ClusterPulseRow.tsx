@@ -44,11 +44,12 @@ export const ClusterPulseRow = () => {
   });
 
   const warningCount = useMemo(() => {
-    if (isBackendConfigured && eventsQuery.data?.length) {
+    if (isBackendConfigured && Array.isArray(eventsQuery.data) && eventsQuery.data.length > 0) {
       return eventsQuery.data.filter((e) => (e as { type?: string }).type === "Warning").length;
     }
-    const items = (k8sEvents.data?.items ?? []) as Array<{ type?: string }>;
-    return items.filter((i) => i?.type === "Warning").length;
+    const rawItems = k8sEvents.data?.items ?? [];
+    const items = Array.isArray(rawItems) ? rawItems : [];
+    return items.filter((i) => (i as { type?: string })?.type === "Warning").length;
   }, [isBackendConfigured, eventsQuery.data, k8sEvents.data?.items]);
 
   const { nodes, pods, cpuDisplay } = useMemo(() => {

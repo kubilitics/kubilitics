@@ -21,6 +21,7 @@ import { useSecurityScan } from '@/hooks/useSecurityScan';
 import { useSecurityAnalysis } from '@/hooks/useSecurityAnalysis';
 import { useComplianceCheck } from '@/hooks/useComplianceCheck';
 import { AI_BASE_URL } from '@/services/aiService';
+import { SectionOverviewHeader } from '@/components/layout/SectionOverviewHeader';
 
 // Security endpoints (/api/v1/security/*) live on the AI backend (port 8081).
 const API_BASE = AI_BASE_URL;
@@ -115,10 +116,8 @@ export function SecurityDashboard() {
     }
   };
 
-  if (isLoadingPosture && !securityPosture) {
-    return <PageLoadingState message="Loading security posture..." />;
-  }
-
+  // Show UI immediately - don't block on loading
+  // Empty states will handle no data scenarios gracefully
   return (
     <div className="container mx-auto p-6 space-y-6">
       {/* Network Error Banner */}
@@ -132,31 +131,19 @@ export function SecurityDashboard() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Shield className="h-8 w-8 text-blue-600" />
-            Security Dashboard
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Comprehensive security monitoring and compliance for your Kubernetes cluster
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={fetchSecurityPosture}
-            disabled={isLoadingPosture}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isLoadingPosture ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button variant="outline">
+      <SectionOverviewHeader
+        title="Security Dashboard"
+        description="Comprehensive security monitoring and compliance for your Kubernetes cluster"
+        icon={Shield}
+        onSync={fetchSecurityPosture}
+        isSyncing={isLoadingPosture}
+        extraActions={
+          <Button variant="outline" className="h-10">
             <Download className="h-4 w-4 mr-2" />
             Export Report
           </Button>
-        </div>
-      </div>
+        }
+      />
 
       {securityPosture ? (
         <>
@@ -171,11 +158,11 @@ export function SecurityDashboard() {
               </CardHeader>
               <CardContent>
                 <div className="flex items-center justify-between">
-                  <div className={`text-4xl font-bold ${getGradeColor(securityPosture.overall_grade)}`}>
-                    {securityPosture.overall_grade}
+                  <div className={`text-4xl font-bold ${getGradeColor(securityPosture?.overall_grade ?? 'F')}`}>
+                    {securityPosture?.overall_grade ?? '—'}
                   </div>
                   <div className="text-right">
-                    <p className="text-2xl font-semibold">{securityPosture.overall_score}</p>
+                    <p className="text-2xl font-semibold">{securityPosture?.overall_score ?? 0}</p>
                     <p className="text-xs text-muted-foreground">out of 100</p>
                   </div>
                 </div>
@@ -193,19 +180,19 @@ export function SecurityDashboard() {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-red-600 font-semibold">Critical</span>
-                    <span className="font-bold">{securityPosture.vulnerability_summary.critical}</span>
+                    <span className="font-bold">{securityPosture.vulnerability_summary?.critical ?? 0}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-orange-600 font-semibold">High</span>
-                    <span className="font-bold">{securityPosture.vulnerability_summary.high}</span>
+                    <span className="font-bold">{securityPosture.vulnerability_summary?.high ?? 0}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-yellow-600">Medium</span>
-                    <span>{securityPosture.vulnerability_summary.medium}</span>
+                    <span>{securityPosture.vulnerability_summary?.medium ?? 0}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-blue-600">Low</span>
-                    <span>{securityPosture.vulnerability_summary.low}</span>
+                    <span>{securityPosture.vulnerability_summary?.low ?? 0}</span>
                   </div>
                 </div>
               </CardContent>
@@ -222,19 +209,19 @@ export function SecurityDashboard() {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-red-600 font-semibold">Critical</span>
-                    <span className="font-bold">{securityPosture.security_issues.critical}</span>
+                    <span className="font-bold">{securityPosture.security_issues?.critical ?? 0}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-orange-600 font-semibold">High</span>
-                    <span className="font-bold">{securityPosture.security_issues.high}</span>
+                    <span className="font-bold">{securityPosture.security_issues?.high ?? 0}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-yellow-600">Medium</span>
-                    <span>{securityPosture.security_issues.medium}</span>
+                    <span>{securityPosture.security_issues?.medium ?? 0}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-blue-600">Low</span>
-                    <span>{securityPosture.security_issues.low}</span>
+                    <span>{securityPosture.security_issues?.low ?? 0}</span>
                   </div>
                 </div>
               </CardContent>
@@ -250,7 +237,7 @@ export function SecurityDashboard() {
               <CardContent>
                 <div className="text-center">
                   <p className="text-4xl font-bold text-blue-600">
-                    {securityPosture.compliance_score.toFixed(1)}%
+                    {(securityPosture.compliance_score ?? 0).toFixed(1)}%
                   </p>
                   <p className="text-xs text-muted-foreground mt-2">
                     CIS Kubernetes Benchmark
@@ -266,7 +253,7 @@ export function SecurityDashboard() {
           </div>
 
           {/* Top Recommendations */}
-          {securityPosture.recommendations.length > 0 && (
+          {(securityPosture?.recommendations?.length ?? 0) > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm font-medium flex items-center gap-2">

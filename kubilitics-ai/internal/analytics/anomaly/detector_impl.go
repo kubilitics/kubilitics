@@ -23,10 +23,10 @@ type baselineEntry struct {
 
 // anomalyDetectorImpl is the concrete AnomalyDetector.
 type anomalyDetectorImpl struct {
-	mu          sync.RWMutex
-	ts          timeseries.TimeSeriesEngine
-	sensitivities map[string]float64 // metricName → 0.0-1.0
-	baselines   map[string]*baselineEntry // "resourceID:metricName" → baseline
+	mu            sync.RWMutex
+	ts            timeseries.TimeSeriesEngine
+	sensitivities map[string]float64        // metricName → 0.0-1.0
+	baselines     map[string]*baselineEntry // "resourceID:metricName" → baseline
 }
 
 // NewAnomalyDetector creates a new anomaly detector backed by a time-series engine.

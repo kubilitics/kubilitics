@@ -508,7 +508,11 @@ export function ClusterShellPanel({
       setConnected(false);
       // Enhanced error message for kcli-specific issues
       if (engine === 'kcli') {
-        setError('kcli WebSocket connection failed. This may indicate kcli binary is missing or backend configuration issue.');
+        const errorMsg = 'kcli WebSocket connection failed.';
+        const detailMsg = shellStatus?.kcliAvailable === false
+          ? ' kcli binary is missing. Please install kcli or configure the backend to use the bundled sidecar.'
+          : ' This may indicate kcli binary is missing or backend configuration issue.';
+        setError(errorMsg + detailMsg);
       } else {
         setError(`${engine.toUpperCase()} WebSocket connection failed.`);
       }
@@ -629,8 +633,16 @@ export function ClusterShellPanel({
 
   const effectiveNamespace = shellStatus?.namespace || 'default';
   // P2-7: In Tauri, if kcli sidecar is bundled, report as available even when backend PATH check fails.
+  // Only show as available if explicitly true from backend OR sidecar check (not if shellStatus is null/undefined)
   const effectiveKcliAvailable =
     shellStatus?.kcliAvailable === true || (isTauri() && kcliSidecarAvailable === true);
+  
+  // Show "Missing" if:
+  // 1. shellStatus exists and kcliAvailable is explicitly false
+  // 2. shellStatus exists and kcliAvailable is undefined/null AND not Tauri sidecar
+  // 3. Not Tauri OR (Tauri and sidecar check returned false/null)
+  const kcliStatusKnown = shellStatus !== null || (isTauri() && kcliSidecarAvailable !== null);
+  const showKcliMissing = kcliStatusKnown && !effectiveKcliAvailable;
   const openResourcePage = useCallback((resourcePath: string) => {
     const query = effectiveNamespace && effectiveNamespace !== 'all'
       ? `?namespace=${encodeURIComponent(effectiveNamespace)}`
@@ -752,10 +764,19 @@ export function ClusterShellPanel({
               'rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
               effectiveKcliAvailable
                 ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300'
-                : 'border-amber-400/20 bg-amber-400/10 text-amber-300'
+                : showKcliMissing
+                ? 'border-amber-400/20 bg-amber-400/10 text-amber-300'
+                : 'border-white/10 bg-white/5 text-white/60'
             )}
+            title={
+              effectiveKcliAvailable
+                ? 'kcli binary is available'
+                : showKcliMissing
+                ? 'kcli binary is missing. Check backend configuration or install kcli.'
+                : 'Checking kcli availability...'
+            }
           >
-            kcli {effectiveKcliAvailable ? 'Ready' : 'Missing'}
+            kcli {effectiveKcliAvailable ? 'Ready' : showKcliMissing ? 'Missing' : 'Checking...'}
           </span>
           <span
             className={cn(

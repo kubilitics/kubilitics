@@ -161,6 +161,14 @@ export function AnalyticsOverview() {
     setIsLoading(false);
   }, []);
 
+  // Ensure loading state is cleared even if fetchAll fails
+  useEffect(() => {
+    fetchAll().catch((error) => {
+      console.error('[AnalyticsOverview] Failed to fetch analytics:', error);
+      setIsLoading(false); // Always clear loading state on error
+    });
+  }, [fetchAll]);
+
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
@@ -204,12 +212,25 @@ export function AnalyticsOverview() {
   };
 
   // ─── Render ────────────────────────────────────────────────────────────────
+  // Show UI immediately - don't block on loading
+  // Empty states will handle no data scenarios gracefully
 
-  if (isLoading) {
-    return <PageLoadingState message="Aggregating analytics..." />;
-  }
-
-  const health = systemHealth!;
+  // Guard against null — health is only set after the first fetch completes.
+  // All JSX that accesses health properties uses optional chaining via this default.
+  const health: SystemHealth = systemHealth ?? {
+    security_score: 0,
+    security_grade: '—',
+    anomalies_24h: 0,
+    monthly_cost: 0,
+    cost_trend: 'stable',
+    compliance_score: 0,
+    critical_issues: 0,
+    ml_models_active: 0,
+    ai_provider: 'none',
+    analytics_enabled: false,
+    ai_reachable: false,
+    backend_reachable: false,
+  };
 
   return (
     <div className="container mx-auto p-6 space-y-6">

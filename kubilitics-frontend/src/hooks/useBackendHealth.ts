@@ -12,7 +12,7 @@ export function useBackendHealth(options?: {
   enabled?: boolean;
   /** When true (Connect page): no cache, no retry — backend down detected immediately. */
   gateOnHealth?: boolean;
-  /** Override retry count. Banner uses 0 so circuit breaker handles recovery. */
+  /** Override retry count. Default: 3 with exponential backoff. */
   retry?: number;
 }) {
   const stored = useBackendConfigStore((s) => s.backendBaseUrl);
@@ -25,7 +25,12 @@ export function useBackendHealth(options?: {
     queryFn: () => getHealth(backendBaseUrl),
     enabled: isConfigured() && (options?.enabled !== false),
     refetchInterval: options?.refetchInterval ?? false,
-    retry: options?.retry ?? (gateOnHealth ? 0 : 1),
-    staleTime: gateOnHealth ? 0 : 30_000,
+    // Use exponential backoff retry: 3 retries with 1s, 2s, 4s delays
+    retry: options?.retry ?? (gateOnHealth ? 0 : 3),
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+    // Allow stale data for 60 seconds (show cached health status immediately)
+    staleTime: gateOnHealth ? 0 : 60_000,
+    // Optimistic UI: show cached health status immediately
+    placeholderData: (previousData) => previousData,
   });
 }

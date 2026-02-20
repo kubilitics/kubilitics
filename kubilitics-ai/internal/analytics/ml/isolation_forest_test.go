@@ -92,7 +92,7 @@ func TestIsolationForest_BatchPredict(t *testing.T) {
 
 	// Batch prediction
 	testPoints := []DataPoint{
-		{Features: []float64{1.0, 1.0}},  // Normal
+		{Features: []float64{1.0, 1.0}},   // Normal
 		{Features: []float64{10.0, 10.0}}, // Anomaly
 		{Features: []float64{1.05, 1.05}}, // Normal
 	}

@@ -36,6 +36,13 @@ type ClusterService interface {
 	HasMetalLB(ctx context.Context, id string) (bool, error)
 	// DiscoverClusters scans the configured kubeconfig for contexts not yet in the repository.
 	DiscoverClusters(ctx context.Context) ([]*models.Cluster, error)
+	// GetOverview returns the cached overview for a cluster if available.
+	GetOverview(clusterID string) (*models.ClusterOverview, bool)
+	// Subscribe returns a channel and unsubscribe function for real-time overview updates.
+	Subscribe(clusterID string) (chan *models.ClusterOverview, func())
+	// ReconnectCluster resets the circuit breaker and forces a fresh K8s client connection.
+	// Call this when the user explicitly requests reconnect or the cluster status page is opened.
+	ReconnectCluster(ctx context.Context, id string) (*models.Cluster, error)
 }
 
 // K8sClientFactory creates a k8s client from kubeconfig path and context. Used in tests to inject a fake client.
@@ -45,6 +52,7 @@ type K8sClientFactory func(kubeconfigPath, contextName string) (*k8s.Client, err
 type clusterService struct {
 	repo               repository.ClusterRepository
 	clients            map[string]*k8s.Client // id -> live K8s client
+	overviewCache      *OverviewCache
 	maxClusters        int
 	k8sTimeout         time.Duration // timeout for outbound K8s API calls; 0 = use request context only
 	k8sRateLimitPerSec float64
@@ -81,6 +89,7 @@ func newClusterService(repo repository.ClusterRepository, cfg *config.Config, fa
 	return &clusterService{
 		repo:               repo,
 		clients:            make(map[string]*k8s.Client),
+		overviewCache:      NewOverviewCache(),
 		maxClusters:        maxClusters,
 		k8sTimeout:         k8sTimeout,
 		k8sRateLimitPerSec: k8sRatePerSec,
@@ -254,6 +263,7 @@ func (s *clusterService) AddCluster(ctx context.Context, kubeconfigPath, context
 			c.UpdatedAt = time.Now()
 			_ = s.repo.Update(ctx, c)
 			s.clients[c.ID] = client
+			_ = s.overviewCache.StartClusterCache(ctx, c.ID, client)
 			return c, nil
 		}
 	}
@@ -275,6 +285,7 @@ func (s *clusterService) AddCluster(ctx context.Context, kubeconfigPath, context
 		return nil, fmt.Errorf("failed to persist cluster: %w", err)
 	}
 	s.clients[cluster.ID] = client
+	_ = s.overviewCache.StartClusterCache(ctx, cluster.ID, client)
 	return cluster, nil
 }
 
@@ -286,6 +297,7 @@ func (s *clusterService) RemoveCluster(ctx context.Context, id string) error {
 		return err
 	}
 	delete(s.clients, id)
+	s.overviewCache.StopClusterCache(id)
 	return nil
 }
 
@@ -384,6 +396,7 @@ func (s *clusterService) LoadClustersFromRepo(ctx context.Context) error {
 		s.clients[c.ID] = client
 		c.Status = "connected"
 		c.LastConnected = time.Now()
+		_ = s.overviewCache.StartClusterCache(ctx, c.ID, client)
 		if p, err := client.DetectProvider(ctx); err == nil && p != "" {
 			c.Provider = p
 		}
@@ -426,7 +439,88 @@ func (s *clusterService) tryReconnectCluster(ctx context.Context, c *models.Clus
 		return false
 	}
 	s.clients[c.ID] = client
+	_ = s.overviewCache.StartClusterCache(ctx, c.ID, client)
 	return true
+}
+
+// ReconnectCluster resets the circuit breaker for an existing client (if any) and builds a fresh
+// K8s client from the stored kubeconfig. Updates the cluster status in the DB.
+func (s *clusterService) ReconnectCluster(ctx context.Context, id string) (*models.Cluster, error) {
+	c, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("cluster not found: %s", id)
+	}
+
+	// Reset the circuit breaker on any existing client so it doesn't block the TestConnection below.
+	if existing, ok := s.clients[id]; ok {
+		existing.ResetCircuitBreaker()
+	}
+
+	// Build a fresh client (re-reads kubeconfig, fresh TLS handshake, new circuit breaker).
+	path := c.KubeconfigPath
+	if path != "" {
+		if _, err := os.Stat(path); err != nil {
+			path = ""
+		}
+	}
+	if path == "" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			path = filepath.Join(home, ".kube", "config")
+		}
+	}
+	if path == "" {
+		c.Status = "disconnected"
+		_ = s.repo.Update(ctx, c)
+		return c, fmt.Errorf("no kubeconfig available for cluster %s", id)
+	}
+
+	client, err := k8s.NewClient(path, c.Context)
+	if err != nil {
+		c.Status = "error"
+		_ = s.repo.Update(ctx, c)
+		return c, fmt.Errorf("failed to create client: %w", err)
+	}
+	if s.k8sTimeout > 0 {
+		client.SetTimeout(s.k8sTimeout)
+	}
+	if s.k8sRateLimitPerSec > 0 && s.k8sRateLimitBurst > 0 {
+		client.SetLimiter(rate.NewLimiter(rate.Limit(s.k8sRateLimitPerSec), s.k8sRateLimitBurst))
+	}
+	client.SetClusterID(id)
+
+	if err := client.TestConnection(ctx); err != nil {
+		c.Status = clusterStatusFromError(err)
+		_ = s.repo.Update(ctx, c)
+		return c, fmt.Errorf("connection test failed: %w", err)
+	}
+
+	// Success: replace client and restart overview cache.
+	s.overviewCache.StopClusterCache(id)
+	s.clients[id] = client
+	_ = s.overviewCache.StartClusterCache(ctx, id, client)
+
+	if info, err := client.GetClusterInfo(ctx); err == nil {
+		c.ServerURL = info["server_url"].(string)
+		c.Version = info["version"].(string)
+		c.NodeCount = info["node_count"].(int)
+		c.NamespaceCount = info["namespace_count"].(int)
+	}
+	if p, err := client.DetectProvider(ctx); err == nil && p != "" {
+		c.Provider = p
+	}
+	c.Status = "connected"
+	c.LastConnected = time.Now()
+	_ = s.repo.Update(ctx, c)
+	return c, nil
+}
+
+func (s *clusterService) GetOverview(clusterID string) (*models.ClusterOverview, bool) {
+	return s.overviewCache.GetOverview(clusterID)
+}
+
+func (s *clusterService) Subscribe(clusterID string) (chan *models.ClusterOverview, func()) {
+	return s.overviewCache.Subscribe(clusterID)
 }
 
 // DiscoverClusters scans the configured kubeconfig (or default ~/.kube/config) for contexts not yet in the repository.

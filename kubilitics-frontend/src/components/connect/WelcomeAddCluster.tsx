@@ -15,7 +15,7 @@ import {
   Check,
   Monitor,
 } from 'lucide-react';
-import { KubernetesLogo } from '@/components/icons/KubernetesIcons';
+import { KubiliticsLogo } from '@/components/icons/KubernetesIcons';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -107,7 +107,7 @@ export function WelcomeAddCluster({
           {/* Branding */}
           <div className="text-center mb-12">
             <div className="flex items-center justify-center gap-3 mb-6">
-              <KubernetesLogo size={48} className="text-primary" />
+              <KubiliticsLogo size={48} className="text-primary" />
               <span className="text-3xl font-bold tracking-tight">Kubilitics</span>
             </div>
             <h1 className="text-2xl font-semibold tracking-tight mb-2">
@@ -156,7 +156,7 @@ export function WelcomeAddCluster({
                 <Loader2 className="h-8 w-8 text-primary animate-spin" />
               ) : (
                 <div className="p-4 rounded-2xl bg-primary/10 group-hover:bg-primary/20 transition-colors">
-                  <FolderOpen className="h-8 w-8 text-primary" />
+                  <KubiliticsLogo className="h-8 w-8 text-primary" />
                 </div>
               )}
               <div className="text-center">
@@ -209,7 +209,7 @@ export function WelcomeAddCluster({
           transition={{ delay: 0.2 }}
           className="text-center text-primary-foreground"
         >
-          <KubernetesLogo size={56} className="mx-auto mb-6 opacity-90" />
+          <KubiliticsLogo size={56} className="mx-auto mb-6 opacity-90" />
           <h2 className="text-xl font-bold mb-3">The Kubernetes Operating System</h2>
           <p className="text-sm opacity-80 mb-8">
             Make Kubernetes understandable, explorable, and calm.

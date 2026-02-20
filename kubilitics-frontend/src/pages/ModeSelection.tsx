@@ -11,7 +11,7 @@ import {
     CheckCircle2,
     Info
 } from 'lucide-react';
-import { KubernetesLogo } from '@/components/icons/KubernetesIcons';
+import { KubiliticsLogo, KubiliticsText } from '../components/icons/KubernetesIcons';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useClusterStore } from '@/stores/clusterStore';
@@ -68,11 +68,9 @@ export default function ModeSelection() {
                     <div className="flex items-center justify-center gap-4 mb-8">
                         <div className="relative">
                             <div className="absolute inset-0 bg-blue-500/20 blur-xl rounded-full" />
-                            <KubernetesLogo size={64} className="relative text-blue-400" />
+                            <KubiliticsLogo size={48} className="text-primary mb-6" />
                         </div>
-                        <span className="text-5xl font-bold tracking-tighter bg-clip-text text-transparent bg-gradient-to-b from-white to-slate-400">
-                            Kubilitics
-                        </span>
+                        <KubiliticsText height={48} className="text-white bg-clip-text" />
                     </div>
                     <h1 className="text-4xl md:text-6xl font-bold mb-6 tracking-tight">
                         Choose your journey.

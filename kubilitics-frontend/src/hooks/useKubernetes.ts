@@ -181,7 +181,15 @@ const CLUSTER_SCOPED_KINDS: ResourceType[] = [
 export function useK8sResourceList<T extends KubernetesResource>(
   resourceType: ResourceType,
   namespace?: string,
-  options?: { enabled?: boolean; refetchInterval?: number; limit?: number; fieldSelector?: string; labelSelector?: string }
+  options?: { 
+    enabled?: boolean; 
+    refetchInterval?: number | false; 
+    limit?: number; 
+    fieldSelector?: string; 
+    labelSelector?: string;
+    staleTime?: number;
+    placeholderData?: (previousData: ResourceList<T> | undefined) => ResourceList<T> | undefined;
+  }
 ) {
   const { config } = useKubernetesConfigStore();
   const storedUrl = useBackendConfigStore((s) => s.backendBaseUrl);
@@ -232,8 +240,10 @@ export function useK8sResourceList<T extends KubernetesResource>(
         return k8sRequest<ResourceList<T>>(path + (query ? `?${query}` : ''), {}, config);
       },
     enabled: !skipRequests && (useBackend ? true : config.isConnected) && (options?.enabled !== false),
-    refetchInterval: options?.refetchInterval ?? 30000,
-    staleTime: 10000,
+    // Removed default refetchInterval - rely on global defaults (refetchOnWindowFocus/reconnect)
+    refetchInterval: options?.refetchInterval ?? false,
+    staleTime: options?.staleTime ?? 10_000,
+    placeholderData: options?.placeholderData,
     retry: useBackend ? false : 3,
   });
 }
@@ -637,7 +647,9 @@ export function useK8sPodLogs(
       !!podName &&
       (options?.enabled !== false) &&
       (useBackend ? true : config.isConnected),
-    refetchInterval: 5000,
+    // Removed aggressive 5s polling - rely on global defaults (refetchOnWindowFocus/reconnect)
+    // Pod logs can be refreshed manually if needed
+    refetchInterval: false,
   });
 }
 

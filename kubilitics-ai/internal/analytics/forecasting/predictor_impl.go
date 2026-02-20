@@ -42,15 +42,15 @@ func (p *predictorImpl) ForecastMetric(ctx context.Context, resourceID, metricNa
 	vals := extractValues(raw)
 	if len(vals) < 3 {
 		return map[string]interface{}{
-			"resource_id":       resourceID,
-			"metric_name":       metricName,
-			"horizon":           horizon,
-			"point_estimate":    nil,
-			"confidence_low":    nil,
-			"confidence_high":   nil,
-			"confidence_level":  0,
-			"method":            "insufficient_data",
-			"data_points":       len(vals),
+			"resource_id":      resourceID,
+			"metric_name":      metricName,
+			"horizon":          horizon,
+			"point_estimate":   nil,
+			"confidence_low":   nil,
+			"confidence_high":  nil,
+			"confidence_level": 0,
+			"method":           "insufficient_data",
+			"data_points":      len(vals),
 		}, nil
 	}
 
@@ -129,14 +129,14 @@ func (p *predictorImpl) PredictThresholdCrossing(ctx context.Context, resourceID
 	vals := extractValues(raw)
 	if len(vals) < 5 {
 		return map[string]interface{}{
-			"resource_id":  resourceID,
-			"metric_name":  metricName,
-			"threshold":    threshold,
-			"direction":    direction,
-			"found":        false,
-			"is_imminent":  false,
-			"confidence":   0,
-			"data_points":  len(vals),
+			"resource_id": resourceID,
+			"metric_name": metricName,
+			"threshold":   threshold,
+			"direction":   direction,
+			"found":       false,
+			"is_imminent": false,
+			"confidence":  0,
+			"data_points": len(vals),
 		}, nil
 	}
 
@@ -249,11 +249,11 @@ func (p *predictorImpl) ForecastCapacityExhaustion(ctx context.Context, resource
 	}
 
 	return map[string]interface{}{
-		"resource_id":          resourceID,
-		"critical":             criticalFound,
-		"earliest_exhaustion":  earliestExhaustion,
-		"recommended_action":   recommendedAction,
-		"metric_forecasts":     results,
+		"resource_id":         resourceID,
+		"critical":            criticalFound,
+		"earliest_exhaustion": earliestExhaustion,
+		"recommended_action":  recommendedAction,
+		"metric_forecasts":    results,
 	}, nil
 }
 
@@ -338,15 +338,15 @@ func (p *predictorImpl) CompareForecastToCapacity(ctx context.Context, resourceI
 	}
 
 	return map[string]interface{}{
-		"resource_id":       resourceID,
-		"metric_name":       metricName,
-		"capacity":          capacity,
-		"horizon":           horizon,
-		"forecast_value":    estimate,
-		"utilization_pct":   utilizationPct,
-		"will_exceed":       willExceed,
+		"resource_id":        resourceID,
+		"metric_name":        metricName,
+		"capacity":           capacity,
+		"horizon":            horizon,
+		"forecast_value":     estimate,
+		"utilization_pct":    utilizationPct,
+		"will_exceed":        willExceed,
 		"recommended_action": action,
-		"forecast_detail":   fm,
+		"forecast_detail":    fm,
 	}, nil
 }
 

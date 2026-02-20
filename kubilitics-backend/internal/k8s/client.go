@@ -121,6 +121,14 @@ func (c *Client) SetClusterID(clusterID string) {
 	}
 }
 
+// ResetCircuitBreaker forcibly closes the circuit breaker so the next call is attempted.
+// Call this before building a fresh client (reconnect) so any open state from a prior client is cleared.
+func (c *Client) ResetCircuitBreaker() {
+	if c.circuitBreaker != nil {
+		c.circuitBreaker.Reset()
+	}
+}
+
 // SetLimiter sets a token-bucket rate limiter for outbound K8s API calls (C1.5). Call after NewClient when config is available.
 func (c *Client) SetLimiter(l *rate.Limiter) {
 	c.limiter = l

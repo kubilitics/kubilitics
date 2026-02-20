@@ -50,9 +50,9 @@ func (rb *ringBuffer) slice() []dataPoint {
 
 // timeSeriesEngineImpl is the in-memory TimeSeriesEngine implementation.
 type timeSeriesEngineImpl struct {
-	mu      sync.RWMutex
+	mu sync.RWMutex
 	// key = resourceID + ":" + metricName
-	series  map[string]*ringBuffer
+	series map[string]*ringBuffer
 	// retention for hot buffer: 24 hours of 15-second samples = 5760 points
 	hotCapacity int
 }
@@ -299,10 +299,10 @@ func (e *timeSeriesEngineImpl) CompareMetrics(ctx context.Context, resourceID, m
 		changePct = (avg2 - avg1) / avg1 * 100
 	}
 	return map[string]interface{}{
-		"period1_avg":  avg1,
-		"period2_avg":  avg2,
-		"change_pct":   changePct,
-		"increased":    avg2 > avg1,
+		"period1_avg": avg1,
+		"period2_avg": avg2,
+		"change_pct":  changePct,
+		"increased":   avg2 > avg1,
 	}, nil
 }
 

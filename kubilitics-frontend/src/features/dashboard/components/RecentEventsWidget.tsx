@@ -140,11 +140,11 @@ export const RecentEventsWidget = () => {
 
   const warningEvents = useMemo((): NormalizedEvent[] => {
     let all: NormalizedEvent[] = [];
-    if (isBackendConfigured() && backendQuery.data?.length) {
+    if (isBackendConfigured() && Array.isArray(backendQuery.data) && backendQuery.data.length > 0) {
       all = backendQuery.data.map((e) => backendToNormalized(e));
     } else {
       const items = (k8sEvents.data?.items ?? []) as Parameters<typeof k8sToNormalized>[0][];
-      all = items.map((i) => k8sToNormalized(i));
+      all = Array.isArray(items) ? items.map((i) => k8sToNormalized(i)) : [];
     }
     const warnings = all.filter((e) => e.type === "Warning");
     const sorted = [...warnings].sort(

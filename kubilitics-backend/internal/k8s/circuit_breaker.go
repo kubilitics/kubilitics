@@ -87,36 +87,39 @@ func stateToString(state CircuitBreakerState) string {
 	}
 }
 
+// Reset forcibly closes the circuit breaker and clears all failure state.
+// Call this when external evidence shows the backend is healthy (e.g. reconnect request).
+func (cb *CircuitBreaker) Reset() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.failureCount = 0
+	cb.halfOpenCallCount = 0
+	cb.setState(StateClosed)
+}
+
 // Execute executes a function with circuit breaker protection.
 func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() error) error {
-	cb.mu.RLock()
+	cb.mu.Lock()
 	state := cb.state
-	cb.mu.RUnlock()
-
-	switch state {
-	case StateOpen:
+	if state == StateOpen {
 		// Check if we should transition to half-open
-		cb.mu.Lock()
 		if time.Since(cb.lastFailureTime) >= cb.openDuration {
 			cb.setState(StateHalfOpen)
 			cb.halfOpenCallCount = 0
 			state = StateHalfOpen
 		}
-		cb.mu.Unlock()
-
-		if state == StateOpen {
-			return ErrCircuitOpen
-		}
-		// Fall through to half-open logic
-
-	case StateHalfOpen:
-		cb.mu.Lock()
+	}
+	if state == StateHalfOpen {
 		if cb.halfOpenCallCount >= cb.halfOpenMaxCalls {
 			cb.mu.Unlock()
 			return ErrCircuitOpen
 		}
 		cb.halfOpenCallCount++
-		cb.mu.Unlock()
+	}
+	cb.mu.Unlock()
+
+	if state == StateOpen {
+		return ErrCircuitOpen
 	}
 
 	// Execute the function

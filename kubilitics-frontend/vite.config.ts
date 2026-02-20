@@ -52,6 +52,14 @@ function removeCrossOriginPlugin(): Plugin {
 export default defineConfig(({ mode }) => ({
   // Use relative paths for Tauri desktop builds (absolute paths don't work with tauri:// protocol)
   base: isTauriBuild ? './' : '/',
+  // Bake build-time constants into the JS bundle so they are available at runtime
+  // without any timing-dependent runtime checks (e.g. __TAURI_INTERNALS__ injection race).
+  define: {
+    // __VITE_IS_TAURI_BUILD__ is true when TAURI_BUILD=true was set during `npm run build`.
+    // Use this instead of isTauri() / import.meta.env.DEV for URL routing decisions so
+    // the correct backend URL is always used, even before __TAURI_INTERNALS__ is injected.
+    __VITE_IS_TAURI_BUILD__: JSON.stringify(isTauriBuild),
+  },
   test: {
     include: ['src/**/*.test.{ts,tsx}'],
     exclude: ['e2e/**', 'node_modules/**'],

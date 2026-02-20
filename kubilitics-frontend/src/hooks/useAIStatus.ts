@@ -3,11 +3,13 @@
  * Polls /health on the kubilitics-ai backend (port 8081) every 30 s.
  * Returns { status: 'active' | 'unavailable' | 'unconfigured', provider, model, error }
  *
- * P2-8: In Tauri when AI sidecar is not available, does not make any request to 8081.
+ * Always polls health directly — the health endpoint bypasses the aiAvailable guard
+ * (skipAvailabilityGuard=true in getAIHealth). This lets the UI detect when the AI
+ * sidecar becomes available even before SyncAIAvailable has set the store flag.
  */
 import { useEffect, useRef, useState } from 'react';
-import { AI_BASE_URL as AI_BACKEND_URL } from '@/services/aiService';
-import { getAIAvailableForRequest, useAiAvailableStore } from '@/stores/aiAvailableStore';
+import { useAiAvailableStore } from '@/stores/aiAvailableStore';
+import { getCurrentAiBackendUrl } from '@/stores/backendConfigStore';
 
 export type AIStatusKind = 'active' | 'unconfigured' | 'unavailable';
 
@@ -33,7 +35,7 @@ interface HealthResponse {
 
 async function fetchAIHealth(signal: AbortSignal): Promise<AIStatus> {
   try {
-    const res = await fetch(`${AI_BACKEND_URL}/health`, { signal });
+    const res = await fetch(`${getCurrentAiBackendUrl()}/health`, { signal });
     if (!res.ok) {
       return { status: 'unavailable', errorMessage: `HTTP ${res.status}`, checking: false };
     }
@@ -62,16 +64,20 @@ async function fetchAIHealth(signal: AbortSignal): Promise<AIStatus> {
   }
 }
 
-export function useAIStatus(): AIStatus {
+export interface AIStatusWithRefetch extends AIStatus {
+  /** Immediately re-check AI health (e.g. after saving API key). */
+  refetch: () => void;
+}
+
+export function useAIStatus(): AIStatusWithRefetch {
   const [status, setStatus] = useState<AIStatus>({ status: 'unavailable', checking: true });
   const abortRef = useRef<AbortController | null>(null);
+  // Re-run when aiAvailable changes so we pick up the adopted AI sidecar immediately.
   const aiAvailable = useAiAvailableStore((s) => s.aiAvailable);
 
   const check = () => {
-    if (!getAIAvailableForRequest()) {
-      setStatus({ status: 'unavailable', checking: false });
-      return;
-    }
+    // Always poll — health endpoint is always reachable (no guard).
+    // This lets us detect AI becoming ready even before aiAvailable is set.
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -80,18 +86,14 @@ export function useAIStatus(): AIStatus {
   };
 
   useEffect(() => {
-    if (!getAIAvailableForRequest()) {
-      setStatus({ status: 'unavailable', checking: false });
-      return;
-    }
     check();
     const interval = setInterval(check, POLL_INTERVAL_MS);
     return () => {
       clearInterval(interval);
       abortRef.current?.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiAvailable]);
 
-  return status;
+  return { ...status, refetch: check };
 }

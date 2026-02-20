@@ -12,7 +12,7 @@ import {
   Trash2,
   Star,
 } from 'lucide-react';
-import { KubernetesLogo } from '@/components/icons/KubernetesIcons';
+import { KubiliticsLogo } from '../components/icons/KubernetesIcons';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -101,14 +101,14 @@ export default function ClusterSelection() {
   const backendClusters: ClusterWithHealth[] =
     isBackendConfigured && clustersFromBackend.data
       ? clustersFromBackend.data.map((b) => {
-          const base = backendClusterToDisplay(b);
-          const fromSummary = summaryHealth[b.id];
-          return {
-            ...base,
-            status: (fromSummary ?? base.status) as ParsedCluster['status'],
-            isChecking: fromSummary === undefined && !!clustersFromBackend.data?.length,
-          };
-        })
+        const base = backendClusterToDisplay(b);
+        const fromSummary = summaryHealth[b.id];
+        return {
+          ...base,
+          status: (fromSummary ?? base.status) as ParsedCluster['status'],
+          isChecking: fromSummary === undefined && !!clustersFromBackend.data?.length,
+        };
+      })
       : [];
 
   // Clusters to display: from backend when configured, else from local state (kubeconfig or demo)
@@ -269,7 +269,7 @@ export default function ClusterSelection() {
           className="flex items-center justify-between mb-8"
         >
           <div className="flex items-center gap-3">
-            <KubernetesLogo size={32} className="text-primary" />
+            <KubiliticsLogo size={32} className="text-primary" />
             <span className="text-xl font-semibold">Kubilitics Setup</span>
           </div>
           <Button variant="ghost" onClick={() => navigate('/setup/kubeconfig')}>
@@ -286,8 +286,8 @@ export default function ClusterSelection() {
                   className={cn(
                     "w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors",
                     i < 1 ? 'bg-primary text-primary-foreground' :
-                    i === 1 ? 'bg-primary/20 text-primary border-2 border-primary' :
-                    'bg-muted text-muted-foreground'
+                      i === 1 ? 'bg-primary/20 text-primary border-2 border-primary' :
+                        'bg-muted text-muted-foreground'
                   )}
                 >
                   {i < 1 ? <CheckCircle2 className="h-4 w-4" /> : i + 1}
@@ -470,8 +470,8 @@ export default function ClusterSelection() {
                     <div className={cn(
                       "p-2.5 rounded-lg",
                       cluster.isChecking ? 'bg-muted' :
-                      cluster.status === 'healthy' ? 'bg-success/10' :
-                      cluster.status === 'warning' ? 'bg-warning/10' : 'bg-error/10'
+                        cluster.status === 'healthy' ? 'bg-success/10' :
+                          cluster.status === 'warning' ? 'bg-warning/10' : 'bg-error/10'
                     )}>
                       {cluster.isChecking ? (
                         <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />
@@ -554,15 +554,15 @@ export default function ClusterSelection() {
 
           {/* Actions */}
           <div className="flex items-center justify-between">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => navigate('/setup/kubeconfig')}
               className="gap-2"
             >
               <Plus className="h-4 w-4" />
               Add Another Cluster
             </Button>
-            
+
             <Button
               onClick={handleConnect}
               disabled={!selectedClusterId || isConnecting}

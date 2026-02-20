@@ -19,15 +19,15 @@ type ResourceFetcher interface {
 
 // EfficiencyScore quantifies how efficiently a resource is using its allocated capacity.
 type EfficiencyScore struct {
-	ResourceID   string  `json:"resource_id"`
-	Namespace    string  `json:"namespace"`
-	Kind         string  `json:"kind"`
-	Name         string  `json:"name"`
-	CPUScore     float64 `json:"cpu_efficiency_pct"`    // 0-100: actual/requested * 100
-	MemoryScore  float64 `json:"memory_efficiency_pct"` // 0-100
-	Overall      float64 `json:"overall_efficiency_pct"`
-	Waste        float64 `json:"estimated_monthly_waste_usd"`
-	Grade        string  `json:"grade"` // A/B/C/D/F
+	ResourceID  string  `json:"resource_id"`
+	Namespace   string  `json:"namespace"`
+	Kind        string  `json:"kind"`
+	Name        string  `json:"name"`
+	CPUScore    float64 `json:"cpu_efficiency_pct"`    // 0-100: actual/requested * 100
+	MemoryScore float64 `json:"memory_efficiency_pct"` // 0-100
+	Overall     float64 `json:"overall_efficiency_pct"`
+	Waste       float64 `json:"estimated_monthly_waste_usd"`
+	Grade       string  `json:"grade"` // A/B/C/D/F
 }
 
 // NamespaceCost holds rolled-up cost for a namespace.
@@ -43,27 +43,27 @@ type NamespaceCost struct {
 
 // CostSnapshot is a point-in-time cost summary for trend storage.
 type CostSnapshot struct {
-	Timestamp        time.Time              `json:"timestamp"`
-	TotalCostHour    float64                `json:"total_cost_hour"`
-	TotalCostDay     float64                `json:"total_cost_day"`
-	TotalCostMonth   float64                `json:"total_cost_month"`
-	ByNamespace      map[string]float64     `json:"by_namespace"`
-	ByResourceType   map[string]float64     `json:"by_resource_type"`
-	ResourceCount    int                    `json:"resource_count"`
-	Efficiencies     []EfficiencyScore      `json:"top_waste_resources"`
-	Optimizations    []Optimization         `json:"top_optimizations"`
+	Timestamp      time.Time          `json:"timestamp"`
+	TotalCostHour  float64            `json:"total_cost_hour"`
+	TotalCostDay   float64            `json:"total_cost_day"`
+	TotalCostMonth float64            `json:"total_cost_month"`
+	ByNamespace    map[string]float64 `json:"by_namespace"`
+	ByResourceType map[string]float64 `json:"by_resource_type"`
+	ResourceCount  int                `json:"resource_count"`
+	Efficiencies   []EfficiencyScore  `json:"top_waste_resources"`
+	Optimizations  []Optimization     `json:"top_optimizations"`
 }
 
 // CostPipeline orchestrates real cost calculation from live cluster data.
 type CostPipeline struct {
-	mu        sync.RWMutex
-	fetcher   ResourceFetcher
+	mu         sync.RWMutex
+	fetcher    ResourceFetcher
 	calculator *CostCalculator
 	optimizer  *CostOptimizer
 
 	// In-memory daily cost snapshots (ring buffer: 30 days).
-	snapshots  []CostSnapshot
-	maxSnaps   int
+	snapshots []CostSnapshot
+	maxSnaps  int
 
 	// Custom pricing override support.
 	customPricing *PricingConfig

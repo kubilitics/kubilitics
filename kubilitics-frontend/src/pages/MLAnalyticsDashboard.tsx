@@ -245,10 +245,8 @@ export function MLAnalyticsDashboard() {
     : null;
 
   // ─── Render ─────────────────────────────────────────────────────────────────
-
-  if (aiLoading && aiAnomalies.length === 0) {
-    return <PageLoadingState message="Analyzing cluster metrics..." />;
-  }
+  // Show UI immediately - don't block on loading
+  // Empty states will handle no data scenarios gracefully
 
   return (
     <div className="container mx-auto p-6 space-y-6">

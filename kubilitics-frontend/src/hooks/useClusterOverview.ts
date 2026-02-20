@@ -15,7 +15,7 @@ export function useClusterOverview(clusterId: string | undefined) {
     queryKey: ['backend', 'clusterOverview', backendBaseUrl, clusterId],
     queryFn: () => getClusterOverview(backendBaseUrl, clusterId!),
     enabled: isConfigured && !!clusterId,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    staleTime: 30_000,
+    refetchInterval: 30_000, // TASK-FE-002: Auto-refresh dashboard every 30s
   });
 }

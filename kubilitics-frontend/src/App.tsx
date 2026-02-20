@@ -3,10 +3,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, MemoryRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { BrowserRouter, MemoryRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useClusterStore } from "@/stores/clusterStore";
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from "@/stores/backendConfigStore";
-import { AIAssistant } from "@/components/AIAssistant";
+import { AIAssistant } from "@/components/ai";
 import { Loader2 } from "lucide-react";
 
 // Loading Fallback Component
@@ -72,6 +72,7 @@ const IngressClasses = lazy(() => import("./pages/IngressClasses"));
 const IngressClassDetail = lazy(() => import("./pages/IngressClassDetail"));
 const NetworkPolicies = lazy(() => import("./pages/NetworkPolicies"));
 const NetworkPolicyDetail = lazy(() => import("./pages/NetworkPolicyDetail"));
+const NetworkingOverview = lazy(() => import("./pages/NetworkingOverview"));
 
 // Storage & Config
 const ConfigMaps = lazy(() => import("./pages/ConfigMaps"));
@@ -92,6 +93,13 @@ const VolumeSnapshotClasses = lazy(() => import("./pages/VolumeSnapshotClasses")
 const VolumeSnapshotClassDetail = lazy(() => import("./pages/VolumeSnapshotClassDetail"));
 const VolumeSnapshotContents = lazy(() => import("./pages/VolumeSnapshotContents"));
 const VolumeSnapshotContentDetail = lazy(() => import("./pages/VolumeSnapshotContentDetail"));
+const StorageOverview = lazy(() => import("./pages/StorageOverview"));
+const ClusterOverview = lazy(() => import("./pages/ClusterOverview"));
+const SecurityOverviewPage = lazy(() => import("./pages/SecurityDashboard").then(m => ({ default: m.SecurityDashboard })));
+const ResourcesOverview = lazy(() => import("./pages/ResourcesOverview"));
+const ScalingOverview = lazy(() => import("./pages/ScalingOverview"));
+const CRDsOverview = lazy(() => import("./pages/CRDsOverview"));
+const AdmissionOverview = lazy(() => import("./pages/AdmissionOverview"));
 
 // Cluster
 const Nodes = lazy(() => import("./pages/Nodes"));
@@ -157,7 +165,27 @@ const CostDashboard = lazy(() => import("./pages/CostDashboard").then(m => ({ de
 // Layout
 import { AppLayout } from "./components/layout/AppLayout";
 
-const queryClient = new QueryClient();
+// Global React Query defaults: optimistic UI, background refresh, no aggressive polling
+// Headlamp/Lens style: show cached data immediately, refresh silently in background
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Retry with exponential backoff: 1s, 2s, 4s
+      retry: 3,
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+      // Allow stale data for 60 seconds - show cached data immediately
+      staleTime: 60_000,
+      // Keep data in cache for 5 minutes
+      gcTime: 5 * 60_000,
+      // Don't refetch on window focus (prevents refetch storms)
+      refetchOnWindowFocus: false,
+      // Refetch when connection restored (user reconnects)
+      refetchOnReconnect: true,
+      // Don't refetch on mount if data is fresh (within staleTime)
+      refetchOnMount: false,
+    },
+  },
+});
 
 // Protected route: requires active cluster only (Headlamp/Lens model — no login wall).
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -188,14 +216,20 @@ function ModeSelectionEntryPoint() {
   // must be re-validated against the live backend on every launch. A stale activeCluster
   // (e.g. from demo mode) would cause all resource hooks to fire against a non-existent
   // cluster ID (e.g. 'prod-us-east'), triggering CORS/404 errors and opening the circuit.
+  //
+  // FIX TASK-002: setAppMode must be called from useEffect, not during render.
+  // Calling a Zustand setter during render is a state mutation during render — React
+  // Strict Mode calls renders twice and this causes a state update loop that crashes React.
+  useEffect(() => {
+    if (isTauri() && !appMode) setAppMode('desktop');
+  }, [appMode, setAppMode]);
+
   if (isTauri()) {
-    if (!appMode) setAppMode('desktop');
     return <Navigate to="/connect" replace />;
   }
 
-  // Browser/Helm: if already connected (activeCluster is valid in this context), go to home
-  if (activeCluster) return <Navigate to="/home" replace />;
-
+  // Browser/Helm: Let ClusterConnect page handle all cluster validation and navigation
+  // Don't navigate early based on activeCluster - it may be stale and needs backend validation
   // Browser/Helm: if mode selected but not connected, go to connect page
   if (appMode) return <Navigate to="/connect" replace />;
 
@@ -203,15 +237,16 @@ function ModeSelectionEntryPoint() {
   return <ModeSelection />;
 }
 
-import { GlobalErrorBoundary } from "@/components/GlobalErrorBoundary";
+import { GlobalErrorBoundary, RouteErrorBoundary } from "@/components/GlobalErrorBoundary";
 import { ErrorTracker } from "@/lib/errorTracker";
 import { AnalyticsConsentDialog } from "@/components/AnalyticsConsentDialog";
 import { KubeconfigContextDialog } from "@/components/KubeconfigContextDialog";
 import { BackendStartupOverlay } from "@/components/BackendStartupOverlay";
 import { BackendStatusBanner } from "@/components/layout/BackendStatusBanner";
+import { BackendClusterValidator } from "@/components/BackendClusterValidator";
 import { isTauri } from "@/lib/tauri";
 import { useAiAvailableStore } from "@/stores/aiAvailableStore";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeWithRetry } from "@/lib/tauri";
 
 // Initialize Error Tracking
 ErrorTracker.init();
@@ -224,24 +259,93 @@ const AppRouter = isTauri() ? MemoryRouter : BrowserRouter;
 
 const AI_STATUS_POLL_MS = 30_000;
 
+/**
+ * PERMANENT FIX (TASK-NET-001 + P0-B):
+ *
+ * Two-layer defense to ensure backendBaseUrl is always http://localhost:819 in Tauri:
+ *
+ * Layer 1 (build-time, in backendConfigStore.ts):
+ *   __VITE_IS_TAURI_BUILD__ constant baked by vite.config.ts → initialState uses
+ *   DEFAULT_BACKEND_BASE_URL instead of '' → correct from the very first render.
+ *
+ * Layer 2 (runtime, this component):
+ *   Fires on mount (by which time __TAURI_INTERNALS__ IS injected). Checks isTauri()
+ *   AND __VITE_IS_TAURI_BUILD__ and writes the correct URL if still empty. This heals
+ *   any persisted '' from a previous broken build or localStorage corruption.
+ */
+function SyncBackendUrl() {
+  const setBackendBaseUrl = useBackendConfigStore((s) => s.setBackendBaseUrl);
+  const backendBaseUrl = useBackendConfigStore((s) => s.backendBaseUrl);
+  useEffect(() => {
+    // Use build-time constant OR runtime check — belt-and-suspenders
+    const isDesktop = (typeof __VITE_IS_TAURI_BUILD__ !== 'undefined' && __VITE_IS_TAURI_BUILD__) || isTauri();
+    if (!isDesktop) return;
+    const expectedUrl = `http://localhost:${import.meta.env.VITE_BACKEND_PORT || 819}`;
+    // Always ensure the stored URL is correct for Tauri — heal persisted '' values
+    if (!backendBaseUrl || backendBaseUrl === '') {
+      setBackendBaseUrl(expectedUrl);
+    }
+    // Run once on mount — backendBaseUrl intentionally excluded to avoid re-running on every change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setBackendBaseUrl]);
+  return null;
+}
+
 /** P2-8: In Tauri, sync get_ai_status().available into store so aiService and useAIStatus skip requests when AI is not available. */
 function SyncAIAvailable() {
   const setAIAvailable = useAiAvailableStore((s) => s.setAIAvailable);
   useEffect(() => {
     if (!isTauri()) return;
+    let earlyRetryTimer: ReturnType<typeof setTimeout> | null = null;
     const run = async () => {
       try {
-        const status = await invoke<{ available: boolean }>('get_ai_status');
+        const status = await invokeWithRetry<{ available: boolean }>('get_ai_status');
         setAIAvailable(status.available);
+        // If AI is not yet available on first check, retry quickly (3s, 6s, 10s)
+        // — the sidecar adoption happens async and may take a few seconds.
+        if (!status.available && earlyRetryTimer === null) {
+          let delay = 3000;
+          const retry = () => {
+            earlyRetryTimer = setTimeout(async () => {
+              try {
+                const s = await invokeWithRetry<{ available: boolean }>('get_ai_status');
+                setAIAvailable(s.available);
+                if (!s.available && delay < 15000) {
+                  delay = Math.min(delay * 2, 15000);
+                  retry();
+                }
+              } catch { /* ignore */ }
+            }, delay);
+          };
+          retry();
+        }
       } catch {
         setAIAvailable(false);
       }
     };
     run();
     const t = setInterval(run, AI_STATUS_POLL_MS);
-    return () => clearInterval(t);
+    return () => {
+      clearInterval(t);
+      if (earlyRetryTimer) clearTimeout(earlyRetryTimer);
+    };
   }, [setAIAvailable]);
   return null;
+}
+
+/**
+ * Wraps children in a RouteErrorBoundary that resets automatically when the
+ * route changes. Without the key, the boundary stays in error state after
+ * the user navigates away and back. Using the pathname as key ensures a fresh
+ * boundary on every route transition.
+ */
+function RouteErrorBoundaryWithReset({ children }: { children: React.ReactNode }) {
+  const { pathname } = useLocation();
+  return (
+    <RouteErrorBoundary key={pathname}>
+      {children}
+    </RouteErrorBoundary>
+  );
 }
 
 /** P2-6: Listens for auth-logout (e.g. 401 from backend). Navigates to / via React Router so MemoryRouter works in Tauri. */
@@ -264,8 +368,7 @@ function AnalyticsConsentWrapper({ children }: { children: React.ReactNode }) {
 
     const checkConsent = async () => {
       try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const hasBeenAsked = await invoke<boolean>('has_analytics_consent_been_asked');
+        const hasBeenAsked = await invokeWithRetry<boolean>('has_analytics_consent_been_asked');
         if (!hasBeenAsked) {
           setShowConsent(true);
         }
@@ -302,11 +405,10 @@ function KubeconfigContextWrapper({ children }: { children: React.ReactNode }) {
 
     const checkFirstLaunch = async () => {
       try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const isFirstLaunch = await invoke<boolean>('is_first_launch');
+        const isFirstLaunch = await invokeWithRetry<boolean>('is_first_launch');
 
         if (isFirstLaunch) {
-          const kubeconfigInfo = await invoke<{
+          const kubeconfigInfo = await invokeWithRetry<{
             path: string;
             current_context?: string;
             contexts: Array<{ name: string; cluster: string; user: string; namespace?: string }>;
@@ -317,6 +419,7 @@ function KubeconfigContextWrapper({ children }: { children: React.ReactNode }) {
             setContexts(kubeconfigInfo.contexts);
             setShowDialog(true);
           } else {
+            const { invoke } = await import('@tauri-apps/api/core');
             await invoke('mark_first_launch_complete');
           }
         }
@@ -383,186 +486,206 @@ const App = () => (
             Disappears automatically once the backend emits 'backend-status: ready'.
             Prevents the user from seeing a broken/empty UI on cold start. */}
         <BackendStartupOverlay />
+        {/* Validates and clears stale cluster IDs when backend becomes ready */}
+        <BackendClusterValidator />
+        <SyncBackendUrl />
         <SyncAIAvailable />
         <AnalyticsConsentWrapper>
-          <KubeconfigContextWrapper>
-            <AppRouter>
-              <AuthLogoutListener>
-              {/* P2-3: Banner at App level so it's visible on /connect and all routes */}
-              <BackendStatusBanner className="rounded-none border-x-0 border-t-0" />
-              <AIAssistant />
-              <Suspense fallback={<PageLoader />}>
-                <Routes>
-                  {/* Entry and setup (no login — Headlamp/Lens model) */}
-                  <Route element={<ModeSelectionEntryPoint />} path="/" />
-                  <Route element={<ModeSelection />} path="/mode-selection" />
-                  <Route element={<ClusterConnect />} path="/connect" />
-                  <Route element={<ConnectedRedirect />} path="/connected" />
-                  <Route element={<KubeConfigSetup />} path="/setup/kubeconfig" />
-                  <Route element={<ClusterSelection />} path="/setup/clusters" />
+          <AppRouter>
+            <AuthLogoutListener>
+              {/* KubeconfigContextWrapper must be inside AppRouter because it calls
+                  useNavigate() — hooks that use Router context cannot be rendered
+                  outside the Router provider or they throw with no message. */}
+              <KubeconfigContextWrapper>
+                {/* P2-3: Banner at App level so it's visible on /connect and all routes */}
+                <BackendStatusBanner className="rounded-none border-x-0 border-t-0" />
+                <AIAssistant />
+                <RouteErrorBoundaryWithReset>
+                  <Suspense fallback={<PageLoader />}>
+                    <Routes>
+                      {/* Entry and setup (no login — Headlamp/Lens model) */}
+                      <Route element={<ModeSelectionEntryPoint />} path="/" />
+                      <Route element={<ModeSelection />} path="/mode-selection" />
+                      <Route element={<ClusterConnect />} path="/connect" />
+                      <Route element={<ConnectedRedirect />} path="/connected" />
+                      <Route element={<KubeConfigSetup />} path="/setup/kubeconfig" />
+                      <Route element={<ClusterSelection />} path="/setup/clusters" />
 
-                  {/* App routes — require cluster connection only */}
-                  <Route
-                    element={
-                      <ProtectedRoute>
-                        <AppLayout />
-                      </ProtectedRoute>
-                    }
-                  >
-                    <Route path="/home" element={<HomePage />} />
-                    <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
-                    <Route path="/dashboard" element={<DashboardPage />} />
-                    <Route path="/settings" element={<SettingsPage />} />
-                    <Route path="/audit-log" element={<AuditLog />} />
+                      {/* App routes — require cluster connection only */}
+                      <Route
+                        element={
+                          <ProtectedRoute>
+                            <AppLayout />
+                          </ProtectedRoute>
+                        }
+                      >
+                        <Route path="/home" element={<HomePage />} />
+                        <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+                        <Route path="/dashboard" element={<DashboardPage />} />
+                        <Route path="/settings" element={<SettingsPage />} />
+                        <Route path="/audit-log" element={<AuditLog />} />
 
-                    {/* Analytics Dashboards */}
-                    <Route path="/analytics" element={<AnalyticsOverview />} />
-                    <Route path="/security" element={<SecurityDashboard />} />
-                    <Route path="/ml-analytics" element={<MLAnalyticsDashboard />} />
-                    <Route path="/cost" element={<CostDashboard />} />
+                        {/* Analytics Dashboards */}
+                        <Route path="/analytics" element={<AnalyticsOverview />} />
+                        <Route path="/security" element={<SecurityDashboard />} />
+                        <Route path="/ml-analytics" element={<MLAnalyticsDashboard />} />
+                        <Route path="/cost" element={<CostDashboard />} />
 
-                    {/* Cluster Topology */}
-                    <Route path="/topology" element={<Topology />} />
+                        {/* Cluster Topology */}
+                        <Route path="/topology" element={<Topology />} />
 
-                    {/* Workloads */}
-                    <Route path="/workloads" element={<WorkloadsOverview />} />
-                    <Route path="/pods" element={<Pods />} />
-                    <Route path="/pods/:namespace/:name" element={<PodDetail />} />
-                    <Route path="/deployments" element={<Deployments />} />
-                    <Route path="/deployments/:namespace/:name" element={<DeploymentDetail />} />
-                    <Route path="/replicasets" element={<ReplicaSets />} />
-                    <Route path="/replicasets/:namespace/:name" element={<ReplicaSetDetail />} />
-                    <Route path="/statefulsets" element={<StatefulSets />} />
-                    <Route path="/statefulsets/:namespace/:name" element={<StatefulSetDetail />} />
-                    <Route path="/daemonsets" element={<DaemonSets />} />
-                    <Route path="/daemonsets/:namespace/:name" element={<DaemonSetDetail />} />
-                    <Route path="/jobs" element={<Jobs />} />
-                    <Route path="/jobs/:namespace/:name" element={<JobDetail />} />
-                    <Route path="/cronjobs" element={<CronJobs />} />
-                    <Route path="/cronjobs/:namespace/:name" element={<CronJobDetail />} />
-                    <Route path="/replicationcontrollers" element={<ReplicationControllers />} />
-                    <Route path="/replicationcontrollers/:namespace/:name" element={<ReplicationControllerDetail />} />
-                    <Route path="/replication-controllers/:namespace/:name" element={<ReplicationControllerDetail />} />
-                    <Route path="/podtemplates" element={<PodTemplates />} />
-                    <Route path="/podtemplates/:namespace/:name" element={<PodTemplateDetail />} />
-                    <Route path="/controllerrevisions" element={<ControllerRevisions />} />
-                    <Route path="/controllerrevisions/:namespace/:name" element={<ControllerRevisionDetail />} />
-                    <Route path="/resourceslices" element={<ResourceSlices />} />
-                    <Route path="/resourceslices/:name" element={<ResourceSliceDetail />} />
-                    <Route path="/deviceclasses" element={<DeviceClasses />} />
-                    <Route path="/deviceclasses/:name" element={<DeviceClassDetail />} />
-                    <Route path="/device-classes" element={<DeviceClasses />} />
-                    <Route path="/device-classes/:name" element={<DeviceClassDetail />} />
-                    <Route path="/ipaddresspools" element={<IPAddressPools />} />
-                    <Route path="/ipaddresspools/:namespace/:name" element={<IPAddressPoolDetail />} />
-                    <Route path="/bgppeers" element={<BGPPeers />} />
-                    <Route path="/bgppeers/:namespace/:name" element={<BGPPeerDetail />} />
+                        {/* Workloads */}
+                        <Route path="/workloads" element={<WorkloadsOverview />} />
+                        <Route path="/pods" element={<Pods />} />
+                        <Route path="/pods/:namespace/:name" element={<PodDetail />} />
+                        <Route path="/deployments" element={<Deployments />} />
+                        <Route path="/deployments/:namespace/:name" element={<DeploymentDetail />} />
+                        <Route path="/replicasets" element={<ReplicaSets />} />
+                        <Route path="/replicasets/:namespace/:name" element={<ReplicaSetDetail />} />
+                        <Route path="/statefulsets" element={<StatefulSets />} />
+                        <Route path="/statefulsets/:namespace/:name" element={<StatefulSetDetail />} />
+                        <Route path="/daemonsets" element={<DaemonSets />} />
+                        <Route path="/daemonsets/:namespace/:name" element={<DaemonSetDetail />} />
+                        <Route path="/jobs" element={<Jobs />} />
+                        <Route path="/jobs/:namespace/:name" element={<JobDetail />} />
+                        <Route path="/cronjobs" element={<CronJobs />} />
+                        <Route path="/cronjobs/:namespace/:name" element={<CronJobDetail />} />
+                        <Route path="/replicationcontrollers" element={<ReplicationControllers />} />
+                        <Route path="/replicationcontrollers/:namespace/:name" element={<ReplicationControllerDetail />} />
+                        <Route path="/replication-controllers/:namespace/:name" element={<ReplicationControllerDetail />} />
+                        <Route path="/podtemplates" element={<PodTemplates />} />
+                        <Route path="/podtemplates/:namespace/:name" element={<PodTemplateDetail />} />
+                        <Route path="/controllerrevisions" element={<ControllerRevisions />} />
+                        <Route path="/controllerrevisions/:namespace/:name" element={<ControllerRevisionDetail />} />
+                        <Route path="/resourceslices" element={<ResourceSlices />} />
+                        <Route path="/resourceslices/:name" element={<ResourceSliceDetail />} />
+                        <Route path="/deviceclasses" element={<DeviceClasses />} />
+                        <Route path="/deviceclasses/:name" element={<DeviceClassDetail />} />
+                        <Route path="/device-classes" element={<DeviceClasses />} />
+                        <Route path="/device-classes/:name" element={<DeviceClassDetail />} />
+                        <Route path="/ipaddresspools" element={<IPAddressPools />} />
+                        <Route path="/ipaddresspools/:namespace/:name" element={<IPAddressPoolDetail />} />
+                        <Route path="/bgppeers" element={<BGPPeers />} />
+                        <Route path="/bgppeers/:namespace/:name" element={<BGPPeerDetail />} />
 
-                    {/* Networking */}
-                    <Route path="/services" element={<Services />} />
-                    <Route path="/services/:namespace/:name" element={<ServiceDetail />} />
-                    <Route path="/endpoints" element={<Endpoints />} />
-                    <Route path="/endpoints/:namespace/:name" element={<EndpointDetail />} />
-                    <Route path="/endpointslices" element={<EndpointSlices />} />
-                    <Route path="/endpointslices/:namespace/:name" element={<EndpointSliceDetail />} />
-                    <Route path="/ingresses" element={<Ingresses />} />
-                    <Route path="/ingresses/:namespace/:name" element={<IngressDetail />} />
-                    <Route path="/ingressclasses" element={<IngressClasses />} />
-                    <Route path="/ingressclasses/:name" element={<IngressClassDetail />} />
-                    <Route path="/networkpolicies" element={<NetworkPolicies />} />
-                    <Route path="/networkpolicies/:namespace/:name" element={<NetworkPolicyDetail />} />
+                        {/* Networking */}
+                        <Route path="/networking" element={<NetworkingOverview />} />
+                        <Route path="/services" element={<Services />} />
+                        <Route path="/services/:namespace/:name" element={<ServiceDetail />} />
+                        <Route path="/endpoints" element={<Endpoints />} />
+                        <Route path="/endpoints/:namespace/:name" element={<EndpointDetail />} />
+                        <Route path="/endpointslices" element={<EndpointSlices />} />
+                        <Route path="/endpointslices/:namespace/:name" element={<EndpointSliceDetail />} />
+                        <Route path="/ingresses" element={<Ingresses />} />
+                        <Route path="/ingresses/:namespace/:name" element={<IngressDetail />} />
+                        <Route path="/ingressclasses" element={<IngressClasses />} />
+                        <Route path="/ingressclasses/:name" element={<IngressClassDetail />} />
+                        <Route path="/networkpolicies" element={<NetworkPolicies />} />
+                        <Route path="/networkpolicies/:namespace/:name" element={<NetworkPolicyDetail />} />
 
-                    {/* Storage & Config */}
-                    <Route path="/configmaps" element={<ConfigMaps />} />
-                    <Route path="/configmaps/:namespace/:name" element={<ConfigMapDetail />} />
-                    <Route path="/secrets" element={<Secrets />} />
-                    <Route path="/secrets/:namespace/:name" element={<SecretDetail />} />
-                    <Route path="/persistentvolumes" element={<PersistentVolumes />} />
-                    <Route path="/persistentvolumes/:name" element={<PersistentVolumeDetail />} />
-                    <Route path="/persistentvolumeclaims" element={<PersistentVolumeClaims />} />
-                    <Route path="/persistentvolumeclaims/:namespace/:name" element={<PersistentVolumeClaimDetail />} />
-                    <Route path="/storageclasses" element={<StorageClasses />} />
-                    <Route path="/storageclasses/:name" element={<StorageClassDetail />} />
-                    <Route path="/volumeattachments" element={<VolumeAttachments />} />
-                    <Route path="/volumeattachments/:name" element={<VolumeAttachmentDetail />} />
-                    <Route path="/volumesnapshots" element={<VolumeSnapshots />} />
-                    <Route path="/volumesnapshots/:namespace/:name" element={<VolumeSnapshotDetail />} />
-                    <Route path="/volume-snapshots" element={<VolumeSnapshots />} />
-                    <Route path="/volume-snapshots/:namespace/:name" element={<VolumeSnapshotDetail />} />
-                    <Route path="/volumesnapshotclasses" element={<VolumeSnapshotClasses />} />
-                    <Route path="/volumesnapshotclasses/:name" element={<VolumeSnapshotClassDetail />} />
-                    <Route path="/volume-snapshot-classes" element={<VolumeSnapshotClasses />} />
-                    <Route path="/volume-snapshot-classes/:name" element={<VolumeSnapshotClassDetail />} />
-                    <Route path="/volumesnapshotcontents" element={<VolumeSnapshotContents />} />
-                    <Route path="/volumesnapshotcontents/:name" element={<VolumeSnapshotContentDetail />} />
-                    <Route path="/volume-snapshot-contents" element={<VolumeSnapshotContents />} />
-                    <Route path="/volume-snapshot-contents/:name" element={<VolumeSnapshotContentDetail />} />
+                        {/* Storage & Config */}
+                        <Route path="/storage" element={<StorageOverview />} />
+                        <Route path="/configmaps" element={<ConfigMaps />} />
+                        <Route path="/configmaps/:namespace/:name" element={<ConfigMapDetail />} />
+                        <Route path="/secrets" element={<Secrets />} />
+                        <Route path="/secrets/:namespace/:name" element={<SecretDetail />} />
+                        <Route path="/persistentvolumes" element={<PersistentVolumes />} />
+                        <Route path="/persistentvolumes/:name" element={<PersistentVolumeDetail />} />
+                        <Route path="/persistentvolumeclaims" element={<PersistentVolumeClaims />} />
+                        <Route path="/persistentvolumeclaims/:namespace/:name" element={<PersistentVolumeClaimDetail />} />
+                        <Route path="/storageclasses" element={<StorageClasses />} />
+                        <Route path="/storageclasses/:name" element={<StorageClassDetail />} />
+                        <Route path="/volumeattachments" element={<VolumeAttachments />} />
+                        <Route path="/volumeattachments/:name" element={<VolumeAttachmentDetail />} />
+                        <Route path="/volumesnapshots" element={<VolumeSnapshots />} />
+                        <Route path="/volumesnapshots/:namespace/:name" element={<VolumeSnapshotDetail />} />
+                        <Route path="/volume-snapshots" element={<VolumeSnapshots />} />
+                        <Route path="/volume-snapshots/:namespace/:name" element={<VolumeSnapshotDetail />} />
+                        <Route path="/volumesnapshotclasses" element={<VolumeSnapshotClasses />} />
+                        <Route path="/volumesnapshotclasses/:name" element={<VolumeSnapshotClassDetail />} />
+                        <Route path="/volume-snapshot-classes" element={<VolumeSnapshotClasses />} />
+                        <Route path="/volume-snapshot-classes/:name" element={<VolumeSnapshotClassDetail />} />
+                        <Route path="/volumesnapshotcontents" element={<VolumeSnapshotContents />} />
+                        <Route path="/volumesnapshotcontents/:name" element={<VolumeSnapshotContentDetail />} />
+                        <Route path="/volume-snapshot-contents" element={<VolumeSnapshotContents />} />
+                        <Route path="/volume-snapshot-contents/:name" element={<VolumeSnapshotContentDetail />} />
 
-                    {/* Cluster */}
-                    <Route path="/nodes" element={<Nodes />} />
-                    <Route path="/nodes/:name" element={<NodeDetail />} />
-                    <Route path="/namespaces" element={<Namespaces />} />
-                    <Route path="/namespaces/:name" element={<NamespaceDetail />} />
-                    <Route path="/events" element={<Events />} />
-                    <Route path="/events/:namespace/:name" element={<EventDetail />} />
-                    <Route path="/componentstatuses" element={<ComponentStatuses />} />
-                    <Route path="/componentstatuses/:name" element={<ComponentStatusDetail />} />
-                    <Route path="/component-statuses/:name" element={<ComponentStatusDetail />} />
-                    <Route path="/apiservices" element={<APIServices />} />
-                    <Route path="/apiservices/:name" element={<APIServiceDetail />} />
-                    <Route path="/leases" element={<Leases />} />
-                    <Route path="/leases/:namespace/:name" element={<LeaseDetail />} />
-                    <Route path="/runtimeclasses" element={<RuntimeClasses />} />
-                    <Route path="/runtimeclasses/:name" element={<RuntimeClassDetail />} />
-                    <Route path="/runtime-classes/:name" element={<RuntimeClassDetail />} />
+                        {/* Cluster */}
+                        <Route path="/cluster-overview" element={<ClusterOverview />} />
+                        <Route path="/nodes" element={<Nodes />} />
+                        <Route path="/nodes/:name" element={<NodeDetail />} />
+                        <Route path="/namespaces" element={<Namespaces />} />
+                        <Route path="/namespaces/:name" element={<NamespaceDetail />} />
+                        <Route path="/events" element={<Events />} />
+                        <Route path="/events/:namespace/:name" element={<EventDetail />} />
+                        <Route path="/componentstatuses" element={<ComponentStatuses />} />
+                        <Route path="/componentstatuses/:name" element={<ComponentStatusDetail />} />
+                        <Route path="/component-statuses/:name" element={<ComponentStatusDetail />} />
+                        <Route path="/apiservices" element={<APIServices />} />
+                        <Route path="/apiservices/:name" element={<APIServiceDetail />} />
+                        <Route path="/leases" element={<Leases />} />
+                        <Route path="/leases/:namespace/:name" element={<LeaseDetail />} />
+                        <Route path="/runtimeclasses" element={<RuntimeClasses />} />
+                        <Route path="/runtimeclasses/:name" element={<RuntimeClassDetail />} />
+                        <Route path="/runtime-classes/:name" element={<RuntimeClassDetail />} />
 
-                    {/* RBAC */}
-                    <Route path="/serviceaccounts" element={<ServiceAccounts />} />
-                    <Route path="/serviceaccounts/:namespace/:name" element={<ServiceAccountDetail />} />
-                    <Route path="/roles" element={<Roles />} />
-                    <Route path="/roles/:namespace/:name" element={<RoleDetail />} />
-                    <Route path="/rolebindings" element={<RoleBindings />} />
-                    <Route path="/rolebindings/:namespace/:name" element={<RoleBindingDetail />} />
-                    <Route path="/clusterroles" element={<ClusterRoles />} />
-                    <Route path="/clusterroles/:name" element={<ClusterRoleDetail />} />
-                    <Route path="/clusterrolebindings" element={<ClusterRoleBindings />} />
-                    <Route path="/clusterrolebindings/:name" element={<ClusterRoleBindingDetail />} />
-                    <Route path="/podsecuritypolicies" element={<PodSecurityPolicies />} />
-                    <Route path="/podsecuritypolicies/:name" element={<PodSecurityPolicyDetail />} />
-                    <Route path="/pod-security-policies/:name" element={<PodSecurityPolicyDetail />} />
+                        {/* RBAC / Security */}
+                        <Route path="/security-overview" element={<SecurityOverviewPage />} />
+                        <Route path="/serviceaccounts" element={<ServiceAccounts />} />
+                        <Route path="/serviceaccounts/:namespace/:name" element={<ServiceAccountDetail />} />
+                        <Route path="/roles" element={<Roles />} />
+                        <Route path="/roles/:namespace/:name" element={<RoleDetail />} />
+                        <Route path="/rolebindings" element={<RoleBindings />} />
+                        <Route path="/rolebindings/:namespace/:name" element={<RoleBindingDetail />} />
+                        <Route path="/clusterroles" element={<ClusterRoles />} />
+                        <Route path="/clusterroles/:name" element={<ClusterRoleDetail />} />
+                        <Route path="/clusterrolebindings" element={<ClusterRoleBindings />} />
+                        <Route path="/clusterrolebindings/:name" element={<ClusterRoleBindingDetail />} />
+                        <Route path="/podsecuritypolicies" element={<PodSecurityPolicies />} />
+                        <Route path="/podsecuritypolicies/:name" element={<PodSecurityPolicyDetail />} />
+                        <Route path="/pod-security-policies/:name" element={<PodSecurityPolicyDetail />} />
 
-                    {/* Autoscaling & Resource Management */}
-                    <Route path="/horizontalpodautoscalers" element={<HorizontalPodAutoscalers />} />
-                    <Route path="/horizontalpodautoscalers/:namespace/:name" element={<HorizontalPodAutoscalerDetail />} />
-                    <Route path="/verticalpodautoscalers" element={<VerticalPodAutoscalers />} />
-                    <Route path="/verticalpodautoscalers/:namespace/:name" element={<VerticalPodAutoscalerDetail />} />
-                    <Route path="/poddisruptionbudgets" element={<PodDisruptionBudgets />} />
-                    <Route path="/poddisruptionbudgets/:namespace/:name" element={<PodDisruptionBudgetDetail />} />
-                    <Route path="/resourcequotas" element={<ResourceQuotas />} />
-                    <Route path="/resourcequotas/:namespace/:name" element={<ResourceQuotaDetail />} />
-                    <Route path="/limitranges" element={<LimitRanges />} />
-                    <Route path="/limitranges/:namespace/:name" element={<LimitRangeDetail />} />
-                    <Route path="/priorityclasses" element={<PriorityClasses />} />
-                    <Route path="/priorityclasses/:name" element={<PriorityClassDetail />} />
+                        {/* Autoscaling & Resource Management */}
+                        <Route path="/resources" element={<ResourcesOverview />} />
+                        <Route path="/scaling" element={<ScalingOverview />} />
+                        <Route path="/horizontalpodautoscalers" element={<HorizontalPodAutoscalers />} />
+                        <Route path="/scaling" element={<ScalingOverview />} />
+                        <Route path="/horizontalpodautoscalers" element={<HorizontalPodAutoscalers />} />
+                        <Route path="/horizontalpodautoscalers/:namespace/:name" element={<HorizontalPodAutoscalerDetail />} />
+                        <Route path="/verticalpodautoscalers" element={<VerticalPodAutoscalers />} />
+                        <Route path="/verticalpodautoscalers/:namespace/:name" element={<VerticalPodAutoscalerDetail />} />
+                        <Route path="/poddisruptionbudgets" element={<PodDisruptionBudgets />} />
+                        <Route path="/poddisruptionbudgets/:namespace/:name" element={<PodDisruptionBudgetDetail />} />
+                        <Route path="/resourcequotas" element={<ResourceQuotas />} />
+                        <Route path="/resourcequotas/:namespace/:name" element={<ResourceQuotaDetail />} />
+                        <Route path="/limitranges" element={<LimitRanges />} />
+                        <Route path="/limitranges/:namespace/:name" element={<LimitRangeDetail />} />
+                        <Route path="/priorityclasses" element={<PriorityClasses />} />
+                        <Route path="/priorityclasses/:name" element={<PriorityClassDetail />} />
 
-                    {/* Custom Resources & Admission Control */}
-                    <Route path="/customresourcedefinitions" element={<CustomResourceDefinitions />} />
-                    <Route path="/customresourcedefinitions/:name" element={<CustomResourceDefinitionDetail />} />
-                    <Route path="/custom-resource-definitions/:name" element={<CustomResourceDefinitionDetail />} />
-                    <Route path="/customresources" element={<CustomResources />} />
-                    <Route path="/mutatingwebhooks" element={<MutatingWebhooks />} />
-                    <Route path="/mutatingwebhooks/:name" element={<MutatingWebhookDetail />} />
-                    <Route path="/validatingwebhooks" element={<ValidatingWebhooks />} />
-                    <Route path="/validatingwebhooks/:name" element={<ValidatingWebhookDetail />} />
+                        {/* Custom Resources & Admission Control */}
+                        <Route path="/crds" element={<CRDsOverview />} />
+                        <Route path="/admission" element={<AdmissionOverview />} />
+                        <Route path="/customresourcedefinitions" element={<CustomResourceDefinitions />} />
+                        <Route path="/admission" element={<AdmissionOverview />} />
+                        <Route path="/customresourcedefinitions" element={<CustomResourceDefinitions />} />
+                        <Route path="/customresourcedefinitions/:name" element={<CustomResourceDefinitionDetail />} />
+                        <Route path="/custom-resource-definitions/:name" element={<CustomResourceDefinitionDetail />} />
+                        <Route path="/customresources" element={<CustomResources />} />
+                        <Route path="/mutatingwebhooks" element={<MutatingWebhooks />} />
+                        <Route path="/mutatingwebhooks/:name" element={<MutatingWebhookDetail />} />
+                        <Route path="/validatingwebhooks" element={<ValidatingWebhooks />} />
+                        <Route path="/validatingwebhooks/:name" element={<ValidatingWebhookDetail />} />
 
-                    {/* 404 */}
-                    <Route path="*" element={<NotFound />} />
-                  </Route>
-                </Routes>
-              </Suspense>
-              </AuthLogoutListener>
-            </AppRouter>
-          </KubeconfigContextWrapper>
+                        {/* 404 */}
+                        <Route path="*" element={<NotFound />} />
+                      </Route>
+                    </Routes>
+                  </Suspense>
+                </RouteErrorBoundaryWithReset>
+              </KubeconfigContextWrapper>
+            </AuthLogoutListener>
+          </AppRouter>
         </AnalyticsConsentWrapper>
       </GlobalErrorBoundary>
     </TooltipProvider>

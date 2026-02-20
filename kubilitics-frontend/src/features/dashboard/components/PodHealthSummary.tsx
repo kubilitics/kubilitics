@@ -28,9 +28,10 @@ export const PodHealthSummary = () => {
       const t = ps.running + ps.pending + ps.failed + ps.succeeded;
       return { running: ps.running, pending: ps.pending, failed: ps.failed, succeeded: ps.succeeded, total: t };
     }
-    const items = (podsList.data?.items ?? []) as Array<{ status?: { phase?: string } }>;
+    const rawItems = podsList.data?.items ?? [];
+    const items = Array.isArray(rawItems) ? rawItems : [];
     let r = 0, p = 0, f = 0, s = 0;
-    for (const pod of items) {
+    for (const pod of items as Array<{ status?: { phase?: string } }>) {
       const phase = (pod?.status?.phase ?? "Unknown").toLowerCase();
       if (phase === "running") r++;
       else if (phase === "pending") p++;

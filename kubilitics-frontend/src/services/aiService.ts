@@ -16,6 +16,8 @@
  *   GET  /api/v1/analytics/recommendations    - AI-driven recommendations
  *   GET  /api/v1/conversations                - list conversations
  *   GET  /api/v1/conversations/{id}           - get conversation by ID
+ *   GET  /api/v1/config/models                - curated model catalog per provider
+ *   POST /api/v1/config/validate              - validate API key without saving
  *   WS   /ws/chat                             - AI chat WebSocket (see useWebSocket hook)
  *
  * Configuration:
@@ -133,11 +135,53 @@ export interface Conversation {
   updated_at: string;
 }
 
+/**
+ * Backend-accepted provider values.
+ * The AI backend only supports these four — 'azure' and 'none' are UI-only concepts
+ * and must be mapped before any POST to the backend (use toBackendProvider() from aiConfigStore).
+ */
+export type BackendProvider = 'openai' | 'anthropic' | 'ollama' | 'custom';
+
+/**
+ * Shape of requests sent TO the backend (POST /api/v1/config/provider and validate).
+ * Provider must be a BackendProvider — never 'azure' or 'none'.
+ */
 export interface LLMProviderConfig {
-  provider: 'openai' | 'anthropic' | 'ollama' | 'custom' | 'none';
+  provider: BackendProvider;
   api_key?: string;
   base_url?: string;
   model?: string;
+}
+
+/**
+ * Shape of responses received FROM the backend (GET /api/v1/config/provider).
+ * The backend may return provider='none' if nothing is configured yet.
+ * The api_key is intentionally absent (security — backend never echoes it).
+ */
+export interface LLMProviderConfigResponse {
+  provider: BackendProvider | 'none';
+  model?: string;
+  base_url?: string;
+  configured?: boolean;
+}
+
+/** A single model option returned by GET /api/v1/config/models */
+export interface ModelOption {
+  id: string;
+  name: string;
+  recommended?: boolean;
+}
+
+/** Response shape for GET /api/v1/config/models */
+export interface ProviderModelsResponse {
+  models: Record<string, ModelOption[]>;
+}
+
+/** Response shape for POST /api/v1/config/validate */
+export interface ValidateKeyResponse {
+  valid: boolean;
+  message?: string;
+  error?: string;
 }
 
 // ─── Error class ─────────────────────────────────────────────────────────────
@@ -155,53 +199,126 @@ export class AIServiceError extends Error {
 
 // ─── Core request helper ─────────────────────────────────────────────────────
 
+// Check if error is CORS-related
+function isCORSError(err: unknown): boolean {
+  if (err instanceof TypeError) {
+    const msg = err.message.toLowerCase();
+    return msg.includes('cors') || msg.includes('access control') || msg.includes('cross-origin') || msg.includes('failed to fetch');
+  }
+  return false;
+}
+
 async function aiRequest<T>(
   path: string,
-  init?: RequestInit
+  init?: RequestInit,
+  retries: number = 3,
+  // TASK-AI-003: Bypass the sidecar-available guard for config/setup endpoints.
+  // The AI Setup modal must POST config BEFORE the sidecar is running, so we
+  // cannot gate those calls on aiAvailable === true (chicken-and-egg deadlock).
+  skipAvailabilityGuard: boolean = false
 ): Promise<T> {
   // P2-8: In Tauri, do not hit AI backend when sidecar is not available.
-  if (!getAIAvailableForRequest()) {
+  // Config/provider endpoints bypass this so setup can complete first.
+  if (!skipAvailabilityGuard && !getAIAvailableForRequest()) {
     throw new AIServiceError('AI backend is not available.');
   }
 
   const url = `${getCurrentAiBackendUrl()}${path}`;
-  let response: Response;
+  let lastError: Error | null = null;
 
-  try {
-    response = await fetch(url, {
-      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-      ...init,
-    });
-  } catch (err) {
-    throw new AIServiceError(
-      `AI service unreachable at ${url}: ${err instanceof Error ? err.message : String(err)}`
-    );
+  // Retry logic with exponential backoff
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+        ...init,
+        signal: AbortSignal.timeout(10000), // 10 second timeout
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        let errorMessage = `AI service error ${response.status} on ${path}`;
+        
+        // Improve error messages based on status code
+        if (response.status === 401 || response.status === 403) {
+          errorMessage = 'API key is invalid or expired. Please check your API key in Settings → AI Configuration.';
+        } else if (response.status === 404) {
+          errorMessage = `AI backend endpoint not found: ${path}. Ensure the AI service is running and up to date.`;
+        } else if (response.status === 503 || response.status === 502) {
+          errorMessage = 'AI backend is temporarily unavailable. Please try again in a moment.';
+        } else if (body) {
+          try {
+            const errorBody = JSON.parse(body);
+            if (errorBody.error) {
+              errorMessage = errorBody.error;
+            }
+          } catch {
+            // Use body as-is if not JSON
+            if (body.length < 200) {
+              errorMessage = body;
+            }
+          }
+        }
+        
+        throw new AIServiceError(errorMessage, response.status, body);
+      }
+
+      return await response.json() as Promise<T>;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      
+      // Don't retry on CORS errors or client errors (4xx)
+      if (isCORSError(err)) {
+        throw new AIServiceError(
+          'CORS error: AI backend may not be running or CORS is not configured. Ensure the AI service is running on localhost:8081 and CORS is enabled.',
+          0,
+          undefined
+        );
+      }
+      
+      if (err instanceof AIServiceError && err.status >= 400 && err.status < 500) {
+        // Don't retry client errors (4xx)
+        throw err;
+      }
+
+      // Retry on network errors or server errors (5xx) with exponential backoff
+      if (attempt < retries) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 10000); // Max 10 seconds
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+
+      // Last attempt failed
+      if (err instanceof AIServiceError) {
+        throw err;
+      }
+      
+      throw new AIServiceError(
+        `AI service unreachable at ${url}: ${lastError.message}`,
+        0,
+        undefined
+      );
+    }
   }
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new AIServiceError(
-      `AI service error ${response.status} on ${path}`,
-      response.status,
-      body
-    );
-  }
-
-  return response.json() as Promise<T>;
+  throw lastError || new Error('Unknown error');
 }
 
 // ─── Health & Info ────────────────────────────────────────────────────────────
 
 export async function getAIHealth(): Promise<AIHealthResponse> {
-  return aiRequest<AIHealthResponse>('/health');
+  // skipAvailabilityGuard=true: health-check must work even before aiAvailable is confirmed
+  // (used by Settings → Test Connection and by useAIStatus polling during setup).
+  return aiRequest<AIHealthResponse>('/health', undefined, 3, true);
 }
 
 export async function getAIReadiness(): Promise<AIHealthResponse> {
-  return aiRequest<AIHealthResponse>('/ready');
+  return aiRequest<AIHealthResponse>('/ready', undefined, 3, true);
 }
 
 export async function getAIInfo(): Promise<AIServerInfo> {
-  return aiRequest<AIServerInfo>('/info');
+  // skipAvailabilityGuard=true: called right after updateAIConfiguration during setup flow.
+  return aiRequest<AIServerInfo>('/info', undefined, 3, true);
 }
 
 // ─── LLM Completion ──────────────────────────────────────────────────────────
@@ -385,14 +502,39 @@ const LLM_CONFIG_KEY = 'kubilitics_ai_provider_config';
 
 export async function updateAIConfiguration(config: LLMProviderConfig): Promise<void> {
   // Security fix: Send config to backend, never store API keys in localStorage.
+  // TASK-AI-003: skipAvailabilityGuard=true — this IS the setup call; must work
+  // even when the AI sidecar is not yet marked available (bootstrap flow).
   await aiRequest('/api/v1/config/provider', {
     method: 'POST',
     body: JSON.stringify(config),
-  });
+  }, 3, true);
 }
 
-export async function getAIConfiguration(): Promise<LLMProviderConfig> {
-  return aiRequest<LLMProviderConfig>('/api/v1/config/provider');
+export async function getAIConfiguration(): Promise<LLMProviderConfigResponse> {
+  // TASK-AI-003: skipAvailabilityGuard=true — reading config must work during setup.
+  return aiRequest<LLMProviderConfigResponse>('/api/v1/config/provider', undefined, 3, true);
+}
+
+/**
+ * Fetch the curated model catalog from the backend.
+ * Returns a map of provider → list of { id, name, recommended? }.
+ * Used by the Settings and AISetupModal to render the model dropdown.
+ * skipAvailabilityGuard=true so it works during first-time setup.
+ */
+export async function getProviderModels(): Promise<ProviderModelsResponse> {
+  return aiRequest<ProviderModelsResponse>('/api/v1/config/models', undefined, 1, true);
+}
+
+/**
+ * Validate an API key + model combination against the provider without saving.
+ * Call this before updateAIConfiguration() to give the user immediate feedback.
+ * Returns { valid: true } on success or { valid: false, error: "..." } on failure.
+ */
+export async function validateAIKey(config: LLMProviderConfig): Promise<ValidateKeyResponse> {
+  return aiRequest<ValidateKeyResponse>('/api/v1/config/validate', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  }, 1, true);
 }
 
 /**

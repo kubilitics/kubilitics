@@ -36,7 +36,7 @@ type DataPoint struct {
 
 // AnomalyResult contains the anomaly score and details
 type AnomalyResult struct {
-	Score       float64  // 0.0 to 1.0, higher = more anomalous
+	Score       float64 // 0.0 to 1.0, higher = more anomalous
 	IsAnomaly   bool
 	PathLength  float64
 	Explanation string

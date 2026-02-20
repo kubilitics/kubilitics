@@ -13,19 +13,20 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 
+	"github.com/kubilitics/kubilitics-backend/internal/api/middleware"
 	"github.com/kubilitics/kubilitics-backend/internal/auth"
 	"github.com/kubilitics/kubilitics-backend/internal/config"
+	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/drawio"
-	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
-	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/repository"
 	"github.com/kubilitics/kubilitics-backend/internal/service"
 	"github.com/kubilitics/kubilitics-backend/internal/topology"
-	"github.com/kubilitics/kubilitics-backend/internal/api/middleware"
 	"golang.org/x/time/rate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -45,6 +46,7 @@ type Handler struct {
 	kcliLimiters          map[string]*rate.Limiter
 	kcliStreamMu          sync.Mutex
 	kcliStreamActive      map[string]int
+	k8sClientCache        *expirable.LRU[string, *k8s.Client] // Cache for stateless requests
 }
 
 // NewHandler creates a new HTTP handler. unifiedMetricsService can be nil; then metrics summary uses legacy per-resource endpoints. projSvc can be nil; then project routes return 501. repo can be nil if auth is disabled.
@@ -64,6 +66,7 @@ func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *conf
 		repo:                  repo,
 		kcliLimiters:          map[string]*rate.Limiter{},
 		kcliStreamActive:      map[string]int{},
+		k8sClientCache:        expirable.NewLRU[string, *k8s.Client](100, nil, time.Minute*10),
 	}
 }
 
@@ -131,7 +134,10 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 	router.Handle("/clusters/{clusterId}", h.wrapWithRBAC(h.GetCluster, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}", h.wrapWithRBAC(h.RemoveCluster, auth.RoleAdmin)).Methods("DELETE")
 	router.Handle("/clusters/{clusterId}/summary", h.wrapWithRBAC(h.GetClusterSummary, auth.RoleViewer)).Methods("GET")
+	// Reconnect: resets circuit breaker and creates a fresh K8s client (POST = mutating; operator-level)
+	router.Handle("/clusters/{clusterId}/reconnect", h.wrapWithRBAC(h.ReconnectCluster, auth.RoleOperator)).Methods("POST")
 	router.Handle("/clusters/{clusterId}/overview", h.wrapWithRBAC(h.GetClusterOverview, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/overview/stream", h.wrapWithRBAC(h.GetClusterOverviewStream, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/workloads", h.wrapWithRBAC(h.GetWorkloadsOverview, auth.RoleViewer)).Methods("GET")
 
 	// Topology routes (BE-AUTHZ-001: GET = viewer, POST export = operator)
@@ -287,13 +293,13 @@ func (h *Handler) GetCluster(w http.ResponseWriter, r *http.Request) {
 			respondErrorWithRequestID(w, r, http.StatusBadRequest, ErrCodeInvalidRequest, fmt.Sprintf("Invalid kubeconfig: %v", err))
 			return
 		}
-		
+
 		info, err := client.GetClusterInfo(r.Context())
 		if err != nil {
 			respondErrorWithRequestID(w, r, http.StatusInternalServerError, ErrCodeInternalError, err.Error())
 			return
 		}
-		
+
 		// Return cluster info without storing (Headlamp/Lens stateless model)
 		clusterInfo := map[string]interface{}{
 			"id":        clusterID,
@@ -328,9 +334,9 @@ func (h *Handler) GetCluster(w http.ResponseWriter, r *http.Request) {
 // In Headlamp/Lens model, clusters are stored client-side, backend just validates and returns info.
 func (h *Handler) AddCluster(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		KubeconfigPath   string `json:"kubeconfig_path"`    // Legacy: file path on server
-		KubeconfigBase64 string `json:"kubeconfig_base64"`  // Headlamp/Lens: base64 kubeconfig
-		Context          string `json:"context"`            // Optional context name
+		KubeconfigPath   string `json:"kubeconfig_path"`   // Legacy: file path on server
+		KubeconfigBase64 string `json:"kubeconfig_base64"` // Headlamp/Lens: base64 kubeconfig
+		Context          string `json:"context"`           // Optional context name
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -415,6 +421,29 @@ func (h *Handler) RemoveCluster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, map[string]string{"message": "Cluster removed"})
+}
+
+// ReconnectCluster handles POST /clusters/{clusterId}/reconnect.
+// Resets the circuit breaker for the cluster and builds a fresh K8s client.
+// Returns the updated cluster object (status "connected" on success, "error" on failure).
+func (h *Handler) ReconnectCluster(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	clusterID := vars["clusterId"]
+	if !validate.ClusterID(clusterID) {
+		respondErrorWithRequestID(w, r, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid clusterId")
+		return
+	}
+	resolvedID, err := h.resolveClusterID(r.Context(), clusterID)
+	if err != nil {
+		respondErrorWithRequestID(w, r, http.StatusNotFound, ErrCodeNotFound, err.Error())
+		return
+	}
+	cluster, err := h.clusterService.ReconnectCluster(r.Context(), resolvedID)
+	if err != nil {
+		respondErrorWithRequestID(w, r, http.StatusServiceUnavailable, ErrCodeInternalError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, cluster)
 }
 
 // GetClusterSummary handles GET /clusters/{clusterId}/summary. clusterId may be backend UUID or context/name.

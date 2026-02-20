@@ -7,7 +7,30 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_BACKEND_BASE_URL, DEFAULT_AI_BASE_URL, DEFAULT_AI_WS_URL, isLocalHostname } from '@/lib/backendConstants';
 
-/** C4.5: When running inside Tauri desktop, default to sidecar (same port as backend). */
+/**
+ * Build-time check: are we running inside a Tauri desktop build?
+ *
+ * __VITE_IS_TAURI_BUILD__ is a compile-time constant injected by vite.config.ts `define`.
+ * It is `true` when TAURI_BUILD=true was set during the build (i.e. kubilitics-desktop).
+ *
+ * This is the ONLY reliable Tauri check for URL routing because:
+ *  - isTauri() relies on __TAURI_INTERNALS__ being injected by WKWebView, which happens
+ *    AFTER the first JS module evaluation. Any code at module init time (including store
+ *    initialState, getEffectiveBackendBaseUrl called from component renders before mount)
+ *    sees isTauri()=false and falls through to the dev proxy path, returning ''.
+ *  - import.meta.env.DEV is true in Tauri dev builds and irrelevant in production builds.
+ *
+ * __VITE_IS_TAURI_BUILD__ is baked in at build time — always correct, zero timing race.
+ */
+function isTauriBuildTime(): boolean {
+  try {
+    return typeof __VITE_IS_TAURI_BUILD__ !== 'undefined' && __VITE_IS_TAURI_BUILD__ === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Runtime Tauri check — only valid AFTER first component mount. Do NOT use for initial URL routing. */
 function isTauri(): boolean {
   if (typeof window === 'undefined') return false;
   const w = window as Window & { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown };
@@ -16,9 +39,10 @@ function isTauri(): boolean {
 
 /** Default backend URL: desktop sidecar or local host (dev) so users never need to "set backend" like Lens/Headlamp. */
 export function getDefaultBackendBaseUrl(): string {
-  if (isTauri()) {
-    return DEFAULT_BACKEND_BASE_URL;
-  }
+  // Build-time: always correct for Tauri desktop
+  if (isTauriBuildTime()) return DEFAULT_BACKEND_BASE_URL;
+  // Runtime fallback (for non-Tauri builds or SSR)
+  if (isTauri()) return DEFAULT_BACKEND_BASE_URL;
   if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) {
     const url = String(import.meta.env.VITE_API_URL).trim();
     if (url) return url.replace(/\/+$/, ''); // strip trailing slashes
@@ -34,8 +58,18 @@ export function getDefaultBackendBaseUrl(): string {
   return '';
 }
 
-/** Effective backend URL: in dev on localhost always use proxy (''); otherwise stored or default. */
+/**
+ * Effective backend URL for all API calls.
+ *
+ * Resolution order:
+ *  1. Tauri build (build-time constant) → always http://localhost:819  [TIMING-INDEPENDENT]
+ *  2. Dev on localhost → '' (empty = same-origin, Vite proxy handles it)
+ *  3. Stored URL (user-configured) → use as-is
+ *  4. Default (getDefaultBackendBaseUrl) → http://localhost:819 or ''
+ */
 export function getEffectiveBackendBaseUrl(stored: string): string {
+  // PERMANENT FIX: build-time constant — no timing race, works on first render
+  if (isTauriBuildTime()) return DEFAULT_BACKEND_BASE_URL;
   // In dev on localhost, always use same-origin so Vite proxy is used (avoids WebSocket connection errors)
   if (typeof import.meta !== 'undefined' && import.meta.env?.DEV && typeof window !== 'undefined' && isLocalHostname(window.location?.hostname ?? '')) {
     return '';
@@ -54,6 +88,8 @@ export interface BackendConfigState {
   aiBackendUrl: string;
   /** AI backend WebSocket URL (e.g. ws://localhost:8081/ws). */
   aiWsUrl: string;
+  /** Flag to prevent session restore after explicit logout. */
+  logoutFlag: boolean;
 }
 
 interface BackendConfigStore extends BackendConfigState {
@@ -63,18 +99,24 @@ interface BackendConfigStore extends BackendConfigState {
   setAiWsUrl: (url: string) => void;
   /** Clear backend URL and cluster; call when switching to direct K8s or disconnecting. */
   clearBackend: () => void;
+  /** Set logout flag to prevent session restore. */
+  setLogoutFlag: (flag: boolean) => void;
   /** True when backend mode is configured (non-empty base URL). */
   isBackendConfigured: () => boolean;
 }
 
-// P0-B: Do NOT call getDefaultBackendBaseUrl() here. At module init in Tauri WebView,
-// __TAURI_INTERNALS__ is not yet injected, so isTauri() is false and we'd set backendBaseUrl ''.
-// URL is resolved lazily via getEffectiveBackendBaseUrl() / isBackendConfigured() at call time.
+// PERMANENT FIX: For Tauri desktop builds, seed backendBaseUrl with the correct URL at
+// module init time using the build-time constant. __VITE_IS_TAURI_BUILD__ is always
+// available — no runtime timing dependency. This ensures every hook's `enabled` flag is
+// correct on the very first render, before SyncBackendUrl() mounts.
+const initialBackendUrl = isTauriBuildTime() ? DEFAULT_BACKEND_BASE_URL : '';
+
 const initialState: BackendConfigState = {
-  backendBaseUrl: '',
+  backendBaseUrl: initialBackendUrl,
   currentClusterId: null,
   aiBackendUrl: DEFAULT_AI_BASE_URL,
   aiWsUrl: DEFAULT_AI_WS_URL,
+  logoutFlag: false,
 };
 
 export const useBackendConfigStore = create<BackendConfigStore>()(
@@ -106,15 +148,17 @@ export const useBackendConfigStore = create<BackendConfigStore>()(
           currentClusterId: null,
           aiBackendUrl: DEFAULT_AI_BASE_URL,
           aiWsUrl: DEFAULT_AI_WS_URL,
+          logoutFlag: true, // Set logout flag to prevent session restore
         }),
 
+      setLogoutFlag: (flag) =>
+        set({ logoutFlag: flag }),
+
       isBackendConfigured: () => {
-        // P0-B: isTauri() must be called at invocation time (NOT at module init time).
-        // At module init, __TAURI_INTERNALS__ is not yet injected into window, so a
-        // module-level isTauri() call returns false, leaving backendBaseUrl empty and
-        // causing all hooks to have enabled:false on cold start.
-        // Calling isTauri() here (at request time) gets the correct runtime value.
-        if (isTauri()) return true; // Desktop always has sidecar backend at port 819
+        // Build-time constant: Tauri desktop always has the sidecar backend
+        if (isTauriBuildTime()) return true;
+        // Runtime fallback: check if __TAURI_INTERNALS__ has been injected by now
+        if (isTauri()) return true;
         const url = getEffectiveBackendBaseUrl(get().backendBaseUrl);
         // In dev on localhost we use '' (proxy), which is valid
         if (typeof import.meta !== 'undefined' && import.meta.env?.DEV && typeof window !== 'undefined' && isLocalHostname(window.location?.hostname ?? '')) {
@@ -125,9 +169,16 @@ export const useBackendConfigStore = create<BackendConfigStore>()(
     }),
     {
       name: 'kubilitics-backend-config',
-      // Migration: copy AI URLs from old settingsStore if present
+      // PERMANENT FIX: When rehydrating from localStorage, ensure Tauri builds always have
+      // the correct backend URL — user cannot accidentally persist '' from a previous broken state.
       onRehydrateStorage: () => (state) => {
         if (!state) return;
+
+        // For Tauri builds: always override backendBaseUrl to the correct sidecar URL.
+        // This fixes cases where a previous broken run persisted '' into localStorage.
+        if (isTauriBuildTime() && (!state.backendBaseUrl || state.backendBaseUrl === '')) {
+          state.backendBaseUrl = DEFAULT_BACKEND_BASE_URL;
+        }
 
         try {
           const oldSettings = localStorage.getItem('kubilitics-settings');

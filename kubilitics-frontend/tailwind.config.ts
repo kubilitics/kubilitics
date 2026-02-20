@@ -3,7 +3,7 @@ import tailwindcssAnimate from "tailwindcss-animate";
 
 export default {
   darkMode: ["class"],
-  content: ["./pages/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
+  content: ["./src/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}"],
   prefix: "",
   theme: {
     container: {
@@ -56,6 +56,8 @@ export default {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
           border: "hsl(var(--sidebar-border))",
+          accent: "hsl(var(--sidebar-accent))",
+          "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
         },
         // Old Legacy / Backward Compat (Mapped to new variables or kept specific)
         deep: {

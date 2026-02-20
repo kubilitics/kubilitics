@@ -31,6 +31,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -41,11 +42,17 @@ import (
 )
 
 func main() {
+	var configPath string
+	flag.StringVar(&configPath, "config", "", "Path to configuration file")
+	flag.Parse()
+
 	// Load configuration
-	cfgMgr, err := config.NewConfigManagerWithDefaults()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create config manager: %v\n", err)
-		os.Exit(1)
+	var cfgMgr config.ConfigManager
+	var err error
+	if configPath != "" {
+		cfgMgr, err = config.NewConfigManager(configPath)
+	} else {
+		cfgMgr, err = config.NewConfigManagerWithDefaults()
 	}
 
 	if err := cfgMgr.Load(context.Background()); err != nil {

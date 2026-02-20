@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef, useState, useCallback } from 'react';
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
-// @ts-ignore
 import cytoscapeSvg from 'cytoscape-svg';
 import fcose from 'cytoscape-fcose';
 import cola from 'cytoscape-cola';

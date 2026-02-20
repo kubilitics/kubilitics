@@ -1,7 +1,7 @@
 # Kubilitics — Enterprise-grade one-command dev and test (B3)
-# Usage: make dev | test | backend | frontend | clean
+# Usage: make dev | desktop | desktop-dev | test | backend | frontend | clean
 
-.PHONY: dev test backend frontend kcli backend-test frontend-test kcli-test test-reports clean env-example restart
+.PHONY: dev test backend frontend kcli backend-test frontend-test kcli-test test-reports clean env-example restart desktop desktop-dev
 
 # Default: run full stack (backend + frontend) via script
 dev: env-example
@@ -70,7 +70,25 @@ test-reports:
 env-example:
 	@if [ ! -f .env ]; then cp -n .env.example .env 2>/dev/null || true; echo "Created .env from .env.example (if present)"; fi
 
+# Build desktop app (Go backend + kcli + frontend + Tauri bundle)
+# Output: kubilitics-desktop/src-tauri/target/release/bundle/
+desktop: backend kcli
+	@chmod +x scripts/build-desktop.sh
+	@./scripts/build-desktop.sh
+
+# Desktop development mode (hot reload)
+# Starts backend sidecar + frontend dev server + Tauri dev window
+desktop-dev: backend kcli
+	@chmod +x scripts/dev-desktop.sh
+	@./scripts/dev-desktop.sh
+
+# Install npm dependencies for desktop (needed once after creating package.json)
+desktop-install:
+	cd kubilitics-desktop && npm install
+
 clean:
 	rm -rf kubilitics-backend/bin
 	rm -rf kubilitics-frontend/dist
+	rm -rf kubilitics-desktop/dist
+	rm -rf kubilitics-desktop/node_modules
 	rm -rf test_reports/backend/*.log test_reports/frontend/*.log test_reports/playwright/*.log 2>/dev/null || true

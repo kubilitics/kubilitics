@@ -30,7 +30,7 @@ import {
   ClipboardPaste,
   FolderOpen,
 } from 'lucide-react';
-import { KubernetesLogo } from '@/components/icons/KubernetesIcons';
+import { KubiliticsLogo, KubiliticsText } from '@/components/icons/KubernetesIcons';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -125,9 +125,13 @@ export default function ClusterConnect() {
   const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
   const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
   const setCurrentClusterId = useBackendConfigStore((s) => s.setCurrentClusterId);
+  const logoutFlag = useBackendConfigStore((s) => s.logoutFlag);
+  const setLogoutFlag = useBackendConfigStore((s) => s.setLogoutFlag);
   const queryClient = useQueryClient();
+  // Performance optimization: Run all queries in parallel instead of sequentially
+  // Removed gateOnHealth to allow parallel execution - circuit breaker handles backend down scenarios
   const health = useBackendHealth({ enabled: true });
-  const clustersFromBackend = useClustersFromBackend({ gateOnHealth: true });
+  const clustersFromBackend = useClustersFromBackend();
   const discoveredClustersRes = useDiscoverClusters();
 
   const [tabMode, setTabMode] = useState<'auto' | 'upload'>('auto');
@@ -139,6 +143,7 @@ export default function ClusterConnect() {
   const [pasteDialogOpen, setPasteDialogOpen] = useState(false);
   const [pasteContent, setPasteContent] = useState('');
   const [isPasting, setIsPasting] = useState(false);
+  const [autoConnectTimeout, setAutoConnectTimeout] = useState(false);
   const autoConnectDoneRef = useRef(false);
   const sessionRestoreDoneRef = useRef(false);
 
@@ -160,74 +165,125 @@ export default function ClusterConnect() {
   // P0-C: In Tauri (desktop), ClusterConnect is the startup screen.
   // NEVER auto-redirect away from it based on a persisted activeCluster — the cluster
   // must be re-confirmed against the live backend on every launch.
-  // In browser mode only: redirect to dashboard if already connected (session continuity).
+  // Browser mode: Let auto-connect and session restore effects handle navigation after validation.
+
+  // Consolidated auto-connect and session restore logic
+  // Priority: 1) Single-cluster auto-connect, 2) Session restore (if not logged out)
+  // IMPORTANT: Test cluster accessibility before connecting/restoring to prevent 503 errors.
+  // Performance optimization: Removed sequential dependencies - queries run in parallel
+  // Only wait for clusters data, not health check (circuit breaker handles backend down)
   useEffect(() => {
-    if (!isTauri() && activeCluster) {
-      navigate('/dashboard', { replace: true });
+    // Don't wait for health check - clusters query runs in parallel
+    // Show UI immediately - don't block on data loading
+    // Only proceed with auto-connect/session restore if data is available
+    if (!clustersFromBackend.data) {
+      // If query is disabled or failed, don't wait - show UI immediately
+      if (!clustersFromBackend.isLoading && !clustersFromBackend.isFetching) {
+        // Query is done (either succeeded with empty data or failed) - proceed to show UI
+        return;
+      }
+      // Still loading - wait a bit but don't block UI forever
+      return;
     }
-  }, [activeCluster, navigate]);
 
-  // P2-1: Headlamp/Lens behavior — single context in kubeconfig → auto-connect on startup.
-  // After both cluster lists resolve, if exactly one registered cluster and it is current, connect once.
-  useEffect(() => {
-    const backendReady = health.isSuccess;
-    if (!backendReady || !clustersFromBackend.data || clustersFromBackend.isLoading || discoveredClustersRes.isLoading) return;
+    // Don't restore session if user explicitly logged out
+    if (logoutFlag) {
+      setLogoutFlag(false); // Clear flag after checking
+      return;
+    }
+
     const registered = clustersFromBackend.data.map(backendToDetected);
-    if (registered.length !== 1 || !registered[0].isCurrent) return;
-    if (autoConnectDoneRef.current) return;
-    autoConnectDoneRef.current = true;
-    const cluster = registered[0];
-    const backendItem = clustersFromBackend.data.find((c) => c.id === cluster.id || c.context === cluster.context);
-    if (!backendItem) return;
-    setIsConnecting(true);
-    setCurrentClusterId(backendItem.id);
-    setClusters(clustersFromBackend.data.map(backendClusterToCluster));
-    setActiveCluster(backendClusterToCluster(backendItem));
-    setDemo(false);
-    navigate('/home', { replace: true });
-  }, [
-    health.isSuccess,
-    clustersFromBackend.data,
-    clustersFromBackend.isLoading,
-    discoveredClustersRes.isLoading,
-    setCurrentClusterId,
-    setClusters,
-    setActiveCluster,
-    setDemo,
-    navigate,
-  ]);
-
-  // P2-2: Session restore on relaunch — if currentClusterId is set, validate against backend and restore or clear.
-  // Skip when single-cluster auto-connect applies (that effect handles it). Run once per mount.
-  useEffect(() => {
-    const backendReady = health.isSuccess;
-    if (!backendReady || !clustersFromBackend.data || clustersFromBackend.isLoading || discoveredClustersRes.isLoading) return;
     const cid = currentClusterId?.trim();
-    if (!cid) return;
-    if (sessionRestoreDoneRef.current) return;
-    const registered = clustersFromBackend.data.map(backendToDetected);
-    if (registered.length === 1 && registered[0].isCurrent) return; // P2-1 handles this
-    sessionRestoreDoneRef.current = true;
-    const backendItem = clustersFromBackend.data.find((c) => c.id === cid);
-    if (backendItem) {
-      setClusters(clustersFromBackend.data.map(backendClusterToCluster));
-      setActiveCluster(backendClusterToCluster(backendItem));
-      setDemo(false);
-      navigate('/home', { replace: true });
-    } else {
-      setCurrentClusterId(null);
-      signOut();
+
+    // Priority 1: Single-cluster auto-connect (if exactly one registered cluster and it's current)
+    /* 
+    DEACTIVATED per user request to allow manual confirmed selection on onboarding.
+    if (registered.length === 1 && registered[0].isCurrent) {
+      if (autoConnectDoneRef.current) return;
+
+      const cluster = registered[0];
+      const backendItem = clustersFromBackend.data.find((c) => c.id === cluster.id || c.context === cluster.context);
+      if (!backendItem) return;
+
+      autoConnectDoneRef.current = true;
+      setIsConnecting(true);
+
+      // Test cluster accessibility before auto-connecting with timeout
+      const clusterCheckTimeout = setTimeout(() => {
+        console.warn(`[ClusterConnect] Auto-connect timeout: cluster check took too long`);
+        setIsConnecting(false);
+        autoConnectDoneRef.current = false;
+        setAutoConnectTimeout(true);
+      }, 5_000); // 5 second timeout for cluster check
+
+      import('@/services/backendApiClient').then(({ getClusterOverview }) => {
+        const backendBaseUrl = getEffectiveBackendBaseUrl(storedBackendUrl);
+        return Promise.race([
+          getClusterOverview(backendBaseUrl, backendItem.id),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5_000))
+        ]);
+      }).then(() => {
+        clearTimeout(clusterCheckTimeout);
+        // Cluster is accessible - proceed with auto-connect
+        setCurrentClusterId(backendItem.id);
+        setClusters(clustersFromBackend.data.map(backendClusterToCluster));
+        setActiveCluster(backendClusterToCluster(backendItem));
+        setDemo(false);
+        setIsConnecting(false);
+        navigate('/home', { replace: true });
+      }).catch((error) => {
+        clearTimeout(clusterCheckTimeout);
+        // Cluster exists but is not accessible - don't auto-connect
+        console.warn(`[ClusterConnect] Auto-connect skipped: cluster ${backendItem.id} is not accessible (${error instanceof Error ? error.message : 'unknown error'})`);
+        setIsConnecting(false);
+        autoConnectDoneRef.current = false; // Allow retry if user manually connects
+        // Clear connecting state immediately - don't leave user stuck
+        setAutoConnectTimeout(true);
+      });
+      return;
+    }
+    */
+
+    // Priority 2: Session restore (if currentClusterId is set and single-cluster auto-connect doesn't apply)
+    if (cid && !sessionRestoreDoneRef.current) {
+      sessionRestoreDoneRef.current = true;
+      const backendItem = clustersFromBackend.data.find((c) => c.id === cid);
+
+      if (backendItem) {
+        // Test cluster accessibility before restoring
+        import('@/services/backendApiClient').then(({ getClusterOverview }) => {
+          const backendBaseUrl = getEffectiveBackendBaseUrl(storedBackendUrl);
+          return getClusterOverview(backendBaseUrl, cid);
+        }).then(() => {
+          // Cluster is accessible - restore session
+          setClusters(clustersFromBackend.data.map(backendClusterToCluster));
+          setActiveCluster(backendClusterToCluster(backendItem));
+          setDemo(false);
+          navigate('/home', { replace: true });
+        }).catch((error) => {
+          // Cluster exists but is not accessible - clear it
+          console.warn(`[ClusterConnect] Session restore failed: cluster ${cid} is not accessible (${error instanceof Error ? error.message : 'unknown error'})`);
+          setCurrentClusterId(null);
+          signOut();
+          // Ensure UI is shown even if session restore fails
+        });
+      } else {
+        // Cluster ID doesn't exist in backend list - clear it
+        setCurrentClusterId(null);
+        signOut();
+      }
     }
   }, [
-    health.isSuccess,
     clustersFromBackend.data,
     clustersFromBackend.isLoading,
-    discoveredClustersRes.isLoading,
     currentClusterId,
+    logoutFlag,
+    storedBackendUrl,
     setCurrentClusterId,
     setClusters,
     setActiveCluster,
     setDemo,
+    setLogoutFlag,
     signOut,
     navigate,
   ]);
@@ -381,47 +437,16 @@ export default function ClusterConnect() {
 
   // P0-C: In Tauri mode, do NOT show the spinner and block the connect page based on
   // a persisted activeCluster — user must always be able to pick a (live) cluster.
-  // In browser mode, this spinner is fine while the redirect effect fires.
-  if (!isTauri() && activeCluster) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-[#020617] text-slate-50">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-10 w-10 animate-spin text-blue-500" />
-          <p className="text-slate-400 font-medium">Initializing Workspace…</p>
-        </div>
-      </div>
-    );
-  }
+  // In browser mode, remove blocking spinner - let redirect happen in background
+  // Show UI immediately instead of blocking
 
-  // P2-1: Full-page "Connecting…" during auto-connect (single cluster).
-  if (isConnecting && autoConnectDoneRef.current) {
-    return (
-      <div className="min-h-screen bg-[#020617] text-slate-50 flex items-center justify-center p-8">
-        <div className="flex flex-col items-center gap-6 max-w-sm text-center">
-          <KubernetesLogo size={56} className="text-blue-500/80" />
-          <Loader2 className="h-10 w-10 animate-spin text-blue-500" />
-          <p className="text-slate-400 font-medium">Connecting…</p>
-        </div>
-      </div>
-    );
-  }
+  // P2-1: Don't block UI during auto-connect - show cluster list immediately
+  // Auto-connect happens in background, user can see clusters and manually connect if needed
+  // This matches Headlamp/Lens pattern - never block the UI
 
-  // P0-G: Backend not ready yet — show loading skeleton until health succeeds.
-  // When gateOnHealth: true, cluster hooks have enabled: false so they report isLoading: false
-  // and data: undefined; without this branch we'd show "No clusters found" during startup.
-  const backendReady = health.isSuccess;
-  if ((isBackendConfigured || isTauri()) && !backendReady && !health.isError) {
-    return (
-      <div className="min-h-screen bg-[#020617] text-slate-50 flex items-center justify-center p-8">
-        <div className="flex flex-col items-center gap-6 max-w-sm text-center">
-          <KubernetesLogo size={56} className="text-blue-500/80" />
-          <Loader2 className="h-10 w-10 animate-spin text-blue-500" />
-          <p className="text-slate-400 font-medium">Connecting to backend…</p>
-          <p className="text-sm text-slate-500">Scanning for clusters once the engine is ready.</p>
-        </div>
-      </div>
-    );
-  }
+  // Show UI immediately - never block on loading
+  // Empty states in the UI will handle no data scenarios gracefully
+  // This matches Headlamp/Lens pattern - UI renders immediately, data loads progressively
 
   // Specialized view for In-Cluster mode
   if (appMode === 'in-cluster') {
@@ -481,8 +506,7 @@ export default function ClusterConnect() {
         >
           <motion.div variants={item} className="text-center mb-10">
             <div className="flex items-center justify-center gap-3 mb-6">
-              <KubernetesLogo size={56} className="text-blue-500" />
-              <span className="text-4xl font-bold tracking-tight">Kubilitics</span>
+              <KubiliticsText height={40} className="text-white bg-clip-text" />
             </div>
             <h1 className="text-2xl font-semibold tracking-tight mb-3">
               Connect Your Cluster

@@ -70,10 +70,9 @@ export function useClusterTopology({
       return result;
     },
     enabled: queryEnabled,
-    refetchInterval: 30_000,  // Task 8.1: refetch every 30s
-    staleTime: 10_000,       // Task 8.1: consider fresh for 10s
-    retry: 2,
-    retryDelay: 1000,
+    // Removed refetchInterval - rely on global defaults (refetchOnWindowFocus/reconnect)
+    staleTime: 60_000,       // Increased from 10s to 60s - allow stale data
+    // Retry uses global defaults (3 retries with exponential backoff)
   });
 
   return {

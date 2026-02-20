@@ -17,23 +17,23 @@ import (
 type Logger interface {
 	// Log logs an audit event
 	Log(ctx context.Context, event *Event) error
-	
+
 	// LogInvestigation logs investigation lifecycle events
 	LogInvestigationStarted(ctx context.Context, investigationID string) error
 	LogInvestigationCompleted(ctx context.Context, investigationID string, duration time.Duration) error
 	LogInvestigationFailed(ctx context.Context, investigationID string, err error) error
-	
+
 	// LogAction logs action lifecycle events
 	LogActionProposed(ctx context.Context, action, resource string) error
 	LogActionApproved(ctx context.Context, action, resource, approver string) error
 	LogActionExecuted(ctx context.Context, action, resource string, duration time.Duration) error
-	
+
 	// LogSafety logs safety-related events
 	LogSafetyViolation(ctx context.Context, rule, resource string) error
-	
+
 	// Sync flushes buffered log entries
 	Sync() error
-	
+
 	// Close closes the audit logger
 	Close() error
 }
@@ -42,22 +42,22 @@ type Logger interface {
 type Config struct {
 	// AuditLogPath is the path to the audit log file
 	AuditLogPath string
-	
+
 	// AppLogPath is the path to the application log file
 	AppLogPath string
-	
+
 	// MaxSize is the maximum size in megabytes before rotation
 	MaxSize int
-	
+
 	// MaxBackups is the maximum number of old log files to retain
 	MaxBackups int
-	
+
 	// MaxAge is the maximum number of days to retain old log files
 	MaxAge int
-	
+
 	// Compress determines if rotated files should be compressed
 	Compress bool
-	
+
 	// LogLevel is the minimum log level (debug, info, warn, error)
 	LogLevel string
 }
@@ -91,13 +91,13 @@ func NewLogger(config *Config) (Logger, error) {
 	if config == nil {
 		config = DefaultConfig()
 	}
-	
+
 	// Parse log level
 	level, err := zapcore.ParseLevel(config.LogLevel)
 	if err != nil {
 		return nil, fmt.Errorf("invalid log level %s: %w", config.LogLevel, err)
 	}
-	
+
 	// Create encoder config
 	encoderConfig := zapcore.EncoderConfig{
 		TimeKey:        "timestamp",
@@ -112,7 +112,7 @@ func NewLogger(config *Config) (Logger, error) {
 		EncodeDuration: zapcore.SecondsDurationEncoder,
 		EncodeCaller:   zapcore.ShortCallerEncoder,
 	}
-	
+
 	// Create application logger with rotation
 	appRotator := &lumberjack.Logger{
 		Filename:   config.AppLogPath,
@@ -121,15 +121,15 @@ func NewLogger(config *Config) (Logger, error) {
 		MaxAge:     config.MaxAge,
 		Compress:   config.Compress,
 	}
-	
+
 	appCore := zapcore.NewCore(
 		zapcore.NewJSONEncoder(encoderConfig),
 		zapcore.AddSync(appRotator),
 		level,
 	)
-	
+
 	appLogger := zap.New(appCore, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
-	
+
 	// Create audit logger with rotation (always INFO level, append-only)
 	auditRotator := &lumberjack.Logger{
 		Filename:   config.AuditLogPath,
@@ -138,13 +138,13 @@ func NewLogger(config *Config) (Logger, error) {
 		MaxAge:     config.MaxAge,
 		Compress:   config.Compress,
 	}
-	
+
 	auditCore := zapcore.NewCore(
 		zapcore.NewJSONEncoder(encoderConfig),
 		zapcore.AddSync(auditRotator),
 		zapcore.InfoLevel, // Audit logs are always INFO level
 	)
-	
+
 	auditZapLogger := zap.New(auditCore)
 
 	// Create the logger instance
@@ -156,10 +156,10 @@ func NewLogger(config *Config) (Logger, error) {
 		flushTicker: time.NewTicker(1 * time.Second),
 		stopCh:      make(chan struct{}),
 	}
-	
+
 	// Start auto-flush goroutine
 	go logger.autoFlush()
-	
+
 	return logger, nil
 }
 
@@ -167,15 +167,15 @@ func NewLogger(config *Config) (Logger, error) {
 func (l *auditLogger) Log(ctx context.Context, event *Event) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	
+
 	// Add to buffer
 	l.buffer = append(l.buffer, event)
-	
+
 	// Flush if buffer is full
 	if len(l.buffer) >= 100 {
 		return l.flushLocked()
 	}
-	
+
 	return nil
 }
 
@@ -184,7 +184,7 @@ func (l *auditLogger) flushLocked() error {
 	if len(l.buffer) == 0 {
 		return nil
 	}
-	
+
 	// Write all buffered events
 	for _, event := range l.buffer {
 		eventJSON, err := json.Marshal(event)
@@ -195,17 +195,17 @@ func (l *auditLogger) flushLocked() error {
 			)
 			continue
 		}
-		
+
 		l.auditLogger.Info(string(eventJSON),
 			zap.String("correlation_id", event.CorrelationID),
 			zap.String("event_type", string(event.EventType)),
 			zap.String("result", string(event.Result)),
 		)
 	}
-	
+
 	// Clear buffer
 	l.buffer = l.buffer[:0]
-	
+
 	return nil
 }
 
@@ -229,7 +229,7 @@ func (l *auditLogger) LogInvestigationStarted(ctx context.Context, investigation
 		WithCorrelationID(investigationID).
 		WithResult(ResultSuccess).
 		WithDescription(fmt.Sprintf("Investigation %s started", investigationID))
-	
+
 	return l.Log(ctx, event)
 }
 
@@ -240,7 +240,7 @@ func (l *auditLogger) LogInvestigationCompleted(ctx context.Context, investigati
 		WithResult(ResultSuccess).
 		WithDuration(duration).
 		WithDescription(fmt.Sprintf("Investigation %s completed", investigationID))
-	
+
 	return l.Log(ctx, event)
 }
 
@@ -250,7 +250,7 @@ func (l *auditLogger) LogInvestigationFailed(ctx context.Context, investigationI
 		WithCorrelationID(investigationID).
 		WithError(err, "investigation_error").
 		WithDescription(fmt.Sprintf("Investigation %s failed", investigationID))
-	
+
 	return l.Log(ctx, event)
 }
 
@@ -261,7 +261,7 @@ func (l *auditLogger) LogActionProposed(ctx context.Context, action, resource st
 		WithResource(resource, "").
 		WithResult(ResultPending).
 		WithDescription(fmt.Sprintf("Action %s proposed for %s", action, resource))
-	
+
 	return l.Log(ctx, event)
 }
 
@@ -273,7 +273,7 @@ func (l *auditLogger) LogActionApproved(ctx context.Context, action, resource, a
 		WithUser(approver).
 		WithResult(ResultSuccess).
 		WithDescription(fmt.Sprintf("Action %s approved for %s by %s", action, resource, approver))
-	
+
 	return l.Log(ctx, event)
 }
 
@@ -285,7 +285,7 @@ func (l *auditLogger) LogActionExecuted(ctx context.Context, action, resource st
 		WithResult(ResultSuccess).
 		WithDuration(duration).
 		WithDescription(fmt.Sprintf("Action %s executed for %s", action, resource))
-	
+
 	return l.Log(ctx, event)
 }
 
@@ -296,7 +296,7 @@ func (l *auditLogger) LogSafetyViolation(ctx context.Context, rule, resource str
 		WithResult(ResultDenied).
 		WithMetadata("rule", rule).
 		WithDescription(fmt.Sprintf("Safety violation: %s for %s", rule, resource))
-	
+
 	return l.Log(ctx, event)
 }
 
@@ -304,15 +304,15 @@ func (l *auditLogger) LogSafetyViolation(ctx context.Context, rule, resource str
 func (l *auditLogger) Sync() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	
+
 	if err := l.flushLocked(); err != nil {
 		return err
 	}
-	
+
 	if err := l.auditLogger.Sync(); err != nil {
 		return err
 	}
-	
+
 	return l.appLogger.Sync()
 }
 
@@ -320,11 +320,11 @@ func (l *auditLogger) Sync() error {
 func (l *auditLogger) Close() error {
 	close(l.stopCh)
 	l.flushTicker.Stop()
-	
+
 	if err := l.Sync(); err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 

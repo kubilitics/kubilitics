@@ -10,11 +10,11 @@ import (
 type ResourceType string
 
 const (
-	ResourceTypePod        ResourceType = "pod"
-	ResourceTypeNode       ResourceType = "node"
-	ResourceTypePVC        ResourceType = "pvc"
+	ResourceTypePod          ResourceType = "pod"
+	ResourceTypeNode         ResourceType = "node"
+	ResourceTypePVC          ResourceType = "pvc"
 	ResourceTypeLoadBalancer ResourceType = "loadbalancer"
-	ResourceTypeIngress    ResourceType = "ingress"
+	ResourceTypeIngress      ResourceType = "ingress"
 )
 
 // CloudProvider represents different cloud providers
@@ -29,27 +29,27 @@ const (
 
 // PricingConfig holds pricing information
 type PricingConfig struct {
-	Provider         CloudProvider
-	CPUPricePerHour  float64 // Price per vCPU per hour
-	MemPricePerGBHour float64 // Price per GB memory per hour
-	StoragePricePerGBMonth float64 // Price per GB storage per month
-	NetworkPricePerGB float64 // Price per GB network egress
+	Provider                 CloudProvider
+	CPUPricePerHour          float64 // Price per vCPU per hour
+	MemPricePerGBHour        float64 // Price per GB memory per hour
+	StoragePricePerGBMonth   float64 // Price per GB storage per month
+	NetworkPricePerGB        float64 // Price per GB network egress
 	LoadBalancerPricePerHour float64
 }
 
 // ResourceCost represents the cost of a single resource
 type ResourceCost struct {
-	ResourceType  ResourceType
-	ResourceName  string
-	Namespace     string
-	CPUCost       float64
-	MemoryCost    float64
-	StorageCost   float64
-	NetworkCost   float64
-	TotalCostHour float64
-	TotalCostDay  float64
+	ResourceType   ResourceType
+	ResourceName   string
+	Namespace      string
+	CPUCost        float64
+	MemoryCost     float64
+	StorageCost    float64
+	NetworkCost    float64
+	TotalCostHour  float64
+	TotalCostDay   float64
 	TotalCostMonth float64
-	Timestamp     time.Time
+	Timestamp      time.Time
 }
 
 // ClusterCost represents total cluster costs
@@ -88,38 +88,38 @@ func getDefaultPricing(provider CloudProvider) PricingConfig {
 	switch provider {
 	case ProviderAWS:
 		return PricingConfig{
-			Provider:         ProviderAWS,
-			CPUPricePerHour:  0.04,   // ~$0.04 per vCPU-hour (t3.medium equivalent)
-			MemPricePerGBHour: 0.005, // ~$0.005 per GB-hour
-			StoragePricePerGBMonth: 0.10, // EBS GP3
-			NetworkPricePerGB: 0.09,       // Egress pricing
+			Provider:                 ProviderAWS,
+			CPUPricePerHour:          0.04,  // ~$0.04 per vCPU-hour (t3.medium equivalent)
+			MemPricePerGBHour:        0.005, // ~$0.005 per GB-hour
+			StoragePricePerGBMonth:   0.10,  // EBS GP3
+			NetworkPricePerGB:        0.09,  // Egress pricing
 			LoadBalancerPricePerHour: 0.025,
 		}
 	case ProviderGCP:
 		return PricingConfig{
-			Provider:         ProviderGCP,
-			CPUPricePerHour:  0.035,
-			MemPricePerGBHour: 0.0047,
-			StoragePricePerGBMonth: 0.10, // Standard PD
-			NetworkPricePerGB: 0.12,
+			Provider:                 ProviderGCP,
+			CPUPricePerHour:          0.035,
+			MemPricePerGBHour:        0.0047,
+			StoragePricePerGBMonth:   0.10, // Standard PD
+			NetworkPricePerGB:        0.12,
 			LoadBalancerPricePerHour: 0.025,
 		}
 	case ProviderAzure:
 		return PricingConfig{
-			Provider:         ProviderAzure,
-			CPUPricePerHour:  0.042,
-			MemPricePerGBHour: 0.0055,
-			StoragePricePerGBMonth: 0.12, // Standard SSD
-			NetworkPricePerGB: 0.087,
+			Provider:                 ProviderAzure,
+			CPUPricePerHour:          0.042,
+			MemPricePerGBHour:        0.0055,
+			StoragePricePerGBMonth:   0.12, // Standard SSD
+			NetworkPricePerGB:        0.087,
 			LoadBalancerPricePerHour: 0.025,
 		}
 	default: // Generic
 		return PricingConfig{
-			Provider:         ProviderGeneric,
-			CPUPricePerHour:  0.04,
-			MemPricePerGBHour: 0.005,
-			StoragePricePerGBMonth: 0.10,
-			NetworkPricePerGB: 0.09,
+			Provider:                 ProviderGeneric,
+			CPUPricePerHour:          0.04,
+			MemPricePerGBHour:        0.005,
+			StoragePricePerGBMonth:   0.10,
+			NetworkPricePerGB:        0.09,
 			LoadBalancerPricePerHour: 0.025,
 		}
 	}
@@ -128,8 +128,8 @@ func getDefaultPricing(provider CloudProvider) PricingConfig {
 // CalculatePodCost calculates cost for a pod
 func (c *CostCalculator) CalculatePodCost(
 	name, namespace string,
-	cpuCores float64,    // CPU in cores
-	memoryGB float64,    // Memory in GB
+	cpuCores float64, // CPU in cores
+	memoryGB float64, // Memory in GB
 	hoursRunning float64, // Hours the pod has been running
 ) ResourceCost {
 	// CPU cost
@@ -142,17 +142,17 @@ func (c *CostCalculator) CalculatePodCost(
 	totalCostHour := (cpuCores * c.pricing.CPUPricePerHour) + (memoryGB * c.pricing.MemPricePerGBHour)
 
 	return ResourceCost{
-		ResourceType:  ResourceTypePod,
-		ResourceName:  name,
-		Namespace:     namespace,
-		CPUCost:       cpuCost,
-		MemoryCost:    memoryCost,
-		StorageCost:   0,
-		NetworkCost:   0,
-		TotalCostHour: totalCostHour,
-		TotalCostDay:  totalCostHour * 24,
+		ResourceType:   ResourceTypePod,
+		ResourceName:   name,
+		Namespace:      namespace,
+		CPUCost:        cpuCost,
+		MemoryCost:     memoryCost,
+		StorageCost:    0,
+		NetworkCost:    0,
+		TotalCostHour:  totalCostHour,
+		TotalCostDay:   totalCostHour * 24,
 		TotalCostMonth: totalCostHour * 24 * 30,
-		Timestamp:     time.Now(),
+		Timestamp:      time.Now(),
 	}
 }
 
@@ -168,15 +168,15 @@ func (c *CostCalculator) CalculateNodeCost(
 	totalCostHour := cpuCostHour + memoryCostHour
 
 	return ResourceCost{
-		ResourceType:  ResourceTypeNode,
-		ResourceName:  name,
-		Namespace:     "",
-		CPUCost:       cpuCostHour,
-		MemoryCost:    memoryCostHour,
-		TotalCostHour: totalCostHour,
-		TotalCostDay:  totalCostHour * 24,
+		ResourceType:   ResourceTypeNode,
+		ResourceName:   name,
+		Namespace:      "",
+		CPUCost:        cpuCostHour,
+		MemoryCost:     memoryCostHour,
+		TotalCostHour:  totalCostHour,
+		TotalCostDay:   totalCostHour * 24,
 		TotalCostMonth: totalCostHour * 24 * 30,
-		Timestamp:     time.Now(),
+		Timestamp:      time.Now(),
 	}
 }
 
@@ -190,16 +190,16 @@ func (c *CostCalculator) CalculatePVCCost(
 	storageCostHour := storageCostMonth / (24 * 30)
 
 	return ResourceCost{
-		ResourceType:  ResourceTypePVC,
-		ResourceName:  name,
-		Namespace:     namespace,
-		CPUCost:       0,
-		MemoryCost:    0,
-		StorageCost:   storageCostMonth,
-		TotalCostHour: storageCostHour,
-		TotalCostDay:  storageCostHour * 24,
+		ResourceType:   ResourceTypePVC,
+		ResourceName:   name,
+		Namespace:      namespace,
+		CPUCost:        0,
+		MemoryCost:     0,
+		StorageCost:    storageCostMonth,
+		TotalCostHour:  storageCostHour,
+		TotalCostDay:   storageCostHour * 24,
 		TotalCostMonth: storageCostMonth,
-		Timestamp:     time.Now(),
+		Timestamp:      time.Now(),
 	}
 }
 
@@ -218,17 +218,17 @@ func (c *CostCalculator) CalculateLoadBalancerCost(
 	totalCostHour := lbCostHour + networkCostHour
 
 	return ResourceCost{
-		ResourceType:  ResourceTypeLoadBalancer,
-		ResourceName:  name,
-		Namespace:     namespace,
-		CPUCost:       0,
-		MemoryCost:    0,
-		StorageCost:   0,
-		NetworkCost:   networkCostMonth,
-		TotalCostHour: totalCostHour,
-		TotalCostDay:  totalCostHour * 24,
+		ResourceType:   ResourceTypeLoadBalancer,
+		ResourceName:   name,
+		Namespace:      namespace,
+		CPUCost:        0,
+		MemoryCost:     0,
+		StorageCost:    0,
+		NetworkCost:    networkCostMonth,
+		TotalCostHour:  totalCostHour,
+		TotalCostDay:   totalCostHour * 24,
 		TotalCostMonth: totalCostHour * 24 * 30,
-		Timestamp:     time.Now(),
+		Timestamp:      time.Now(),
 	}
 }
 

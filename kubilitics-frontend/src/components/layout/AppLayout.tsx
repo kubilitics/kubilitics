@@ -14,6 +14,7 @@ import { useOfflineMode } from '@/hooks/useOfflineMode';
 import { analyticsService } from '@/services/analyticsService';
 import { cn } from '@/lib/utils';
 import { isTauri } from '@/lib/tauri';
+import { RouteErrorBoundary } from '@/components/GlobalErrorBoundary';
 
 export function AppLayout() {
   useRecentlyVisited();
@@ -104,10 +105,24 @@ export function AppLayout() {
           <div
             className={cn(
               'flex flex-col gap-4 min-h-0 flex-1 transition-opacity duration-200',
-              !isConnected && 'opacity-50 pointer-events-none select-none'
+              !isConnected && 'opacity-50 pointer-events-none select-none relative'
             )}
             aria-hidden={!isConnected}
           >
+            {!isConnected && (
+              <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-auto">
+                <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg p-6 shadow-lg text-center max-w-md">
+                  <p className="text-sm font-medium text-foreground mb-2">Not connected to cluster</p>
+                  <p className="text-xs text-muted-foreground mb-4">Please connect to a cluster to view content.</p>
+                  <Link
+                    to="/connect"
+                    className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                  >
+                    Connect Cluster
+                  </Link>
+                </div>
+              </div>
+            )}
             <motion.div
               key={location.pathname}
               initial={reduceMotion ? false : { opacity: 0, y: 8 }}
@@ -115,7 +130,12 @@ export function AppLayout() {
               transition={{ duration: reduceMotion ? 0 : 0.25, ease: 'easeOut' }}
               className="flex flex-col gap-4 min-h-0 flex-1"
             >
-              <Outlet />
+              <RouteErrorBoundary
+                routeName={location.pathname.split('/').pop()?.replace(/-/g, ' ')}
+                onGoBack={() => navigate(-1)}
+              >
+                <Outlet />
+              </RouteErrorBoundary>
             </motion.div>
           </div>
         </main>

@@ -340,12 +340,12 @@ func (a *ARIMA) mean(series []float64) float64 {
 // GetModelInfo returns information about the fitted model
 func (a *ARIMA) GetModelInfo() map[string]interface{} {
 	return map[string]interface{}{
-		"order":      []int{a.p, a.d, a.q},
-		"fitted":     a.fitted,
-		"ar_coeffs":  a.coefficients.AR,
-		"ma_coeffs":  a.coefficients.MA,
-		"constant":   a.coefficients.C,
-		"std_error":  a.calculateStdError(),
+		"order":       []int{a.p, a.d, a.q},
+		"fitted":      a.fitted,
+		"ar_coeffs":   a.coefficients.AR,
+		"ma_coeffs":   a.coefficients.MA,
+		"constant":    a.coefficients.C,
+		"std_error":   a.calculateStdError(),
 		"n_residuals": len(a.residuals),
 	}
 }

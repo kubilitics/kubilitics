@@ -185,36 +185,44 @@ export function useWorkloadsOverview() {
     refetchInterval: 30_000,
   });
 
-  // Always fetch resource lists when we have a cluster — used for fallback when backend workloads API fails or when backend not configured
+  // Fallback resource list queries: only fire when backend is NOT configured (direct K8s mode).
+  // When backend is configured, the backendQuery handles data — avoid 6 × limit:5000 requests.
+  const fallbackEnabled = !isBackendConfigured() && !!(activeCluster || clusterId);
   const deployments = useK8sResourceList('deployments', undefined, {
-    enabled: !!(activeCluster || clusterId),
-    limit: 5000,
-    refetchInterval: 60000,
+    enabled: fallbackEnabled,
+    limit: 500,
+    refetchInterval: false,
+    staleTime: 60_000,
   });
   const statefulsets = useK8sResourceList('statefulsets', undefined, {
-    enabled: !!(activeCluster || clusterId),
-    limit: 5000,
-    refetchInterval: 60000,
+    enabled: fallbackEnabled,
+    limit: 500,
+    refetchInterval: false,
+    staleTime: 60_000,
   });
   const daemonsets = useK8sResourceList('daemonsets', undefined, {
-    enabled: !!(activeCluster || clusterId),
-    limit: 5000,
-    refetchInterval: 60000,
+    enabled: fallbackEnabled,
+    limit: 500,
+    refetchInterval: false,
+    staleTime: 60_000,
   });
   const jobs = useK8sResourceList('jobs', undefined, {
-    enabled: !!(activeCluster || clusterId),
-    limit: 5000,
-    refetchInterval: 60000,
+    enabled: fallbackEnabled,
+    limit: 500,
+    refetchInterval: false,
+    staleTime: 60_000,
   });
   const cronjobs = useK8sResourceList('cronjobs', undefined, {
-    enabled: !!(activeCluster || clusterId),
-    limit: 5000,
-    refetchInterval: 60000,
+    enabled: fallbackEnabled,
+    limit: 500,
+    refetchInterval: false,
+    staleTime: 60_000,
   });
   const pods = useK8sResourceList('pods', undefined, {
-    enabled: !!(activeCluster || clusterId),
-    limit: 5000,
-    refetchInterval: 30000,
+    enabled: fallbackEnabled,
+    limit: 500,
+    refetchInterval: false,
+    staleTime: 30_000,
   });
   const overview = useClusterOverview(clusterId);
   const fallback = useMemo(() => {
@@ -224,7 +232,7 @@ export function useWorkloadsOverview() {
     const jobItems = (jobs.data?.items ?? []) as Record<string, unknown>[];
     const cjItems = (cronjobs.data?.items ?? []) as Record<string, unknown>[];
 
-    let podStatus = { running: 0, pending: 0, failed: 0, succeeded: 0 };
+    const podStatus = { running: 0, pending: 0, failed: 0, succeeded: 0 };
     const podItems = (pods.data?.items ?? []) as Array<{ status?: { phase?: string } }>;
     for (const p of podItems) {
       const phase = p?.status?.phase ?? '';

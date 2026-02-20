@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Upload, 
-  Search, 
-  CheckCircle2, 
-  Loader2, 
-  Server, 
+import {
+  Upload,
+  Search,
+  CheckCircle2,
+  Loader2,
+  Server,
   Database,
   ArrowRight,
   FileText,
@@ -16,13 +16,13 @@ import {
   Pause,
   RotateCcw,
 } from 'lucide-react';
-import { KubernetesLogo } from '@/components/icons/KubernetesIcons';
+import { KubiliticsLogo } from '../icons/KubernetesIcons';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 
-type DemoStep = 
+type DemoStep =
   | 'idle'
   | 'uploading'
   | 'parsing'
@@ -105,7 +105,7 @@ export function OnboardingDemo() {
         }
         setStep('parsing');
         break;
-      
+
       case 'parsing':
         setProgress(0);
         for (let i = 0; i <= 100; i += 10) {
@@ -114,25 +114,25 @@ export function OnboardingDemo() {
         }
         setStep('detecting');
         break;
-      
+
       case 'detecting':
         setProgress(0);
         await new Promise(r => setTimeout(r, 800));
         setStep('health-check');
         break;
-      
+
       case 'health-check':
         // Simulate health checks one by one
         for (let i = 0; i < demoClusters.length; i++) {
           await new Promise(r => setTimeout(r, 600));
-          setClusters(prev => prev.map((c, idx) => 
+          setClusters(prev => prev.map((c, idx) =>
             idx === i ? { ...c, status: idx === 1 ? 'warning' : 'healthy' } : c
           ));
         }
         await new Promise(r => setTimeout(r, 400));
         setStep('cluster-selection');
         break;
-      
+
       case 'cluster-selection':
         // Auto-select first cluster after a delay
         await new Promise(r => setTimeout(r, 1000));
@@ -140,7 +140,7 @@ export function OnboardingDemo() {
         await new Promise(r => setTimeout(r, 500));
         setStep('namespace-fetch');
         break;
-      
+
       case 'namespace-fetch':
         setProgress(0);
         for (let i = 0; i <= 100; i += 15) {
@@ -149,14 +149,14 @@ export function OnboardingDemo() {
         }
         setStep('namespace-selection');
         break;
-      
+
       case 'namespace-selection':
         await new Promise(r => setTimeout(r, 800));
         setSelectedNamespace('production');
         await new Promise(r => setTimeout(r, 600));
         setStep('connecting');
         break;
-      
+
       case 'connecting':
         setProgress(0);
         for (let i = 0; i <= 100; i += 8) {
@@ -327,8 +327,8 @@ export function OnboardingDemo() {
                     key={cluster.id}
                     className={cn(
                       "flex items-center gap-3 p-3 rounded-lg border transition-all",
-                      selectedCluster === cluster.id 
-                        ? 'border-primary bg-primary/5' 
+                      selectedCluster === cluster.id
+                        ? 'border-primary bg-primary/5'
                         : 'border-border bg-muted/30'
                     )}
                   >
@@ -405,8 +405,8 @@ export function OnboardingDemo() {
                     key={ns.name}
                     className={cn(
                       "flex items-center justify-between p-2.5 rounded-lg border transition-all",
-                      selectedNamespace === ns.name 
-                        ? 'border-primary bg-primary/5' 
+                      selectedNamespace === ns.name
+                        ? 'border-primary bg-primary/5'
                         : 'border-border bg-muted/30'
                     )}
                   >
@@ -454,7 +454,7 @@ export function OnboardingDemo() {
               exit={{ opacity: 0, scale: 0.95 }}
               className="flex-1 flex flex-col items-center justify-center text-center"
             >
-              <motion.div 
+              <motion.div
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 transition={{ type: 'spring', stiffness: 200, delay: 0.1 }}

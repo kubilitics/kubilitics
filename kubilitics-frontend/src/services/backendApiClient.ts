@@ -10,9 +10,9 @@ import { isTauri } from '@/lib/tauri';
 
 const API_PREFIX = '/api/v1';
 
-/** P1-3: Cooldown shorter in Tauri (local backend) so Retry is useful sooner. */
+/** P1-3: Cooldown longer to prevent banner flashing. Increased from 15s/60s to 30s/60s. */
 const BACKEND_DOWN_COOLDOWN_MS_BROWSER = 60_000;
-const BACKEND_DOWN_COOLDOWN_MS_TAURI = 15_000;
+const BACKEND_DOWN_COOLDOWN_MS_TAURI = 30_000;
 
 function getBackendDownCooldownMs(): number {
   return isTauri() ? BACKEND_DOWN_COOLDOWN_MS_TAURI : BACKEND_DOWN_COOLDOWN_MS_BROWSER;
@@ -22,6 +22,15 @@ let backendUnavailableUntil = 0;
 
 function isNetworkError(e: unknown): boolean {
   if (e instanceof TypeError && (e.message === 'Failed to fetch' || e.message?.includes('NetworkError'))) return true;
+  return false;
+}
+
+/** Check if error is CORS-related. CORS errors should NOT open circuit breaker. */
+function isCORSError(e: unknown): boolean {
+  if (e instanceof TypeError) {
+    const msg = e.message.toLowerCase();
+    return msg.includes('cors') || msg.includes('access control') || msg.includes('cross-origin');
+  }
   return false;
 }
 
@@ -134,12 +143,15 @@ export async function backendRequest<T>(
     });
   } catch (e) {
     // BA-3: Circuit breaker ONLY opens on network-level errors (ECONNREFUSED, Failed to fetch, timeout).
+    // CORS errors are configuration issues, not backend unavailability - don't open circuit.
     // HTTP 4xx (404, 401, 403) and 5xx responses must NOT open the circuit — these are application-level
     // errors (wrong cluster ID, auth failure, server error) not backend unavailability. Opening the circuit
     // on 404 would lock out the user for 60 seconds just because they navigated to a non-existent resource.
     // IMPORTANT: markBackendUnavailable() is ONLY called here in the network catch block, never in the
     // !response.ok path below. Any refactor that moves markBackendUnavailable() to the error path would break this.
-    if (isNetworkError(e)) markBackendUnavailable();
+    if (isNetworkError(e) && !isCORSError(e)) {
+      markBackendUnavailable();
+    }
     throw e;
   }
 
@@ -157,6 +169,29 @@ export async function backendRequest<T>(
       // P2-6: Use event so App can navigate via React Router; window.location.href breaks MemoryRouter (Tauri).
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('auth-logout'));
+      }
+    }
+
+    // Handle rate limiting (429) with user-visible feedback
+    if (response.status === 429) {
+      const retryAfter = response.headers.get('Retry-After');
+      const retryAfterSeconds = retryAfter ? parseInt(retryAfter, 10) : null;
+      const retryAfterMs = retryAfterSeconds ? retryAfterSeconds * 1000 : null;
+
+      // Show toast notification with retry information
+      const { toast } = await import('sonner');
+      const retryMessage = retryAfterSeconds
+        ? `Rate limit exceeded. Please retry after ${retryAfterSeconds} second${retryAfterSeconds !== 1 ? 's' : ''}.`
+        : 'Rate limit exceeded. Please retry in a moment.';
+      toast.error(retryMessage, {
+        duration: retryAfterMs ? Math.min(retryAfterMs, 10000) : 5000,
+      });
+
+      // If Retry-After is provided and reasonable, schedule automatic retry
+      if (retryAfterMs && retryAfterMs <= 30000) { // Only auto-retry if <= 30 seconds
+        await new Promise(resolve => setTimeout(resolve, retryAfterMs));
+        // Retry the request once
+        return backendRequest<T>(baseUrl, path, init);
       }
     }
 
@@ -448,6 +483,22 @@ export async function addClusterWithUpload(
 }
 
 /**
+ * POST /api/v1/clusters/{clusterId}/reconnect — reset circuit breaker and rebuild K8s client.
+ * Returns updated cluster (status "connected" on success).
+ * Call this when a cluster shows status "error" to recover without restarting the backend.
+ */
+export async function reconnectCluster(
+  baseUrl: string,
+  clusterId: string
+): Promise<BackendCluster> {
+  return backendRequest<BackendCluster>(
+    baseUrl,
+    `clusters/${encodeURIComponent(clusterId)}/reconnect`,
+    { method: 'POST' }
+  );
+}
+
+/**
  * GET /api/v1/clusters/{clusterId}/topology — get topology graph.
  * Optional query: namespace, resource_types.
  */
@@ -464,7 +515,7 @@ export async function getTopology(
   const path = `clusters/${encodeURIComponent(clusterId)}/topology${query ? `?${query}` : ''}`;
 
   try {
-    const result = await backendRequest<any>(baseUrl, path);
+    const result = await backendRequest<unknown>(baseUrl, path);
 
     if (!result) {
       throw new Error('Empty response from topology API');
@@ -506,7 +557,7 @@ export async function getResourceTopology(
   const path = `clusters/${encodeURIComponent(clusterId)}/topology/resource/${encodeURIComponent(kind)}/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`;
 
   try {
-    const result = await backendRequest<any>(baseUrl, path);
+    const result = await backendRequest<unknown>(baseUrl, path);
     if (!result) throw new Error('Empty response from topology API');
 
     const transformedGraph = adaptTopologyGraph(result);
@@ -561,7 +612,10 @@ export async function getHealth(
     // BA-4: 5s timeout prevents hanging if backend accepts connection but doesn't respond (e.g. DB migration blocking).
     response = await fetch(url, { signal: AbortSignal.timeout(5000) });
   } catch (e) {
-    if (isNetworkError(e)) markBackendUnavailable();
+    // Don't open circuit on CORS errors - these are config issues, not backend down
+    if (isNetworkError(e) && !isCORSError(e)) {
+      markBackendUnavailable();
+    }
     throw e;
   }
   const body = await response.text();
@@ -986,7 +1040,10 @@ export async function getEvents(
   if (params?.limit != null) search.set('limit', String(params.limit));
   const query = search.toString();
   const path = `clusters/${encodeURIComponent(clusterId)}/events${query ? `?${query}` : ''}`;
-  return backendRequest<BackendEvent[]>(baseUrl, path);
+  // Backend might return { items: [...] } or just [...]
+  const res = await backendRequest<BackendEvent[] | { items: BackendEvent[] }>(baseUrl, path);
+  if (Array.isArray(res)) return res;
+  return (res as { items: BackendEvent[] }).items || [];
 }
 
 /**
@@ -1007,7 +1064,9 @@ export async function getResourceEvents(
   search.set('involvedObjectName', name);
   search.set('limit', String(limit));
   const path = `clusters/${encodeURIComponent(clusterId)}/events?${search.toString()}`;
-  return backendRequest<BackendEvent[]>(baseUrl, path);
+  const res = await backendRequest<BackendEvent[] | { items: BackendEvent[] }>(baseUrl, path);
+  if (Array.isArray(res)) return res;
+  return (res as { items: BackendEvent[] }).items || [];
 }
 
 /** Per-container metrics from pod metrics API. */
@@ -1326,6 +1385,7 @@ export interface ShellStatusResult {
 }
 
 /** Response from GET /api/v1/clusters/{clusterId}/kcli/tui/state */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface KCLITUIStateResult extends ShellStatusResult { }
 
 /**

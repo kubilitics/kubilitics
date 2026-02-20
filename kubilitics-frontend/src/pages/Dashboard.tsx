@@ -1,6 +1,10 @@
 import { motion } from 'framer-motion';
-import { Zap } from 'lucide-react';
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Zap, AlertCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useClusterStore } from '@/stores/clusterStore';
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { cn } from '@/lib/utils';
 import { LiveSignalStrip } from '@/components/dashboard/LiveSignalStrip';
 import { DashboardHero } from '@/components/dashboard/DashboardHero';
@@ -11,6 +15,7 @@ import { WorkloadCapacitySnapshot } from '@/components/dashboard/WorkloadCapacit
 import { HealthScoreCard } from '@/components/dashboard/HealthScoreCard';
 import { ClusterDetailsPanel } from '@/components/dashboard/ClusterDetailsPanel';
 import { DashboardTour, useDashboardTour } from '@/components/onboarding/DashboardTour';
+import { useClusterOverview } from '@/hooks/useClusterOverview';
 
 const container = {
   hidden: { opacity: 0 },
@@ -26,11 +31,36 @@ const item = {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { activeCluster } = useClusterStore();
+  const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
   const { showTour, completeTour, skipTour } = useDashboardTour();
+  
+  // Test cluster accessibility - redirect to connect if cluster is invalid
+  const overviewQuery = useClusterOverview(currentClusterId || undefined);
+
+  useEffect(() => {
+    // If cluster overview fails with 404/503, redirect to connect page
+    if (overviewQuery.error && overviewQuery.isError) {
+      const error = overviewQuery.error as any;
+      if (error?.status === 404 || error?.status === 503 || error?.status === 500) {
+        console.warn(`[Dashboard] Cluster ${currentClusterId} is not accessible (${error.status}). Redirecting to connect page.`);
+        navigate('/connect', { replace: true });
+      }
+    }
+  }, [overviewQuery.error, overviewQuery.isError, currentClusterId, navigate]);
 
   if (!activeCluster) {
-    return null;
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <AlertCircle className="h-12 w-12 text-muted-foreground" />
+        <h2 className="text-xl font-semibold">No cluster selected</h2>
+        <p className="text-muted-foreground">Please connect to a cluster to view the dashboard.</p>
+        <Button onClick={() => navigate('/connect')} variant="default">
+          Connect Cluster
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -86,7 +116,7 @@ export default function Dashboard() {
             variants={item}
             className={cn(
               'grid gap-4 md:gap-5',
-              'grid-cols-1 lg:grid-cols-[30%_1fr_25%]',
+              'grid-cols-1 lg:grid-cols-[minmax(0,30%)_1fr_minmax(0,25%)]',
               'min-h-0'
             )}
             style={{ minHeight: 'min(460px, 52vh)' }}

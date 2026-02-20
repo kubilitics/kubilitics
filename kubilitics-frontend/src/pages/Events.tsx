@@ -207,7 +207,20 @@ export default function Events() {
     return { total, warning, errors, resourcesAffected };
   }, [rawRows]);
 
-  /* Pagination removed for virtualization */
+  /* Pagination removed for virtualization, but kept compatible object for UI */
+  const pagination = {
+    rangeLabel: `${filteredRows.length} events`,
+    hasPrev: false,
+    hasNext: false,
+    onPrev: () => { },
+    onNext: () => { },
+    currentPage: 1,
+    totalPages: 1,
+    onPageChange: () => { },
+    dataUpdatedAt: eventsQuery.dataUpdatedAt,
+    isFetching: eventsQuery.isFetching,
+  };
+
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
   return (

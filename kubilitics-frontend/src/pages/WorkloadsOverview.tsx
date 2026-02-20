@@ -50,6 +50,7 @@ import { getDetailPath } from '@/utils/resourceKindMapper';
 import { ConnectionRequiredBanner } from '@/components/layout/ConnectionRequiredBanner';
 import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
 import { useColumnVisibility } from '@/hooks/useColumnVisibility';
+import { SectionOverviewHeader } from '@/components/layout/SectionOverviewHeader';
 
 const KIND_ICONS: Record<string, typeof Container> = {
   Deployment: Container,
@@ -244,29 +245,12 @@ export default function WorkloadsOverview() {
       <ConnectionRequiredBanner />
 
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
-            Workloads Overview
-          </h1>
-          <p className="text-muted-foreground mt-1 flex items-center gap-2">
-            AI-powered visibility across cluster resource performance and health
-            <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20">
-              Live
-            </Badge>
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" className="gap-2" onClick={handleSync} disabled={isSyncing}>
-            <RefreshCcw className={cn("h-4 w-4", isSyncing && "animate-spin")} />
-            {isSyncing ? 'Syncing...' : 'Sync Resources'}
-          </Button>
-          <Button className="gap-2 bg-gradient-to-r from-primary to-blue-600 shadow-lg shadow-primary/20">
-            <Zap className="h-4 w-4" />
-            AI Recommendations
-          </Button>
-        </div>
-      </div>
+      <SectionOverviewHeader
+        title="Workloads Overview"
+        description="AI-powered visibility across cluster resource performance and health"
+        onSync={handleSync}
+        isSyncing={isSyncing}
+      />
 
       {/* Workload Health Pulse + Alerts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -574,7 +558,7 @@ export default function WorkloadsOverview() {
                             filterable={false}
                             distinctValues={[]}
                             selectedFilterValues={new Set()}
-                            onFilterChange={() => {}}
+                            onFilterChange={() => { }}
                           />
                         </th>
                       )}
@@ -619,7 +603,7 @@ export default function WorkloadsOverview() {
                             filterable={false}
                             distinctValues={[]}
                             selectedFilterValues={new Set()}
-                            onFilterChange={() => {}}
+                            onFilterChange={() => { }}
                           />
                         </th>
                       )}
@@ -703,8 +687,8 @@ export default function WorkloadsOverview() {
                       const pressureColor = PRESSURE_COLORS[w.pressure] ?? 'text-muted-foreground';
                       const pressureLabel =
                         w.pressure === 'Low' || w.pressure === 'Normal' ? 'Normal' :
-                        w.pressure === 'Medium' || w.pressure === 'Elevated' ? 'Elevated' :
-                        w.pressure === 'Zero' || w.pressure === 'Idle' ? 'Idle' : w.pressure;
+                          w.pressure === 'Medium' || w.pressure === 'Elevated' ? 'Elevated' :
+                            w.pressure === 'Zero' || w.pressure === 'Idle' ? 'Idle' : w.pressure;
                       const key = getWorkloadKey(w);
                       const isSelected = selectedItems.has(key);
 

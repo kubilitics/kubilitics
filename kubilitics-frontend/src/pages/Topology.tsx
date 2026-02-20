@@ -245,7 +245,7 @@ export default function Topology() {
       replicas: n.computed?.replicas?.ready,
     })), []);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const toAIEdges = useCallback((edges: Array<{ source: string; target: string; relationshipType: string }>): AIEdgeSummary[] =>
     edges.map(e => ({
       source: e.source,

@@ -193,7 +193,7 @@ func pctStr(v float64) string {
 	if float64(i) == v {
 		s = intStr(i)
 	} else {
-		s = intStr(int(v*10)) // 1 decimal place
+		s = intStr(int(v * 10)) // 1 decimal place
 		s = s[:len(s)-1] + "." + s[len(s)-1:]
 	}
 	return s

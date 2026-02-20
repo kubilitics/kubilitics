@@ -65,6 +65,15 @@ func DefaultConfig() *Config {
 	cfg.Logging.Level = "info"
 	cfg.Logging.Format = "json"
 
+	// MCP defaults — always enabled; MCP is the core tool layer for cluster intelligence.
+	cfg.MCP.Enabled = true
+
+	// Safety defaults — enabled by default
+	cfg.Safety.Enabled = true
+
+	// Analytics defaults — enabled by default
+	cfg.Analytics.Enabled = true
+
 	// Budget defaults
 	cfg.Budget.GlobalMonthlyBudget = 0.0 // 0 means no limit
 	cfg.Budget.PerUserMonthlyBudget = 0.0

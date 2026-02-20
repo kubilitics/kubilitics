@@ -12,11 +12,11 @@ const (
 	EventInvestigationFailed    EventType = "investigation.failed"
 
 	// Action events
-	EventActionProposed  EventType = "action.proposed"
-	EventActionApproved  EventType = "action.approved"
-	EventActionRejected  EventType = "action.rejected"
-	EventActionExecuted  EventType = "action.executed"
-	EventActionFailed    EventType = "action.failed"
+	EventActionProposed EventType = "action.proposed"
+	EventActionApproved EventType = "action.approved"
+	EventActionRejected EventType = "action.rejected"
+	EventActionExecuted EventType = "action.executed"
+	EventActionFailed   EventType = "action.failed"
 
 	// Configuration events
 	EventConfigLoaded  EventType = "config.loaded"
@@ -47,30 +47,30 @@ const (
 // Event represents a single audit event
 type Event struct {
 	// Core fields
-	Timestamp     time.Time         `json:"timestamp"`
-	CorrelationID string            `json:"correlation_id"`
-	EventType     EventType         `json:"event_type"`
-	Result        Result            `json:"result"`
-	
+	Timestamp     time.Time `json:"timestamp"`
+	CorrelationID string    `json:"correlation_id"`
+	EventType     EventType `json:"event_type"`
+	Result        Result    `json:"result"`
+
 	// Actor information
 	User      string `json:"user,omitempty"`
 	UserAgent string `json:"user_agent,omitempty"`
 	SourceIP  string `json:"source_ip,omitempty"`
-	
+
 	// Resource information
 	Resource     string `json:"resource,omitempty"`
 	ResourceType string `json:"resource_type,omitempty"`
 	Namespace    string `json:"namespace,omitempty"`
-	
+
 	// Action details
 	Action      string                 `json:"action,omitempty"`
 	Description string                 `json:"description,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	
+
 	// Error information
-	Error      string `json:"error,omitempty"`
-	ErrorCode  string `json:"error_code,omitempty"`
-	
+	Error     string `json:"error,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
+
 	// Duration tracking
 	DurationMs int64 `json:"duration_ms,omitempty"`
 }

@@ -1,35 +1,39 @@
 /**
  * Fetches cluster list from Kubilitics backend (GET /api/v1/clusters).
- * When gateOnHealth is true (Connect page only): run health first, then clusters — avoids request storm when backend is down.
- * When gateOnHealth is false (default): run clusters immediately so HomePage, ProjectDetail, dialogs get clusters without delay.
+ * 
+ * Performance optimization: Removed gateOnHealth - use circuit breaker instead.
+ * This allows clusters query to run in parallel with health check, reducing startup time.
+ * Circuit breaker prevents request storms when backend is down.
  */
 import { useQuery } from '@tanstack/react-query';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { getClusters } from '@/services/backendApiClient';
 import { useBackendCircuitOpen } from '@/hooks/useBackendCircuitOpen';
-import { useBackendHealth } from '@/hooks/useBackendHealth';
 
 export interface UseClustersFromBackendOptions {
-  /** When true, clusters fetch only after health succeeds (use only on Connect page to avoid storm). Default false. */
+  /** @deprecated Use circuit breaker instead - removed health gating for parallel execution */
   gateOnHealth?: boolean;
 }
 
 export function useClustersFromBackend(options?: UseClustersFromBackendOptions) {
-  const gateOnHealth = options?.gateOnHealth === true;
   const stored = useBackendConfigStore((s) => s.backendBaseUrl);
   const backendBaseUrl = getEffectiveBackendBaseUrl(stored);
   const isConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
   const circuitOpen = useBackendCircuitOpen();
-  const health = useBackendHealth({ enabled: gateOnHealth, gateOnHealth });
 
-  const enabled = gateOnHealth
-    ? isConfigured && !circuitOpen && health.isSuccess
-    : isConfigured && !circuitOpen;
+  // Removed gateOnHealth - circuit breaker handles backend down scenarios
+  // This allows clusters query to run in parallel with health check
+  const enabled = isConfigured && !circuitOpen;
 
   return useQuery({
     queryKey: ['backend', 'clusters', backendBaseUrl],
     queryFn: () => getClusters(backendBaseUrl),
     enabled,
-    staleTime: 30_000,
+    staleTime: 60_000, // Allow showing stale data immediately
+    // Use placeholderData to show cached clusters immediately while fresh data loads
+    placeholderData: (previousData) => previousData,
+    // Retry with exponential backoff - circuit breaker will prevent storms
+    retry: 2,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000),
   });
 }

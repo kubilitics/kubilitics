@@ -341,10 +341,8 @@ export function CostDashboard() {
   };
 
   // ─── Render ────────────────────────────────────────────────────────────────
-
-  if (isLoading && !overview) {
-    return <PageLoadingState message="Analyzing cost data..." />;
-  }
+  // Show UI immediately - don't block on loading
+  // Empty states will handle no data scenarios gracefully
 
   return (
     <div className="container mx-auto p-6 space-y-6">

@@ -27,38 +27,25 @@ import {
   AlertTriangle,
   Container,
   Clock,
-  Loader2,
   Cpu,
   Lock,
   Zap,
   Camera,
   ClipboardList,
-  HardDrive as StorageIcon
+  HardDrive as StorageIcon,
+  Bot,
+  BarChart3,
+  DollarSign,
+  ShieldAlert,
+  Brain,
 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useResourceCounts } from '@/hooks/useResourceCounts';
 import { useMetalLBInstalled } from '@/hooks/useMetalLBInstalled';
+import { useAIStatus } from '@/hooks/useAIStatus';
+import { useUIStore } from '@/stores/uiStore';
 
-const SIDEBAR_COLLAPSED_KEY = 'kubilitics-sidebar-collapsed';
-
-function useSidebarCollapsed() {
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
-    } catch {
-      /* ignore */
-    }
-  }, [collapsed]);
-  return [collapsed, setCollapsed] as const;
-}
 
 interface NavItemProps {
   to: string;
@@ -72,16 +59,30 @@ interface NavItemProps {
 function NavItem({ to, icon: Icon, label, count, onNavigate }: NavItemProps) {
   const location = useLocation();
   const isActive = location.pathname === to || location.pathname.startsWith(`${to}/`);
+  const itemRef = useRef<HTMLAnchorElement>(null);
+
+  useEffect(() => {
+    if (isActive && itemRef.current) {
+      // Small delay to ensure any accordion animation has started/completed
+      const timer = setTimeout(() => {
+        if (itemRef.current) {
+          itemRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [isActive]);
 
   return (
     <NavLink
+      ref={itemRef}
       to={to}
       onClick={onNavigate}
       className={cn(
         'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 group relative overflow-hidden',
         isActive
-          ? 'text-primary bg-primary/5'
-          : 'text-foreground hover:bg-muted/50'
+          ? 'text-primary bg-primary/10 border-primary/20 shadow-sm'
+          : 'text-foreground hover:bg-muted/50 border-transparent hover:border-border/50'
       )}
     >
       {/* Active Indicator Line */}
@@ -242,36 +243,44 @@ function isPathIn(pathname: string, prefixes: string[]) {
   return prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
-/** Shows "Syncing resources..." for max 10s to avoid endless loading when queries hang */
-function SyncingIndicator({ isLoading }: { isLoading: boolean }) {
+/** Subtle background sync indicator - only shows on initial load, not background refresh */
+function SyncingIndicator({ isLoading, isInitialLoad }: { isLoading: boolean; isInitialLoad: boolean }) {
+  // Only show on initial load, not during background refresh
+  // Headlamp/Lens style: background syncing happens silently without disrupting UX
+  if (!isInitialLoad) return null;
+
+  // Only show for a brief moment on initial load (max 3s)
   const [show, setShow] = useState(false);
   useEffect(() => {
-    if (isLoading) {
+    if (isLoading && isInitialLoad) {
       setShow(true);
-      const id = setTimeout(() => setShow(false), 10000);
+      const id = setTimeout(() => setShow(false), 3000); // Max 3s for initial load
       return () => clearTimeout(id);
     } else {
       setShow(false);
     }
-  }, [isLoading]);
+  }, [isLoading, isInitialLoad]);
+
   if (!isLoading || !show) return null;
+
+  // Very subtle indicator - small dot in corner, not prominent banner
   return (
-    <div className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-blue-600 bg-blue-50/50 dark:bg-blue-950/30 dark:text-blue-400 rounded-lg animate-pulse border border-blue-100 dark:border-blue-900/50">
-      <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-      <span>Syncing resources...</span>
+    <div className="flex items-center justify-center px-2 py-1">
+      <div className="h-1.5 w-1.5 rounded-full bg-blue-500/60 animate-pulse" title="Loading resources..." />
     </div>
   );
 }
 
 const WORKLOAD_PATHS = ['/pods', '/deployments', '/replicasets', '/statefulsets', '/daemonsets', '/jobs', '/cronjobs', '/podtemplates', '/controllerrevisions', '/resourceslices', '/deviceclasses', '/device-classes'];
-const NETWORKING_PATHS = ['/services', '/ingresses', '/ingressclasses', '/endpoints', '/endpointslices', '/networkpolicies', '/ipaddresspools', '/bgppeers'];
-const STORAGE_PATHS = ['/configmaps', '/secrets', '/persistentvolumes', '/persistentvolumeclaims', '/storageclasses', '/volumeattachments', '/volumesnapshots', '/volume-snapshots', '/volumesnapshotclasses', '/volume-snapshot-classes', '/volumesnapshotcontents', '/volume-snapshot-contents'];
-const CLUSTER_PATHS = ['/nodes', '/namespaces', '/events', '/apiservices', '/leases'];
-const SECURITY_PATHS = ['/serviceaccounts', '/roles', '/clusterroles', '/rolebindings', '/clusterrolebindings', '/priorityclasses'];
-const RESOURCES_PATHS = ['/resourcequotas', '/limitranges'];
-const SCALING_PATHS = ['/horizontalpodautoscalers', '/verticalpodautoscalers', '/poddisruptionbudgets'];
-const CRD_PATHS = ['/customresourcedefinitions', '/customresources'];
-const ADMISSION_PATHS = ['/mutatingwebhooks', '/validatingwebhooks'];
+const NETWORKING_PATHS = ['/networking', '/services', '/ingresses', '/ingressclasses', '/endpoints', '/endpointslices', '/networkpolicies', '/ipaddresspools', '/bgppeers'];
+const STORAGE_PATHS = ['/storage', '/configmaps', '/secrets', '/persistentvolumes', '/persistentvolumeclaims', '/storageclasses', '/volumeattachments', '/volumesnapshots', '/volume-snapshots', '/volumesnapshotclasses', '/volume-snapshot-classes', '/volumesnapshotcontents', '/volume-snapshot-contents'];
+const CLUSTER_PATHS = ['/cluster-overview', '/nodes', '/namespaces', '/events', '/apiservices', '/leases'];
+const SECURITY_PATHS = ['/security-overview', '/serviceaccounts', '/roles', '/clusterroles', '/rolebindings', '/clusterrolebindings', '/priorityclasses'];
+const RESOURCES_PATHS = ['/resources', '/resourcequotas', '/limitranges'];
+const SCALING_PATHS = ['/scaling', '/horizontalpodautoscalers', '/verticalpodautoscalers', '/poddisruptionbudgets'];
+const CRD_PATHS = ['/crds', '/customresourcedefinitions', '/customresources'];
+const ADMISSION_PATHS = ['/admission', '/mutatingwebhooks', '/validatingwebhooks'];
+const AI_PATHS = ['/analytics', '/security', '/cost', '/ml-analytics'];
 
 // Section identifiers for accordion state management
 const SECTION_IDS = {
@@ -284,6 +293,7 @@ const SECTION_IDS = {
   SCALING: 'scaling',
   CRDS: 'crds',
   ADMISSION: 'admission',
+  AI: 'ai',
 } as const;
 
 type SectionId = typeof SECTION_IDS[keyof typeof SECTION_IDS] | null;
@@ -299,17 +309,22 @@ function getSectionForPath(pathname: string): SectionId {
   if (isPathIn(pathname, SCALING_PATHS)) return SECTION_IDS.SCALING;
   if (isPathIn(pathname, CRD_PATHS)) return SECTION_IDS.CRDS;
   if (isPathIn(pathname, ADMISSION_PATHS)) return SECTION_IDS.ADMISSION;
+  if (isPathIn(pathname, AI_PATHS)) return SECTION_IDS.AI;
   return null; // Dashboard, Settings, etc.
 }
 
 function SidebarContent({
   counts,
   isLoading,
+  isInitialLoad,
   metallbInstalled,
+  aiActive,
 }: {
   counts: ReturnType<typeof useResourceCounts>['counts'];
   isLoading: boolean;
+  isInitialLoad: boolean;
   metallbInstalled: boolean;
+  aiActive: boolean;
 }) {
   const location = useLocation();
   const pathname = location.pathname;
@@ -332,9 +347,13 @@ function SidebarContent({
   }, [pathname]);
 
   // Handle section toggle: if clicking the same section, close it; otherwise open new and close others
-  const handleSectionToggle = (sectionId: string) => {
+  const handleSectionToggle = (sectionId: string, forceOpen: boolean = false) => {
     setOpenSection((current) => {
-      // If clicking the already-open section, close it
+      // If force open is requested (e.g. from a NavLink click), ensure it's open
+      if (forceOpen) {
+        return sectionId as SectionId;
+      }
+      // Otherwise, toggle: if clicking the already-open section, close it
       if (current === sectionId) {
         return null;
       }
@@ -391,10 +410,28 @@ function SidebarContent({
         </NavLink>
       </div>
 
-      {/* Connection indicator — cap display at 10s to avoid endless "Syncing" when queries hang */}
-      <SyncingIndicator isLoading={isLoading} />
+      {/* Subtle background sync indicator - only on initial load, not background refresh */}
+      <SyncingIndicator isLoading={isLoading} isInitialLoad={isInitialLoad} />
 
       <div className="space-y-5">
+        {/* AI Intelligence — only shown when AI backend is active */}
+        {aiActive && (
+          <NavGroup
+            label="AI Intelligence"
+            sectionId={SECTION_IDS.AI}
+            to="/analytics"
+            icon={Bot}
+            isOpen={openSection === SECTION_IDS.AI}
+            onToggle={(id) => handleSectionToggle(id, true)}
+            isSectionActive={getSectionForPath(pathname) === SECTION_IDS.AI}
+          >
+            <NavItem to="/analytics" icon={BarChart3} label="Analytics Overview" onNavigate={() => handleNavItemClick(SECTION_IDS.AI)} />
+            <NavItem to="/security" icon={ShieldAlert} label="Security Insights" onNavigate={() => handleNavItemClick(SECTION_IDS.AI)} />
+            <NavItem to="/cost" icon={DollarSign} label="Cost Analysis" onNavigate={() => handleNavItemClick(SECTION_IDS.AI)} />
+            <NavItem to="/ml-analytics" icon={Brain} label="ML Analytics" onNavigate={() => handleNavItemClick(SECTION_IDS.AI)} />
+          </NavGroup>
+        )}
+
         {/* Workloads */}
         <NavGroup
           label="Workloads"
@@ -402,8 +439,8 @@ function SidebarContent({
           to="/workloads"
           icon={Cpu}
           isOpen={openSection === SECTION_IDS.WORKLOADS}
-          onToggle={handleSectionToggle}
-          isSectionActive={isPathIn(pathname, WORKLOAD_PATHS) || pathname === '/workloads'}
+          onToggle={(id) => handleSectionToggle(id, true)}
+          isSectionActive={getSectionForPath(pathname) === SECTION_IDS.WORKLOADS}
         >
           <NavItem to="/pods" icon={Box} label="Pods" count={counts.pods} onNavigate={() => handleNavItemClick(SECTION_IDS.WORKLOADS)} />
           <NavItem to="/deployments" icon={Container} label="Deployments" count={counts.deployments} onNavigate={() => handleNavItemClick(SECTION_IDS.WORKLOADS)} />
@@ -422,10 +459,11 @@ function SidebarContent({
         <NavGroup
           label="Networking"
           sectionId={SECTION_IDS.NETWORKING}
+          to="/networking"
           icon={Globe}
           isOpen={openSection === SECTION_IDS.NETWORKING}
-          onToggle={handleSectionToggle}
-          isSectionActive={isPathIn(pathname, NETWORKING_PATHS)}
+          onToggle={(id) => handleSectionToggle(id, true)}
+          isSectionActive={getSectionForPath(pathname) === SECTION_IDS.NETWORKING}
         >
           <NavItem to="/services" icon={Globe} label="Services" count={counts.services} onNavigate={() => handleNavItemClick(SECTION_IDS.NETWORKING)} />
           <NavItem to="/ingresses" icon={Globe} label="Ingresses" count={counts.ingresses} onNavigate={() => handleNavItemClick(SECTION_IDS.NETWORKING)} />
@@ -445,10 +483,11 @@ function SidebarContent({
         <NavGroup
           label="Storage"
           sectionId={SECTION_IDS.STORAGE}
+          to="/storage"
           icon={StorageIcon}
           isOpen={openSection === SECTION_IDS.STORAGE}
-          onToggle={handleSectionToggle}
-          isSectionActive={isPathIn(pathname, STORAGE_PATHS)}
+          onToggle={(id) => handleSectionToggle(id, true)}
+          isSectionActive={getSectionForPath(pathname) === SECTION_IDS.STORAGE}
         >
           <NavItem to="/configmaps" icon={Settings} label="ConfigMaps" count={counts.configmaps} onNavigate={() => handleNavItemClick(SECTION_IDS.STORAGE)} />
           <NavItem to="/secrets" icon={Key} label="Secrets" count={counts.secrets} onNavigate={() => handleNavItemClick(SECTION_IDS.STORAGE)} />
@@ -465,10 +504,11 @@ function SidebarContent({
         <NavGroup
           label="Cluster"
           sectionId={SECTION_IDS.CLUSTER}
+          to="/cluster-overview"
           icon={Server}
           isOpen={openSection === SECTION_IDS.CLUSTER}
-          onToggle={handleSectionToggle}
-          isSectionActive={isPathIn(pathname, CLUSTER_PATHS)}
+          onToggle={(id) => handleSectionToggle(id, true)}
+          isSectionActive={getSectionForPath(pathname) === SECTION_IDS.CLUSTER}
         >
           <NavItem to="/nodes" icon={Server} label="Nodes" count={counts.nodes} onNavigate={() => handleNavItemClick(SECTION_IDS.CLUSTER)} />
           <NavItem to="/namespaces" icon={FileText} label="Namespaces" count={counts.namespaces} onNavigate={() => handleNavItemClick(SECTION_IDS.CLUSTER)} />
@@ -481,10 +521,11 @@ function SidebarContent({
         <NavGroup
           label="Security"
           sectionId={SECTION_IDS.SECURITY}
+          to="/security-overview"
           icon={Lock}
           isOpen={openSection === SECTION_IDS.SECURITY}
-          onToggle={handleSectionToggle}
-          isSectionActive={isPathIn(pathname, SECURITY_PATHS)}
+          onToggle={(id) => handleSectionToggle(id, true)}
+          isSectionActive={getSectionForPath(pathname) === SECTION_IDS.SECURITY}
         >
           <NavItem to="/serviceaccounts" icon={Users} label="Service Accounts" count={counts.serviceaccounts} onNavigate={() => handleNavItemClick(SECTION_IDS.SECURITY)} />
           <NavItem to="/roles" icon={Shield} label="Roles" count={counts.roles} onNavigate={() => handleNavItemClick(SECTION_IDS.SECURITY)} />
@@ -498,10 +539,11 @@ function SidebarContent({
         <NavGroup
           label="Resources"
           sectionId={SECTION_IDS.RESOURCES}
+          to="/resources"
           icon={Gauge}
           isOpen={openSection === SECTION_IDS.RESOURCES}
-          onToggle={handleSectionToggle}
-          isSectionActive={isPathIn(pathname, RESOURCES_PATHS)}
+          onToggle={(id) => handleSectionToggle(id, true)}
+          isSectionActive={getSectionForPath(pathname) === SECTION_IDS.RESOURCES}
         >
           <NavItem to="/resourcequotas" icon={Gauge} label="Resource Quotas" count={counts.resourcequotas} onNavigate={() => handleNavItemClick(SECTION_IDS.RESOURCES)} />
           <NavItem to="/limitranges" icon={Scale} label="Limit Ranges" count={counts.limitranges} onNavigate={() => handleNavItemClick(SECTION_IDS.RESOURCES)} />
@@ -511,10 +553,11 @@ function SidebarContent({
         <NavGroup
           label="Scaling"
           sectionId={SECTION_IDS.SCALING}
+          to="/scaling"
           icon={Zap}
           isOpen={openSection === SECTION_IDS.SCALING}
-          onToggle={handleSectionToggle}
-          isSectionActive={isPathIn(pathname, SCALING_PATHS)}
+          onToggle={(id) => handleSectionToggle(id, true)}
+          isSectionActive={getSectionForPath(pathname) === SECTION_IDS.SCALING}
         >
           <NavItem to="/horizontalpodautoscalers" icon={Scale} label="HPAs" count={counts.horizontalpodautoscalers} onNavigate={() => handleNavItemClick(SECTION_IDS.SCALING)} />
           <NavItem to="/verticalpodautoscalers" icon={Scale} label="VPAs" count={counts.verticalpodautoscalers} onNavigate={() => handleNavItemClick(SECTION_IDS.SCALING)} />
@@ -525,10 +568,11 @@ function SidebarContent({
         <NavGroup
           label="CRDs"
           sectionId={SECTION_IDS.CRDS}
+          to="/crds"
           icon={FileCode}
           isOpen={openSection === SECTION_IDS.CRDS}
-          onToggle={handleSectionToggle}
-          isSectionActive={isPathIn(pathname, CRD_PATHS)}
+          onToggle={(id) => handleSectionToggle(id, true)}
+          isSectionActive={getSectionForPath(pathname) === SECTION_IDS.CRDS}
         >
           <NavItem to="/customresourcedefinitions" icon={FileCode} label="Definitions" count={counts.customresourcedefinitions} onNavigate={() => handleNavItemClick(SECTION_IDS.CRDS)} />
           <NavItem to="/customresources" icon={FileCode} label="Instances" onNavigate={() => handleNavItemClick(SECTION_IDS.CRDS)} />
@@ -538,10 +582,11 @@ function SidebarContent({
         <NavGroup
           label="Admission"
           sectionId={SECTION_IDS.ADMISSION}
+          to="/admission"
           icon={Webhook}
           isOpen={openSection === SECTION_IDS.ADMISSION}
-          onToggle={handleSectionToggle}
-          isSectionActive={isPathIn(pathname, ADMISSION_PATHS)}
+          onToggle={(id) => handleSectionToggle(id, true)}
+          isSectionActive={getSectionForPath(pathname) === SECTION_IDS.ADMISSION}
         >
           <NavItem to="/mutatingwebhooks" icon={Webhook} label="Mutating Webhooks" count={counts.mutatingwebhookconfigurations} onNavigate={() => handleNavItemClick(SECTION_IDS.ADMISSION)} />
           <NavItem to="/validatingwebhooks" icon={Webhook} label="Validating Webhooks" count={counts.validatingwebhookconfigurations} onNavigate={() => handleNavItemClick(SECTION_IDS.ADMISSION)} />
@@ -551,13 +596,18 @@ function SidebarContent({
   );
 }
 
-const SECTION_ROUTES = ['/workloads', '/topology', ...WORKLOAD_PATHS, ...NETWORKING_PATHS, ...STORAGE_PATHS, ...CLUSTER_PATHS, ...SECURITY_PATHS, ...RESOURCES_PATHS, ...SCALING_PATHS, ...CRD_PATHS, ...ADMISSION_PATHS];
+const SECTION_ROUTES = ['/workloads', '/topology', ...WORKLOAD_PATHS, ...NETWORKING_PATHS, ...STORAGE_PATHS, ...CLUSTER_PATHS, ...SECURITY_PATHS, ...RESOURCES_PATHS, ...SCALING_PATHS, ...CRD_PATHS, ...ADMISSION_PATHS, ...AI_PATHS];
 
 
 export function Sidebar() {
-  const { counts, isLoading } = useResourceCounts();
+  const { counts, isLoading, isInitialLoad } = useResourceCounts();
   const { installed: metallbInstalled } = useMetalLBInstalled();
-  const [collapsed, setCollapsed] = useSidebarCollapsed();
+  const aiStatus = useAIStatus();
+  // Show AI section when AI is active (configured + reachable). Also show when unconfigured
+  // so users know AI features exist and can set them up.
+  const aiActive = aiStatus.status === 'active' || aiStatus.status === 'unconfigured';
+  const collapsed = useUIStore((s) => s.isSidebarCollapsed);
+  const setCollapsed = useUIStore((s) => s.setSidebarCollapsed);
   const [flyoutOpen, setFlyoutOpen] = useState(false);
   const location = useLocation();
   const pathname = location.pathname;
@@ -574,7 +624,7 @@ export function Sidebar() {
   const fullContent = (
     <div className="flex flex-col flex-1 min-h-0 bg-sidebar/30">
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-6 scrollbar-thin scrollbar-thumb-border/40 hover:scrollbar-thumb-border/80">
-        <SidebarContent counts={counts} isLoading={isLoading} metallbInstalled={metallbInstalled} />
+        <SidebarContent counts={counts} isLoading={isLoading} isInitialLoad={isInitialLoad} metallbInstalled={metallbInstalled} aiActive={aiActive} />
       </div>
 
       {/* Fixed footer: Audit Log + Settings + Collapse — always visible at bottom */}
@@ -633,6 +683,7 @@ export function Sidebar() {
       <>
         <aside
           className="w-[5.5rem] h-[calc(100vh-5rem)] border-r border-border/60 bg-sidebar/95 backdrop-blur supports-[backdrop-filter]:bg-sidebar/60 flex flex-col items-center py-6 gap-4 shrink-0 z-30"
+          // Note: Using calc(100vh-5rem) to match header height (h-20 = 5rem)
           onMouseEnter={() => setFlyoutOpen(true)}
           onMouseLeave={() => setFlyoutOpen(false)}
           aria-label="Navigation rail"
@@ -645,6 +696,15 @@ export function Sidebar() {
           <NavItemIconOnly to="/nodes" icon={Server} label="Nodes" iconColor="text-sky-600 group-hover:text-sky-700" />
           <NavItemIconOnly to="/services" icon={Globe} label="Services" iconColor="text-cyan-600 group-hover:text-cyan-700" />
           <NavItemIconOnly to="/events" icon={Activity} label="Events" iconColor="text-amber-600 group-hover:text-amber-700" />
+          {aiActive && (
+            <>
+              <div className="w-12 h-px bg-border/50 my-2" />
+              <NavItemIconOnly to="/analytics" icon={BarChart3} label="Analytics" iconColor="text-purple-600 group-hover:text-purple-700" />
+              <NavItemIconOnly to="/security" icon={ShieldAlert} label="Security Insights" iconColor="text-red-600 group-hover:text-red-700" />
+              <NavItemIconOnly to="/cost" icon={DollarSign} label="Cost Analysis" iconColor="text-green-600 group-hover:text-green-700" />
+              <NavItemIconOnly to="/ml-analytics" icon={Brain} label="ML Analytics" iconColor="text-cyan-600 group-hover:text-cyan-700" />
+            </>
+          )}
 
           <div className="flex-1" />
 
@@ -681,7 +741,9 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="w-72 h-[calc(100vh-5rem)] flex flex-col border-r border-border/60 bg-sidebar/95 backdrop-blur supports-[backdrop-filter]:bg-sidebar/60 shrink-0 transition-all duration-300">
+    <aside className="w-72 h-[calc(100vh-5rem)] flex flex-col border-r border-border/60 bg-sidebar/95 backdrop-blur supports-[backdrop-filter]:bg-sidebar/60 shrink-0 transition-all duration-300"
+    // Note: Using calc(100vh-5rem) to match header height (h-20 = 5rem)
+    >
       {fullContent}
     </aside>
   );

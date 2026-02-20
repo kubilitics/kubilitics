@@ -154,14 +154,14 @@ function getNextRunTimes(schedule: string, count: number): Date[] {
   const [minPart, hourPart, dayOfMonth, month, dayOfWeek] = parts;
   const allStar = dayOfMonth === '*' && month === '*' && dayOfWeek === '*';
   const result: Date[] = [];
-  let t = new Date();
+  const t = new Date();
   t.setSeconds(0, 0);
 
   if (minPart.startsWith('*/') && hourPart === '*' && allStar) {
     const n = parseInt(minPart.slice(2), 10);
     if (!Number.isFinite(n) || n < 1) return [];
     const currMin = t.getMinutes();
-    let nextMin = Math.ceil((currMin + 1) / n) * n;
+    const nextMin = Math.ceil((currMin + 1) / n) * n;
     if (nextMin >= 60) {
       t.setMinutes(0);
       t.setHours(t.getHours() + 1);
@@ -191,7 +191,7 @@ function getNextRunTimes(schedule: string, count: number): Date[] {
     if (!Number.isFinite(n) || n < 1) return [];
     t.setMinutes(0);
     const currH = t.getHours();
-    let nextH = Math.ceil((currH + 1) / n) * n;
+    const nextH = Math.ceil((currH + 1) / n) * n;
     if (nextH >= 24) {
       t.setDate(t.getDate() + 1);
       t.setHours(nextH % 24);

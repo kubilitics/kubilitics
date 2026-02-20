@@ -23,7 +23,7 @@ export interface StatusPillProps {
  * so Pods, Deployments, and ResourceList pages share the same look.
  */
 export function StatusPill({ label, variant, icon: Icon, className }: StatusPillProps) {
-  const style = variantStyles[variant];
+  const style = variantStyles[variant] || variantStyles.neutral;
   return (
     <div
       className={cn(

@@ -14,21 +14,24 @@ import {
   Eye,
   Scale,
   Wifi,
-  WifiOff,
   Trash2,
   Wrench,
   AlertCircle,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Search,
   Activity,
   Shield,
   DollarSign,
   Zap,
   Settings2,
-  Brain,
+  Box,
   Server,
-  Database,
+  Network,
+  HardDrive,
+  Lock,
+  LayoutDashboard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -37,58 +40,442 @@ import { cn } from '@/lib/utils';
 import { useWebSocket, type ToolEvent } from '@/hooks/useWebSocket';
 import { buildChatWSUrl } from '@/services/aiService';
 import { useLocation } from 'react-router-dom';
-import { InvestigationPanel } from './InvestigationPanel';
-import { SafetyPanel } from './SafetyPanel';
-import { BackendConnectionPanel } from './BackendConnectionPanel';
-import { MemoryPanel } from './MemoryPanel';
-import { AnalyticsPanel } from './AnalyticsPanel';
-import { CostPanel } from './CostPanel';
-import { SecurityPanel } from './SecurityPanel';
-import { PersistencePanel } from './PersistencePanel';
-import { BudgetPanel } from './BudgetPanel';
+import { useAIPanelStore, type AIContext } from '@/stores/aiPanelStore';
 
-interface ActionButton {
-  label: string;
-  action: string;
-  variant: 'default' | 'outline' | 'secondary';
-  icon?: string;
+// ─── Route context ─────────────────────────────────────────────────────────────
+
+interface RouteContext {
+  namespace: string;
+  resource: string;
+  screen: string;
+  resourceName: string;
+  resourceKind: string;
 }
 
-const suggestedQueries = [
-  'Why is my pod crashing?',
-  'Show pods with high CPU usage',
-  'What deployments need attention?',
-  'Find services without endpoints',
-  'Explain PersistentVolumeClaims',
-];
-
-function getIconForAction(iconName?: string) {
-  switch (iconName) {
-    case 'check': return CheckCircle;
-    case 'eye': return Eye;
-    case 'scale': return Scale;
-    default: return Terminal;
-  }
-}
-
-/** Extract namespace / resource type / screen from the current URL path */
+/** Extract namespace / resource type / resource name / screen from current URL */
 function useRouteContext() {
   const location = useLocation();
-  return useCallback(() => {
-    const parts = location.pathname.split('/');
+  return useCallback((): RouteContext => {
+    const parts = location.pathname.split('/').filter(Boolean);
+
+    const kindMap: Record<string, string> = {
+      pods: 'Pod', deployments: 'Deployment', services: 'Service',
+      nodes: 'Node', persistentvolumeclaims: 'PVC', configmaps: 'ConfigMap',
+      secrets: 'Secret', ingresses: 'Ingress', daemonsets: 'DaemonSet',
+      statefulsets: 'StatefulSet', jobs: 'Job', cronjobs: 'CronJob',
+    };
+
     const namespaceIdx = parts.indexOf('namespaces');
-    const namespace = namespaceIdx !== -1 ? parts[namespaceIdx + 1] : '';
-    const resourceType = namespaceIdx !== -1 ? parts[namespaceIdx + 2] || '' : '';
+    let namespace = '';
+    let resourceType = '';
+    let resourceName = '';
+
+    if (namespaceIdx !== -1) {
+      namespace = parts[namespaceIdx + 1] ?? '';
+      resourceType = parts[namespaceIdx + 2] ?? '';
+      resourceName = parts[namespaceIdx + 3] ?? '';
+    } else {
+      for (let i = 0; i < parts.length; i++) {
+        const normalized = parts[i].toLowerCase();
+        if (kindMap[normalized]) {
+          resourceType = normalized;
+          resourceName = parts[i + 1] ?? '';
+          break;
+        }
+      }
+    }
+
+    const resourceKind = kindMap[resourceType.toLowerCase()] ?? '';
     const screen = resourceType
-      ? parts.length > namespaceIdx + 3
-        ? `${resourceType}-detail`
-        : `${resourceType}-list`
+      ? resourceName ? `${resourceType}-detail` : `${resourceType}-list`
       : 'dashboard';
-    return { namespace, resource: resourceType, screen };
+
+    return { namespace, resource: resourceType, screen, resourceName, resourceKind };
   }, [location.pathname]);
 }
 
-// ─── Tool category helpers ─────────────────────────────────────────────────
+// ─── Quick action chips ────────────────────────────────────────────────────────
+
+type PageChip = { label: string; query: string };
+
+function getQuickChips(screen: string, resourceName?: string, namespace?: string): PageChip[] {
+  const ctx = resourceName && namespace
+    ? ` for ${resourceName} in ${namespace}`
+    : resourceName ? ` for ${resourceName}` : '';
+
+  switch (screen) {
+    case 'dashboard':
+      return [
+        { label: 'What needs attention?', query: 'What needs my attention right now?' },
+        { label: 'Cluster health', query: 'Show me a comprehensive cluster health analysis' },
+        { label: 'Explain alerts', query: 'Explain the current alerts and their severity' },
+        { label: 'Resource summary', query: 'Give me a resource usage summary' },
+      ];
+    case 'pods':
+    case 'pods-list':
+      return [
+        { label: 'Find crash loops', query: 'Find all pods in CrashLoopBackOff' },
+        { label: 'OOM killed', query: 'Which pods have been OOMKilled recently?' },
+        { label: 'High restarts', query: 'Show pods with restart count above 5' },
+        { label: 'Pending pods', query: 'Why are there pending pods?' },
+        { label: 'Missing limits', query: 'Which pods are missing resource limits?' },
+      ];
+    case 'pods-detail':
+      return [
+        { label: 'Analyze this pod', query: `Analyze pod${ctx}` },
+        { label: 'Show logs', query: `Show recent error logs${ctx}` },
+        { label: 'Why failing?', query: `Why is this pod failing${ctx}?` },
+        { label: 'Ownership chain', query: `Show ownership chain${ctx}` },
+      ];
+    case 'deployments':
+    case 'deployments-list':
+      return [
+        { label: 'Needs attention', query: 'Which deployments need attention?' },
+        { label: 'Rollout failures', query: 'Are there any stalled rollouts?' },
+        { label: 'Scale down safely?', query: 'Which deployments can I safely scale down?' },
+        { label: 'Image issues', query: 'Are there any image pull errors?' },
+      ];
+    case 'deployments-detail':
+      return [
+        { label: 'Analyze deployment', query: `Analyze deployment${ctx}` },
+        { label: 'Rollback risk', query: `What is the rollback risk${ctx}?` },
+        { label: 'Scaling rec.', query: `Should I scale${ctx}?` },
+        { label: 'Health check', query: `Run a health check on${ctx}` },
+      ];
+    case 'nodes':
+    case 'nodes-list':
+      return [
+        { label: 'Check pressure', query: 'Check node memory and disk pressure' },
+        { label: 'Capacity analysis', query: 'Show node capacity and allocation' },
+        { label: 'Heaviest pods', query: 'Which nodes host the most resource-intensive pods?' },
+        { label: 'Safe to drain?', query: 'Is it safe to drain a node right now?' },
+      ];
+    case 'nodes-detail':
+      return [
+        { label: 'Analyze node', query: `Analyze node${ctx}` },
+        { label: 'Pods on this node', query: `List all pods on${ctx}` },
+        { label: 'Safe to drain?', query: `Is it safe to drain${ctx}?` },
+        { label: 'Node events', query: `Show recent events for${ctx}` },
+      ];
+    case 'services':
+    case 'services-list':
+      return [
+        { label: 'No endpoints', query: 'Find services with no ready endpoints' },
+        { label: 'Exposure risk', query: 'Which services are exposed externally with risk?' },
+        { label: 'Network policies', query: 'Show which services are blocked by network policies' },
+        { label: 'Connectivity check', query: 'Run a network connectivity analysis' },
+      ];
+    case 'persistentvolumeclaims':
+    case 'persistentvolumeclaims-list':
+      return [
+        { label: 'Unbound PVCs', query: 'Find all unbound PersistentVolumeClaims' },
+        { label: 'Storage health', query: 'Run a storage health analysis' },
+        { label: 'Orphaned PVs', query: 'Are there any orphaned PersistentVolumes?' },
+        { label: 'Capacity forecast', query: 'Forecast storage capacity needs' },
+      ];
+    case 'security':
+      return [
+        { label: 'RBAC audit', query: 'Run a full RBAC permissions audit' },
+        { label: 'Cluster-admin?', query: 'Who has cluster-admin access?' },
+        { label: 'CIS benchmark', query: 'Run a CIS Kubernetes benchmark check' },
+        { label: 'Privileged containers', query: 'Find all containers running as privileged' },
+      ];
+    default:
+      return [
+        { label: 'Cluster status', query: 'What is the overall cluster status?' },
+        { label: 'Recent warnings', query: 'Show me recent warning events' },
+        { label: 'Health summary', query: 'Give me a health summary' },
+        { label: 'What can you do?', query: 'What can you help me with?' },
+      ];
+  }
+}
+
+function getKindIcon(kind: string): React.ElementType {
+  const map: Record<string, React.ElementType> = {
+    Pod: Box, Deployment: LayoutDashboard, Service: Network,
+    Node: Server, PVC: HardDrive, ConfigMap: Settings2,
+    Secret: Lock, Ingress: Network, DaemonSet: LayoutDashboard,
+    StatefulSet: LayoutDashboard, Job: Zap, CronJob: Zap,
+  };
+  return map[kind] ?? Box;
+}
+
+// ─── ContextBar ────────────────────────────────────────────────────────────────
+
+interface ContextBarProps {
+  resourceKind: string;
+  resourceName: string;
+  namespace: string;
+  onClear: () => void;
+}
+
+function ContextBar({ resourceKind, resourceName, namespace, onClear }: ContextBarProps) {
+  const KindIcon = getKindIcon(resourceKind);
+  return (
+    <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border bg-primary/5 shrink-0">
+      <span className="text-[10px] text-muted-foreground shrink-0">Context:</span>
+      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 min-w-0 overflow-hidden">
+        <KindIcon className="h-3 w-3 text-primary shrink-0" />
+        <span className="text-[11px] font-medium text-primary truncate">{resourceName}</span>
+        {namespace && (
+          <span className="text-[11px] text-primary/60 shrink-0 ml-0.5">{namespace}</span>
+        )}
+      </div>
+      <button
+        onClick={onClear}
+        className="ml-auto shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+        title="Clear context"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
+// ─── QuickActionChips ──────────────────────────────────────────────────────────
+
+interface QuickActionChipsProps {
+  screen: string;
+  resourceName?: string;
+  namespace?: string;
+  onChipClick: (query: string) => void;
+}
+
+function QuickActionChips({ screen, resourceName, namespace, onChipClick }: QuickActionChipsProps) {
+  const chips = getQuickChips(screen, resourceName, namespace);
+  return (
+    <div className="flex gap-1.5 px-4 py-2 overflow-x-auto scrollbar-none border-t border-border/50 shrink-0">
+      {chips.map((chip) => (
+        <button
+          key={chip.query}
+          onClick={() => onChipClick(chip.query)}
+          className="shrink-0 px-3 py-1 rounded-full text-[11px] font-medium
+                     bg-muted hover:bg-muted/70 text-muted-foreground hover:text-foreground
+                     border border-border/50 transition-colors whitespace-nowrap"
+        >
+          {chip.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── AIStatusFooter ────────────────────────────────────────────────────────────
+
+interface AIStatusFooterProps {
+  isConnected: boolean;
+  isConnecting: boolean;
+  onReconnect: () => void;
+  onClearMessages: () => void;
+  hasMessages: boolean;
+}
+
+function AIStatusFooter({ isConnected, isConnecting, onReconnect, onClearMessages, hasMessages }: AIStatusFooterProps) {
+  return (
+    <div className="flex items-center justify-between px-4 py-1.5 border-t border-border bg-muted/10 shrink-0">
+      <div className="flex items-center gap-1.5">
+        {isConnecting ? (
+          <>
+            <span className="h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse" />
+            <span className="text-[10px] text-muted-foreground">Connecting…</span>
+          </>
+        ) : isConnected ? (
+          <>
+            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+            <span className="text-[10px] text-muted-foreground">Connected</span>
+          </>
+        ) : (
+          <>
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-[10px] text-muted-foreground">Disconnected</span>
+            <button
+              onClick={onReconnect}
+              className="text-[10px] text-primary hover:underline ml-1"
+            >
+              Reconnect
+            </button>
+          </>
+        )}
+      </div>
+      {hasMessages && (
+        <button
+          onClick={onClearMessages}
+          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          title="Clear chat history"
+        >
+          <Trash2 className="h-3 w-3" />
+          Clear
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── AssistantMessage — section-aware renderer ─────────────────────────────────
+
+interface ResponseSections {
+  whatYouAsked?: string;
+  whatIExecuted?: string;
+  whatIFound?: string;
+  seniorAnalysis?: string;
+  suggestedActions?: string;
+}
+
+function parseResponseSections(content: string): ResponseSections | null {
+  const hasStructure =
+    content.includes('🧠') || content.includes('⚙️') ||
+    content.includes('📊') || content.includes('🔍') || content.includes('🛠');
+  if (!hasStructure) return null;
+
+  const extractSection = (startEmoji: string, ...endEmojis: string[]) => {
+    const startIdx = content.indexOf(startEmoji);
+    if (startIdx === -1) return undefined;
+    let endIdx = content.length;
+    for (const emoji of endEmojis) {
+      const idx = content.indexOf(emoji, startIdx + 1);
+      if (idx !== -1 && idx < endIdx) endIdx = idx;
+    }
+    const raw = content.slice(startIdx, endIdx);
+    // Strip the header line (emoji + title)
+    const newlineIdx = raw.indexOf('\n');
+    return newlineIdx !== -1 ? raw.slice(newlineIdx + 1).trim() : raw.trim();
+  };
+
+  const sections: ResponseSections = {
+    whatYouAsked: extractSection('🧠', '⚙️', '📊', '🔍', '🛠'),
+    whatIExecuted: extractSection('⚙️', '📊', '🔍', '🛠'),
+    whatIFound: extractSection('📊', '🔍', '🛠'),
+    seniorAnalysis: extractSection('🔍', '🛠'),
+    suggestedActions: extractSection('🛠'),
+  };
+
+  const hasContent = Object.values(sections).some(v => v && v.length > 0);
+  return hasContent ? sections : null;
+}
+
+interface CollapsibleSectionProps {
+  icon: string;
+  title: string;
+  content: string;
+  defaultOpen?: boolean;
+  highlight?: boolean;
+}
+
+function CollapsibleSection({ icon, title, content, defaultOpen = true, highlight = false }: CollapsibleSectionProps) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={cn(
+      'rounded-lg border overflow-hidden',
+      highlight ? 'border-primary/20 bg-primary/5' : 'border-border/40 bg-muted/20'
+    )}>
+      <button
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/30 transition-colors"
+        onClick={() => setOpen(o => !o)}
+      >
+        <span className="text-sm">{icon}</span>
+        <span className={cn('text-[11px] font-semibold flex-1', highlight ? 'text-primary' : 'text-muted-foreground')}>
+          {title}
+        </span>
+        {open
+          ? <ChevronUp className="h-3 w-3 text-muted-foreground shrink-0" />
+          : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />}
+      </button>
+      {open && (
+        <div className="px-3 pb-2 pt-1 text-sm whitespace-pre-wrap leading-relaxed">
+          {content}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KubectlCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex items-center gap-2 px-2 py-1 rounded bg-muted/50 border border-border/40">
+      <code className="flex-1 text-[10px] font-mono text-foreground/80 truncate">{command}</code>
+      <button
+        onClick={() => {
+          navigator.clipboard.writeText(command);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        }}
+        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+        title="Copy command"
+      >
+        {copied
+          ? <CheckCircle className="h-3 w-3 text-green-500" />
+          : <Copy className="h-3 w-3" />}
+      </button>
+    </div>
+  );
+}
+
+function ActionsSection({ content }: { content: string }) {
+  const cmdRegex = /`(kubectl[^`]+)`/g;
+  const commands: string[] = [];
+  let match;
+  while ((match = cmdRegex.exec(content)) !== null) {
+    commands.push(match[1]);
+  }
+  return (
+    <div className="rounded-lg border border-border/40 bg-muted/20 overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border/30">
+        <span className="text-sm">🛠</span>
+        <span className="text-[11px] font-semibold text-muted-foreground">Suggested Actions</span>
+      </div>
+      <div className="px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed">{content}</div>
+      {commands.length > 0 && (
+        <div className="px-3 pb-2 space-y-1.5">
+          {commands.map((cmd, i) => <KubectlCommand key={i} command={cmd} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssistantMessage({ content, onCopy, copied }: {
+  content: string;
+  onCopy: () => void;
+  copied: boolean;
+}) {
+  const sections = parseResponseSections(content);
+  return (
+    <div className="space-y-1.5">
+      {sections ? (
+        <>
+          {sections.whatYouAsked && (
+            <CollapsibleSection icon="🧠" title="What you asked" content={sections.whatYouAsked} defaultOpen={false} />
+          )}
+          {sections.whatIExecuted && (
+            <CollapsibleSection icon="⚙️" title="What I executed" content={sections.whatIExecuted} defaultOpen={false} />
+          )}
+          {sections.whatIFound && (
+            <CollapsibleSection icon="📊" title="What I found" content={sections.whatIFound} />
+          )}
+          {sections.seniorAnalysis && (
+            <CollapsibleSection icon="🔍" title="Analysis" content={sections.seniorAnalysis} highlight />
+          )}
+          {sections.suggestedActions && (
+            <ActionsSection content={sections.suggestedActions} />
+          )}
+        </>
+      ) : (
+        <div className="whitespace-pre-wrap text-sm leading-relaxed">{content}</div>
+      )}
+      <button
+        onClick={onCopy}
+        className="mt-1 text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+      >
+        {copied
+          ? <><CheckCircle className="h-3 w-3" />Copied</>
+          : <><Copy className="h-3 w-3" />Copy</>}
+      </button>
+    </div>
+  );
+}
+
+// ─── Tool category helpers ─────────────────────────────────────────────────────
 
 const TOOL_CATEGORY_CONFIG: Record<string, {
   color: string;
@@ -97,41 +484,36 @@ const TOOL_CATEGORY_CONFIG: Record<string, {
   icon: React.ElementType;
   label: string;
 }> = {
-  observe:        { color: 'text-blue-600 dark:text-blue-400',   bgColor: 'bg-blue-500/8',    borderColor: 'border-blue-500/25',   icon: Eye,       label: 'Observe'    },
-  analyze:        { color: 'text-purple-600 dark:text-purple-400', bgColor: 'bg-purple-500/8', borderColor: 'border-purple-500/25', icon: Activity,  label: 'Analyze'    },
-  troubleshoot:   { color: 'text-orange-600 dark:text-orange-400', bgColor: 'bg-orange-500/8', borderColor: 'border-orange-500/25', icon: Search,    label: 'Troubleshoot' },
-  recommend:      { color: 'text-cyan-600 dark:text-cyan-400',    bgColor: 'bg-cyan-500/8',    borderColor: 'border-cyan-500/25',   icon: Zap,       label: 'Recommend'  },
-  security:       { color: 'text-red-600 dark:text-red-400',      bgColor: 'bg-red-500/8',     borderColor: 'border-red-500/25',    icon: Shield,    label: 'Security'   },
-  cost:           { color: 'text-green-600 dark:text-green-400',  bgColor: 'bg-green-500/8',   borderColor: 'border-green-500/25',  icon: DollarSign, label: 'Cost'      },
-  action:         { color: 'text-amber-600 dark:text-amber-400',  bgColor: 'bg-amber-500/8',   borderColor: 'border-amber-500/25',  icon: Terminal,  label: 'Action'     },
-  automation:     { color: 'text-indigo-600 dark:text-indigo-400', bgColor: 'bg-indigo-500/8', borderColor: 'border-indigo-500/25', icon: Settings2, label: 'Automate'   },
-  export:         { color: 'text-teal-600 dark:text-teal-400',    bgColor: 'bg-teal-500/8',    borderColor: 'border-teal-500/25',   icon: Eye,       label: 'Export'     },
+  observe:      { color: 'text-blue-600 dark:text-blue-400',    bgColor: 'bg-blue-500/8',    borderColor: 'border-blue-500/25',    icon: Eye,        label: 'Observe'     },
+  analyze:      { color: 'text-purple-600 dark:text-purple-400',bgColor: 'bg-purple-500/8',  borderColor: 'border-purple-500/25',  icon: Activity,   label: 'Analyze'     },
+  troubleshoot: { color: 'text-orange-600 dark:text-orange-400',bgColor: 'bg-orange-500/8',  borderColor: 'border-orange-500/25',  icon: Search,     label: 'Troubleshoot'},
+  recommend:    { color: 'text-cyan-600 dark:text-cyan-400',    bgColor: 'bg-cyan-500/8',    borderColor: 'border-cyan-500/25',    icon: Zap,        label: 'Recommend'   },
+  security:     { color: 'text-red-600 dark:text-red-400',      bgColor: 'bg-red-500/8',     borderColor: 'border-red-500/25',     icon: Shield,     label: 'Security'    },
+  cost:         { color: 'text-green-600 dark:text-green-400',  bgColor: 'bg-green-500/8',   borderColor: 'border-green-500/25',   icon: DollarSign, label: 'Cost'        },
+  action:       { color: 'text-amber-600 dark:text-amber-400',  bgColor: 'bg-amber-500/8',   borderColor: 'border-amber-500/25',   icon: Terminal,   label: 'Action'      },
+  automation:   { color: 'text-indigo-600 dark:text-indigo-400',bgColor: 'bg-indigo-500/8',  borderColor: 'border-indigo-500/25',  icon: Settings2,  label: 'Automate'    },
+  export:       { color: 'text-teal-600 dark:text-teal-400',    bgColor: 'bg-teal-500/8',    borderColor: 'border-teal-500/25',    icon: Eye,        label: 'Export'      },
 };
 
 function getToolCategory(toolName: string) {
   const prefix = toolName.split('_')[0];
   return TOOL_CATEGORY_CONFIG[prefix] ?? {
-    color: 'text-muted-foreground',
-    bgColor: 'bg-muted/50',
-    borderColor: 'border-border',
-    icon: Wrench,
-    label: 'Tool',
+    color: 'text-muted-foreground', bgColor: 'bg-muted/50',
+    borderColor: 'border-border', icon: Wrench, label: 'Tool',
   };
 }
 
 function humanizeToolName(toolName: string): string {
-  return toolName
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return toolName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// ─── Analysis result card helpers ─────────────────────────────────────────────
+// ─── Analysis result card helpers ──────────────────────────────────────────────
 
 const SEVERITY_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
-  CRITICAL: { color: 'text-red-700 dark:text-red-400',    bg: 'bg-red-500/15',    label: 'Critical' },
-  HIGH:     { color: 'text-orange-700 dark:text-orange-400', bg: 'bg-orange-500/15', label: 'High' },
-  MEDIUM:   { color: 'text-yellow-700 dark:text-yellow-400', bg: 'bg-yellow-500/15', label: 'Medium' },
-  LOW:      { color: 'text-green-700 dark:text-green-400',  bg: 'bg-green-500/15',  label: 'Low' },
+  CRITICAL: { color: 'text-red-700 dark:text-red-400',      bg: 'bg-red-500/15',    label: 'Critical' },
+  HIGH:     { color: 'text-orange-700 dark:text-orange-400',bg: 'bg-orange-500/15', label: 'High'     },
+  MEDIUM:   { color: 'text-yellow-700 dark:text-yellow-400',bg: 'bg-yellow-500/15', label: 'Medium'   },
+  LOW:      { color: 'text-green-700 dark:text-green-400',  bg: 'bg-green-500/15',  label: 'Low'      },
 };
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -143,38 +525,27 @@ function SeverityBadge({ severity }: { severity: string }) {
   );
 }
 
-/** Radial security score gauge (SVG-based) */
 function SecurityScoreGauge({ score }: { score: number }) {
   const clamped = Math.max(0, Math.min(100, score));
   const radius = 28;
   const circumference = 2 * Math.PI * radius;
   const strokeDash = (clamped / 100) * circumference;
   const color = clamped >= 80 ? '#22c55e' : clamped >= 60 ? '#f59e0b' : clamped >= 40 ? '#f97316' : '#ef4444';
-
   return (
     <div className="flex flex-col items-center gap-0.5">
       <svg width="72" height="72" viewBox="0 0 72 72">
         <circle cx="36" cy="36" r={radius} fill="none" stroke="currentColor" strokeWidth="5" className="text-muted/20" />
-        <circle
-          cx="36" cy="36" r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth="5"
+        <circle cx="36" cy="36" r={radius} fill="none" stroke={color} strokeWidth="5"
           strokeDasharray={`${strokeDash} ${circumference - strokeDash}`}
-          strokeLinecap="round"
-          transform="rotate(-90 36 36)"
-          style={{ transition: 'stroke-dasharray 0.6s ease' }}
-        />
-        <text x="36" y="40" textAnchor="middle" fontSize="14" fontWeight="700" fill={color}>
-          {clamped}
-        </text>
+          strokeLinecap="round" transform="rotate(-90 36 36)"
+          style={{ transition: 'stroke-dasharray 0.6s ease' }} />
+        <text x="36" y="40" textAnchor="middle" fontSize="14" fontWeight="700" fill={color}>{clamped}</text>
       </svg>
       <span className="text-[9px] text-muted-foreground">/ 100</span>
     </div>
   );
 }
 
-/** Slim horizontal progress bar */
 function ProgressBar({ value, max, color = 'bg-green-500' }: { value: number; max: number; color?: string }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
   return (
@@ -184,7 +555,6 @@ function ProgressBar({ value, max, color = 'bg-green-500' }: { value: number; ma
   );
 }
 
-/** Generic issue row for findings lists */
 function IssueRow({ issue }: { issue: Record<string, unknown> }) {
   const sev = (issue.severity as string) ?? 'LOW';
   const msg = (issue.message as string) ?? JSON.stringify(issue);
@@ -200,7 +570,7 @@ function IssueRow({ issue }: { issue: Record<string, unknown> }) {
   );
 }
 
-// ─── Specialized deep-analysis result renderers ───────────────────────────────
+// ─── Deep-analysis result renderers ───────────────────────────────────────────
 
 const DEEP_ANALYSIS_TOOLS = new Set([
   'analyze_pod_health', 'analyze_deployment_health', 'analyze_node_pressure',
@@ -225,17 +595,13 @@ function AnalysisPodHealthCard({ data }: { data: Record<string, unknown> }) {
         </div>
         <div className="text-right">
           <div className="text-[10px] text-muted-foreground">Issues</div>
-          <div className={cn('text-sm font-bold', issues.length > 0 ? 'text-orange-500' : 'text-green-500')}>
-            {issues.length}
-          </div>
+          <div className={cn('text-sm font-bold', issues.length > 0 ? 'text-orange-500' : 'text-green-500')}>{issues.length}</div>
         </div>
       </div>
       {issues.length > 0 && (
         <div className="border border-border/40 rounded-lg overflow-hidden">
           {issues.slice(0, 6).map((issue, i) => <IssueRow key={i} issue={issue} />)}
-          {issues.length > 6 && (
-            <div className="text-[9px] text-muted-foreground px-2 py-1">+{issues.length - 6} more issues</div>
-          )}
+          {issues.length > 6 && <div className="text-[9px] text-muted-foreground px-2 py-1">+{issues.length - 6} more issues</div>}
         </div>
       )}
     </div>
@@ -244,7 +610,7 @@ function AnalysisPodHealthCard({ data }: { data: Record<string, unknown> }) {
 
 function AnalysisDeploymentHealthCard({ data }: { data: Record<string, unknown> }) {
   const deployments = (data.deployments as Record<string, unknown>[]) ?? [];
-  const healthColor = { Healthy: 'text-green-500', Degraded: 'text-amber-500', Critical: 'text-red-500' };
+  const healthColor: Record<string, string> = { Healthy: 'text-green-500', Degraded: 'text-amber-500', Critical: 'text-red-500' };
   return (
     <div className="space-y-1.5">
       {deployments.slice(0, 8).map((d, i) => {
@@ -258,17 +624,13 @@ function AnalysisDeploymentHealthCard({ data }: { data: Record<string, unknown> 
               background: health === 'Healthy' ? '#22c55e' : health === 'Degraded' ? '#f59e0b' : '#ef4444'
             }} />
             <span className="font-medium truncate flex-1">{d.name as string}</span>
-            <span className={cn('font-semibold', healthColor[health as keyof typeof healthColor] ?? 'text-muted-foreground')}>
-              {health}
-            </span>
+            <span className={cn('font-semibold', healthColor[health] ?? 'text-muted-foreground')}>{health}</span>
             <span className="text-muted-foreground shrink-0">{ready}/{desired}</span>
             {issues.length > 0 && <SeverityBadge severity="HIGH" />}
           </div>
         );
       })}
-      {deployments.length > 8 && (
-        <div className="text-[9px] text-muted-foreground">+{deployments.length - 8} more</div>
-      )}
+      {deployments.length > 8 && <div className="text-[9px] text-muted-foreground">+{deployments.length - 8} more</div>}
     </div>
   );
 }
@@ -281,9 +643,7 @@ function AnalysisNodePressureCard({ data }: { data: Record<string, unknown> }) {
       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
         <span>{data.total_nodes as number} nodes</span>
         <span>·</span>
-        <span className={underPressure > 0 ? 'text-red-500 font-semibold' : 'text-green-500'}>
-          {underPressure} under pressure
-        </span>
+        <span className={underPressure > 0 ? 'text-red-500 font-semibold' : 'text-green-500'}>{underPressure} under pressure</span>
       </div>
       {nodes.filter(n => n.severity === 'HIGH').slice(0, 5).map((n, i) => {
         const pressures = (n.active_pressures as string[]) ?? [];
@@ -309,14 +669,11 @@ function AnalysisSecurityPostureCard({ data }: { data: Record<string, unknown> }
   const score = (data.security_score as number) ?? 100;
   const findings = (data.findings as Record<string, unknown>[]) ?? [];
   const riskLevel = (data.risk_level as string) ?? 'LOW';
-
-  // Group findings by severity
   const bySeverity = findings.reduce<Record<string, number>>((acc, f) => {
     const sev = (f.severity as string) ?? 'LOW';
     acc[sev] = (acc[sev] ?? 0) + 1;
     return acc;
   }, {});
-
   return (
     <div className="space-y-3">
       <div className="flex items-start gap-4">
@@ -338,9 +695,7 @@ function AnalysisSecurityPostureCard({ data }: { data: Record<string, unknown> }
       </div>
       {findings.length > 0 && (
         <div className="border border-border/40 rounded-lg overflow-hidden">
-          <div className="px-2 py-1 bg-muted/20 text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">
-            CIS Benchmark Findings
-          </div>
+          <div className="px-2 py-1 bg-muted/20 text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">CIS Benchmark Findings</div>
           {findings.slice(0, 5).map((f, i) => (
             <div key={i} className="flex items-start gap-1.5 px-2 py-1.5 border-t border-border/20">
               <SeverityBadge severity={(f.severity as string)} />
@@ -353,9 +708,7 @@ function AnalysisSecurityPostureCard({ data }: { data: Record<string, unknown> }
               </div>
             </div>
           ))}
-          {findings.length > 5 && (
-            <div className="text-[9px] text-muted-foreground px-2 py-1">+{findings.length - 5} more findings</div>
-          )}
+          {findings.length > 5 && <div className="text-[9px] text-muted-foreground px-2 py-1">+{findings.length - 5} more findings</div>}
         </div>
       )}
     </div>
@@ -378,9 +731,7 @@ function AnalysisStorageHealthCard({ data }: { data: Record<string, unknown> }) 
           </div>
           <ProgressBar value={bound} max={total} color={isHealthy ? 'bg-green-500' : 'bg-red-500'} />
         </div>
-        <span className={cn('text-xs font-bold', isHealthy ? 'text-green-500' : 'text-red-500')}>
-          {data.storage_health as string}
-        </span>
+        <span className={cn('text-xs font-bold', isHealthy ? 'text-green-500' : 'text-red-500')}>{data.storage_health as string}</span>
       </div>
       {unbound_details.length > 0 && (
         <div className="border border-border/40 rounded-lg overflow-hidden">
@@ -409,9 +760,7 @@ function AnalysisRBACCard({ data }: { data: Record<string, unknown> }) {
       </div>
       {findings.length > 0 && (
         <div className="border border-border/40 rounded-lg overflow-hidden">
-          <div className="px-2 py-1 bg-muted/20 text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">
-            RBAC Findings
-          </div>
+          <div className="px-2 py-1 bg-muted/20 text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">RBAC Findings</div>
           {findings.slice(0, 4).map((f, i) => (
             <div key={i} className="px-2 py-1.5 border-t border-border/20 text-[10px]">
               <div className="flex items-center gap-1 mb-0.5">
@@ -421,14 +770,10 @@ function AnalysisRBACCard({ data }: { data: Record<string, unknown> }) {
                   {f.role_name as string}
                 </span>
               </div>
-              {f.recommendation && (
-                <div className="text-[9px] text-muted-foreground truncate">{f.recommendation as string}</div>
-              )}
+              {f.recommendation && <div className="text-[9px] text-muted-foreground truncate">{f.recommendation as string}</div>}
             </div>
           ))}
-          {findings.length > 4 && (
-            <div className="text-[9px] text-muted-foreground px-2 py-1">+{findings.length - 4} more</div>
-          )}
+          {findings.length > 4 && <div className="text-[9px] text-muted-foreground px-2 py-1">+{findings.length - 4} more</div>}
         </div>
       )}
     </div>
@@ -467,13 +812,9 @@ function AnalysisLogPatternsCard({ data }: { data: Record<string, unknown> }) {
       )}
       {sampleErrors.length > 0 && (
         <div className="border border-border/40 rounded-lg overflow-hidden">
-          <div className="px-2 py-1 bg-muted/20 text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">
-            Sample Errors
-          </div>
+          <div className="px-2 py-1 bg-muted/20 text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">Sample Errors</div>
           {sampleErrors.slice(0, 3).map((line, i) => (
-            <div key={i} className="px-2 py-1 border-t border-border/20 text-[9px] font-mono text-foreground/70 truncate">
-              {line}
-            </div>
+            <div key={i} className="px-2 py-1 border-t border-border/20 text-[9px] font-mono text-foreground/70 truncate">{line}</div>
           ))}
         </div>
       )}
@@ -511,9 +852,7 @@ function AnalysisDriftCard({ data }: { data: Record<string, unknown> }) {
               </div>
             </div>
           ))}
-          {drifts.length > 6 && (
-            <div className="text-[9px] text-muted-foreground px-2 py-1">+{drifts.length - 6} more drifts</div>
-          )}
+          {drifts.length > 6 && <div className="text-[9px] text-muted-foreground px-2 py-1">+{drifts.length - 6} more drifts</div>}
         </div>
       )}
     </div>
@@ -585,9 +924,7 @@ function AnalysisNetworkCard({ data }: { data: Record<string, unknown> }) {
     <div className="space-y-2">
       <div className="flex items-center gap-3 text-[10px]">
         <span className="text-muted-foreground">{services.length} services</span>
-        <span className={cn(noEndpoints.length > 0 ? 'text-red-500 font-semibold' : 'text-green-500')}>
-          {noEndpoints.length} no-endpoint
-        </span>
+        <span className={cn(noEndpoints.length > 0 ? 'text-red-500 font-semibold' : 'text-green-500')}>{noEndpoints.length} no-endpoint</span>
         <span className="text-muted-foreground ml-auto">{netPolicies} network policies</span>
       </div>
       {noEndpoints.length > 0 && (
@@ -618,17 +955,12 @@ function AnalysisResourceLimitsCard({ data }: { data: Record<string, unknown> })
             <span className="text-muted-foreground">Compliance rate</span>
             <span className="font-semibold">{complianceRate}</span>
           </div>
-          <ProgressBar
-            value={totalPods - violations}
-            max={totalPods}
-            color={violations === 0 ? 'bg-green-500' : violations < 5 ? 'bg-amber-500' : 'bg-red-500'}
-          />
+          <ProgressBar value={totalPods - violations} max={totalPods}
+            color={violations === 0 ? 'bg-green-500' : violations < 5 ? 'bg-amber-500' : 'bg-red-500'} />
         </div>
         <div className="text-right">
           <div className="text-[10px] text-muted-foreground">Violations</div>
-          <div className={cn('text-sm font-bold', violations > 0 ? 'text-orange-500' : 'text-green-500')}>
-            {violations}
-          </div>
+          <div className={cn('text-sm font-bold', violations > 0 ? 'text-orange-500' : 'text-green-500')}>{violations}</div>
         </div>
       </div>
       {violationList.length > 0 && (
@@ -640,76 +972,36 @@ function AnalysisResourceLimitsCard({ data }: { data: Record<string, unknown> })
               <span className="ml-auto text-muted-foreground">{(v.missing as string[]).join(', ')}</span>
             </div>
           ))}
-          {violationList.length > 4 && (
-            <div className="text-[9px] text-muted-foreground px-2 py-1">+{violationList.length - 4} more</div>
-          )}
+          {violationList.length > 4 && <div className="text-[9px] text-muted-foreground px-2 py-1">+{violationList.length - 4} more</div>}
         </div>
       )}
     </div>
   );
 }
 
-/**
- * AnalysisResultCard — routes to specialized UI based on tool name.
- * Falls back to the plain JSON renderer for unknown tools.
- */
-function AnalysisResultCard({
-  toolName,
-  resultJson,
-}: {
-  toolName: string;
-  resultJson: string;
-}) {
+function AnalysisResultCard({ toolName, resultJson }: { toolName: string; resultJson: string }) {
   let parsed: Record<string, unknown> | null = null;
-  try {
-    parsed = JSON.parse(resultJson) as Record<string, unknown>;
-  } catch {
-    // not JSON — render raw
-  }
-
-  if (!parsed) {
-    return (
-      <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">
-        {resultJson}
-      </pre>
-    );
-  }
-
+  try { parsed = JSON.parse(resultJson) as Record<string, unknown>; } catch { /* raw */ }
+  if (!parsed) return <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">{resultJson}</pre>;
   switch (toolName) {
-    case 'analyze_pod_health':
-      return <AnalysisPodHealthCard data={parsed} />;
-    case 'analyze_deployment_health':
-      return <AnalysisDeploymentHealthCard data={parsed} />;
-    case 'analyze_node_pressure':
-      return <AnalysisNodePressureCard data={parsed} />;
-    case 'detect_resource_contention':
-      return <AnalysisContentionCard data={parsed} />;
-    case 'analyze_network_connectivity':
-      return <AnalysisNetworkCard data={parsed} />;
-    case 'analyze_rbac_permissions':
-      return <AnalysisRBACCard data={parsed} />;
-    case 'analyze_storage_health':
-      return <AnalysisStorageHealthCard data={parsed} />;
-    case 'check_resource_limits':
-      return <AnalysisResourceLimitsCard data={parsed} />;
-    case 'analyze_hpa_behavior':
-      return <AnalysisHPACard data={parsed} />;
-    case 'analyze_log_patterns':
-      return <AnalysisLogPatternsCard data={parsed} />;
-    case 'assess_security_posture':
-      return <AnalysisSecurityPostureCard data={parsed} />;
-    case 'detect_configuration_drift':
-      return <AnalysisDriftCard data={parsed} />;
+    case 'analyze_pod_health':           return <AnalysisPodHealthCard data={parsed} />;
+    case 'analyze_deployment_health':    return <AnalysisDeploymentHealthCard data={parsed} />;
+    case 'analyze_node_pressure':        return <AnalysisNodePressureCard data={parsed} />;
+    case 'detect_resource_contention':   return <AnalysisContentionCard data={parsed} />;
+    case 'analyze_network_connectivity': return <AnalysisNetworkCard data={parsed} />;
+    case 'analyze_rbac_permissions':     return <AnalysisRBACCard data={parsed} />;
+    case 'analyze_storage_health':       return <AnalysisStorageHealthCard data={parsed} />;
+    case 'check_resource_limits':        return <AnalysisResourceLimitsCard data={parsed} />;
+    case 'analyze_hpa_behavior':         return <AnalysisHPACard data={parsed} />;
+    case 'analyze_log_patterns':         return <AnalysisLogPatternsCard data={parsed} />;
+    case 'assess_security_posture':      return <AnalysisSecurityPostureCard data={parsed} />;
+    case 'detect_configuration_drift':   return <AnalysisDriftCard data={parsed} />;
     default:
-      return (
-        <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">
-          {JSON.stringify(parsed, null, 2)}
-        </pre>
-      );
+      return <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">{JSON.stringify(parsed, null, 2)}</pre>;
   }
 }
 
-// ─── Execution result cards (A-CORE-004) ─────────────────────────────────────
+// ─── Execution result cards ────────────────────────────────────────────────────
 
 const EXECUTION_TOOLS = new Set([
   'restart_pod', 'scale_deployment', 'cordon_node', 'drain_node',
@@ -727,56 +1019,35 @@ const RISK_CONFIG: Record<string, { color: string; bg: string; ring: string }> =
 function RiskLevelBadge({ level }: { level: string }) {
   const cfg = RISK_CONFIG[level?.toLowerCase()] ?? RISK_CONFIG.medium;
   return (
-    <span className={cn(
-      'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ring-1',
-      cfg.color, cfg.bg, cfg.ring
-    )}>
+    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ring-1', cfg.color, cfg.bg, cfg.ring)}>
       <span className={cn('w-1.5 h-1.5 rounded-full', {
-        'bg-green-500': level === 'low',
-        'bg-yellow-500': level === 'medium',
-        'bg-orange-500': level === 'high',
-        'bg-red-500': level === 'critical',
+        'bg-green-500': level === 'low', 'bg-yellow-500': level === 'medium',
+        'bg-orange-500': level === 'high', 'bg-red-500': level === 'critical',
       })} />
       {level ?? 'unknown'}
     </span>
   );
 }
 
-interface PolicyCheckRow {
-  policy_name: string;
-  passed: boolean;
-  reason: string;
-  severity: string;
-}
+interface PolicyCheckRow { policy_name: string; passed: boolean; reason: string; severity: string; }
 
 function PolicyChecksList({ checks }: { checks: PolicyCheckRow[] }) {
   if (!checks?.length) return null;
   return (
     <div className="space-y-1">
-      <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Policy Checks ({checks.length})
-      </div>
+      <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Policy Checks ({checks.length})</div>
       <div className="space-y-0.5">
         {checks.map((c, i) => (
-          <div key={i} className={cn(
-            'flex items-start gap-2 px-2 py-1 rounded text-[10px]',
-            c.passed ? 'bg-green-500/8' : 'bg-red-500/8'
-          )}>
-            <span className={cn('shrink-0 mt-0.5', c.passed ? 'text-green-500' : 'text-red-500')}>
-              {c.passed ? '✓' : '✗'}
-            </span>
+          <div key={i} className={cn('flex items-start gap-2 px-2 py-1 rounded text-[10px]', c.passed ? 'bg-green-500/8' : 'bg-red-500/8')}>
+            <span className={cn('shrink-0 mt-0.5', c.passed ? 'text-green-500' : 'text-red-500')}>{c.passed ? '✓' : '✗'}</span>
             <div className="flex-1 min-w-0">
               <div className="font-medium truncate">{c.policy_name}</div>
               {c.reason && <div className="text-muted-foreground text-[9px]">{c.reason}</div>}
             </div>
             <span className={cn('shrink-0 text-[9px] font-bold uppercase', {
-              'text-red-500': c.severity === 'critical',
-              'text-orange-500': c.severity === 'high',
-              'text-yellow-500': c.severity === 'medium',
-              'text-green-500': c.severity === 'low',
-            })}>
-              {c.severity}
-            </span>
+              'text-red-500': c.severity === 'critical', 'text-orange-500': c.severity === 'high',
+              'text-yellow-500': c.severity === 'medium', 'text-green-500': c.severity === 'low',
+            })}>{c.severity}</span>
           </div>
         ))}
       </div>
@@ -784,31 +1055,22 @@ function PolicyChecksList({ checks }: { checks: PolicyCheckRow[] }) {
   );
 }
 
-/** Safety gate header: shows approval status + risk level */
 function SafetyGateHeader({ data }: { data: Record<string, unknown> }) {
   const approved = data.approved as boolean;
   const riskLevel = (data.risk_level as string) ?? 'unknown';
   const requiresHuman = data.requires_human as boolean;
   const reason = data.reason as string;
-
   return (
-    <div className={cn(
-      'flex items-start gap-3 p-3 rounded-lg',
+    <div className={cn('flex items-start gap-3 p-3 rounded-lg',
       approved ? 'bg-green-500/8 border border-green-500/20'
                : requiresHuman ? 'bg-amber-500/8 border border-amber-500/20'
-               : 'bg-red-500/8 border border-red-500/20'
-    )}>
-      {/* Status icon */}
-      <div className={cn(
-        'shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm',
+               : 'bg-red-500/8 border border-red-500/20')}>
+      <div className={cn('shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm',
         approved ? 'bg-green-500/15 text-green-600'
                  : requiresHuman ? 'bg-amber-500/15 text-amber-600'
-                 : 'bg-red-500/15 text-red-600'
-      )}>
+                 : 'bg-red-500/15 text-red-600')}>
         {approved ? '✓' : requiresHuman ? '👤' : '✗'}
       </div>
-
-      {/* Status text */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className={cn('text-[11px] font-semibold', {
@@ -820,9 +1082,7 @@ function SafetyGateHeader({ data }: { data: Record<string, unknown> }) {
           </span>
           <RiskLevelBadge level={riskLevel} />
         </div>
-        {reason && (
-          <div className="text-[10px] text-muted-foreground mt-0.5 break-words">{reason}</div>
-        )}
+        {reason && <div className="text-[10px] text-muted-foreground mt-0.5 break-words">{reason}</div>}
         {requiresHuman && !approved && (
           <div className="text-[9px] text-amber-600 dark:text-amber-400 mt-1 font-medium">
             ⚡ Action blocked — awaiting explicit operator confirmation
@@ -833,7 +1093,6 @@ function SafetyGateHeader({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-/** Dry-run banner */
 function DryRunBanner() {
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/25 text-yellow-700 dark:text-yellow-400">
@@ -843,7 +1102,6 @@ function DryRunBanner() {
   );
 }
 
-/** Success execution summary */
 function ExecutionSuccess({ data, label }: { data: Record<string, unknown>; label: string }) {
   const message = data.message as string;
   return (
@@ -857,7 +1115,6 @@ function ExecutionSuccess({ data, label }: { data: Record<string, unknown>; labe
   );
 }
 
-/** Execution result metadata chips */
 function ExecMeta({ items }: { items: Array<{ label: string; value: unknown }> }) {
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -871,42 +1128,28 @@ function ExecMeta({ items }: { items: Array<{ label: string; value: unknown }> }
   );
 }
 
-// ── Per-tool execution cards ──────────────────────────────────────────────────
-
 function RestartPodCard({ data }: { data: Record<string, unknown> }) {
-  const isDryRun = data.dry_run as boolean;
-  const approved = data.approved as boolean;
   return (
     <div className="space-y-2">
-      {isDryRun && <DryRunBanner />}
+      {data.dry_run && <DryRunBanner />}
       <SafetyGateHeader data={data} />
-      {approved && !isDryRun && (
-        <ExecutionSuccess data={data} label="Pod restart initiated" />
-      )}
-      <ExecMeta items={[
-        { label: 'Pod', value: data.pod as string },
-        { label: 'Namespace', value: data.namespace as string },
-      ]} />
+      {data.approved && !data.dry_run && <ExecutionSuccess data={data} label="Pod restart initiated" />}
+      <ExecMeta items={[{ label: 'Pod', value: data.pod as string }, { label: 'Namespace', value: data.namespace as string }]} />
       <PolicyChecksList checks={(data.policy_checks as PolicyCheckRow[]) ?? []} />
     </div>
   );
 }
 
 function ScaleDeploymentCard({ data }: { data: Record<string, unknown> }) {
-  const isDryRun = data.dry_run as boolean;
-  const approved = data.approved as boolean;
-  const replicas = data.replicas;
   return (
     <div className="space-y-2">
-      {isDryRun && <DryRunBanner />}
+      {data.dry_run && <DryRunBanner />}
       <SafetyGateHeader data={data} />
-      {approved && !isDryRun && (
-        <ExecutionSuccess data={data} label={`Deployment scaled to ${replicas} replicas`} />
-      )}
+      {data.approved && !data.dry_run && <ExecutionSuccess data={data} label={`Deployment scaled to ${data.replicas} replicas`} />}
       <ExecMeta items={[
         { label: 'Deployment', value: data.name as string },
         { label: 'Namespace', value: data.namespace as string },
-        { label: 'Replicas', value: replicas },
+        { label: 'Replicas', value: data.replicas },
       ]} />
       <PolicyChecksList checks={(data.policy_checks as PolicyCheckRow[]) ?? []} />
     </div>
@@ -914,37 +1157,25 @@ function ScaleDeploymentCard({ data }: { data: Record<string, unknown> }) {
 }
 
 function CordonNodeCard({ data }: { data: Record<string, unknown> }) {
-  const isDryRun = data.dry_run as boolean;
-  const approved = data.approved as boolean;
   return (
     <div className="space-y-2">
-      {isDryRun && <DryRunBanner />}
+      {data.dry_run && <DryRunBanner />}
       <SafetyGateHeader data={data} />
-      {approved && !isDryRun && (
-        <ExecutionSuccess data={data} label="Node cordoned — marked unschedulable" />
-      )}
-      <ExecMeta items={[
-        { label: 'Node', value: data.node as string },
-      ]} />
+      {data.approved && !data.dry_run && <ExecutionSuccess data={data} label="Node cordoned — marked unschedulable" />}
+      <ExecMeta items={[{ label: 'Node', value: data.node as string }]} />
       <PolicyChecksList checks={(data.policy_checks as PolicyCheckRow[]) ?? []} />
     </div>
   );
 }
 
 function DrainNodeCard({ data }: { data: Record<string, unknown> }) {
-  const isDryRun = data.dry_run as boolean;
-  const approved = data.approved as boolean;
   return (
     <div className="space-y-2">
-      {isDryRun && <DryRunBanner />}
+      {data.dry_run && <DryRunBanner />}
       <SafetyGateHeader data={data} />
-      {approved && !isDryRun && (
-        <ExecutionSuccess data={data} label="Node drained — all pods evicted" />
-      )}
-      <ExecMeta items={[
-        { label: 'Node', value: data.node as string },
-      ]} />
-      {!approved && (
+      {data.approved && !data.dry_run && <ExecutionSuccess data={data} label="Node drained — all pods evicted" />}
+      <ExecMeta items={[{ label: 'Node', value: data.node as string }]} />
+      {!data.approved && (
         <div className="px-2 py-1.5 rounded bg-amber-500/8 border border-amber-500/20 text-[10px] text-amber-700 dark:text-amber-400">
           ⚠️ Node draining is a high-blast-radius operation. Review policy checks and obtain approval before proceeding.
         </div>
@@ -955,20 +1186,14 @@ function DrainNodeCard({ data }: { data: Record<string, unknown> }) {
 }
 
 function ApplyResourcePatchCard({ data }: { data: Record<string, unknown> }) {
-  const isDryRun = data.dry_run as boolean;
-  const approved = data.approved as boolean;
   const patch = data.patch as Record<string, unknown> | undefined;
   return (
     <div className="space-y-2">
-      {isDryRun && <DryRunBanner />}
+      {data.dry_run && <DryRunBanner />}
       <SafetyGateHeader data={data} />
-      {approved && !isDryRun && (
-        <ExecutionSuccess data={data} label="Patch applied successfully" />
-      )}
-      <ExecMeta items={[
-        { label: 'Resource', value: data.resource as string },
-      ]} />
-      {isDryRun && patch && (
+      {data.approved && !data.dry_run && <ExecutionSuccess data={data} label="Patch applied successfully" />}
+      <ExecMeta items={[{ label: 'Resource', value: data.resource as string }]} />
+      {data.dry_run && patch && (
         <div className="space-y-1">
           <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Patch Preview</div>
           <pre className="text-[9px] leading-relaxed bg-muted/20 rounded p-2 overflow-auto max-h-24 text-muted-foreground">
@@ -982,19 +1207,13 @@ function ApplyResourcePatchCard({ data }: { data: Record<string, unknown> }) {
 }
 
 function DeleteResourceCard({ data }: { data: Record<string, unknown> }) {
-  const isDryRun = data.dry_run as boolean;
-  const approved = data.approved as boolean;
   return (
     <div className="space-y-2">
-      {isDryRun && <DryRunBanner />}
+      {data.dry_run && <DryRunBanner />}
       <SafetyGateHeader data={data} />
-      {approved && !isDryRun && (
-        <ExecutionSuccess data={data} label="Resource deleted" />
-      )}
-      <ExecMeta items={[
-        { label: 'Resource', value: data.resource as string },
-      ]} />
-      {!approved && (
+      {data.approved && !data.dry_run && <ExecutionSuccess data={data} label="Resource deleted" />}
+      <ExecMeta items={[{ label: 'Resource', value: data.resource as string }]} />
+      {!data.approved && (
         <div className="px-2 py-1.5 rounded bg-red-500/8 border border-red-500/20 text-[10px] text-red-700 dark:text-red-400">
           🚨 Resource deletion is irreversible. Safety engine requires explicit human confirmation.
         </div>
@@ -1005,14 +1224,12 @@ function DeleteResourceCard({ data }: { data: Record<string, unknown> }) {
 }
 
 function RollbackDeploymentCard({ data }: { data: Record<string, unknown> }) {
-  const isDryRun = data.dry_run as boolean;
-  const approved = data.approved as boolean;
   const revision = data.revision;
   return (
     <div className="space-y-2">
-      {isDryRun && <DryRunBanner />}
+      {data.dry_run && <DryRunBanner />}
       <SafetyGateHeader data={data} />
-      {approved && !isDryRun && (
+      {data.approved && !data.dry_run && (
         <ExecutionSuccess data={data} label={revision ? `Rolled back to revision ${revision}` : 'Rolled back to previous revision'} />
       )}
       <ExecMeta items={[
@@ -1026,21 +1243,17 @@ function RollbackDeploymentCard({ data }: { data: Record<string, unknown> }) {
 }
 
 function UpdateResourceLimitsCard({ data }: { data: Record<string, unknown> }) {
-  const isDryRun = data.dry_run as boolean;
-  const approved = data.approved as boolean;
   const patch = data.patch as Record<string, unknown> | undefined;
   return (
     <div className="space-y-2">
-      {isDryRun && <DryRunBanner />}
+      {data.dry_run && <DryRunBanner />}
       <SafetyGateHeader data={data} />
-      {approved && !isDryRun && (
-        <ExecutionSuccess data={data} label="Resource limits updated" />
-      )}
+      {data.approved && !data.dry_run && <ExecutionSuccess data={data} label="Resource limits updated" />}
       <ExecMeta items={[
         { label: 'Resource', value: data.resource as string },
         { label: 'Container', value: data.container as string },
       ]} />
-      {isDryRun && patch && (
+      {data.dry_run && patch && (
         <div className="space-y-1">
           <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Limits Patch Preview</div>
           <pre className="text-[9px] leading-relaxed bg-muted/20 rounded p-2 overflow-auto max-h-24 text-muted-foreground">
@@ -1054,97 +1267,57 @@ function UpdateResourceLimitsCard({ data }: { data: Record<string, unknown> }) {
 }
 
 function TriggerHPAScaleCard({ data }: { data: Record<string, unknown> }) {
-  const isDryRun = data.dry_run as boolean;
-  const approved = data.approved as boolean;
-  const targetReplicas = data.target_replicas;
   return (
     <div className="space-y-2">
-      {isDryRun && <DryRunBanner />}
+      {data.dry_run && <DryRunBanner />}
       <SafetyGateHeader data={data} />
-      {approved && !isDryRun && (
-        <ExecutionSuccess data={data} label={`HPA scaled to ${targetReplicas} target replicas`} />
-      )}
+      {data.approved && !data.dry_run && <ExecutionSuccess data={data} label={`HPA scaled to ${data.target_replicas} target replicas`} />}
       <ExecMeta items={[
         { label: 'HPA', value: data.hpa as string },
         { label: 'Namespace', value: data.namespace as string },
-        { label: 'Target Replicas', value: targetReplicas },
+        { label: 'Target Replicas', value: data.target_replicas },
       ]} />
       <PolicyChecksList checks={(data.policy_checks as PolicyCheckRow[]) ?? []} />
     </div>
   );
 }
 
-/**
- * ExecutionResultCard — routes to specialized card by tool name.
- * Handles safety gate denied, requires_human, dry_run, and success states.
- */
-function ExecutionResultCard({
-  toolName,
-  resultJson,
-}: {
-  toolName: string;
-  resultJson: string;
-}) {
+function ExecutionResultCard({ toolName, resultJson }: { toolName: string; resultJson: string }) {
   let parsed: Record<string, unknown> | null = null;
-  try {
-    parsed = JSON.parse(resultJson) as Record<string, unknown>;
-  } catch {
-    // not JSON — render raw
-  }
-
-  if (!parsed) {
-    return (
-      <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">
-        {resultJson}
-      </pre>
-    );
-  }
-
+  try { parsed = JSON.parse(resultJson) as Record<string, unknown>; } catch { /* raw */ }
+  if (!parsed) return <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">{resultJson}</pre>;
   switch (toolName) {
-    case 'restart_pod':           return <RestartPodCard data={parsed} />;
-    case 'scale_deployment':      return <ScaleDeploymentCard data={parsed} />;
-    case 'cordon_node':           return <CordonNodeCard data={parsed} />;
-    case 'drain_node':            return <DrainNodeCard data={parsed} />;
-    case 'apply_resource_patch':  return <ApplyResourcePatchCard data={parsed} />;
-    case 'delete_resource':       return <DeleteResourceCard data={parsed} />;
-    case 'rollback_deployment':   return <RollbackDeploymentCard data={parsed} />;
+    case 'restart_pod':            return <RestartPodCard data={parsed} />;
+    case 'scale_deployment':       return <ScaleDeploymentCard data={parsed} />;
+    case 'cordon_node':            return <CordonNodeCard data={parsed} />;
+    case 'drain_node':             return <DrainNodeCard data={parsed} />;
+    case 'apply_resource_patch':   return <ApplyResourcePatchCard data={parsed} />;
+    case 'delete_resource':        return <DeleteResourceCard data={parsed} />;
+    case 'rollback_deployment':    return <RollbackDeploymentCard data={parsed} />;
     case 'update_resource_limits': return <UpdateResourceLimitsCard data={parsed} />;
-    case 'trigger_hpa_scale':     return <TriggerHPAScaleCard data={parsed} />;
+    case 'trigger_hpa_scale':      return <TriggerHPAScaleCard data={parsed} />;
     default:
-      return (
-        <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">
-          {JSON.stringify(parsed, null, 2)}
-        </pre>
-      );
+      return <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">{JSON.stringify(parsed, null, 2)}</pre>;
   }
 }
 
-// ─── ToolEventBubble ──────────────────────────────────────────────────────────
+// ─── ToolEventBubble ───────────────────────────────────────────────────────────
 
-interface ToolEventBubbleProps {
-  event: ToolEvent;
-}
+interface ToolEventBubbleProps { event: ToolEvent; }
 
 function ToolEventBubble({ event }: ToolEventBubbleProps) {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const isCalling = event.phase === 'calling';
   const isError = event.phase === 'error';
   const isResult = event.phase === 'result';
-
   const cat = getToolCategory(event.tool_name);
   const CategoryIcon = cat.icon;
 
-  // Try to pretty-print JSON result
   let prettyResult = event.result ?? '';
   let isJson = false;
   if (isResult && prettyResult) {
-    try {
-      const parsed = JSON.parse(prettyResult);
-      prettyResult = JSON.stringify(parsed, null, 2);
-      isJson = true;
-    } catch {
-      // not JSON, leave as-is
-    }
+    try { const p = JSON.parse(prettyResult); prettyResult = JSON.stringify(p, null, 2); isJson = true; } catch { /* raw */ }
   }
 
   const hasArgs = isCalling && event.args && Object.keys(event.args).length > 0;
@@ -1152,104 +1325,76 @@ function ToolEventBubble({ event }: ToolEventBubbleProps) {
   const displayResult = expanded ? prettyResult : prettyResult.slice(0, 200) + (resultTruncated ? '…' : '');
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="flex justify-start"
-    >
-      <div
-        className={cn(
-          'max-w-[92%] rounded-xl border text-xs font-mono overflow-hidden',
-          cat.bgColor,
-          cat.borderColor,
-          isError && 'bg-destructive/8 border-destructive/25',
-        )}
-      >
-        {/* Header row */}
+    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="flex justify-start">
+      <div className={cn(
+        'max-w-[92%] rounded-xl border text-xs font-mono overflow-hidden',
+        cat.bgColor, cat.borderColor,
+        isError && 'bg-destructive/8 border-destructive/25',
+      )}>
+        {/* Header */}
         <div
-          className={cn(
-            'flex items-center gap-1.5 px-3 py-2',
-            (isResult || isError) && resultTruncated && 'cursor-pointer hover:opacity-80'
-          )}
-          onClick={() => (isResult || isError) && setExpanded((e) => !e)}
+          className={cn('flex items-center gap-1.5 px-3 py-2', (isResult || isError) && resultTruncated && 'cursor-pointer hover:opacity-80')}
+          onClick={() => (isResult || isError) && setExpanded(e => !e)}
         >
-          {/* Phase indicator */}
           {isCalling && <Loader2 className={cn('h-3 w-3 animate-spin shrink-0', cat.color)} />}
           {isResult && <CheckCircle className="h-3 w-3 shrink-0 text-green-500" />}
           {isError && <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />}
-
           <CategoryIcon className={cn('h-3 w-3 shrink-0', cat.color)} />
-
-          {/* Tool name badge */}
-          <span className={cn('font-semibold truncate max-w-[180px]', cat.color)}>
-            {humanizeToolName(event.tool_name)}
-          </span>
-
-          {/* Status label */}
+          <span className={cn('font-semibold truncate max-w-[180px]', cat.color)}>{humanizeToolName(event.tool_name)}</span>
           <span className="text-muted-foreground ml-auto shrink-0">
-            {isCalling && 'running…'}
-            {isResult && 'done'}
-            {isError && 'failed'}
+            {isCalling && 'running…'}{isResult && 'done'}{isError && 'failed'}
           </span>
-
-          {/* Expand/collapse toggle */}
-          {(isResult || isError) && (prettyResult.length > 0) && (
+          {/* Copy result button */}
+          {isResult && event.result && (
+            <button
+              className="shrink-0 text-muted-foreground hover:text-foreground ml-1 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(event.result ?? '');
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }}
+              title="Copy result"
+            >
+              {copied ? <CheckCircle className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+            </button>
+          )}
+          {(isResult || isError) && prettyResult.length > 0 && (
             <button
               className="shrink-0 text-muted-foreground hover:text-foreground ml-1"
-              onClick={(e) => { e.stopPropagation(); setExpanded((x) => !x); }}
+              onClick={(e) => { e.stopPropagation(); setExpanded(x => !x); }}
             >
-              {expanded
-                ? <ChevronDown className="h-3 w-3" />
-                : <ChevronRight className="h-3 w-3" />}
+              {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             </button>
           )}
         </div>
 
-        {/* Args chips (only when calling) */}
+        {/* Args chips */}
         {hasArgs && (
           <div className="px-3 pb-2 flex flex-wrap gap-1">
             {Object.entries(event.args!).map(([k, v]) => (
-              <span
-                key={k}
-                className={cn(
-                  'px-1.5 py-0.5 rounded text-[10px] border',
-                  'bg-background/50',
-                  cat.borderColor,
-                  cat.color,
-                )}
-              >
-                <span className="opacity-60">{k}=</span>
-                <span>{JSON.stringify(v)}</span>
+              <span key={k} className={cn('px-1.5 py-0.5 rounded text-[10px] border bg-background/50', cat.borderColor, cat.color)}>
+                <span className="opacity-60">{k}=</span><span>{JSON.stringify(v)}</span>
               </span>
             ))}
           </div>
         )}
 
-        {/* Result / error body */}
+        {/* Result body */}
         {isResult && prettyResult && (
           <div className="px-3 pb-2">
-            {/* Deep-analysis tools get a specialized rich card; others get raw JSON */}
             {DEEP_ANALYSIS_TOOLS.has(event.tool_name) ? (
               <AnalysisResultCard toolName={event.tool_name} resultJson={event.result ?? ''} />
             ) : EXECUTION_TOOLS.has(event.tool_name) ? (
               <ExecutionResultCard toolName={event.tool_name} resultJson={event.result ?? ''} />
             ) : (
               <>
-                <pre
-                  className={cn(
-                    'text-[10px] leading-relaxed break-all whitespace-pre-wrap',
-                    'text-muted-foreground',
-                    !expanded && 'line-clamp-3',
-                    isJson && 'language-json',
-                  )}
-                >
+                <pre className={cn('text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground',
+                  !expanded && 'line-clamp-3', isJson && 'language-json')}>
                   {displayResult}
                 </pre>
                 {resultTruncated && (
-                  <button
-                    onClick={() => setExpanded((x) => !x)}
-                    className={cn('text-[10px] mt-1', cat.color, 'hover:underline')}
-                  >
+                  <button onClick={() => setExpanded(x => !x)} className={cn('text-[10px] mt-1', cat.color, 'hover:underline')}>
                     {expanded ? 'Show less' : `Show all (${prettyResult.length} chars)`}
                   </button>
                 )}
@@ -1257,83 +1402,74 @@ function ToolEventBubble({ event }: ToolEventBubbleProps) {
             )}
           </div>
         )}
-        {isError && event.error && (
-          <div className="px-3 pb-2 text-destructive break-words">
-            {event.error}
-          </div>
-        )}
+        {isError && event.error && <div className="px-3 pb-2 text-destructive break-words">{event.error}</div>}
       </div>
     </motion.div>
   );
 }
 
-// ─── AIAssistant ──────────────────────────────────────────────────────────────
-
-type AITab = 'chat' | 'investigate' | 'safety' | 'backend' | 'memory' | 'analytics' | 'cost' | 'security' | 'persistence' | 'budget';
+// ─── AIAssistant (main) ────────────────────────────────────────────────────────
 
 export function AIAssistant() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const { isOpen, isExpanded, context, open, close, toggleExpand, clearContext, consumePendingQuery } = useAIPanelStore();
   const [input, setInput] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<AITab>('chat');
+
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const getContext = useRouteContext();
 
-  // Build WebSocket URL from context
-  const wsUrl = buildChatWSUrl(getContext());
+  // Merge store context (from "Ask AI" buttons) with route-derived context
+  const routeCtx = getContext();
+  const activeContext: AIContext | null = context ?? (routeCtx.resourceName ? {
+    resourceKind: routeCtx.resourceKind,
+    resourceName: routeCtx.resourceName,
+    namespace: routeCtx.namespace,
+  } : null);
 
-  const {
-    messages,
-    isConnected,
-    isConnecting,
-    connect,
-    disconnect,
-    sendUserMessage,
-    clearMessages,
-  } = useWebSocket({
+  const wsUrl = buildChatWSUrl(routeCtx);
+
+  const { messages, isConnected, isConnecting, connect, disconnect, sendUserMessage, clearMessages } = useWebSocket({
     url: wsUrl,
     autoConnect: false,
   });
 
-  // Connect when chat is opened, disconnect when closed
+  // Connect when opened, disconnect when closed
   useEffect(() => {
-    if (isOpen) {
-      connect();
-    } else {
-      disconnect();
-    }
+    if (isOpen) connect(); else disconnect();
   }, [isOpen, connect, disconnect]);
 
-  // Keyboard shortcut: Cmd+Shift+P
+  // Keyboard shortcuts: Cmd+Shift+P toggle, Escape close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'p') {
         e.preventDefault();
-        setIsOpen((prev) => !prev);
+        if (isOpen) close(); else open();
       }
-      if (e.key === 'Escape' && isOpen) {
-        setIsOpen(false);
-      }
+      if (e.key === 'Escape' && isOpen) close();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, open, close]);
 
   // Auto-focus input when opened
   useEffect(() => {
-    if (isOpen && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
+    if (isOpen && inputRef.current) setTimeout(() => inputRef.current?.focus(), 100);
   }, [isOpen]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
+
+  // Consume pending query from store (from "Ask AI" buttons on detail pages)
+  useEffect(() => {
+    if (isOpen && isConnected) {
+      const pending = consumePendingQuery();
+      if (pending) sendUserMessage(pending, routeCtx);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, isConnected]);
 
   const isLoading =
     messages.length > 0 &&
@@ -1342,14 +1478,24 @@ export function AIAssistant() {
 
   const handleSend = useCallback(() => {
     if (!input.trim() || !isConnected) return;
-    sendUserMessage(input.trim(), getContext());
+    const ctx = getContext();
+    let msg = input.trim();
+    // Prepend context prefix for resource detail pages
+    if (activeContext?.resourceName && activeContext?.namespace) {
+      msg = `[Context: I am currently viewing ${activeContext.resourceKind || 'resource'} "${activeContext.resourceName}" in namespace "${activeContext.namespace}"]\n\n${msg}`;
+    }
+    sendUserMessage(msg, ctx);
     setInput('');
-  }, [input, isConnected, sendUserMessage, getContext]);
+  }, [input, isConnected, sendUserMessage, getContext, activeContext]);
 
-  const handleSuggestedQuery = useCallback((query: string) => {
-    setInput(query);
-    setTimeout(() => inputRef.current?.focus(), 50);
-  }, []);
+  const handleChipClick = useCallback((query: string) => {
+    if (!isConnected) {
+      setInput(query);
+      setTimeout(() => inputRef.current?.focus(), 50);
+      return;
+    }
+    sendUserMessage(query, getContext());
+  }, [isConnected, sendUserMessage, getContext]);
 
   const handleCopy = useCallback((id: string, content: string) => {
     navigator.clipboard.writeText(content);
@@ -1369,16 +1515,14 @@ export function AIAssistant() {
             className="fixed bottom-6 right-6 z-50"
           >
             <Button
-              onClick={() => setIsOpen(true)}
+              onClick={open}
               size="lg"
               className="h-14 w-14 rounded-full shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground"
+              aria-label="Open Kubilitics AI"
             >
               <Bot className="h-6 w-6" />
             </Button>
-            <Badge
-              variant="secondary"
-              className="absolute -top-1 -right-1 text-[10px] px-1.5"
-            >
+            <Badge variant="secondary" className="absolute -top-1 -right-1 text-[10px] px-1.5">
               ⌘⇧P
             </Badge>
           </motion.div>
@@ -1393,362 +1537,93 @@ export function AIAssistant() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            role="dialog"
+            aria-label="Kubilitics AI Assistant"
+            aria-modal="true"
             className={cn(
               'fixed z-50 flex flex-col bg-card border border-border rounded-2xl shadow-xl overflow-hidden',
-              isExpanded
-                ? 'inset-6'
-                : 'bottom-6 right-6 w-[420px] h-[600px] max-h-[80vh]'
+              isExpanded ? 'inset-6' : 'bottom-6 right-6 w-[420px] h-[600px] max-h-[80vh]'
             )}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+            {/* ── Header ── */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/20 shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="p-1.5 rounded-lg bg-primary/10">
+                <div className="p-1.5 rounded-lg bg-primary/10 shrink-0">
                   <Sparkles className="h-4 w-4 text-primary" />
                 </div>
-                <div>
-                  <h3 className="font-semibold text-sm">Kubilitics AI</h3>
-                  <div className="flex items-center gap-1.5">
-                    {isConnecting ? (
-                      <>
-                        <span className="h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse" />
-                        <p className="text-[10px] text-muted-foreground">Connecting...</p>
-                      </>
-                    ) : isConnected ? (
-                      <>
-                        <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                        <p className="text-[10px] text-muted-foreground">Connected</p>
-                      </>
-                    ) : (
-                      <>
-                        <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                        <p className="text-[10px] text-muted-foreground">Disconnected</p>
-                      </>
-                    )}
-                  </div>
-                </div>
+                <h3 className="font-semibold text-sm">Kubilitics AI</h3>
               </div>
-
-              {/* Tab switcher */}
-              <div className="flex items-center gap-0.5 bg-muted/60 rounded-lg p-0.5 mx-2">
-                <button
-                  onClick={() => setActiveTab('chat')}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all',
-                    activeTab === 'chat'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <Bot className="h-3 w-3" />
-                  Chat
-                </button>
-                <button
-                  onClick={() => setActiveTab('investigate')}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all',
-                    activeTab === 'investigate'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <Brain className="h-3 w-3" />
-                  Investigate
-                </button>
-                <button
-                  onClick={() => setActiveTab('safety')}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all',
-                    activeTab === 'safety'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <Shield className="h-3 w-3" />
-                  Safety
-                </button>
-                <button
-                  onClick={() => setActiveTab('backend')}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all',
-                    activeTab === 'backend'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <Server className="h-3 w-3" />
-                  Backend
-                </button>
-                <button
-                  onClick={() => setActiveTab('memory')}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all',
-                    activeTab === 'memory'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <Database className="h-3 w-3" />
-                  Memory
-                </button>
-                <button
-                  onClick={() => setActiveTab('analytics')}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all',
-                    activeTab === 'analytics'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <Activity className="h-3 w-3" />
-                  Analytics
-                </button>
-                <button
-                  onClick={() => setActiveTab('cost')}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all',
-                    activeTab === 'cost'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <DollarSign className="h-3 w-3" />
-                  Cost
-                </button>
-                <button
-                  onClick={() => setActiveTab('security')}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all',
-                    activeTab === 'security'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <Shield className="h-3 w-3" />
-                  SecOps
-                </button>
-                <button
-                  onClick={() => setActiveTab('persistence')}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all',
-                    activeTab === 'persistence'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <Database className="h-3 w-3" />
-                  DB
-                </button>
-                <button
-                  onClick={() => setActiveTab('budget')}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all',
-                    activeTab === 'budget'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <Zap className="h-3 w-3" />
-                  Budget
-                </button>
-              </div>
-
               <div className="flex items-center gap-1">
-                {/* Clear messages */}
-                {messages.length > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={clearMessages}
-                    title="Clear chat"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
-                {/* Reconnect when disconnected */}
-                {!isConnected && !isConnecting && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={connect}
-                    title="Reconnect"
-                  >
-                    <Wifi className="h-4 w-4" />
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => setIsExpanded(!isExpanded)}
-                >
-                  {isExpanded ? (
-                    <Minimize2 className="h-4 w-4" />
-                  ) : (
-                    <Maximize2 className="h-4 w-4" />
-                  )}
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleExpand}
+                  title={isExpanded ? 'Collapse' : 'Expand'}>
+                  {isExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => setIsOpen(false)}
-                >
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={close} title="Close">
                   <X className="h-4 w-4" />
                 </Button>
               </div>
             </div>
 
-            {/* Investigation tab */}
-            {activeTab === 'investigate' && (
-              <div className="flex-1 overflow-hidden">
-                <InvestigationPanel />
-              </div>
+            {/* ── Context Bar (conditional) ── */}
+            {activeContext?.resourceName && (
+              <ContextBar
+                resourceKind={activeContext.resourceKind ?? ''}
+                resourceName={activeContext.resourceName}
+                namespace={activeContext.namespace ?? ''}
+                onClear={clearContext}
+              />
             )}
 
-            {/* Safety tab */}
-            {activeTab === 'safety' && (
-              <div className="flex-1 overflow-hidden">
-                <SafetyPanel />
-              </div>
-            )}
-
-            {/* Backend tab */}
-            {activeTab === 'backend' && (
-              <div className="flex-1 overflow-hidden">
-                <BackendConnectionPanel />
-              </div>
-            )}
-
-            {/* Memory tab */}
-            {activeTab === 'memory' && (
-              <div className="flex-1 overflow-hidden">
-                <MemoryPanel />
-              </div>
-            )}
-
-            {/* Analytics tab */}
-            {activeTab === 'analytics' && (
-              <div className="flex-1 overflow-y-auto p-4">
-                <AnalyticsPanel />
-              </div>
-            )}
-
-            {/* Cost Intelligence tab */}
-            {activeTab === 'cost' && (
-              <div className="flex-1 overflow-y-auto p-4">
-                <CostPanel />
-              </div>
-            )}
-
-            {/* Security Analysis tab (A-CORE-012) */}
-            {activeTab === 'security' && (
-              <div className="flex-1 overflow-y-auto p-4">
-                <SecurityPanel />
-              </div>
-            )}
-
-            {/* Persistence Layer tab (A-CORE-013) */}
-            {activeTab === 'persistence' && (
-              <div className="flex-1 overflow-y-auto p-4">
-                <PersistencePanel />
-              </div>
-            )}
-
-            {/* Token Budget tab (A-CORE-014) */}
-            {activeTab === 'budget' && (
-              <div className="flex-1 overflow-y-auto p-4">
-                <BudgetPanel />
-              </div>
-            )}
-
-            {/* Messages */}
-            {activeTab === 'chat' && (
-            <ScrollArea className="flex-1 p-4" ref={scrollRef as any}>
+            {/* ── Message Area ── */}
+            <ScrollArea className="flex-1 p-4" ref={scrollRef as React.Ref<HTMLDivElement>}>
               {messages.length === 0 ? (
-                <div className="space-y-4">
-                  <div className="text-center py-8">
-                    <Bot className="h-12 w-12 mx-auto text-muted-foreground/50 mb-3" />
-                    <h4 className="font-medium text-sm mb-1">How can I help?</h4>
-                    <p className="text-xs text-muted-foreground">
-                      Ask me anything about your Kubernetes cluster
+                <div className="flex flex-col items-center justify-center h-full gap-4 px-6 py-12">
+                  <div className="p-4 rounded-2xl bg-primary/8 border border-primary/15">
+                    <Sparkles className="h-8 w-8 text-primary" />
+                  </div>
+                  <div className="text-center">
+                    <h4 className="font-semibold text-sm mb-1">Kubilitics AI</h4>
+                    <p className="text-xs text-muted-foreground max-w-[260px] leading-relaxed">
+                      {activeContext?.resourceName
+                        ? `Ask me anything about ${activeContext.resourceKind || 'this resource'} "${activeContext.resourceName}".`
+                        : 'Ask me anything about your cluster. I can analyze pods, deployments, nodes, security, costs, and more.'}
                     </p>
                     {!isConnected && !isConnecting && (
-                      <p className="text-xs text-destructive mt-2">
-                        Not connected — configure your AI provider in Settings
+                      <p className="text-xs text-destructive mt-3">
+                        AI service offline — configure your provider in Settings
                       </p>
                     )}
                   </div>
-
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground font-medium">Suggested queries</p>
-                    <div className="flex flex-wrap gap-2">
-                      {suggestedQueries.map((query) => (
-                        <button
-                          key={query}
-                          onClick={() => handleSuggestedQuery(query)}
-                          className="text-xs px-3 py-1.5 rounded-full bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {query}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-4" role="log" aria-live="polite">
                   {messages.map((message, idx) => {
-                    // Tool event messages rendered as inline progress indicators.
                     if (message.role === 'tool_event' && message.toolEvent) {
-                      return (
-                        <ToolEventBubble
-                          key={`tool-${idx}`}
-                          event={message.toolEvent}
-                        />
-                      );
+                      return <ToolEventBubble key={`tool-${idx}`} event={message.toolEvent} />;
                     }
-
                     return (
                       <motion.div
                         key={idx}
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className={cn(
-                          'flex',
-                          message.role === 'user' ? 'justify-end' : 'justify-start'
-                        )}
+                        className={cn('flex', message.role === 'user' ? 'justify-end' : 'justify-start')}
                       >
-                        <div
-                          className={cn(
-                            'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm',
-                            message.role === 'user'
-                              ? 'bg-primary text-primary-foreground rounded-br-md'
-                              : message.role === 'system'
-                              ? 'bg-destructive/10 text-destructive rounded-bl-md text-xs'
-                              : 'bg-muted rounded-bl-md'
-                          )}
-                        >
-                          <div className="whitespace-pre-wrap">{message.content}</div>
-
-                          {message.role === 'assistant' && (
-                            <button
-                              onClick={() => handleCopy(String(idx), message.content)}
-                              className="mt-2 text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1"
-                            >
-                              {copiedId === String(idx) ? (
-                                <>
-                                  <CheckCircle className="h-3 w-3" />
-                                  Copied
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="h-3 w-3" />
-                                  Copy
-                                </>
-                              )}
-                            </button>
+                        <div className={cn(
+                          'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm',
+                          message.role === 'user'
+                            ? 'bg-primary text-primary-foreground rounded-br-md'
+                            : message.role === 'system'
+                            ? 'bg-destructive/10 text-destructive rounded-bl-md text-xs'
+                            : 'bg-muted rounded-bl-md'
+                        )}>
+                          {message.role === 'assistant' ? (
+                            <AssistantMessage
+                              content={message.content}
+                              onCopy={() => handleCopy(String(idx), message.content)}
+                              copied={copiedId === String(idx)}
+                            />
+                          ) : (
+                            <div className="whitespace-pre-wrap">{message.content}</div>
                           )}
                         </div>
                       </motion.div>
@@ -1756,15 +1631,11 @@ export function AIAssistant() {
                   })}
 
                   {isLoading && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="flex justify-start"
-                    >
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start">
                       <div className="bg-muted rounded-2xl rounded-bl-md px-4 py-3">
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          Thinking...
+                          Thinking…
                         </div>
                       </div>
                     </motion.div>
@@ -1772,14 +1643,20 @@ export function AIAssistant() {
                 </div>
               )}
             </ScrollArea>
-            )}
 
-            {/* Input — only shown in chat tab */}
-            {activeTab === 'chat' && (
-            <div className="p-4 border-t border-border bg-muted/20">
+            {/* ── Quick Action Chips ── */}
+            <QuickActionChips
+              screen={routeCtx.screen}
+              resourceName={activeContext?.resourceName}
+              namespace={activeContext?.namespace}
+              onChipClick={handleChipClick}
+            />
+
+            {/* ── Input Area ── */}
+            <div className="p-4 border-t border-border bg-muted/20 shrink-0">
               {!isConnected && !isConnecting && (
                 <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
-                  <WifiOff className="h-3.5 w-3.5 text-destructive" />
+                  <Wifi className="h-3.5 w-3.5 text-destructive" />
                   <span>AI service offline. Check Settings → AI Configuration.</span>
                 </div>
               )}
@@ -1789,12 +1666,11 @@ export function AIAssistant() {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                  placeholder={
-                    isConnected
-                      ? 'Ask anything about your cluster...'
-                      : 'Connect AI service first...'
-                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                  }}
+                  placeholder={isConnected ? 'Ask anything about your cluster…' : 'Connect AI service first…'}
+                  aria-label="Message Kubilitics AI"
                   className="flex-1 bg-background border border-input rounded-xl px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                   disabled={!isConnected}
                 />
@@ -1802,16 +1678,22 @@ export function AIAssistant() {
                   onClick={handleSend}
                   disabled={!input.trim() || !isConnected}
                   size="icon"
-                  className="h-10 w-10 rounded-xl"
+                  className="h-10 w-10 rounded-xl shrink-0"
+                  aria-label="Send message"
                 >
                   <Send className="h-4 w-4" />
                 </Button>
               </div>
-              <p className="text-[10px] text-muted-foreground text-center mt-2">
-                Press ⌘⇧P to toggle • ESC to close
-              </p>
             </div>
-            )}
+
+            {/* ── AI Status Footer ── */}
+            <AIStatusFooter
+              isConnected={isConnected}
+              isConnecting={isConnecting}
+              onReconnect={connect}
+              onClearMessages={clearMessages}
+              hasMessages={messages.length > 0}
+            />
           </motion.div>
         )}
       </AnimatePresence>

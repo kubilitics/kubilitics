@@ -10,30 +10,30 @@ import (
 type OptimizationType string
 
 const (
-	OptimizationRightsize      OptimizationType = "rightsize"
-	OptimizationIdleResource   OptimizationType = "idle_resource"
+	OptimizationRightsize       OptimizationType = "rightsize"
+	OptimizationIdleResource    OptimizationType = "idle_resource"
 	OptimizationOverprovisioned OptimizationType = "overprovisioned"
-	OptimizationUnderutil      OptimizationType = "underutilized"
-	OptimizationSpot           OptimizationType = "spot_instance"
-	OptimizationCommitment     OptimizationType = "commitment_discount"
+	OptimizationUnderutil       OptimizationType = "underutilized"
+	OptimizationSpot            OptimizationType = "spot_instance"
+	OptimizationCommitment      OptimizationType = "commitment_discount"
 )
 
 // Optimization represents a cost optimization recommendation
 type Optimization struct {
-	Type            OptimizationType
-	ResourceType    ResourceType
-	ResourceName    string
-	Namespace       string
-	CurrentCost     float64
-	OptimizedCost   float64
-	Savings         float64
-	SavingsPercent  float64
-	Priority        string // "critical", "high", "medium", "low"
-	Description     string
-	Action          string
-	Impact          string
-	Confidence      float64 // 0.0 to 1.0
-	Timestamp       time.Time
+	Type           OptimizationType
+	ResourceType   ResourceType
+	ResourceName   string
+	Namespace      string
+	CurrentCost    float64
+	OptimizedCost  float64
+	Savings        float64
+	SavingsPercent float64
+	Priority       string // "critical", "high", "medium", "low"
+	Description    string
+	Action         string
+	Impact         string
+	Confidence     float64 // 0.0 to 1.0
+	Timestamp      time.Time
 }
 
 // CostOptimizer provides cost optimization recommendations
@@ -276,15 +276,15 @@ func (o *CostOptimizer) GenerateOptimizationReport(optimizations []Optimization)
 		"total_savings_month": totalSavings,
 		"total_savings_year":  totalSavings * 12,
 		"by_type": map[string]int{
-			"rightsize":        len(grouped[OptimizationRightsize]),
-			"overprovisioned":  len(grouped[OptimizationOverprovisioned]),
-			"underutilized":    len(grouped[OptimizationUnderutil]),
-			"idle":             len(grouped[OptimizationIdleResource]),
-			"spot":             len(grouped[OptimizationSpot]),
-			"commitment":       len(grouped[OptimizationCommitment]),
+			"rightsize":       len(grouped[OptimizationRightsize]),
+			"overprovisioned": len(grouped[OptimizationOverprovisioned]),
+			"underutilized":   len(grouped[OptimizationUnderutil]),
+			"idle":            len(grouped[OptimizationIdleResource]),
+			"spot":            len(grouped[OptimizationSpot]),
+			"commitment":      len(grouped[OptimizationCommitment]),
 		},
-		"by_priority": byPriority,
-		"top_10":      o.GetTopOptimizations(optimizations, 10),
+		"by_priority":  byPriority,
+		"top_10":       o.GetTopOptimizations(optimizations, 10),
 		"generated_at": time.Now(),
 	}
 }

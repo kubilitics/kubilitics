@@ -13,9 +13,17 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useBackendConfigStore } from '@/stores/backendConfigStore';
-import { useAIConfigStore, type AIProvider } from '@/stores/aiConfigStore';
+import { useAIConfigStore, toBackendProvider, type AIProvider } from '@/stores/aiConfigStore';
 import { getHealth } from '@/services/backendApiClient';
-import { getAIHealth, getAIConfiguration, updateAIConfiguration } from '@/services/aiService';
+import {
+  getAIHealth,
+  getAIConfiguration,
+  updateAIConfiguration,
+  getProviderModels,
+  validateAIKey,
+  type ModelOption,
+  type LLMProviderConfigResponse,
+} from '@/services/aiService';
 import { DEFAULT_BACKEND_BASE_URL, DEFAULT_AI_BASE_URL, DEFAULT_AI_WS_URL } from '@/lib/backendConstants';
 import { isTauri } from '@/lib/tauri';
 
@@ -62,7 +70,14 @@ export default function Settings() {
   const [analyticsConsent, setAnalyticsConsent] = useState<boolean | null>(null);
   const [isUpdatingAnalytics, setIsUpdatingAnalytics] = useState(false);
   const [isSavingAIConfig, setIsSavingAIConfig] = useState(false);
-  const isDesktop = isTauri();
+  // Model catalog loaded from the backend (provider → model list)
+  const [modelCatalog, setModelCatalog] = useState<Record<string, ModelOption[]>>({});
+  // True when user picked "Other (enter manually)" from the model dropdown
+  const [showCustomModel, setShowCustomModel] = useState(false);
+  // Inline validation feedback for the API key / model
+  const [keyValidation, setKeyValidation] = useState<{ ok: boolean; msg: string } | null>(null);
+  // Use build-time constant first (timing-independent), fall back to runtime check
+  const isDesktop = (typeof __VITE_IS_TAURI_BUILD__ !== 'undefined' && __VITE_IS_TAURI_BUILD__) || isTauri();
 
   const form = useForm<z.infer<typeof settingsSchema>>({
     resolver: zodResolver(settingsSchema),
@@ -82,22 +97,48 @@ export default function Settings() {
   }, [isDesktop]);
 
   // Hydrate AI config fields from the backend on mount.
-  // This ensures the Settings page always reflects the server-side state rather
-  // than stale localStorage values (which never contain the apiKey anyway).
+  // Backend is source of truth — overrides any stale localStorage values.
+  // apiKey is intentionally NOT returned by the backend (security).
   useEffect(() => {
     getAIConfiguration()
-      .then((cfg) => {
+      .then((cfg: LLMProviderConfigResponse) => {
         if (!cfg || !cfg.provider || cfg.provider === 'none') return;
         setProvider(cfg.provider as AIProvider);
         if (cfg.model) setModel(cfg.model);
         if (cfg.base_url) setCustomEndpoint(cfg.base_url);
-        // apiKey is intentionally not returned by the backend (security) — leave as-is
+        // Mark AI as enabled if we have a live backend config
+        if (cfg.configured) setEnabled(true);
       })
       .catch(() => {
         // AI backend not running yet — local store values are fine as defaults
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Load model catalog from the backend once.
+  useEffect(() => {
+    getProviderModels()
+      .then((resp) => setModelCatalog(resp.models))
+      .catch(() => {
+        // Backend not yet running — we'll show a free-text input as fallback
+      });
+  }, []);
+
+  // When the provider changes, auto-select the recommended model from the catalog.
+  // Also reset validation state and custom-model toggle.
+  useEffect(() => {
+    setKeyValidation(null);
+    const list = modelCatalog[provider] ?? [];
+    const recommended = list.find((m) => m.recommended);
+    if (recommended) {
+      setModel(recommended.id);
+      setShowCustomModel(false);
+    } else if (list.length === 0 && provider !== 'custom') {
+      // Catalog not loaded yet or empty — keep existing model, show free text
+      setShowCustomModel(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider, modelCatalog]);
 
   async function loadAnalyticsConsent() {
     if (!isDesktop) return;
@@ -251,23 +292,17 @@ export default function Settings() {
   }
 
   const handleReset = () => {
-    reset();
+    setBackendBaseUrl(DEFAULT_BACKEND_BASE_URL);
+    setAiBackendUrl(DEFAULT_AI_BASE_URL);
+    setAiWsUrl(DEFAULT_AI_WS_URL);
+
     form.reset({
       backendBaseUrl: DEFAULT_BACKEND_BASE_URL,
-      // We'd need default constants for AI too, but reset() handles the store.
-      // We just need to update the form.
-      // Ideally we export defaults from store or constants.
+      aiBackendUrl: DEFAULT_AI_BASE_URL,
+      aiWsUrl: DEFAULT_AI_WS_URL
     });
-    // Re-read from store state after reset (might need a tick)
-    setTimeout(() => {
-      const state = useSettingsStore.getState();
-      form.reset({
-        backendBaseUrl: state.backendBaseUrl,
-        aiBackendUrl: state.aiBackendUrl,
-        aiWsUrl: state.aiWsUrl
-      });
-      toast.info('Restored default settings');
-    }, 0);
+
+    toast.info('Restored default settings');
   };
 
   return (
@@ -424,7 +459,10 @@ export default function Settings() {
           {/* AI Provider Selection */}
           <div className="space-y-2">
             <label className="text-sm font-medium">AI Provider</label>
-            <Select value={provider} onValueChange={(value) => setProvider(value as AIProvider)}>
+            <Select value={provider} onValueChange={(value) => {
+              setProvider(value as AIProvider);
+              // Model auto-selected by the useEffect above when catalog loads
+            }}>
               <SelectTrigger>
                 <SelectValue placeholder="Select AI provider" />
               </SelectTrigger>
@@ -448,7 +486,7 @@ export default function Settings() {
               type="password"
               placeholder={provider === 'ollama' ? 'Not required for Ollama' : 'Enter your API key'}
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={(e) => { setApiKey(e.target.value); setKeyValidation(null); }}
               disabled={provider === 'ollama'}
             />
             <p className="text-xs text-muted-foreground">
@@ -458,23 +496,70 @@ export default function Settings() {
             </p>
           </div>
 
-          {/* Model */}
+          {/* Model — smart dropdown with curated list + "Other" escape hatch */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Model</label>
-            <Input
-              placeholder={
-                provider === 'openai' ? 'e.g., gpt-4' :
-                  provider === 'anthropic' ? 'e.g., claude-3-5-sonnet-20241022' :
-                    provider === 'azure' ? 'e.g., gpt-4' :
-                      provider === 'ollama' ? 'e.g., llama3.2' :
-                        'Enter model name'
-              }
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Specify the model to use for AI operations
-            </p>
+            {(() => {
+              const catalogKey = provider === 'azure' ? 'custom' : provider;
+              const modelList = modelCatalog[catalogKey] ?? [];
+              const isInList = modelList.some((m) => m.id === model);
+              const showDropdown = modelList.length > 0 && provider !== 'custom' && provider !== 'azure';
+              return (
+                <>
+                  {showDropdown && (
+                    <Select
+                      value={isInList ? model : (showCustomModel ? '__other__' : '')}
+                      onValueChange={(val) => {
+                        if (val === '__other__') {
+                          setShowCustomModel(true);
+                          setModel('');
+                        } else {
+                          setShowCustomModel(false);
+                          setModel(val);
+                        }
+                        setKeyValidation(null);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select model…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {modelList.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                        ))}
+                        <SelectItem value="__other__">Other (enter manually)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {(!showDropdown || showCustomModel) && (
+                    <Input
+                      placeholder={
+                        provider === 'openai' ? 'e.g., gpt-4o' :
+                          provider === 'anthropic' ? 'e.g., claude-sonnet-4-5' :
+                            provider === 'azure' ? 'e.g., gpt-4' :
+                              provider === 'ollama' ? 'e.g., llama3.2' :
+                                'Enter exact model name'
+                      }
+                      value={model}
+                      onChange={(e) => { setModel(e.target.value); setKeyValidation(null); }}
+                    />
+                  )}
+                </>
+              );
+            })()}
+            {keyValidation && (
+              <p className={`text-xs flex items-center gap-1 ${keyValidation.ok ? 'text-green-600' : 'text-red-500'}`}>
+                {keyValidation.ok ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                {keyValidation.msg}
+              </p>
+            )}
+            {!keyValidation && (
+              <p className="text-xs text-muted-foreground">
+                {modelCatalog[provider]?.length
+                  ? 'Select from the list or choose "Other" to enter a custom model name'
+                  : 'Enter the exact model name for your provider'}
+              </p>
+            )}
           </div>
 
           {/* Endpoint URL — required for ollama, azure, and custom providers */}
@@ -549,18 +634,40 @@ export default function Settings() {
             <Button
               onClick={async () => {
                 setIsSavingAIConfig(true);
+                setKeyValidation(null);
                 try {
-                  // Map 'azure' → 'custom' since the AI backend supports:
-                  // anthropic | openai | ollama | custom
-                  const backendProvider = provider === 'azure' ? 'custom' : provider;
-                  // Pass base_url for both ollama and custom providers
+                  // Map UI provider to backend provider:
+                  //   'azure' → 'custom'  (backend doesn't know about azure)
+                  //   'none'  → skip save (nothing configured)
+                  if (provider === 'none') {
+                    toast.error('Please select an AI provider first');
+                    return;
+                  }
+                  const backendProvider = toBackendProvider(provider);
                   const needsBaseUrl = provider === 'ollama' || provider === 'custom' || provider === 'azure';
-                  await updateAIConfiguration({
+                  const configPayload = {
                     provider: backendProvider,
-                    api_key: apiKey || undefined,
-                    model: model || undefined,
-                    base_url: needsBaseUrl ? customEndpoint : undefined,
-                  });
+                    api_key: apiKey ? apiKey.trim() : undefined,
+                    model: model ? model.trim() : undefined,
+                    base_url: needsBaseUrl ? customEndpoint.trim() : undefined,
+                  };
+
+                  // Validate the key + model before saving.
+                  // Ollama skips API key validation (no key needed).
+                  if (backendProvider !== 'ollama') {
+                    const validation = await validateAIKey(configPayload);
+                    if (!validation.valid) {
+                      const errMsg = validation.error || validation.message || 'API key or model is invalid';
+                      setKeyValidation({ ok: false, msg: errMsg });
+                      toast.error(errMsg);
+                      return;
+                    }
+                    setKeyValidation({ ok: true, msg: 'API key and model verified ✓' });
+                  }
+
+                  await updateAIConfiguration(configPayload);
+                  // Mark AI as enabled now that we have a valid config
+                  if (!enabled) setEnabled(true);
                   toast.success('AI configuration saved successfully');
                 } catch (error) {
                   toast.error(`Failed to save AI configuration: ${error}`);
@@ -568,7 +675,7 @@ export default function Settings() {
                   setIsSavingAIConfig(false);
                 }
               }}
-              disabled={isSavingAIConfig || !enabled}
+              disabled={isSavingAIConfig}
             >
               {isSavingAIConfig ? (
                 <>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Upload, CheckCircle2, XCircle, Server, ArrowRight, ChevronRight, Loader2 } from 'lucide-react';
-import { KubernetesLogo } from '@/components/icons/KubernetesIcons';
+import { KubiliticsLogo } from '../components/icons/KubernetesIcons';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -47,7 +47,7 @@ export default function KubeConfigSetup() {
 
     try {
       const content = await file.text();
-      
+
       // Simulate progress
       for (let i = 0; i <= 50; i += 10) {
         await new Promise((r) => setTimeout(r, 100));
@@ -123,7 +123,7 @@ export default function KubeConfigSetup() {
           className="flex items-center justify-between mb-12"
         >
           <div className="flex items-center gap-3">
-            <KubernetesLogo size={32} className="text-primary" />
+            <KubiliticsLogo size={48} className="text-primary mb-6" />
             <span className="text-xl font-semibold">Kubilitics Setup</span>
           </div>
           <Button variant="ghost" onClick={() => navigate('/')}>
@@ -142,13 +142,12 @@ export default function KubeConfigSetup() {
               return (
                 <div key={label} className="flex items-center gap-2">
                   <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
-                      isComplete
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${isComplete
                         ? 'bg-primary text-primary-foreground'
                         : isActive
-                        ? 'bg-primary/20 text-primary border-2 border-primary'
-                        : 'bg-muted text-muted-foreground'
-                    }`}
+                          ? 'bg-primary/20 text-primary border-2 border-primary'
+                          : 'bg-muted text-muted-foreground'
+                      }`}
                   >
                     {isComplete ? <CheckCircle2 className="h-4 w-4" /> : i + 1}
                   </div>
@@ -254,11 +253,10 @@ export default function KubeConfigSetup() {
                 {parsedClusters.map((cluster) => (
                   <Card
                     key={cluster.id}
-                    className={`cursor-pointer transition-all ${
-                      selectedClusterId === cluster.id
+                    className={`cursor-pointer transition-all ${selectedClusterId === cluster.id
                         ? 'ring-2 ring-primary border-primary'
                         : 'hover:border-primary/50'
-                    }`}
+                      }`}
                     onClick={() => handleSelectCluster(cluster)}
                   >
                     <CardContent className="p-4">
