@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { CodeEditor } from '@/components/editor/CodeEditor';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import yamlParser from 'js-yaml';
 
 export interface YamlValidationError {
   line: number;
@@ -22,58 +23,35 @@ export interface YamlViewerProps {
 
 function validateYaml(yaml: string): YamlValidationError[] {
   const errors: YamlValidationError[] = [];
-  const lines = yaml.split('\n');
-  
-  let inMultilineString = false;
-  
-  lines.forEach((line, index) => {
-    const lineNum = index + 1;
-    const trimmed = line.trim();
-    
-    if (!trimmed || trimmed.startsWith('#')) return;
-    
-    if (line.includes('\t')) {
-      errors.push({ line: lineNum, message: 'Use spaces instead of tabs' });
+
+  try {
+    const doc = yamlParser.load(yaml) as any;
+    if (!doc) return errors;
+
+    if (!doc.apiVersion) {
+      errors.push({ line: 1, message: 'Missing required field: apiVersion' });
     }
-    
-    if (trimmed.endsWith('|') || trimmed.endsWith('>')) {
-      inMultilineString = true;
-      return;
+    if (!doc.kind) {
+      errors.push({ line: 1, message: 'Missing required field: kind' });
     }
-    
-    if (inMultilineString) {
-      const currentIndent = line.search(/\S/);
-      if (currentIndent <= 0) {
-        inMultilineString = false;
-      } else {
-        return;
-      }
+    if (!doc.metadata) {
+      errors.push({ line: 1, message: 'Missing required field: metadata' });
     }
-    
-    if (trimmed.includes(':')) {
-      const colonIndex = trimmed.indexOf(':');
-      const key = trimmed.substring(0, colonIndex);
-      
-      if (/[{}[\]]/.test(key)) {
-        errors.push({ line: lineNum, message: 'Invalid characters in key' });
-      }
-      
-      if (colonIndex < trimmed.length - 1 && trimmed[colonIndex + 1] !== ' ') {
-        errors.push({ line: lineNum, message: 'Missing space after colon' });
-      }
+  } catch (err: any) {
+    // Extract line number from js-yaml error if possible
+    let line = 1;
+    let message = 'Invalid YAML';
+
+    if (err.mark && err.mark.line !== undefined) {
+      line = err.mark.line + 1;
+      message = err.reason || err.message;
+    } else {
+      message = err.message || String(err);
     }
-  });
-  
-  if (!yaml.includes('apiVersion:')) {
-    errors.push({ line: 1, message: 'Missing required field: apiVersion' });
+
+    errors.push({ line, message });
   }
-  if (!yaml.includes('kind:')) {
-    errors.push({ line: 1, message: 'Missing required field: kind' });
-  }
-  if (!yaml.includes('metadata:')) {
-    errors.push({ line: 1, message: 'Missing required field: metadata' });
-  }
-  
+
   return errors;
 }
 
@@ -135,7 +113,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave }: Yam
 
   const handleSave = async () => {
     if (errors.length > 0 || !onSave) return;
-    
+
     setIsSaving(true);
     try {
       await onSave(editedYaml);
@@ -220,7 +198,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave }: Yam
                 className="rounded-lg"
               />
             </div>
-            
+
             {errors.length > 0 && (
               <div className="w-56 shrink-0">
                 <div className="h-full rounded-lg border border-border bg-muted/30 p-3">

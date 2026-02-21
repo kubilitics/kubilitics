@@ -108,7 +108,7 @@ function probeToChips(probe: Record<string, unknown> | undefined): string[] {
   if (!probe || typeof probe !== 'object') return [];
   const chips: string[] = [];
   const typedProbe = probe as Probe;
-  
+
   if (typedProbe.httpGet && typeof typedProbe.httpGet.path === 'string') {
     chips.push(`path: ${typedProbe.httpGet.path}`);
   }
@@ -134,7 +134,7 @@ export function ContainersSection({ containers, className, onForwardPort }: Cont
       {containers.map((container, index) => {
         const state = stateConfig[container.state];
         const StateIcon = state.icon;
-        
+
         return (
           <motion.div
             key={container.name}
@@ -290,71 +290,83 @@ export function ContainersSection({ containers, className, onForwardPort }: Cont
                   tooltip={
                     <>
                       <p className="font-medium">Runtime</p>
-                      <p className="mt-1 text-muted-foreground text-xs">Container ID, image, and ports. Use Forward to access a port from your machine.</p>
+                      <p className="mt-1 text-muted-foreground text-xs">Container ID, image, and ports. Standardized for deep inspection.</p>
                     </>
                   }
                 >
-                  <div className="space-y-5">
-                    {container.containerID && (
-                      <div className="space-y-1.5">
-                        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Container ID</span>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="flex items-center gap-2 rounded-lg bg-muted/60 border border-border/60 px-3 py-2.5 font-mono text-xs text-foreground cursor-help group">
-                              <span className="truncate min-w-0 flex-1">{container.containerID.replace(/^[^:]+:\/\//, '').slice(0, 32)}…</span>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 opacity-70 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(container.containerID!); toast.success('Copied'); }}>
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div className="space-y-4">
+                        <div className="group relative">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 mb-1.5 block">Container ID</span>
+                          <div className="flex items-center gap-2 rounded-xl bg-muted/30 border border-border/40 p-3 font-mono text-xs transition-colors hover:bg-muted/50 group-hover:border-primary/20">
+                            <span className="truncate flex-1 text-foreground/80">{container.containerID || '—'}</span>
+                            {container.containerID && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => { navigator.clipboard.writeText(container.containerID!); toast.success('Copied'); }}
+                              >
                                 <Copy className="h-3.5 w-3.5" />
                               </Button>
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-xs font-mono text-xs">{TOOLTIP_CONTAINER_ID}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    )}
-                    {container.imagePullPolicy && (
-                      <div className="space-y-1.5">
-                        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Image Pull Policy</span>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="inline-flex">
-                              <span className="inline-flex items-center rounded-md border border-border/60 bg-muted/40 px-3 py-1.5 text-sm font-medium text-foreground">
-                                {container.imagePullPolicy}
-                              </span>
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-xs">{TOOLTIP_IMAGE_PULL_POLICY[container.imagePullPolicy] ?? container.imagePullPolicy}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    )}
-                    <div className="space-y-1.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Image</span>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className="rounded-lg border border-primary/25 bg-primary/5 px-4 py-3 font-mono text-sm font-medium text-foreground cursor-help">
-                            {container.image || '—'}
+                            )}
                           </div>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-md font-mono text-xs break-all">{container.imageID ? `Image ID: ${container.imageID}` : container.image}</TooltipContent>
-                      </Tooltip>
-                    </div>
-                    {container.ports && container.ports.length > 0 && (
-                      <div className="space-y-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Ports</span>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {container.ports.map((p) => (
-                            <span key={p.containerPort} className="inline-flex items-center rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 font-mono text-sm font-medium">
-                              {p.protocol}:{p.containerPort}
-                            </span>
-                          ))}
-                          {onForwardPort && container.ports[0] && (
-                            <Button variant="outline" size="sm" className="gap-2 font-medium shadow-sm border-primary/30 hover:border-primary/50 hover:bg-primary/5" onClick={() => onForwardPort(container.name, container.ports![0].containerPort)}>
-                              <ExternalLink className="h-4 w-4" />
-                              Port forward
-                            </Button>
-                          )}
+                        </div>
+
+                        <div className="group relative">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 mb-1.5 block">Image Reference</span>
+                          <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 space-y-2">
+                            <div className="flex items-center justify-between gap-4">
+                              <div className="font-mono text-sm font-semibold text-primary/90 truncate">{container.image || '—'}</div>
+                              {container.imagePullPolicy && (
+                                <Badge variant="outline" className="text-[9px] uppercase tracking-tighter bg-background/50 border-primary/20">{container.imagePullPolicy}</Badge>
+                              )}
+                            </div>
+                            {container.imageID && (
+                              <p className="text-[10px] text-muted-foreground font-mono truncate">{container.imageID}</p>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    )}
+
+                      <div className="space-y-4">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 mb-1.5 block">Exposed Ports</span>
+                        {container.ports && container.ports.length > 0 ? (
+                          <div className="rounded-xl border border-border/40 bg-muted/10 divide-y divide-border/30 overflow-hidden">
+                            {container.ports.map((p, pIdx) => (
+                              <div key={`${p.containerPort}-${pIdx}`} className="flex items-center justify-between px-4 py-3 group hover:bg-muted/30 transition-colors">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex flex-col">
+                                    <span className="text-xs font-bold text-foreground">{p.containerPort}</span>
+                                    <span className="text-[10px] text-muted-foreground uppercase">{p.protocol || 'TCP'}</span>
+                                  </div>
+                                  {p.name && (
+                                    <Badge variant="secondary" className="text-[10px] font-mono px-2 py-0">{p.name}</Badge>
+                                  )}
+                                </div>
+                                {onForwardPort && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 gap-1.5 text-[10px] font-bold uppercase tracking-tight border-primary/20 hover:bg-primary/10 hover:border-primary/40 text-primary"
+                                    onClick={() => onForwardPort(container.name, p.containerPort)}
+                                  >
+                                    <ExternalLink className="h-3 w-3" />
+                                    Forward
+                                  </Button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-dashed border-border/60 p-6 flex flex-col items-center justify-center gap-2 text-muted-foreground bg-muted/5">
+                            <Box className="h-5 w-5 opacity-20" />
+                            <span className="text-xs font-medium">No ports detected</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </SectionCard>
 

@@ -3,20 +3,19 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
     Globe,
     Search,
-    Filter,
     RefreshCw,
-    ArrowUpRight,
-    Shield,
-    Network
+    ArrowUpRight
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNetworkingOverview } from '@/hooks/useNetworkingOverview';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { SectionOverviewHeader } from '@/components/layout/SectionOverviewHeader';
+import { NetworkingPulse } from '@/components/networking/NetworkingPulse';
+import { ServiceDistribution } from '@/components/networking/ServiceDistribution';
 
 export default function NetworkingOverview() {
     const [searchQuery, setSearchQuery] = useState('');
@@ -38,70 +37,94 @@ export default function NetworkingOverview() {
     if (isLoading) {
         return (
             <div className="flex items-center justify-center min-h-[400px]">
-                <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+                <RefreshCw className="h-8 w-8 animate-spin text-[#326CE5]" />
             </div>
         );
     }
 
+    const servicesCount = data?.resources.filter(r => r.kind === 'Service').length ?? 0;
+    const ingressCount = data?.resources.filter(r => r.kind === 'Ingress').length ?? 0;
+    const policyCount = data?.resources.filter(r => r.kind === 'NetworkPolicy').length ?? 0;
+
     return (
-        <div className="p-6 space-y-8 max-w-[1600px] mx-auto pb-20">
+        <div className="flex flex-col gap-6 p-6">
             {/* Header Section */}
             <SectionOverviewHeader
                 title="Networking Overview"
-                description="Manage services, ingresses, and security policies."
+                description="High-fidelity visibility across cluster services, traffic flow, and security layers."
                 icon={Globe}
                 onSync={handleSync}
                 isSyncing={isSyncing}
             />
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Card className="bg-card/50 backdrop-blur-sm border-primary/10">
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium text-muted-foreground">Pulse Health</span>
-                            <ActivityIcon className="h-4 w-4 text-emerald-500" />
+            {/* Hero Section: Traffic Pulse & Distribution */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Traffic Pulse Chart */}
+                <Card className="lg:col-span-8 overflow-hidden border-[#326CE5]/10 shadow-sm bg-white/50 backdrop-blur-sm">
+                    <CardHeader className="pb-0">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <CardTitle className="text-xl font-black text-[#326CE5]">Traffic Pulse</CardTitle>
+                                <p className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Real-time Connectivity Signals</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-full bg-[#326CE5] animate-ping" />
+                                <span className="text-[10px] font-black text-[#326CE5] uppercase">Live Monitor</span>
+                            </div>
                         </div>
-                        <div className="text-3xl font-bold text-emerald-500">
-                            {data?.pulse.optimal_percent.toFixed(1)}%
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card className="bg-card/50 backdrop-blur-sm border-primary/10">
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium text-muted-foreground">Total Services</span>
-                            <Globe className="h-4 w-4 text-primary" />
-                        </div>
-                        <div className="text-3xl font-bold">
-                            {data?.resources.filter(r => r.kind === 'Service').length}
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card className="bg-card/50 backdrop-blur-sm border-primary/10">
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium text-muted-foreground">Active Ingresses</span>
-                            <Network className="h-4 w-4 text-blue-500" />
-                        </div>
-                        <div className="text-3xl font-bold">
-                            {data?.resources.filter(r => r.kind === 'Ingress').length}
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                        <NetworkingPulse />
+                        <div className="grid grid-cols-3 gap-4 mt-4 border-t border-slate-100 pt-6">
+                            <div className="text-center">
+                                <span className="block text-2xl font-black text-[#326CE5]">{data?.pulse.optimal_percent.toFixed(1)}%</span>
+                                <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-tighter">Availability</span>
+                            </div>
+                            <div className="text-center">
+                                <span className="block text-2xl font-black text-[#326CE5]">{servicesCount}</span>
+                                <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-tighter">Total Endpoints</span>
+                            </div>
+                            <div className="text-center">
+                                <span className="block text-2xl font-black text-[#326CE5]">{policyCount}</span>
+                                <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-tighter">Active Policies</span>
+                            </div>
                         </div>
                     </CardContent>
                 </Card>
 
-                <Card className="bg-card/50 backdrop-blur-sm border-primary/10">
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium text-muted-foreground">Network Policies</span>
-                            <Shield className="h-4 w-4 text-amber-500" />
-                        </div>
-                        <div className="text-3xl font-bold">
-                            {data?.resources.filter(r => r.kind === 'NetworkPolicy').length}
+                {/* Service Distribution Donut */}
+                <Card className="lg:col-span-4 border-[#326CE5]/10 shadow-sm bg-white/50 backdrop-blur-sm flex flex-col items-center justify-center p-6 px-0 text-center relative overflow-hidden">
+                    <CardHeader className="pb-0">
+                        <CardTitle className="text-sm font-black uppercase text-[#326CE5]/60">Domain Allocation</CardTitle>
+                    </CardHeader>
+                    <CardContent className="w-full flex flex-col items-center">
+                        <ServiceDistribution data={{
+                            services: servicesCount,
+                            ingresses: ingressCount,
+                            policies: policyCount
+                        }} />
+
+                        <div className="flex flex-wrap justify-center gap-4 mt-2">
+                            <div className="flex items-center gap-2">
+                                <div className="h-2 w-2 rounded-full bg-[#326CE5]" />
+                                <span className="text-[10px] font-bold text-muted-foreground">Services</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="h-2 w-2 rounded-full bg-[#60A5FA]" />
+                                <span className="text-[10px] font-bold text-muted-foreground">Ingress</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="h-2 w-2 rounded-full bg-[#93C5FD]" />
+                                <span className="text-[10px] font-bold text-muted-foreground">Policies</span>
+                            </div>
                         </div>
                     </CardContent>
+
+                    <div className="mt-4 w-full px-6">
+                        <Button variant="outline" className="w-full h-10 border-[#326CE5]/20 text-[#326CE5] font-bold hover:bg-[#326CE5]/5 rounded-xl transition-all">
+                            Manage Load Balancers
+                        </Button>
+                    </div>
                 </Card>
             </div>
 
@@ -111,17 +134,11 @@ export default function NetworkingOverview() {
                     <div className="relative flex-1 max-w-md">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
-                            placeholder="Filter by name or kind..."
-                            className="pl-10 bg-background/50 border-primary/10 focus:ring-primary/20 transition-all rounded-xl"
+                            placeholder="Search network resources..."
+                            className="pl-10 bg-background/50 border-primary/10 transition-all rounded-xl focus:ring-[#326CE5]/20"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                         />
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" className="rounded-lg h-9 border-primary/10 hover:bg-muted/50">
-                            <Filter className="h-3.5 w-3.5 mr-2" />
-                            Advanced Filters
-                        </Button>
                     </div>
                 </div>
 
@@ -129,12 +146,12 @@ export default function NetworkingOverview() {
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-muted/30">
-                                <th className="px-6 py-4 text-sm font-semibold text-muted-foreground border-b border-primary/5">Name</th>
-                                <th className="px-6 py-4 text-sm font-semibold text-muted-foreground border-b border-primary/5">Kind</th>
-                                <th className="px-6 py-4 text-sm font-semibold text-muted-foreground border-b border-primary/5">Namespace</th>
-                                <th className="px-6 py-4 text-sm font-semibold text-muted-foreground border-b border-primary/5">Status</th>
-                                <th className="px-6 py-4 text-sm font-semibold text-muted-foreground border-b border-primary/5">Type</th>
-                                <th className="px-6 py-4 text-sm font-semibold text-muted-foreground border-b border-primary/5"></th>
+                                <th className="px-6 py-4 text-xs font-black uppercase tracking-widest text-muted-foreground border-b border-primary/5">Resource Name</th>
+                                <th className="px-6 py-4 text-xs font-black uppercase tracking-widest text-muted-foreground border-b border-primary/5">Kind</th>
+                                <th className="px-6 py-4 text-xs font-black uppercase tracking-widest text-muted-foreground border-b border-primary/5">Namespace</th>
+                                <th className="px-6 py-4 text-xs font-black uppercase tracking-widest text-muted-foreground border-b border-primary/5">Status</th>
+                                <th className="px-6 py-4 text-xs font-black uppercase tracking-widest text-muted-foreground border-b border-primary/5">Type</th>
+                                <th className="px-6 py-4 border-b border-primary/5"></th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-primary/5">
@@ -144,34 +161,34 @@ export default function NetworkingOverview() {
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: idx * 0.05 }}
                                     key={`${resource.kind}-${resource.name}`}
-                                    className="group hover:bg-muted/30 transition-colors"
+                                    className="group hover:bg-[#326CE5]/5 transition-colors"
                                 >
                                     <td className="px-6 py-4">
-                                        <div className="font-medium text-foreground group-hover:text-primary transition-colors">
+                                        <div className="font-bold text-foreground group-hover:text-[#326CE5] transition-colors">
                                             {resource.name}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <Badge variant="outline" className="font-mono text-[10px] uppercase tracking-wider bg-background/50 border-primary/10">
+                                        <Badge variant="outline" className="font-bold text-[9px] uppercase tracking-wider bg-white border-[#326CE5]/20 text-[#326CE5]">
                                             {resource.kind}
                                         </Badge>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-muted-foreground">
+                                    <td className="px-6 py-4 text-sm font-medium text-muted-foreground">
                                         {resource.namespace}
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="flex items-center gap-2">
-                                            <div className={cn("h-2 w-2 rounded-full", resource.status === 'Active' ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-amber-500")} />
-                                            <span className="text-sm font-medium">{resource.status}</span>
+                                            <div className={cn("h-1.5 w-1.5 rounded-full", resource.status === 'Active' ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-amber-500")} />
+                                            <span className="text-[12px] font-bold text-slate-700">{resource.status}</span>
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <span className="text-sm text-muted-foreground italic font-light">
+                                        <span className="text-[12px] font-medium text-muted-foreground italic">
                                             {resource.type || '-'}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-primary/10 hover:text-primary rounded-lg transition-all">
+                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-[#326CE5] hover:text-white rounded-lg transition-all">
                                             <ArrowUpRight className="h-4 w-4" />
                                         </Button>
                                     </td>
@@ -182,24 +199,5 @@ export default function NetworkingOverview() {
                 </div>
             </div>
         </div>
-    );
-}
-
-function ActivityIcon(props: any) {
-    return (
-        <svg
-            {...props}
-            xmlns="http://www.w3.org/2000/svg"
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-        >
-            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-        </svg>
     );
 }

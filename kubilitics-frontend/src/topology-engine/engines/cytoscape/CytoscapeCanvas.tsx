@@ -5,6 +5,7 @@ import cytoscapeSvg from 'cytoscape-svg';
 import fcose from 'cytoscape-fcose';
 import cola from 'cytoscape-cola';
 import type { TopologyGraph, HeatMapMode, TopologyNode } from '../../types/topology.types';
+import { GraphModel } from '../../core/graphModel';
 import { getHeatmapColor } from '../../renderer/styles';
 import type { EngineRef } from '../../types/engine.types';
 import type { OverlayType, OverlayData } from '../../types/overlay.types';
@@ -43,31 +44,31 @@ try {
 export const CLUSTER_ROOT_ID = 'cluster-root';
 
 export const RESOURCE_COLOR_MAP: Record<string, string> = {
-  'Cluster': '#0f172a',          // Root node - dark slate
-  'Pod': '#3498DB',              // Vibrant blue
-  'Deployment': '#FF6B35',       // Vibrant orange
-  'ReplicaSet': '#9B59B6',       // Rich purple
-  'StatefulSet': '#1E88E5',      // Bright blue
-  'DaemonSet': '#5E35B1',        // Deep purple
-  'Job': '#F57C00',              // Vibrant orange
-  'CronJob': '#FF9800',          // Bright orange
-  'Service': '#2ECC71',          // Fresh green
-  'Ingress': '#26A69A',          // Teal
-  'Endpoints': '#546E7A',        // Slate
-  'EndpointSlice': '#607D8B',    // Blue slate
-  'NetworkPolicy': '#FF6F00',    // Amber
-  'ConfigMap': '#FFC107',        // Bright yellow
-  'Secret': '#E53935',           // Rich red
-  'PersistentVolume': '#0097A7', // Cyan
-  'PersistentVolumeClaim': '#00ACC1', // Light cyan
-  'StorageClass': '#00BCD4',     // Bright cyan
-  'Node': '#D32F2F',             // Deep red
-  'Namespace': '#7B1FA2',        // Deep purple
-  'ServiceAccount': '#AD1457',   // Deep pink
-  'Role': '#EC407A',             // Pink
-  'ClusterRole': '#C2185B',      // Magenta
-  'RoleBinding': '#F06292',      // Light pink
-  'ClusterRoleBinding': '#E91E63', // Magenta
+  'Cluster': 'hsl(217, 91%, 25%)',      // Deep slate/blue
+  'Pod': 'hsl(199, 89%, 48%)',          // Vibrant blue
+  'Deployment': 'hsl(25, 95%, 53%)',   // Vibrant orange
+  'ReplicaSet': 'hsl(262, 83%, 58%)',   // Rich purple
+  'StatefulSet': 'hsl(210, 80%, 45%)',  // Royal blue
+  'DaemonSet': 'hsl(280, 75%, 45%)',    // Deep violet
+  'Job': 'hsl(45, 93%, 47%)',           // Amber
+  'CronJob': 'hsl(38, 92%, 50%)',       // Bright orange
+  'Service': 'hsl(142, 72%, 29%)',      // Emerald green
+  'Ingress': 'hsl(174, 90%, 41%)',      // Teal
+  'Endpoints': 'hsl(215, 25%, 40%)',    // Muted slate
+  'EndpointSlice': 'hsl(215, 20%, 50%)',// Lighter slate
+  'NetworkPolicy': 'hsl(15, 80%, 40%)', // Rust orange
+  'ConfigMap': 'hsl(47, 96%, 53%)',     // Golden yellow
+  'Secret': 'hsl(346, 84%, 61%)',       // Soft red
+  'PersistentVolume': 'hsl(200, 40%, 45%)', // Slate blue
+  'PersistentVolumeClaim': 'hsl(200, 60%, 45%)', // Ocean blue
+  'StorageClass': 'hsl(200, 30%, 30%)', // Deep slate
+  'Node': 'hsl(0, 72%, 51%)',           // Alarm red
+  'Namespace': 'hsl(280, 80%, 60%)',    // Amethyst purple
+  'ServiceAccount': 'hsl(320, 70%, 50%)',// Pink
+  'Role': 'hsl(310, 60%, 45%)',         // Magenta
+  'ClusterRole': 'hsl(300, 80%, 40%)',  // Deep magenta
+  'RoleBinding': 'hsl(300, 50%, 60%)',  // Light magenta
+  'ClusterRoleBinding': 'hsl(300, 60%, 55%)', // Mid magenta
 };
 
 /** Minimal node data for synthetic cluster root (Cytoscape element data shape). */
@@ -116,6 +117,8 @@ function buildHierarchicalGraph(graph: TopologyGraph): {
   nodes: Array<{ group: 'nodes'; data: CyNodeData; position: { x: number; y: number } }>;
   edges: Array<{ group: 'edges'; data: CyEdgeData }>;
 } {
+  // Use GraphModel which now uses GraphEnhancer internally for full relationship discovery
+  const model = new GraphModel(graph);
   const clusterName = graph.metadata?.clusterId || 'Cluster';
 
   const rootNode: CyNodeData = {
@@ -127,49 +130,43 @@ function buildHierarchicalGraph(graph: TopologyGraph): {
     badge: 'Cluster',
   };
 
-  const namespaces = graph.nodes.filter(n => n.kind === 'Namespace').sort((a, b) => a.name.localeCompare(b.name));
-  const k8sNodes = graph.nodes.filter(n => n.kind === 'Node').sort((a, b) => a.name.localeCompare(b.name));
+  const nsNodes = model.getNodesByKind('Namespace').sort((a, b) => a.name.localeCompare(b.name));
+  const kNodes = model.getNodesByKind('Node').sort((a, b) => a.name.localeCompare(b.name));
+  const otherRes = model.nodes.filter(n => n.kind !== 'Namespace' && n.kind !== 'Node');
 
-  // Resources that don't have a direct parent yet
-  const otherResources = graph.nodes.filter(n => n.kind !== 'Namespace' && n.kind !== 'Node');
-
-  // We'll organize resources into "Towers" based on Namespace.
-  const towersNodes = namespaces;
-  const towers = towersNodes.map(n => n.id);
-
-  const totalWidth = Math.max(towers.length * TOWER_WIDTH, 600);
+  const towers = nsNodes.map(n => n.id);
+  const totalWidth = Math.max(towers.length * TOWER_WIDTH, 800);
   const startX = -totalWidth / 2 + TOWER_WIDTH / 2;
 
   const positions = new Map<string, { x: number; y: number }>();
-  positions.set(CLUSTER_ROOT_ID, { x: 0, y: -200 });
+  positions.set(CLUSTER_ROOT_ID, { x: 0, y: -300 });
 
-  // Place Tower Heads in the first row
+  // Place Tower Heads (Namespaces)
   const row1Y = 100;
   towers.forEach((towerId, idx) => {
     const x = startX + idx * TOWER_WIDTH;
     positions.set(towerId, { x, y: row1Y });
   });
 
-  // Level mapping for workload hierarchy within a tower
+  // Level mapping
   const getResourceLevel = (kind: string): number => {
-    if (['Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob'].includes(kind)) return 1;
-    if (kind === 'ReplicaSet') return 2;
-    if (kind === 'Pod') return 3;
-    if (['Service', 'Ingress', 'ConfigMap', 'Secret', 'PersistentVolumeClaim', 'Endpoints'].includes(kind)) return 4;
-    return 5;
+    if (kind === 'Ingress') return 1;
+    if (kind === 'Service') return 2;
+    if (['Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob'].includes(kind)) return 3;
+    if (kind === 'ReplicaSet') return 4;
+    if (kind === 'Pod') return 5;
+    if (['ConfigMap', 'Secret', 'PersistentVolumeClaim', 'Endpoints'].includes(kind)) return 6;
+    return 7;
   };
 
-  // Group resources by their tower and level
   const resourceGroups = new Map<string, Map<number, TopologyNode[]>>();
 
-  otherResources.forEach(node => {
+  otherRes.forEach(node => {
     let towerId = '';
-
     if (node.namespace) {
-      const nsNode = namespaces.find(ns => ns.name === node.namespace);
+      const nsNode = nsNodes.find(ns => ns.name === node.namespace);
       if (nsNode) towerId = nsNode.id;
     }
-
     if (!towerId) towerId = 'cluster-scoped';
 
     if (!resourceGroups.has(towerId)) resourceGroups.set(towerId, new Map());
@@ -179,34 +176,32 @@ function buildHierarchicalGraph(graph: TopologyGraph): {
     levels.get(level)!.push(node);
   });
 
-  const levelGap = 160;
+  const levelGap = 140;
 
-  // Position resources within each tower
   resourceGroups.forEach((levels, towerId) => {
     const towerPos = positions.get(towerId);
-    // If it's cluster-scoped, place it on the far right
     const baseX = towerPos ? towerPos.x : (totalWidth / 2 + TOWER_WIDTH);
     const baseY = row1Y + levelGap;
 
     levels.forEach((nodes, level) => {
       const y = baseY + (level - 1) * levelGap;
       nodes.forEach((node, idx) => {
-        const x = baseX + (nodes.length > 1 ? (idx - (nodes.length - 1) / 2) * 110 : 0);
+        const x = baseX + (nodes.length > 1 ? (idx - (nodes.length - 1) / 2) * 90 : 0);
         positions.set(node.id, { x, y });
       });
     });
   });
 
-  // Ensure all Nodes are positioned below the root but above namespaces
-  k8sNodes.forEach((n, idx) => {
+  // Nodes positioning
+  kNodes.forEach((n, idx) => {
     if (!positions.has(n.id)) {
-      positions.set(n.id, { x: (idx - (k8sNodes.length - 1) / 2) * 150, y: -50 });
+      positions.set(n.id, { x: (idx - (kNodes.length - 1) / 2) * 180, y: -100 });
     }
   });
 
   const cyNodes = [
     { group: 'nodes' as const, data: rootNode, position: positions.get(CLUSTER_ROOT_ID)! },
-    ...graph.nodes.map(node => ({
+    ...model.nodes.map(node => ({
       group: 'nodes' as const,
       data: {
         id: node.id,
@@ -215,43 +210,33 @@ function buildHierarchicalGraph(graph: TopologyGraph): {
         kind: node.kind,
         namespace: node.namespace,
         badge: node.kind,
-        statusBadge: node.computed.health === 'warning' ? '⚠️' : node.computed.health === 'critical' ? '🔴' : '',
+        statusBadge: node.computed?.health === 'warning' ? '⚠️' : node.computed?.health === 'critical' ? '🔴' : '',
       },
-      position: positions.get(node.id) || { x: (Math.random() - 0.5) * 1000, y: 500 }
+      position: positions.get(node.id) || { x: (Math.random() - 0.5) * 1000, y: 1000 }
     }))
   ];
 
-  const edges: Array<{ group: 'edges'; data: CyEdgeData }> = [
-    // Cluster -> Namespaces/Nodes
-    ...namespaces.map(ns => ({
+  const cyEdges: Array<{ group: 'edges'; data: CyEdgeData }> = [
+    ...nsNodes.map(ns => ({
       group: 'edges' as const,
       data: { id: `root-${ns.id}`, source: CLUSTER_ROOT_ID, target: ns.id, relationshipType: 'contains' }
     })),
-    ...k8sNodes.map(n => ({
+    ...kNodes.map(n => ({
       group: 'edges' as const,
       data: { id: `root-${n.id}`, source: CLUSTER_ROOT_ID, target: n.id, relationshipType: 'contains' }
     })),
-    // Existing relationships
-    ...graph.edges.map(edge => ({
+    ...model.edges.map(edge => ({
       group: 'edges' as const,
       data: {
-        id: `${edge.source}-${edge.target}`,
+        id: edge.id,
         source: edge.source,
         target: edge.target,
         relationshipType: edge.relationshipType,
       }
-    })),
-    // Implicit hierarchy: Namespace -> Workload
-    ...otherResources.filter(r => r.namespace).map(r => {
-      const nsNode = namespaces.find(ns => ns.name === r.namespace);
-      return nsNode ? {
-        group: 'edges' as const,
-        data: { id: `ns-h-${nsNode.id}-${r.id}`, source: nsNode.id, target: r.id, relationshipType: 'contains' }
-      } : null;
-    }).filter(e => e !== null) as any
+    }))
   ];
 
-  return { nodes: cyNodes, edges };
+  return { nodes: cyNodes, edges: cyEdges };
 }
 
 /**
@@ -262,102 +247,138 @@ function getStaticStyles(): cytoscape.StylesheetStyle[] {
     {
       selector: 'node',
       style: {
-        'shape': 'ellipse',
+        'shape': 'round-rectangle',
         'background-color': (ele: any) => RESOURCE_COLOR_MAP[ele.data('kind')] || '#64748b',
-        'width': (ele: any) => ele.data('kind') === 'Cluster' ? 100 : 72,
-        'height': (ele: any) => ele.data('kind') === 'Cluster' ? 100 : 72,
-        'border-width': 3,
-        'border-color': '#ffffff',
-        'border-opacity': 1,
-        'shadow-blur': 12,
-        'shadow-color': 'rgba(0,0,0,0.2)',
+        'width': (ele: any) => {
+          const kind = ele.data('kind');
+          if (kind === 'Cluster') return 120;
+          if (kind === 'Namespace' || kind === 'Node') return 90;
+          if (['Deployment', 'Service', 'Ingress'].includes(kind)) return 80;
+          return 72;
+        },
+        'height': (ele: any) => {
+          const kind = ele.data('kind');
+          if (kind === 'Cluster') return 120;
+          if (kind === 'Namespace' || kind === 'Node') return 90;
+          if (['Deployment', 'Service', 'Ingress'].includes(kind)) return 80;
+          return 72;
+        },
+        'border-width': 0,
+        'shadow-blur': 15,
+        'shadow-color': 'rgba(0,0,0,0.1)',
         'shadow-offset-x': 0,
         'shadow-offset-y': 4,
+        'shadow-opacity': 0.3,
 
         'label': (ele: any) => {
           const kind = ele.data('kind') || '';
           const name = ele.data('name') || '';
           if (kind === 'Cluster') return name;
           const status = ele.data('statusBadge') || '';
-          const maxNameLen = 18;
+          const maxNameLen = 20;
           const nameStr = name.length > maxNameLen ? name.substring(0, maxNameLen - 1) + '…' : name;
           return `${kind}${status ? ' ' + status : ''}\n${nameStr}`;
         },
         'text-valign': 'bottom',
         'text-halign': 'center',
-        'text-margin-y': 12,
-        'font-size': '12px',
-        'font-weight': '600',
-        'font-family': '"Inter", system-ui, sans-serif',
-        'color': '#1e293b',
+        'text-margin-y': 10,
+        'font-size': '11px',
+        'font-weight': '700',
+        'font-family': '"Outfit", "Inter", system-ui, sans-serif',
+        'color': '#334155',
         'text-wrap': 'wrap',
-        'text-max-width': 140,
+        'text-max-width': 160,
         'line-height': 1.4,
         'text-background-color': '#ffffff',
-        'text-background-opacity': 0.9,
-        'text-background-padding': '4px 8px',
-        'text-background-shape': 'roundrectangle',
-        'min-zoomed-font-size': 8,
+        'text-background-opacity': 0.85,
+        'text-background-padding': '3px 6px',
+        'text-background-shape': 'round-rectangle',
+        'min-zoomed-font-size': 7,
       } as any,
+    },
+    {
+      selector: 'node:active',
+      style: {
+        'overlay-color': '#000',
+        'overlay-padding': 10,
+        'overlay-opacity': 0.1,
+      } as any
+    },
+    {
+      selector: 'node:selected',
+      style: {
+        'border-width': 4,
+        'border-color': '#3b82f6',
+        'shadow-blur': 25,
+        'shadow-color': 'rgba(59, 130, 246, 0.4)',
+      } as any
     },
     {
       selector: `node[id="${CLUSTER_ROOT_ID}"]`,
       style: {
+        'shape': 'ellipse',
         'background-color': '#0f172a',
         'color': '#ffffff',
         'text-background-color': '#0f172a',
         'text-background-opacity': 1,
         'text-valign': 'center',
         'text-margin-y': 0,
-        'font-size': '14px',
-        'width': 100,
-        'height': 100,
+        'font-size': '16px',
+        'font-weight': '800',
+        'width': 140,
+        'height': 140,
       } as any
     },
     {
       selector: 'edge',
       style: {
-        'width': 2.5,
-        'line-color': '#94a3b8',
-        'target-arrow-color': '#94a3b8',
-        'target-arrow-shape': 'triangle',
-        'curve-style': 'bezier',
-        'arrow-scale': 1.2,
-        'opacity': 0.7,
+        'width': 2,
+        'line-color': '#cbd5e1',
+        'target-arrow-color': '#cbd5e1',
+        'target-arrow-shape': 'vee',
+        'curve-style': 'taxi',
+        'taxi-direction': 'vertical',
+        'arrow-scale': 1.1,
+        'opacity': 0.6,
         'label': (ele: any) => {
           const rel = ele.data('relationshipType') || '';
+          if (rel === 'contains') return '';
           return rel.replace(/_/g, ' ');
         },
-        'font-size': '10px',
-        'font-weight': '500',
-        'color': '#64748b',
+        'font-size': '9px',
+        'font-weight': '600',
+        'color': '#94a3b8',
         'text-background-color': '#ffffff',
         'text-background-opacity': 0.9,
         'text-background-padding': '2px 4px',
-        'text-background-shape': 'roundrectangle',
-        'text-margin-y': -10,
-        'min-zoomed-font-size': 9,
+        'text-background-shape': 'round-rectangle',
+        'text-margin-y': -8,
+        'min-zoomed-font-size': 10,
+        'edge-distances': 'node-position',
       } as any,
     },
-    // Heatmap styles
-    { selector: 'node.heatmap-green', style: { 'border-color': '#2ECC71', 'border-width': 4 } as any },
-    { selector: 'node.heatmap-yellow', style: { 'border-color': '#F39C12', 'border-width': 4 } as any },
-    { selector: 'node.heatmap-orange', style: { 'border-color': '#E67E22', 'border-width': 4 } as any },
-    { selector: 'node.heatmap-red', style: { 'border-color': '#E74C3C', 'border-width': 4 } as any },
-    // Traffic flow
-    { selector: 'edge.traffic-flow', style: { 'line-color': '#2ECC71', 'target-arrow-color': '#2ECC71', 'width': 4, 'opacity': 1 } as any },
-    // Namespaces (parent nodes if any)
     {
-      selector: ':parent',
+      selector: 'edge:selected',
       style: {
-        'text-valign': 'top',
-        'text-halign': 'center',
-        'background-opacity': 0.05,
-        'background-color': '#64748b',
-        'border-width': 2,
-        'border-color': '#cbd5e1',
-        'border-style': 'dashed',
-        'padding': 40,
+        'width': 4,
+        'line-color': '#3b82f6',
+        'target-arrow-color': '#3b82f6',
+        'opacity': 1,
+      } as any
+    },
+    // Heatmap styles
+    { selector: 'node.heatmap-green', style: { 'border-color': '#10b981', 'border-width': 4, 'border-opacity': 1 } as any },
+    { selector: 'node.heatmap-yellow', style: { 'border-color': '#f59e0b', 'border-width': 4, 'border-opacity': 1 } as any },
+    { selector: 'node.heatmap-orange', style: { 'border-color': '#f97316', 'border-width': 4, 'border-opacity': 1 } as any },
+    { selector: 'node.heatmap-red', style: { 'border-color': '#ef4444', 'border-width': 4, 'border-opacity': 1 } as any },
+    // Hover glow effect
+    {
+      selector: 'node.hover',
+      style: {
+        'shadow-blur': 30,
+        'shadow-color': (ele: any) => RESOURCE_COLOR_MAP[ele.data('kind')] || '#64748b',
+        'shadow-opacity': 0.6,
+        'scale': 1.05,
       } as any
     },
     ...getHighlightStylesheet(),

@@ -76,7 +76,7 @@ export function ResourceTopologyView({
   const clusterId = useActiveClusterId();
   const canvasRef = useRef<TopologyCanvasRef>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
-  const [activeTab, setActiveTab] = useState<'cytoscape' | 'd3-force' | 'enterprise'>('enterprise');
+  const [activeTab, setActiveTab] = useState<'cytoscape' | 'd3-force'>('cytoscape');
   const [activeOverlay, setActiveOverlay] = useState<OverlayType | null>(null);
 
   const backendConfigured = isBackendConfigured();
@@ -433,28 +433,13 @@ export function ResourceTopologyView({
 
       {/* Canvas Area with Tabs */}
       <div className="relative h-[calc(100%-3.5rem)]">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'cytoscape' | 'd3-force' | 'enterprise')} className="h-full flex flex-col">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'cytoscape' | 'd3-force')} className="h-full flex flex-col">
           <TabsList className="mb-2 flex-shrink-0 mx-4 mt-2">
-            <TabsTrigger value="enterprise">AGT Topology</TabsTrigger>
-            <TabsTrigger value="cytoscape">Cytoscape Layout</TabsTrigger>
-            <TabsTrigger value="d3-force">D3.js Force-Directed</TabsTrigger>
+            <TabsTrigger value="cytoscape">Network View</TabsTrigger>
+            <TabsTrigger value="d3-force">Clustered Force</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="enterprise" className="flex-1 relative min-h-0 mt-0">
-            {activeTab === 'enterprise' && graph && (
-              <TopologyViewer
-                graph={graph}
-                showControls={true}
-                onNodeSelect={(nodeId) => {
-                  if (nodeId) {
-                    const node = graph.nodes.find(n => n.id === nodeId);
-                    if (node) handleNodeDoubleClick(node);
-                  }
-                }}
-                className="h-full w-full rounded-b-lg"
-              />
-            )}
-          </TabsContent>
+
           <TabsContent value="cytoscape" className="flex-1 relative min-h-0 mt-0">
             {activeTab === 'cytoscape' && graph && (
               <TopologyCanvas
@@ -486,9 +471,15 @@ export function ResourceTopologyView({
               </div>
             )}
 
-            {/* Legend Bar - Matching Reference Image Style */}
-            <div className="absolute bottom-4 left-4 z-50 bg-white border border-gray-200 rounded-lg px-6 py-3 shadow-lg">
-              <div className="flex items-center gap-6 flex-wrap">
+            {/* Premium Legend Panel (mirrored from main Topology page) */}
+            <div className="absolute bottom-4 left-4 z-50 p-4 shadow-2xl border-none bg-white/90 backdrop-blur-md dark:bg-slate-900/90 rounded-xl w-72 overflow-hidden transition-all duration-300 hover:w-80">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="p-1 bg-blue-100 dark:bg-blue-900 rounded-md">
+                  <MapIcon className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <h4 className="font-bold text-[11px] tracking-tight text-slate-800 dark:text-slate-100 uppercase">Ecosystem Legend</h4>
+              </div>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
                 {[
                   { kind: 'Deployment', label: 'Deployment', color: NODE_COLORS.Deployment.bg },
                   { kind: 'ReplicaSet', label: 'ReplicaSet', color: NODE_COLORS.ReplicaSet.bg },
@@ -497,16 +488,14 @@ export function ResourceTopologyView({
                   { kind: 'Ingress', label: 'Ingress', color: NODE_COLORS.Ingress.bg },
                   { kind: 'ConfigMap', label: 'ConfigMap', color: NODE_COLORS.ConfigMap.bg },
                   { kind: 'Node', label: 'Node', color: NODE_COLORS.Node.bg },
-                  { kind: 'Endpoints', label: 'Endpoints', color: NODE_COLORS.Endpoints.bg },
+                  { kind: 'PersistentVolumeClaim', label: 'PVC', color: NODE_COLORS.PersistentVolumeClaim.bg },
                 ].map(rt => (
-                  <div key={rt.kind} className="flex items-center gap-2">
+                  <div key={rt.kind} className="flex items-center gap-1.5 group cursor-default">
                     <div
-                      className="w-3 h-3 rounded-full shrink-0"
+                      className="w-1.5 h-1.5 rounded-full shadow-sm group-hover:scale-125 transition-transform"
                       style={{ backgroundColor: rt.color }}
                     />
-                    <span className="text-xs font-medium text-gray-700 whitespace-nowrap">
-                      {rt.label}
-                    </span>
+                    <span className="text-[9px] font-medium text-slate-500 dark:text-slate-400 truncate">{rt.label}</span>
                   </div>
                 ))}
               </div>

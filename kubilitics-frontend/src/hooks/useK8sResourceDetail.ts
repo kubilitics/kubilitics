@@ -4,6 +4,7 @@ import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
 import { getResourceEvents } from '@/services/backendApiClient';
+import yaml from 'js-yaml';
 
 /** Canonical K8s kind for involvedObject (used in events fieldSelector). */
 export const RESOURCE_EVENTS_KIND = [
@@ -21,78 +22,21 @@ export interface EventInfo {
 
 // Convert a K8s resource object to YAML string
 export function resourceToYaml(resource: KubernetesResource): string {
-  const formatValue = (value: any, indent: number = 0): string => {
-    const spaces = '  '.repeat(indent);
-    
-    if (value === null || value === undefined) return 'null';
-    if (typeof value === 'boolean') return value ? 'true' : 'false';
-    if (typeof value === 'number') return String(value);
-    if (typeof value === 'string') {
-      if (value.includes('\n')) {
-        const lines = value.split('\n').map(line => `${spaces}  ${line}`).join('\n');
-        return `|\n${lines}`;
-      }
-      if (value.includes(':') || value.includes('#') || value.includes('"') || value.includes("'")) {
-        return `"${value.replace(/"/g, '\\"')}"`;
-      }
-      return value;
-    }
-    if (Array.isArray(value)) {
-      if (value.length === 0) return '[]';
-      return value.map(item => {
-        if (typeof item === 'object' && item !== null) {
-          const objLines = Object.entries(item)
-            .map(([k, v], idx) => {
-              const prefix = idx === 0 ? '- ' : '  ';
-              return `${spaces}${prefix}${k}: ${formatValue(v, indent + 1)}`;
-            })
-            .join('\n');
-          return objLines;
-        }
-        return `${spaces}- ${formatValue(item, indent + 1)}`;
-      }).join('\n');
-    }
-    if (typeof value === 'object') {
-      const entries = Object.entries(value).filter(([_, v]) => v !== undefined);
-      if (entries.length === 0) return '{}';
-      return '\n' + entries
-        .map(([k, v]) => `${spaces}  ${k}: ${formatValue(v, indent + 1)}`)
-        .join('\n');
-    }
-    return String(value);
-  };
+  if (!resource || Object.keys(resource).length === 0) return '';
 
-  const lines: string[] = [];
-  
-  if (resource.apiVersion) lines.push(`apiVersion: ${resource.apiVersion}`);
-  if (resource.kind) lines.push(`kind: ${resource.kind}`);
-  
-  if (resource.metadata) {
-    lines.push('metadata:');
-    const { name, namespace, labels, annotations, creationTimestamp, uid } = resource.metadata;
-    if (name) lines.push(`  name: ${name}`);
-    if (namespace) lines.push(`  namespace: ${namespace}`);
-    if (uid) lines.push(`  uid: ${uid}`);
-    if (creationTimestamp) lines.push(`  creationTimestamp: ${creationTimestamp}`);
-    if (labels && Object.keys(labels).length > 0) {
-      lines.push('  labels:');
-      Object.entries(labels).forEach(([k, v]) => lines.push(`    ${k}: ${v}`));
-    }
-    if (annotations && Object.keys(annotations).length > 0) {
-      lines.push('  annotations:');
-      Object.entries(annotations).forEach(([k, v]) => lines.push(`    ${k}: "${v}"`));
-    }
+  try {
+    return yaml.dump(resource, {
+      indent: 2,
+      noArrayIndent: false,
+      skipInvalid: true,
+      flowLevel: -1,
+      noRefs: true,
+      lineWidth: -1,
+    });
+  } catch (err) {
+    console.error('Failed to convert resource to YAML:', err);
+    return '';
   }
-  
-  if (resource.spec) {
-    lines.push(`spec:${formatValue(resource.spec, 0)}`);
-  }
-  
-  if (resource.status) {
-    lines.push(`status:${formatValue(resource.status, 0)}`);
-  }
-  
-  return lines.join('\n');
 }
 
 // Hook to fetch events for a resource (namespace-wide when fieldSelector not provided; use useResourceEvents for resource-scoped).
@@ -107,8 +51,8 @@ export function useK8sEvents(namespace?: string, fieldSelector?: string) {
     type: (event.type === 'Warning' ? 'Warning' : 'Normal') as EventInfo['type'],
     reason: event.reason || '',
     message: event.message || '',
-    time: event.lastTimestamp ? calculateAge(event.lastTimestamp) : 
-          event.eventTime ? calculateAge(event.eventTime) : 'unknown',
+    time: event.lastTimestamp ? calculateAge(event.lastTimestamp) :
+      event.eventTime ? calculateAge(event.eventTime) : 'unknown',
   }));
 
   return { events, isLoading, error };
@@ -149,17 +93,17 @@ export function useResourceEvents(
 
   const events: EventInfo[] = useBackend
     ? (backendQuery.data ?? []).map((e) => ({
-        type: (e.type === 'Warning' ? 'Warning' : 'Normal') as EventInfo['type'],
-        reason: e.reason ?? '',
-        message: e.message ?? '',
-        time: e.last_timestamp ? calculateAge(e.last_timestamp) : (e.first_timestamp ? calculateAge(e.first_timestamp) : 'unknown'),
-      }))
+      type: (e.type === 'Warning' ? 'Warning' : 'Normal') as EventInfo['type'],
+      reason: e.reason ?? '',
+      message: e.message ?? '',
+      time: e.last_timestamp ? calculateAge(e.last_timestamp) : (e.first_timestamp ? calculateAge(e.first_timestamp) : 'unknown'),
+    }))
     : (k8sList.data?.items ?? []).map((event: any) => ({
-        type: (event.type === 'Warning' ? 'Warning' : 'Normal') as EventInfo['type'],
-        reason: event.reason || '',
-        message: event.message || '',
-        time: event.lastTimestamp ? calculateAge(event.lastTimestamp) : (event.eventTime ? calculateAge(event.eventTime) : 'unknown'),
-      }));
+      type: (event.type === 'Warning' ? 'Warning' : 'Normal') as EventInfo['type'],
+      reason: event.reason || '',
+      message: event.message || '',
+      time: event.lastTimestamp ? calculateAge(event.lastTimestamp) : (event.eventTime ? calculateAge(event.eventTime) : 'unknown'),
+    }));
 
   const isLoading = useBackend ? backendQuery.isLoading : k8sList.isLoading;
   const error = useBackend ? backendQuery.error : k8sList.error;

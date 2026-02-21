@@ -500,15 +500,15 @@ const TOOL_CATEGORY_CONFIG: Record<string, {
   icon: React.ElementType;
   label: string;
 }> = {
-  observe:      { color: 'text-blue-600 dark:text-blue-400',    bgColor: 'bg-blue-500/8',    borderColor: 'border-blue-500/25',    icon: Eye,        label: 'Observe'     },
-  analyze:      { color: 'text-purple-600 dark:text-purple-400',bgColor: 'bg-purple-500/8',  borderColor: 'border-purple-500/25',  icon: Activity,   label: 'Analyze'     },
-  troubleshoot: { color: 'text-orange-600 dark:text-orange-400',bgColor: 'bg-orange-500/8',  borderColor: 'border-orange-500/25',  icon: Search,     label: 'Troubleshoot'},
-  recommend:    { color: 'text-cyan-600 dark:text-cyan-400',    bgColor: 'bg-cyan-500/8',    borderColor: 'border-cyan-500/25',    icon: Zap,        label: 'Recommend'   },
-  security:     { color: 'text-red-600 dark:text-red-400',      bgColor: 'bg-red-500/8',     borderColor: 'border-red-500/25',     icon: Shield,     label: 'Security'    },
-  cost:         { color: 'text-green-600 dark:text-green-400',  bgColor: 'bg-green-500/8',   borderColor: 'border-green-500/25',   icon: DollarSign, label: 'Cost'        },
-  action:       { color: 'text-amber-600 dark:text-amber-400',  bgColor: 'bg-amber-500/8',   borderColor: 'border-amber-500/25',   icon: Terminal,   label: 'Action'      },
-  automation:   { color: 'text-indigo-600 dark:text-indigo-400',bgColor: 'bg-indigo-500/8',  borderColor: 'border-indigo-500/25',  icon: Settings2,  label: 'Automate'    },
-  export:       { color: 'text-teal-600 dark:text-teal-400',    bgColor: 'bg-teal-500/8',    borderColor: 'border-teal-500/25',    icon: Eye,        label: 'Export'      },
+  observe: { color: 'text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-500/8', borderColor: 'border-blue-500/25', icon: Eye, label: 'Observe' },
+  analyze: { color: 'text-purple-600 dark:text-purple-400', bgColor: 'bg-purple-500/8', borderColor: 'border-purple-500/25', icon: Activity, label: 'Analyze' },
+  troubleshoot: { color: 'text-orange-600 dark:text-orange-400', bgColor: 'bg-orange-500/8', borderColor: 'border-orange-500/25', icon: Search, label: 'Troubleshoot' },
+  recommend: { color: 'text-cyan-600 dark:text-cyan-400', bgColor: 'bg-cyan-500/8', borderColor: 'border-cyan-500/25', icon: Zap, label: 'Recommend' },
+  security: { color: 'text-red-600 dark:text-red-400', bgColor: 'bg-red-500/8', borderColor: 'border-red-500/25', icon: Shield, label: 'Security' },
+  cost: { color: 'text-green-600 dark:text-green-400', bgColor: 'bg-green-500/8', borderColor: 'border-green-500/25', icon: DollarSign, label: 'Cost' },
+  action: { color: 'text-amber-600 dark:text-amber-400', bgColor: 'bg-amber-500/8', borderColor: 'border-amber-500/25', icon: Terminal, label: 'Action' },
+  automation: { color: 'text-indigo-600 dark:text-indigo-400', bgColor: 'bg-indigo-500/8', borderColor: 'border-indigo-500/25', icon: Settings2, label: 'Automate' },
+  export: { color: 'text-teal-600 dark:text-teal-400', bgColor: 'bg-teal-500/8', borderColor: 'border-teal-500/25', icon: Eye, label: 'Export' },
 };
 
 function getToolCategory(toolName: string) {
@@ -526,10 +526,10 @@ function humanizeToolName(toolName: string): string {
 // ─── Analysis result card helpers ──────────────────────────────────────────────
 
 const SEVERITY_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
-  CRITICAL: { color: 'text-red-700 dark:text-red-400',      bg: 'bg-red-500/15',    label: 'Critical' },
-  HIGH:     { color: 'text-orange-700 dark:text-orange-400',bg: 'bg-orange-500/15', label: 'High'     },
-  MEDIUM:   { color: 'text-yellow-700 dark:text-yellow-400',bg: 'bg-yellow-500/15', label: 'Medium'   },
-  LOW:      { color: 'text-green-700 dark:text-green-400',  bg: 'bg-green-500/15',  label: 'Low'      },
+  CRITICAL: { color: 'text-red-700 dark:text-red-400', bg: 'bg-red-500/15', label: 'Critical' },
+  HIGH: { color: 'text-orange-700 dark:text-orange-400', bg: 'bg-orange-500/15', label: 'High' },
+  MEDIUM: { color: 'text-yellow-700 dark:text-yellow-400', bg: 'bg-yellow-500/15', label: 'Medium' },
+  LOW: { color: 'text-green-700 dark:text-green-400', bg: 'bg-green-500/15', label: 'Low' },
 };
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -1000,18 +1000,18 @@ function AnalysisResultCard({ toolName, resultJson }: { toolName: string; result
   try { parsed = JSON.parse(resultJson) as Record<string, unknown>; } catch { /* raw */ }
   if (!parsed) return <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">{resultJson}</pre>;
   switch (toolName) {
-    case 'analyze_pod_health':           return <AnalysisPodHealthCard data={parsed} />;
-    case 'analyze_deployment_health':    return <AnalysisDeploymentHealthCard data={parsed} />;
-    case 'analyze_node_pressure':        return <AnalysisNodePressureCard data={parsed} />;
-    case 'detect_resource_contention':   return <AnalysisContentionCard data={parsed} />;
+    case 'analyze_pod_health': return <AnalysisPodHealthCard data={parsed} />;
+    case 'analyze_deployment_health': return <AnalysisDeploymentHealthCard data={parsed} />;
+    case 'analyze_node_pressure': return <AnalysisNodePressureCard data={parsed} />;
+    case 'detect_resource_contention': return <AnalysisContentionCard data={parsed} />;
     case 'analyze_network_connectivity': return <AnalysisNetworkCard data={parsed} />;
-    case 'analyze_rbac_permissions':     return <AnalysisRBACCard data={parsed} />;
-    case 'analyze_storage_health':       return <AnalysisStorageHealthCard data={parsed} />;
-    case 'check_resource_limits':        return <AnalysisResourceLimitsCard data={parsed} />;
-    case 'analyze_hpa_behavior':         return <AnalysisHPACard data={parsed} />;
-    case 'analyze_log_patterns':         return <AnalysisLogPatternsCard data={parsed} />;
-    case 'assess_security_posture':      return <AnalysisSecurityPostureCard data={parsed} />;
-    case 'detect_configuration_drift':   return <AnalysisDriftCard data={parsed} />;
+    case 'analyze_rbac_permissions': return <AnalysisRBACCard data={parsed} />;
+    case 'analyze_storage_health': return <AnalysisStorageHealthCard data={parsed} />;
+    case 'check_resource_limits': return <AnalysisResourceLimitsCard data={parsed} />;
+    case 'analyze_hpa_behavior': return <AnalysisHPACard data={parsed} />;
+    case 'analyze_log_patterns': return <AnalysisLogPatternsCard data={parsed} />;
+    case 'assess_security_posture': return <AnalysisSecurityPostureCard data={parsed} />;
+    case 'detect_configuration_drift': return <AnalysisDriftCard data={parsed} />;
     default:
       return <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">{JSON.stringify(parsed, null, 2)}</pre>;
   }
@@ -1026,10 +1026,10 @@ const EXECUTION_TOOLS = new Set([
 ]);
 
 const RISK_CONFIG: Record<string, { color: string; bg: string; ring: string }> = {
-  low:      { color: 'text-green-700 dark:text-green-400',   bg: 'bg-green-500/12',  ring: 'ring-green-500/30' },
-  medium:   { color: 'text-yellow-700 dark:text-yellow-400', bg: 'bg-yellow-500/12', ring: 'ring-yellow-500/30' },
-  high:     { color: 'text-orange-700 dark:text-orange-400', bg: 'bg-orange-500/12', ring: 'ring-orange-500/30' },
-  critical: { color: 'text-red-700 dark:text-red-400',       bg: 'bg-red-500/12',    ring: 'ring-red-500/30' },
+  low: { color: 'text-green-700 dark:text-green-400', bg: 'bg-green-500/12', ring: 'ring-green-500/30' },
+  medium: { color: 'text-yellow-700 dark:text-yellow-400', bg: 'bg-yellow-500/12', ring: 'ring-yellow-500/30' },
+  high: { color: 'text-orange-700 dark:text-orange-400', bg: 'bg-orange-500/12', ring: 'ring-orange-500/30' },
+  critical: { color: 'text-red-700 dark:text-red-400', bg: 'bg-red-500/12', ring: 'ring-red-500/30' },
 };
 
 function RiskLevelBadge({ level }: { level: string }) {
@@ -1079,12 +1079,12 @@ function SafetyGateHeader({ data }: { data: Record<string, unknown> }) {
   return (
     <div className={cn('flex items-start gap-3 p-3 rounded-lg',
       approved ? 'bg-green-500/8 border border-green-500/20'
-               : requiresHuman ? 'bg-amber-500/8 border border-amber-500/20'
-               : 'bg-red-500/8 border border-red-500/20')}>
+        : requiresHuman ? 'bg-amber-500/8 border border-amber-500/20'
+          : 'bg-red-500/8 border border-red-500/20')}>
       <div className={cn('shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm',
         approved ? 'bg-green-500/15 text-green-600'
-                 : requiresHuman ? 'bg-amber-500/15 text-amber-600'
-                 : 'bg-red-500/15 text-red-600')}>
+          : requiresHuman ? 'bg-amber-500/15 text-amber-600'
+            : 'bg-red-500/15 text-red-600')}>
         {approved ? '✓' : requiresHuman ? '👤' : '✗'}
       </div>
       <div className="flex-1 min-w-0">
@@ -1303,15 +1303,15 @@ function ExecutionResultCard({ toolName, resultJson }: { toolName: string; resul
   try { parsed = JSON.parse(resultJson) as Record<string, unknown>; } catch { /* raw */ }
   if (!parsed) return <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">{resultJson}</pre>;
   switch (toolName) {
-    case 'restart_pod':            return <RestartPodCard data={parsed} />;
-    case 'scale_deployment':       return <ScaleDeploymentCard data={parsed} />;
-    case 'cordon_node':            return <CordonNodeCard data={parsed} />;
-    case 'drain_node':             return <DrainNodeCard data={parsed} />;
-    case 'apply_resource_patch':   return <ApplyResourcePatchCard data={parsed} />;
-    case 'delete_resource':        return <DeleteResourceCard data={parsed} />;
-    case 'rollback_deployment':    return <RollbackDeploymentCard data={parsed} />;
+    case 'restart_pod': return <RestartPodCard data={parsed} />;
+    case 'scale_deployment': return <ScaleDeploymentCard data={parsed} />;
+    case 'cordon_node': return <CordonNodeCard data={parsed} />;
+    case 'drain_node': return <DrainNodeCard data={parsed} />;
+    case 'apply_resource_patch': return <ApplyResourcePatchCard data={parsed} />;
+    case 'delete_resource': return <DeleteResourceCard data={parsed} />;
+    case 'rollback_deployment': return <RollbackDeploymentCard data={parsed} />;
     case 'update_resource_limits': return <UpdateResourceLimitsCard data={parsed} />;
-    case 'trigger_hpa_scale':      return <TriggerHPAScaleCard data={parsed} />;
+    case 'trigger_hpa_scale': return <TriggerHPAScaleCard data={parsed} />;
     default:
       return <pre className="text-[10px] leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">{JSON.stringify(parsed, null, 2)}</pre>;
   }
@@ -1498,7 +1498,7 @@ export function AIAssistant() {
       const pending = consumePendingQuery();
       if (pending) sendUserMessage(pending, routeCtx);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, isConnected]);
 
   const isLoading =
@@ -1539,22 +1539,62 @@ export function AIAssistant() {
       <AnimatePresence>
         {!isOpen && (
           <motion.div
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0, opacity: 0 }}
-            className="fixed bottom-6 right-6 z-50"
+            initial={{ scale: 0, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0, opacity: 0, y: 20 }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="fixed bottom-8 right-8 z-50 flex flex-col items-center gap-2"
           >
-            <Button
+            {/* Pulsing Glow Effect */}
+            <motion.div
+              animate={{
+                scale: [1, 1.2, 1],
+                opacity: [0.3, 0.6, 0.3],
+              }}
+              transition={{
+                duration: 4,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+              className="absolute inset-0 bg-blue-500/30 rounded-full blur-2xl -z-10"
+            />
+
+            <button
               onClick={open}
-              size="lg"
-              className="h-14 w-14 rounded-full shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground"
-              aria-label="Open Kubilitics AI"
+              className="relative h-16 w-16 rounded-[2rem] shadow-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-indigo-600 border border-white/20 flex items-center justify-center group overflow-hidden"
+              aria-label="Activate KOS Intelligence"
             >
-              <Bot className="h-6 w-6" />
-            </Button>
-            <Badge variant="secondary" className="absolute -top-1 -right-1 text-[10px] px-1.5">
-              ⌘⇧P
-            </Badge>
+              {/* Animated Inner Shine */}
+              <motion.div
+                animate={{ x: [-100, 100] }}
+                transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 w-1/2"
+              />
+
+              <div className="relative z-10">
+                <AnimatePresence mode="wait">
+                  {isConnecting ? (
+                    <motion.div key="loader" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <Loader2 className="h-7 w-7 text-white animate-spin" />
+                    </motion.div>
+                  ) : (
+                    <motion.div key="bot" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }}>
+                      <Bot className="h-7 w-7 text-white drop-shadow-lg" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </button>
+
+            <motion.div
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-slate-900/90 backdrop-blur-md text-[#38BDF8] px-4 py-1.5 rounded-xl text-[11px] font-semibold tracking-wide shadow-xl border border-white/10 flex items-center gap-2"
+            >
+              <Zap className="h-3.5 w-3.5 fill-[#38BDF8]" />
+              KOS Intelligence
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1643,8 +1683,8 @@ export function AIAssistant() {
                           message.role === 'user'
                             ? 'bg-primary text-primary-foreground rounded-br-md'
                             : message.role === 'system'
-                            ? 'bg-destructive/10 text-destructive rounded-bl-md text-xs'
-                            : 'bg-muted rounded-bl-md'
+                              ? 'bg-destructive/10 text-destructive rounded-bl-md text-xs'
+                              : 'bg-muted rounded-bl-md'
                         )}>
                           {message.role === 'assistant' ? (
                             <AssistantMessage

@@ -26,7 +26,6 @@ import {
   Activity,
   AlertTriangle,
   Search,
-  RefreshCcw,
   Zap,
   Box,
   Layers,
@@ -40,6 +39,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Info,
+  ArrowUpRight
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -51,6 +51,7 @@ import { ConnectionRequiredBanner } from '@/components/layout/ConnectionRequired
 import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
 import { useColumnVisibility } from '@/hooks/useColumnVisibility';
 import { SectionOverviewHeader } from '@/components/layout/SectionOverviewHeader';
+import { WorkloadPulse } from '@/components/workloads/WorkloadPulse';
 
 const KIND_ICONS: Record<string, typeof Container> = {
   Deployment: Container,
@@ -64,7 +65,7 @@ const STATUS_COLORS: Record<string, string> = {
   Running: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
   Healthy: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
   Optimal: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  Completed: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+  Completed: 'bg-[#326CE5]/10 text-[#326CE5] border-[#326CE5]/20',
   Scheduled: 'bg-slate-500/10 text-slate-600 border-slate-500/20',
   'Scaled to Zero': 'bg-slate-500/10 text-slate-600 border-slate-500/20',
   Pending: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
@@ -121,7 +122,7 @@ export default function WorkloadsOverview() {
     queryClient.invalidateQueries({ queryKey: ['backend', 'workloads'] });
     queryClient.invalidateQueries({ queryKey: ['backend', 'clusterOverview'] });
     refetch();
-    setTimeout(() => setIsSyncing(false), 2500);
+    setTimeout(() => setIsSyncing(false), 1500);
   }, [queryClient, refetch]);
 
   const workloads: WorkloadItem[] = data?.workloads ?? [];
@@ -222,24 +223,6 @@ export default function WorkloadsOverview() {
   const pulse = data?.pulse;
   const alerts = data?.alerts;
 
-  const pulseBreakdown = useMemo(() => {
-    if (!pulse) return null;
-    const byKind: Record<string, number> = {};
-    for (const w of workloads) {
-      byKind[w.kind] = (byKind[w.kind] ?? 0) + 1;
-    }
-    const workloadTotal = workloads.length;
-    const podTotal = Math.max(0, pulse.total - workloadTotal);
-    return {
-      byKind: Object.entries(byKind)
-        .sort(([, a], [, b]) => b - a)
-        .map(([kind, count]) => ({ kind, count })),
-      workloadTotal,
-      podTotal,
-      total: pulse.total,
-    };
-  }, [pulse, workloads]);
-
   return (
     <div className="flex flex-col gap-6 p-6">
       <ConnectionRequiredBanner />
@@ -247,562 +230,271 @@ export default function WorkloadsOverview() {
       {/* Header */}
       <SectionOverviewHeader
         title="Workloads Overview"
-        description="AI-powered visibility across cluster resource performance and health"
+        description="Enterprise visibility across cluster resource performance and autonomous health orchestration."
+        icon={Zap}
         onSync={handleSync}
         isSyncing={isSyncing}
       />
 
-      {/* Workload Health Pulse + Alerts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2 overflow-hidden border-primary/10 bg-gradient-to-br from-background via-background to-primary/5">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
-              <Activity className="h-5 w-5 text-primary" />
-              Workload Health Pulse
-            </CardTitle>
+      {/* Hero Section: Workload Health Pulse + Alerts */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+        <Card className="lg:col-span-8 overflow-hidden border-slate-100 shadow-sm bg-white ring-1 ring-slate-100">
+          <CardHeader className="flex flex-row items-center justify-between pb-4 pt-10 px-12">
+            <div>
+              <CardTitle className="text-2xl font-bold tracking-tight text-slate-900 leading-tight">Workload Intelligence</CardTitle>
+              <p className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mt-1.5 opacity-70">Fleet-Wide Autonomous Health Pulse</p>
+            </div>
             {pulse && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 text-[10px] font-bold uppercase tracking-wider">
-                <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                {pulse.optimal_percent >= 95 ? 'Optimal' : pulse.optimal_percent >= 80 ? 'Good' : pulse.optimal_percent >= 60 ? 'Fair' : 'At Risk'}
+              <div className="flex items-center gap-2.5 px-5 py-2 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold uppercase tracking-wider border border-emerald-100 shadow-sm shadow-emerald-500/5">
+                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                {pulse.optimal_percent >= 95 ? 'All Systems Nominal' : pulse.optimal_percent >= 80 ? 'Serviceable' : pulse.optimal_percent >= 60 ? 'Degraded' : 'Critical Failure'}
               </div>
             )}
           </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="h-[200px] flex items-center justify-center">
-                <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
+          <CardContent className="pt-2 pb-14 px-12">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
+              <div className="relative">
+                <WorkloadPulse data={pulse} />
+                {/* Visual anchor for the chart */}
+                <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 h-1 w-24 bg-slate-100 rounded-full blur-[1px]" />
               </div>
-            ) : (isError || !activeCluster) && !data ? (
-              <div className="h-[200px] flex flex-col items-center justify-center gap-2 text-muted-foreground">
-                <AlertCircle className="h-12 w-12" />
-                <p className="text-sm">Connect a cluster to see workload health</p>
-              </div>
-            ) : pulse ? (
-              <div className="h-[200px] w-full flex items-center justify-center relative">
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-5">
-                  <Activity className="h-40 w-40 text-primary" />
+
+              <div className="space-y-12 pr-4">
+                <div className="relative pl-6">
+                  <span className="block text-6xl font-bold text-slate-900 tracking-tighter leading-none">{pulse?.total ?? 0}</span>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-3 block">Orchestrated Units</span>
+                  <div className="absolute left-0 top-1 bottom-1 w-1 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.3)]" />
                 </div>
-                <div className="text-center z-10 flex flex-col items-center">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="text-5xl font-black mb-2 flex flex-baseline gap-1.5 items-center cursor-help">
-                        {pulse.total}
-                        <span className="text-xl font-medium text-muted-foreground">Resources</span>
-                        <Info className="h-5 w-5 text-muted-foreground/70" />
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-xs p-3">
-                      <div className="space-y-2 text-left">
-                        <p className="font-semibold text-foreground">Resource breakdown</p>
-                        <p className="text-xs text-muted-foreground">
-                          Total = workload controllers (Explorer table) + pods. Explorer lists only controllers.
-                        </p>
-                        {pulseBreakdown ? (
-                          <div className="space-y-1 text-xs font-mono">
-                            {pulseBreakdown.byKind.map(({ kind, count }) => (
-                              <div key={kind} className="flex justify-between gap-4">
-                                <span className="text-muted-foreground">{kind}</span>
-                                <span className="tabular-nums">{count}</span>
-                              </div>
-                            ))}
-                            <div className="flex justify-between gap-4 pt-1 border-t border-border">
-                              <span className="text-muted-foreground">Workload controllers</span>
-                              <span className="tabular-nums font-medium">{pulseBreakdown.workloadTotal}</span>
-                            </div>
-                            {pulseBreakdown.podTotal > 0 && (
-                              <div className="flex justify-between gap-4">
-                                <span className="text-muted-foreground">Pods</span>
-                                <span className="tabular-nums">{pulseBreakdown.podTotal}</span>
-                              </div>
-                            )}
-                            <div className="flex justify-between gap-4 pt-1 border-t border-border font-medium">
-                              <span>Total</span>
-                              <span className="tabular-nums">{pulseBreakdown.total}</span>
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="text-xs text-muted-foreground">Total: {pulse.total}</p>
-                        )}
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                  <div className="flex gap-6 mt-4">
-                    <div className="text-center">
-                      <div className="text-xs font-medium text-muted-foreground uppercase mb-1">Healthy</div>
-                      <div className="text-xl font-bold text-emerald-500">{pulse.healthy}</div>
-                    </div>
-                    <div className="w-px h-10 bg-border" />
-                    <div className="text-center">
-                      <div className="text-xs font-medium text-muted-foreground uppercase mb-1">Warning</div>
-                      <div className="text-xl font-bold text-amber-500">{pulse.warning}</div>
-                    </div>
-                    <div className="w-px h-10 bg-border" />
-                    <div className="text-center">
-                      <div className="text-xs font-medium text-muted-foreground uppercase mb-1">Critical</div>
-                      <div className="text-xl font-bold text-rose-500">{pulse.critical}</div>
-                    </div>
+
+                <div className="grid grid-cols-3 gap-10 py-10 border-y border-slate-50 relative">
+                  <div className="space-y-1.5">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em]">Healthy</span>
+                    <span className="text-2xl font-bold text-emerald-600 transition-all">{pulse?.healthy ?? 0}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-3">
-                    {pulse.optimal_percent.toFixed(1)}% optimal
-                  </p>
+                  <div className="space-y-1.5 border-l border-slate-50 pl-6">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em]">Warning</span>
+                    <span className="text-2xl font-bold text-amber-500">{pulse?.warning ?? 0}</span>
+                  </div>
+                  <div className="space-y-1.5 border-l border-slate-50 pl-6">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em]">Critical</span>
+                    <span className="text-2xl font-bold text-rose-600">{pulse?.critical ?? 0}</span>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Health Convergence</span>
+                    <span className="text-sm font-bold text-emerald-600 tabular-nums">{pulse?.optimal_percent.toFixed(1)}%</span>
+                  </div>
+                  <div className="h-3 w-full bg-slate-50 rounded-full overflow-hidden p-0.5 border border-slate-100 shadow-inner">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${pulse?.optimal_percent ?? 0}%` }}
+                      transition={{ duration: 1.2, ease: "circOut" }}
+                      className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 rounded-full shadow-[0_0_12px_rgba(16,185,129,0.3)]"
+                    />
+                  </div>
                 </div>
               </div>
-            ) : (
-              <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">
-                No data
-              </div>
-            )}
+            </div>
           </CardContent>
         </Card>
 
         {/* Alerts / Insights */}
-        <Card className="border-amber-500/20 bg-gradient-to-br from-background to-amber-500/5">
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold flex items-center gap-2 text-amber-600">
-              <AlertTriangle className="h-5 w-5" />
-              Alerts & Insights
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <Card className="lg:col-span-4 border-slate-100 shadow-sm bg-white ring-1 ring-slate-100 flex flex-col p-10 relative overflow-hidden group">
+          <AlertTriangle className="absolute -bottom-12 -right-12 w-56 h-56 opacity-[0.03] text-blue-600 -rotate-12 transition-transform duration-700 group-hover:rotate-0" />
+
+          <div className="flex-1 relative z-10">
+            <div className="flex items-center gap-4 mb-10">
+              <div className="h-12 w-12 rounded-2xl bg-blue-50 flex items-center justify-center border border-blue-100">
+                <Zap className="h-6 w-6 text-blue-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Alert Intelligence</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Autonomous Tracking</p>
+              </div>
+            </div>
+
             {isLoading ? (
-              <div className="py-8 flex justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <div className="py-12 flex justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-200" />
               </div>
             ) : alerts && (alerts.warnings > 0 || alerts.critical > 0) ? (
-              <>
-                <div className="flex gap-3 text-sm">
-                  {alerts.warnings > 0 && (
-                    <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20">
-                      {alerts.warnings} Warning{alerts.warnings !== 1 ? 's' : ''}
-                    </Badge>
-                  )}
-                  {alerts.critical > 0 && (
-                    <Badge variant="outline" className="bg-rose-500/10 text-rose-600 border-rose-500/20">
-                      {alerts.critical} Critical
-                    </Badge>
-                  )}
+              <div className="space-y-6">
+                <div className="flex gap-2">
+                  <Badge className="bg-rose-50 text-rose-700 border-rose-100 text-[10px] font-bold px-3 py-1 rounded-lg">{alerts.critical} Critical</Badge>
+                  <Badge className="bg-amber-50 text-amber-700 border-amber-100 text-[10px] font-bold px-3 py-1 rounded-lg">{alerts.warnings} Warnings</Badge>
                 </div>
-                {alerts.top_3?.length > 0 && (
-                  <div className="space-y-2">
-                    {alerts.top_3.map((a, i) => (
-                      <div
-                        key={i}
-                        className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs"
-                      >
-                        <p className="font-medium text-foreground">{a.reason}</p>
-                        <p className="text-muted-foreground truncate">{a.resource}</p>
-                        {a.namespace && (
-                          <p className="text-muted-foreground text-[10px]">{a.namespace}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <Link to="/events" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-                  View all events
-                  <ChevronRight className="w-3 h-3" />
-                </Link>
-              </>
+
+                <div className="space-y-3">
+                  {alerts.top_3?.slice(0, 2).map((a, i) => (
+                    <div key={i} className="p-4 rounded-2xl bg-slate-50 border border-slate-100 hover:border-blue-200 transition-colors group/alert cursor-default">
+                      <p className="text-xs font-bold text-slate-900 leading-snug group-hover/alert:text-blue-600 transition-colors">{a.reason}</p>
+                      <p className="text-[10px] text-slate-500 font-medium mt-1 truncate font-mono">{a.resource}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : (
-              <div className="py-6 text-center">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 text-xs font-medium">
-                  No active alerts
+              <div className="py-10 text-center">
+                <div className="h-16 w-16 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-6 border border-emerald-100">
+                  <Activity className="h-8 w-8 text-emerald-500" />
                 </div>
-                <p className="text-muted-foreground text-xs mt-2">Cluster is healthy</p>
-                <Link to="/events" className="inline-flex items-center gap-1 mt-2 text-xs text-primary hover:underline">
-                  View events
-                  <ChevronRight className="w-3 h-3" />
-                </Link>
+                <p className="text-sm font-bold text-slate-900 uppercase tracking-wider">Health Nominal</p>
+                <p className="text-[10px] text-slate-400 font-semibold mt-1 uppercase tracking-widest">No Active Interruptions</p>
               </div>
             )}
-          </CardContent>
+          </div>
+
+          <div className="mt-10 relative z-10">
+            <Button variant="outline" asChild className="w-full h-14 border-slate-200 text-slate-600 font-bold rounded-2xl hover:bg-slate-50 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm">
+              <Link to="/events" className="flex items-center justify-center gap-2">
+                Deep Inspection <ChevronRight className="w-4 h-4" />
+              </Link>
+            </Button>
+          </div>
         </Card>
       </div>
 
-      {/* Pod Status & Cluster Efficiency */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
+      {/* Resources Overview: Pod Distribution & Efficiency */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <Card className="lg:col-span-8 border-slate-100 shadow-sm overflow-hidden bg-white ring-1 ring-slate-100">
           <PodStatusDistribution />
-        </div>
-        <ClusterEfficiencyCard />
+        </Card>
+        <Card className="lg:col-span-4 border-slate-100 shadow-sm overflow-hidden bg-white ring-1 ring-slate-100">
+          <ClusterEfficiencyCard />
+        </Card>
       </div>
 
       {/* Workloads Explorer */}
-      <Card className="border-primary/10">
-        <CardHeader className="border-b bg-muted/20 pb-4">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <CardTitle>Workloads Explorer</CardTitle>
-                <p className="text-xs text-muted-foreground">Detailed state of all workload controllers</p>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {selectedItems.size > 0 && (
-                  <div className="flex items-center gap-2 px-2 py-1 rounded-lg border border-border bg-muted/30">
-                    <span className="text-sm text-muted-foreground">{selectedItems.size} selected</span>
-                    <Button variant="ghost" size="sm" className="h-7" onClick={() => setSelectedItems(new Set())}>
-                      Clear
-                    </Button>
-                  </div>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 h-9"
-                  onClick={() => setShowTableFilters((v) => !v)}
-                  aria-label={showTableFilters ? 'Hide table column filters' : 'Show table column filters'}
-                >
-                  {showTableFilters ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-                  {showTableFilters ? 'Hide filters' : 'Show filters'}
-                </Button>
-                <ColumnVisibilityDropdown
-                  columns={WORKLOADS_COLUMNS_FOR_VISIBILITY}
-                  visibleColumns={columnVisibility.visibleColumns}
-                  onToggle={columnVisibility.setColumnVisible}
-                  ariaLabel="Toggle table columns"
-                />
-              </div>
+      <div className="bg-white border border-slate-100 rounded-[2rem] overflow-hidden shadow-sm ring-1 ring-slate-100">
+        <div className="p-8 border-b border-slate-50">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div>
+              <h3 className="text-xl font-bold tracking-tight text-slate-900">Workloads Explorer</h3>
+              <p className="text-[11px] text-slate-500 font-semibold uppercase tracking-wider mt-1">Controller Registry & Orchestration Metrics</p>
             </div>
-            {/* Global filters (search, clear, page size) - always visible */}
-            <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
-              <div className="flex items-center gap-2 bg-background border rounded-lg p-1.5 flex-1 min-w-[200px]">
-                <Search className="h-4 w-4 text-muted-foreground shrink-0" />
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1 min-w-[320px]">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <Input
-                  placeholder="Filter by name, namespace, kind..."
-                  className="border-0 focus-visible:ring-0 h-8 flex-1"
+                  placeholder="Search controllers..."
+                  className="pl-12 bg-slate-50 border-transparent transition-all rounded-xl focus:bg-white focus:ring-4 focus:ring-blue-500/5 focus:border-slate-200 h-10 font-medium text-sm"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  aria-label="Search workloads"
                 />
               </div>
-              {hasActiveFilters && (
-                <Button variant="ghost" size="sm" className="gap-1.5 h-8" onClick={clearAllFilters}>
-                  <Filter className="h-3.5 w-3.5" />
-                  Clear filters
-                </Button>
-              )}
-              <div className="flex items-center gap-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-2 h-9">
-                      {pageSize} per page
-                      <ChevronDown className="h-4 w-4 opacity-50" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {PAGE_SIZE_OPTIONS.map((size) => (
-                      <DropdownMenuItem
-                        key={size}
-                        onClick={() => handlePageSizeChange(size)}
-                        className={cn(pageSize === size && 'bg-accent')}
-                      >
-                        {size} per page
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+              <ColumnVisibilityDropdown
+                columns={WORKLOADS_COLUMNS_FOR_VISIBILITY}
+                visibleColumns={columnVisibility.visibleColumns}
+                onToggle={columnVisibility.setColumnVisible}
+              />
             </div>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="py-16 flex justify-center">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          ) : !data ? (
-            <div className="py-16 text-center text-muted-foreground text-sm">
-              Connect a cluster to explore workloads
-            </div>
-          ) : filteredWorkloads.length === 0 ? (
-            <div className="py-16 text-center text-muted-foreground text-sm">
-              {searchQuery || hasActiveFilters ? 'No workloads match your filter' : 'No workload controllers found'}
-            </div>
-          ) : (
-            <TableFilterProvider value={showTableFilters}>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-muted/50 text-muted-foreground border-b-2 border-border uppercase text-[10px] font-bold tracking-wider">
-                    <tr>
-                      <th className="px-4 py-3 w-10">
-                        <Checkbox
-                          checked={isAllSelected}
-                          onCheckedChange={toggleAll}
-                          aria-label="Select all on page"
-                          className={cn(isSomeSelected && 'data-[state=checked]:bg-primary/50')}
-                        />
-                      </th>
-                      {columnVisibility.isColumnVisible('kind') && (
-                        <th className="px-6 py-3">
-                          <TableColumnHeaderWithFilterAndSort
-                            columnId="kind"
-                            label="Kind"
-                            sortKey={sortKey}
-                            sortOrder={sortOrder}
-                            onSort={(k) => setSort(k)}
-                            filterable={false}
-                            distinctValues={distinctValuesByColumn.kind ?? []}
-                            selectedFilterValues={columnFilters.kind ?? new Set()}
-                            onFilterChange={(col, vals) => setColumnFilter(col, vals)}
-                          />
-                        </th>
-                      )}
-                      {columnVisibility.isColumnVisible('name') && (
-                        <th className="px-6 py-3">
-                          <TableColumnHeaderWithFilterAndSort
-                            columnId="name"
-                            label="Name"
-                            sortKey={sortKey}
-                            sortOrder={sortOrder}
-                            onSort={(k) => setSort(k)}
-                            filterable={false}
-                            distinctValues={[]}
-                            selectedFilterValues={new Set()}
-                            onFilterChange={() => { }}
-                          />
-                        </th>
-                      )}
-                      {columnVisibility.isColumnVisible('namespace') && (
-                        <th className="px-6 py-3">
-                          <TableColumnHeaderWithFilterAndSort
-                            columnId="namespace"
-                            label="Namespace"
-                            sortKey={sortKey}
-                            sortOrder={sortOrder}
-                            onSort={(k) => setSort(k)}
-                            filterable={false}
-                            distinctValues={distinctValuesByColumn.namespace ?? []}
-                            selectedFilterValues={columnFilters.namespace ?? new Set()}
-                            onFilterChange={(col, vals) => setColumnFilter(col, vals)}
-                          />
-                        </th>
-                      )}
-                      {columnVisibility.isColumnVisible('status') && (
-                        <th className="px-6 py-3">
-                          <TableColumnHeaderWithFilterAndSort
-                            columnId="status"
-                            label="Status"
-                            sortKey={sortKey}
-                            sortOrder={sortOrder}
-                            onSort={(k) => setSort(k)}
-                            filterable={false}
-                            distinctValues={distinctValuesByColumn.status ?? []}
-                            selectedFilterValues={columnFilters.status ?? new Set()}
-                            onFilterChange={(col, vals) => setColumnFilter(col, vals)}
-                          />
-                        </th>
-                      )}
-                      {columnVisibility.isColumnVisible('replicas') && (
-                        <th className="px-6 py-3 text-right">
-                          <TableColumnHeaderWithFilterAndSort
-                            columnId="replicas"
-                            label="Replicas"
-                            sortKey={sortKey}
-                            sortOrder={sortOrder}
-                            onSort={(k) => setSort(k)}
-                            filterable={false}
-                            distinctValues={[]}
-                            selectedFilterValues={new Set()}
-                            onFilterChange={() => { }}
-                          />
-                        </th>
-                      )}
-                      {columnVisibility.isColumnVisible('pressure') && (
-                        <th className="px-6 py-3 text-right">
-                          <TableColumnHeaderWithFilterAndSort
-                            columnId="pressure"
-                            label="Pressure"
-                            sortKey={sortKey}
-                            sortOrder={sortOrder}
-                            onSort={(k) => setSort(k)}
-                            filterable={false}
-                            distinctValues={distinctValuesByColumn.pressure ?? []}
-                            selectedFilterValues={columnFilters.pressure ?? new Set()}
-                            onFilterChange={(col, vals) => setColumnFilter(col, vals)}
-                          />
-                        </th>
-                      )}
-                    </tr>
-                    {showTableFilters && (
-                      <tr className="bg-muted/30 border-b-2 border-border">
-                        <td className="px-4 py-2 w-10" />
-                        {columnVisibility.isColumnVisible('kind') && (
-                          <td className="px-6 py-2">
-                            <TableFilterCell
-                              columnId="kind"
-                              label="Kind"
-                              distinctValues={distinctValuesByColumn.kind ?? []}
-                              selectedFilterValues={columnFilters.kind ?? new Set()}
-                              onFilterChange={setColumnFilter}
-                              valueCounts={valueCountsByColumn.kind}
-                            />
-                          </td>
-                        )}
-                        {columnVisibility.isColumnVisible('name') && <td className="px-6 py-2" />}
-                        {columnVisibility.isColumnVisible('namespace') && (
-                          <td className="px-6 py-2">
-                            <TableFilterCell
-                              columnId="namespace"
-                              label="Namespace"
-                              distinctValues={distinctValuesByColumn.namespace ?? []}
-                              selectedFilterValues={columnFilters.namespace ?? new Set()}
-                              onFilterChange={setColumnFilter}
-                              valueCounts={valueCountsByColumn.namespace}
-                            />
-                          </td>
-                        )}
-                        {columnVisibility.isColumnVisible('status') && (
-                          <td className="px-6 py-2">
-                            <TableFilterCell
-                              columnId="status"
-                              label="Status"
-                              distinctValues={distinctValuesByColumn.status ?? []}
-                              selectedFilterValues={columnFilters.status ?? new Set()}
-                              onFilterChange={setColumnFilter}
-                              valueCounts={valueCountsByColumn.status}
-                            />
-                          </td>
-                        )}
-                        {columnVisibility.isColumnVisible('replicas') && <td className="px-6 py-2 text-right" />}
-                        {columnVisibility.isColumnVisible('pressure') && (
-                          <td className="px-6 py-2 text-right">
-                            <TableFilterCell
-                              columnId="pressure"
-                              label="Pressure"
-                              distinctValues={distinctValuesByColumn.pressure ?? []}
-                              selectedFilterValues={columnFilters.pressure ?? new Set()}
-                              onFilterChange={setColumnFilter}
-                              valueCounts={valueCountsByColumn.pressure}
-                            />
-                          </td>
-                        )}
-                      </tr>
-                    )}
-                  </thead>
-                  <tbody className="divide-y">
-                    {itemsOnPage.map((w, i) => {
-                      const Icon = KIND_ICONS[w.kind] ?? Container;
-                      const detailPath = getDetailPath(w.kind, w.name, w.namespace);
-                      const statusColor = STATUS_COLORS[w.status] ?? 'bg-muted/50 text-muted-foreground';
-                      const pressureColor = PRESSURE_COLORS[w.pressure] ?? 'text-muted-foreground';
-                      const pressureLabel =
-                        w.pressure === 'Low' || w.pressure === 'Normal' ? 'Normal' :
-                          w.pressure === 'Medium' || w.pressure === 'Elevated' ? 'Elevated' :
-                            w.pressure === 'Zero' || w.pressure === 'Idle' ? 'Idle' : w.pressure;
-                      const key = getWorkloadKey(w);
-                      const isSelected = selectedItems.has(key);
+        </div>
 
-                      return (
-                        <motion.tr
-                          key={key}
-                          initial={{ opacity: 0, y: 4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: i * 0.02 }}
-                          className={cn('hover:bg-muted/30 transition-colors group', isSelected && 'bg-primary/5')}
-                        >
-                          <td className="px-4 py-4 w-10" onClick={(e) => e.stopPropagation()}>
-                            <Checkbox
-                              checked={isSelected}
-                              onCheckedChange={() => toggleSelection(w)}
-                              aria-label={`Select ${w.name}`}
-                            />
-                          </td>
-                          {columnVisibility.isColumnVisible('kind') && (
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-2">
-                                <div className="p-1.5 rounded-lg bg-primary/5 text-primary">
-                                  <Icon className="h-3.5 w-3.5" />
-                                </div>
-                                <span className="font-medium">{w.kind}</span>
-                              </div>
-                            </td>
-                          )}
-                          {columnVisibility.isColumnVisible('name') && (
-                            <td className="px-6 py-4">
-                              {detailPath ? (
-                                <Link
-                                  to={detailPath}
-                                  className="font-medium text-primary hover:underline truncate block max-w-[200px]"
-                                >
-                                  {w.name}
-                                </Link>
-                              ) : (
-                                <span className="font-medium truncate block max-w-[200px]">{w.name}</span>
-                              )}
-                            </td>
-                          )}
-                          {columnVisibility.isColumnVisible('namespace') && (
-                            <td className="px-6 py-4 text-muted-foreground font-mono text-xs">
-                              {w.namespace || '—'}
-                            </td>
-                          )}
-                          {columnVisibility.isColumnVisible('status') && (
-                            <td className="px-6 py-4">
-                              <Badge variant="secondary" className={cn('border', statusColor)}>
-                                {w.status}
-                              </Badge>
-                            </td>
-                          )}
-                          {columnVisibility.isColumnVisible('replicas') && (
-                            <td className="px-6 py-4 text-right font-mono text-xs">
-                              {w.desired > 0 ? `${w.ready}/${w.desired}` : '—'}
-                            </td>
-                          )}
-                          {columnVisibility.isColumnVisible('pressure') && (
-                            <td className="px-6 py-4 text-right">
-                              <span className={cn('font-mono text-xs', pressureColor)}>
-                                {pressureLabel}
-                              </span>
-                            </td>
-                          )}
-                        </motion.tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="p-4 border-t flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex flex-wrap gap-2">
-                  <ListPagination
-                    rangeLabel={
-                      totalFiltered > 0
-                        ? `Showing ${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered}`
-                        : 'No workloads'
-                    }
-                    hasPrev={safePageIndex > 0}
-                    hasNext={start + pageSize < totalFiltered}
-                    onPrev={() => setPageIndex((i) => Math.max(0, i - 1))}
-                    onNext={() => setPageIndex((i) => Math.min(totalPages - 1, i + 1))}
-                    currentPage={safePageIndex + 1}
-                    totalPages={Math.max(1, totalPages)}
-                    onPageChange={(p) => setPageIndex(Math.max(0, Math.min(p - 1, totalPages - 1)))}
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link to="/deployments" className="text-xs">
-                      Deployments
-                      <ChevronRight className="w-3 h-3 ml-1" />
-                    </Link>
-                  </Button>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link to="/statefulsets" className="text-xs">
-                      StatefulSets
-                      <ChevronRight className="w-3 h-3 ml-1" />
-                    </Link>
-                  </Button>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link to="/jobs" className="text-xs">
-                      Jobs
-                      <ChevronRight className="w-3 h-3 ml-1" />
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-            </TableFilterProvider>
-          )}
-        </CardContent>
-      </Card>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50/50">
+                <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-100 w-10">
+                  <Checkbox checked={isAllSelected} onCheckedChange={toggleAll} />
+                </th>
+                <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-100">Controller</th>
+                <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-100">Namespace</th>
+                <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-100">Status</th>
+                <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-100 text-right">Replicas</th>
+                <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-100 text-right">Pressure</th>
+                <th className="px-8 py-5 border-b border-slate-100"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50 text-sm">
+              {itemsOnPage.map((w, i) => {
+                const Icon = KIND_ICONS[w.kind] ?? Container;
+                const detailPath = getDetailPath(w.kind, w.name, w.namespace);
+                const isSelected = selectedItems.has(getWorkloadKey(w));
+
+                return (
+                  <motion.tr
+                    key={getWorkloadKey(w)}
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.02 }}
+                    className={cn("group hover:bg-slate-50 transition-colors", isSelected && "bg-blue-50/30")}
+                  >
+                    <td className="px-8 py-4">
+                      <Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(w)} />
+                    </td>
+                    <td className="px-8 py-4">
+                      <div className="flex items-center gap-4">
+                        <div className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">
+                          <Icon className="h-4.5 w-4.5" />
+                        </div>
+                        <div>
+                          <Link to={detailPath || '#'} className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors block leading-tight tracking-tight">
+                            {w.name}
+                          </Link>
+                          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider mt-0.5 block">{w.kind}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-8 py-4">
+                      <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg">
+                        {w.namespace}
+                      </span>
+                    </td>
+                    <td className="px-8 py-4 text-xs font-bold text-slate-700">
+                      <Badge variant="outline" className={cn("text-[9px] uppercase tracking-wider bg-white border-slate-100 font-bold px-2 py-0.5 rounded-lg",
+                        w.status === 'Running' || w.status === 'Healthy' ? "text-emerald-600 border-emerald-100" : "text-blue-600 border-blue-100")}>
+                        {w.status}
+                      </Badge>
+                    </td>
+                    <td className="px-8 py-4 text-right">
+                      <span className="font-mono text-xs font-bold text-slate-600">
+                        {w.desired > 0 ? `${w.ready}/${w.desired}` : '—'}
+                      </span>
+                    </td>
+                    <td className="px-8 py-4 text-right">
+                      <span className={cn("text-[10px] font-bold uppercase tracking-wider", PRESSURE_COLORS[w.pressure])}>
+                        {w.pressure}
+                      </span>
+                    </td>
+                    <td className="px-8 py-4 text-right">
+                      <Button variant="ghost" size="sm" className="h-9 w-9 p-0 hover:bg-white hover:text-blue-600 hover:shadow-sm rounded-xl transition-all border border-transparent hover:border-slate-100">
+                        <ArrowUpRight className="h-4 w-4" />
+                      </Button>
+                    </td>
+                  </motion.tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="p-6 border-t border-slate-50 bg-slate-50/30 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <ListPagination
+            rangeLabel={`Fleet Census: ${totalFiltered} Controllers`}
+            hasPrev={safePageIndex > 0}
+            hasNext={start + pageSize < totalFiltered}
+            onPrev={() => setPageIndex((i) => Math.max(0, i - 1))}
+            onNext={() => setPageIndex((i) => Math.min(totalPages - 1, i + 1))}
+            currentPage={safePageIndex + 1}
+            totalPages={totalPages}
+            onPageChange={(p) => setPageIndex(p - 1)}
+          />
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" asChild className="h-10 px-5 font-bold border-slate-200 text-slate-600 hover:bg-white hover:text-blue-600 rounded-xl transition-all">
+              <Link to="/deployments">Deployments</Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild className="h-10 px-5 font-bold border-slate-200 text-slate-600 hover:bg-white hover:text-blue-600 rounded-xl transition-all">
+              <Link to="/statefulsets">StatefulSets</Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild className="h-10 px-5 font-bold border-slate-200 text-slate-600 hover:bg-white hover:text-blue-600 rounded-xl transition-all">
+              <Link to="/pods">All Pods</Link>
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

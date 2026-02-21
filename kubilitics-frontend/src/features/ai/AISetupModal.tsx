@@ -39,6 +39,7 @@ import {
 } from '@/services/aiService';
 import { toBackendProvider } from '@/stores/aiConfigStore';
 import { motion, AnimatePresence } from 'framer-motion';
+import { cn } from '@/lib/utils';
 
 const AI_PROVIDER_OPTIONS = [
     { value: 'openai', label: 'OpenAI (GPT-4, GPT-3.5)', icon: 'openai' },
@@ -93,7 +94,7 @@ export function AISetupModal({ open, onOpenChange, onComplete }: AISetupModalPro
 
     // When provider changes, auto-select the recommended model from the catalog.
     const handleProviderChange = (newProvider: LLMProviderConfig['provider']) => {
-        if (newProvider === 'none') return; // 'none' is not a valid setup choice
+        if ((newProvider as string) === 'none') return; // 'none' is not a valid setup choice
         const list = modelCatalog[newProvider] ?? [];
         const recommended = list.find((m) => m.recommended);
         setShowCustomModel(false);
@@ -104,8 +105,8 @@ export function AISetupModal({ open, onOpenChange, onComplete }: AISetupModalPro
             // matching what buildModelCatalog() returns (single source of truth on backend).
             model: recommended?.id ?? (
                 newProvider === 'openai' ? 'gpt-4o' :
-                newProvider === 'anthropic' ? 'claude-sonnet-4-5' :
-                newProvider === 'ollama' ? 'llama3.2' : ''
+                    newProvider === 'anthropic' ? 'claude-sonnet-4-5' :
+                        newProvider === 'ollama' ? 'llama3.2' : ''
             ),
             base_url: newProvider === 'ollama' ? 'http://localhost:11434' : prev.base_url,
             api_key: '', // Clear key when switching providers — user must re-enter
@@ -125,7 +126,7 @@ export function AISetupModal({ open, onOpenChange, onComplete }: AISetupModalPro
     }, [modelCatalog]);
 
     const handleSave = async () => {
-        if (aiConfig.provider === 'none') {
+        if ((aiConfig.provider as string) === 'none') {
             toast.error('Please select an AI provider first');
             return;
         }
@@ -317,9 +318,9 @@ export function AISetupModal({ open, onOpenChange, onComplete }: AISetupModalPro
                                         <Input
                                             placeholder={
                                                 aiConfig.provider === 'openai' ? 'e.g. gpt-4o' :
-                                                aiConfig.provider === 'anthropic' ? 'e.g. claude-sonnet-4-5' :
-                                                aiConfig.provider === 'ollama' ? 'e.g. llama3.2' :
-                                                'Enter exact model name'
+                                                    aiConfig.provider === 'anthropic' ? 'e.g. claude-sonnet-4-5' :
+                                                        aiConfig.provider === 'ollama' ? 'e.g. llama3.2' :
+                                                            'Enter exact model name'
                                             }
                                             value={aiConfig.model || ''}
                                             onChange={(e) => setAiConfig({ ...aiConfig, model: e.target.value })}
@@ -336,35 +337,69 @@ export function AISetupModal({ open, onOpenChange, onComplete }: AISetupModalPro
                         </AnimatePresence>
                     </div>
 
-                    <div className="mt-10 flex gap-3">
-                        <Button
-                            variant="ghost"
-                            className="flex-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-xl h-12 font-semibold"
-                            onClick={() => onOpenChange(false)}
-                        >
-                            Back
-                        </Button>
-                        <Button
-                            className={`flex-[1.5] h-12 rounded-xl text-white font-bold transition-all shadow-lg ${testStatus === 'success' ? 'bg-emerald-500 shadow-emerald-500/20' :
-                                testStatus === 'error' ? 'bg-rose-500 shadow-rose-500/20' : 'bg-slate-900 hover:bg-slate-800 shadow-slate-900/20'
-                                }`}
-                            onClick={handleSave}
-                            disabled={testStatus === 'loading'}
-                        >
-                            {testStatus === 'loading' ? (
-                                <Loader2 className="h-5 w-5 animate-spin" />
-                            ) : testStatus === 'success' ? (
-                                <CheckCircle2 className="h-5 w-5" />
-                            ) : testStatus === 'error' ? (
-                                "Retry Sync"
-                            ) : (
-                                "Identify & Sync"
+                    <div className="mt-10 space-y-4">
+                        <AnimatePresence>
+                            {testStatus !== 'idle' && (
+                                <motion.div
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: 'auto' }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    className={cn(
+                                        "p-4 rounded-xl border flex items-center gap-3",
+                                        testStatus === 'loading' ? "bg-blue-50/50 border-blue-100 text-blue-600" :
+                                            testStatus === 'success' ? "bg-emerald-50/50 border-emerald-100 text-emerald-600" :
+                                                "bg-rose-50/50 border-rose-100 text-rose-600"
+                                    )}
+                                >
+                                    {testStatus === 'loading' ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : testStatus === 'success' ? (
+                                        <CheckCircle2 className="h-4 w-4" />
+                                    ) : (
+                                        <AlertCircle className="h-4 w-4" />
+                                    )}
+                                    <span className="text-xs font-bold uppercase tracking-wider">
+                                        {testStatus === 'loading' ? 'Establishing secure link...' :
+                                            testStatus === 'success' ? 'Engine Ready · Proactive Sync Active' :
+                                                'Connection Interrupted · Verification Failed'}
+                                    </span>
+                                </motion.div>
                             )}
-                        </Button>
+                        </AnimatePresence>
+
+                        <div className="flex gap-3">
+                            <Button
+                                variant="ghost"
+                                className="flex-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-xl h-12 font-semibold"
+                                onClick={() => onOpenChange(false)}
+                            >
+                                Back
+                            </Button>
+                            <Button
+                                className={cn(
+                                    "flex-[1.5] h-12 rounded-xl text-white font-bold transition-all shadow-lg",
+                                    testStatus === 'success' ? 'bg-emerald-600 shadow-emerald-600/20' :
+                                        testStatus === 'error' ? 'bg-rose-600 shadow-rose-600/20' :
+                                            'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
+                                )}
+                                onClick={handleSave}
+                                disabled={testStatus === 'loading'}
+                            >
+                                {testStatus === 'loading' ? (
+                                    <Loader2 className="h-5 w-5 animate-spin" />
+                                ) : testStatus === 'success' ? (
+                                    "System Active"
+                                ) : testStatus === 'error' ? (
+                                    "Retry Connection"
+                                ) : (
+                                    "Identify & Sync"
+                                )}
+                            </Button>
+                        </div>
                     </div>
 
-                    <p className="mt-8 text-center text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                        Zero-Trust Storage &bull; End-to-End Privacy
+                    <p className="mt-8 text-center text-[10px] font-bold uppercase tracking-[0.4em] text-slate-300">
+                        Zero-Trust Hub
                     </p>
                 </div>
             </DialogContent>

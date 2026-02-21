@@ -1,16 +1,16 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
 import { motion } from 'framer-motion';
-import { 
-  Network, 
-  ZoomIn, 
-  ZoomOut, 
-  Maximize2, 
+import {
+  Network,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
   Play,
   Pause,
   RotateCcw,
-  FileJson, 
-  FileSpreadsheet, 
+  FileJson,
+  FileSpreadsheet,
   Image,
   Box,
   Server,
@@ -43,15 +43,15 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { D3MiniMap } from './D3MiniMap';
 
-export type ResourceType = 
+export type ResourceType =
   | 'cluster'
-  | 'pod' 
-  | 'deployment' 
-  | 'replicaset' 
-  | 'service' 
-  | 'node' 
-  | 'namespace' 
-  | 'configmap' 
+  | 'pod'
+  | 'deployment'
+  | 'replicaset'
+  | 'service'
+  | 'node'
+  | 'namespace'
+  | 'configmap'
   | 'secret'
   | 'ingress'
   | 'statefulset'
@@ -107,38 +107,39 @@ type GroupingMode = 'none' | 'namespace' | 'type';
 const MAX_FORCE_NODES = 250;
 
 // Resource type styling
+// Resource type styling - Synchronized with Cytoscape HSL palette
 const resourceStyles: Record<ResourceType, { color: string; radius: number }> = {
   pod: { color: 'hsl(199, 89%, 48%)', radius: 24 },
   deployment: { color: 'hsl(25, 95%, 53%)', radius: 32 },
   replicaset: { color: 'hsl(262, 83%, 58%)', radius: 28 },
-  service: { color: 'hsl(142, 76%, 36%)', radius: 30 },
+  service: { color: 'hsl(142, 72%, 29%)', radius: 30 },
   node: { color: 'hsl(0, 72%, 51%)', radius: 36 },
-  namespace: { color: 'hsl(280, 87%, 67%)', radius: 34 },
+  namespace: { color: 'hsl(280, 80%, 60%)', radius: 34 },
   configmap: { color: 'hsl(47, 96%, 53%)', radius: 22 },
-  secret: { color: 'hsl(340, 82%, 52%)', radius: 22 },
-  ingress: { color: 'hsl(174, 72%, 40%)', radius: 28 },
-  statefulset: { color: 'hsl(220, 70%, 50%)', radius: 30 },
-  daemonset: { color: 'hsl(280, 70%, 50%)', radius: 30 },
+  secret: { color: 'hsl(346, 84%, 61%)', radius: 22 },
+  ingress: { color: 'hsl(174, 90%, 41%)', radius: 28 },
+  statefulset: { color: 'hsl(210, 80%, 45%)', radius: 30 },
+  daemonset: { color: 'hsl(280, 75%, 45%)', radius: 30 },
   job: { color: 'hsl(45, 93%, 47%)', radius: 26 },
-  cronjob: { color: 'hsl(36, 100%, 50%)', radius: 26 },
-  pv: { color: 'hsl(210, 40%, 50%)', radius: 26 },
-  pvc: { color: 'hsl(210, 60%, 45%)', radius: 24 },
+  cronjob: { color: 'hsl(38, 92%, 50%)', radius: 26 },
+  pv: { color: 'hsl(200, 40%, 45%)', radius: 26 },
+  pvc: { color: 'hsl(200, 60%, 45%)', radius: 24 },
   hpa: { color: 'hsl(160, 60%, 45%)', radius: 24 },
   vpa: { color: 'hsl(150, 60%, 45%)', radius: 24 },
   pdb: { color: 'hsl(350, 60%, 50%)', radius: 24 },
-  networkpolicy: { color: 'hsl(200, 70%, 50%)', radius: 26 },
-  serviceaccount: { color: 'hsl(230, 60%, 55%)', radius: 24 },
-  role: { color: 'hsl(300, 60%, 50%)', radius: 24 },
-  clusterrole: { color: 'hsl(320, 70%, 50%)', radius: 28 },
-  rolebinding: { color: 'hsl(290, 60%, 50%)', radius: 22 },
-  clusterrolebinding: { color: 'hsl(310, 60%, 50%)', radius: 26 },
-  endpoint: { color: 'hsl(180, 60%, 45%)', radius: 22 },
-  endpointslice: { color: 'hsl(190, 60%, 45%)', radius: 22 },
+  networkpolicy: { color: 'hsl(15, 80%, 40%)', radius: 26 },
+  serviceaccount: { color: 'hsl(320, 70%, 50%)', radius: 24 },
+  role: { color: 'hsl(310, 60%, 45%)', radius: 24 },
+  clusterrole: { color: 'hsl(300, 80%, 40%)', radius: 28 },
+  rolebinding: { color: 'hsl(300, 50%, 60%)', radius: 22 },
+  clusterrolebinding: { color: 'hsl(300, 60%, 55%)', radius: 26 },
+  endpoint: { color: 'hsl(215, 25%, 40%)', radius: 22 },
+  endpointslice: { color: 'hsl(215, 20%, 50%)', radius: 22 },
   ingressclass: { color: 'hsl(170, 60%, 45%)', radius: 26 },
-  storageclass: { color: 'hsl(200, 50%, 50%)', radius: 28 },
+  storageclass: { color: 'hsl(200, 30%, 30%)', radius: 28 },
   user: { color: 'hsl(240, 60%, 55%)', radius: 24 },
   group: { color: 'hsl(250, 60%, 55%)', radius: 26 },
-  cluster: { color: 'hsl(217, 91%, 60%)', radius: 50 }, // Larger radius for cluster node
+  cluster: { color: 'hsl(217, 91%, 25%)', radius: 50 },
 };
 
 const resourceIcons: Record<ResourceType, LucideIcon> = {
@@ -239,10 +240,10 @@ interface GroupNode {
   color: string;
 }
 
-export function D3TopologyCanvas({ 
-  nodes, 
-  edges, 
-  onNodeClick, 
+export function D3TopologyCanvas({
+  nodes,
+  edges,
+  onNodeClick,
   className,
   showTraffic: showTrafficProp,
 }: D3TopologyCanvasProps) {
@@ -264,14 +265,14 @@ export function D3TopologyCanvas({
   // Calculate groups based on grouping mode
   const groups = useMemo((): globalThis.Map<string, GroupNode> => {
     const groupMap: globalThis.Map<string, GroupNode> = new globalThis.Map();
-    
+
     if (groupingMode === 'none') return groupMap;
-    
+
     nodes.forEach(node => {
       let groupKey: string;
       let groupName: string;
       let groupColor: string;
-      
+
       if (groupingMode === 'namespace') {
         groupKey = node.namespace || 'default';
         groupName = node.namespace || 'default';
@@ -281,7 +282,7 @@ export function D3TopologyCanvas({
         groupName = resourceLabels[node.type];
         groupColor = resourceStyles[node.type]?.color || 'hsl(var(--primary))';
       }
-      
+
       if (!groupMap.has(groupKey)) {
         groupMap.set(groupKey, {
           id: `group-${groupKey}`,
@@ -291,12 +292,12 @@ export function D3TopologyCanvas({
           color: groupColor
         });
       }
-      
+
       const group = groupMap.get(groupKey)!;
       group.count++;
       group.nodes.push(node.id);
     });
-    
+
     return groupMap;
   }, [nodes, groupingMode]);
 
@@ -304,7 +305,7 @@ export function D3TopologyCanvas({
   const { d3Nodes, d3Links } = useMemo(() => {
     let processedNodes: D3Node[] = [];
     let processedLinks: D3Link[] = [];
-    
+
     if (groupingMode === 'none') {
       // No grouping - show all nodes
       processedNodes = nodes.map(node => ({
@@ -312,7 +313,7 @@ export function D3TopologyCanvas({
         radius: resourceStyles[node.type]?.radius || 24,
         color: resourceStyles[node.type]?.color || 'hsl(var(--primary))',
       }));
-      
+
       processedLinks = edges.map(edge => ({
         source: edge.from,
         target: edge.to,
@@ -322,7 +323,7 @@ export function D3TopologyCanvas({
     } else {
       // With grouping
       const visibleNodeIds = new Set<string>();
-      
+
       // Add group nodes or expanded individual nodes
       groups.forEach((group, groupKey) => {
         if (collapsedGroups.has(groupKey)) {
@@ -355,12 +356,12 @@ export function D3TopologyCanvas({
           });
         }
       });
-      
+
       // Process links - connect to group nodes if collapsed
       edges.forEach(edge => {
         let source = edge.from;
         let target = edge.to;
-        
+
         // Check if source/target are in collapsed groups
         groups.forEach((group, groupKey) => {
           if (collapsedGroups.has(groupKey)) {
@@ -372,13 +373,13 @@ export function D3TopologyCanvas({
             }
           }
         });
-        
+
         // Only add if both endpoints are visible and not self-referential
         if (visibleNodeIds.has(source) && visibleNodeIds.has(target) && source !== target) {
           // Check if this link already exists (for collapsed groups)
           const existingLink = processedLinks.find(
-            l => (l.source === source || (l.source as D3Node).id === source) && 
-                 (l.target === target || (l.target as D3Node).id === target)
+            l => (l.source === source || (l.source as D3Node).id === source) &&
+              (l.target === target || (l.target as D3Node).id === target)
           );
           if (!existingLink) {
             processedLinks.push({
@@ -391,7 +392,7 @@ export function D3TopologyCanvas({
         }
       });
     }
-    
+
     return { d3Nodes: processedNodes, d3Links: processedLinks };
   }, [nodes, edges, groupingMode, groups, collapsedGroups]);
 
@@ -450,368 +451,397 @@ export function D3TopologyCanvas({
       // Clear previous content
       svg.selectAll('*').remove();
 
-    // Create defs for gradients and markers
-    const defs = svg.append('defs');
-    
-    // Arrow marker
-    defs.append('marker')
-      .attr('id', 'arrowhead')
-      .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 20)
-      .attr('refY', 0)
-      .attr('markerWidth', 6)
-      .attr('markerHeight', 6)
-      .attr('orient', 'auto')
-      .append('path')
-      .attr('d', 'M0,-5L10,0L0,5')
-      .attr('fill', 'hsl(var(--muted-foreground))');
+      // Create defs for gradients and markers
+      const defs = svg.append('defs');
 
-    // Traffic flow gradient
-    const trafficGradient = defs.append('linearGradient')
-      .attr('id', 'traffic-gradient')
-      .attr('gradientUnits', 'userSpaceOnUse');
-    
-    trafficGradient.append('stop')
-      .attr('offset', '0%')
-      .attr('stop-color', 'hsl(142, 76%, 36%)')
-      .attr('stop-opacity', 0.8);
-    
-    trafficGradient.append('stop')
-      .attr('offset', '50%')
-      .attr('stop-color', 'hsl(199, 89%, 48%)')
-      .attr('stop-opacity', 1);
-    
-    trafficGradient.append('stop')
-      .attr('offset', '100%')
-      .attr('stop-color', 'hsl(142, 76%, 36%)')
-      .attr('stop-opacity', 0.8);
+      // Arrow marker
+      defs.append('marker')
+        .attr('id', 'arrowhead')
+        .attr('viewBox', '0 -5 10 10')
+        .attr('refX', 20)
+        .attr('refY', 0)
+        .attr('markerWidth', 6)
+        .attr('markerHeight', 6)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('d', 'M0,-5L10,0L0,5')
+        .attr('fill', 'hsl(var(--muted-foreground))');
 
-    // Create container group for zoom/pan
-    const g = svg.append('g').attr('class', 'topology-container');
+      // Traffic flow gradient
+      const trafficGradient = defs.append('linearGradient')
+        .attr('id', 'traffic-gradient')
+        .attr('gradientUnits', 'userSpaceOnUse');
 
-    // Add zoom behavior
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.2, 4])
-      .on('zoom', (event) => {
-        g.attr('transform', event.transform);
-      });
+      trafficGradient.append('stop')
+        .attr('offset', '0%')
+        .attr('stop-color', 'hsl(142, 76%, 36%)')
+        .attr('stop-opacity', 0.8);
 
-    zoomRef.current = zoom;
-    svg.call(zoom);
+      trafficGradient.append('stop')
+        .attr('offset', '50%')
+        .attr('stop-color', 'hsl(199, 89%, 48%)')
+        .attr('stop-opacity', 1);
 
-    // Create links group
-    const linksGroup = g.append('g').attr('class', 'links');
-    
-    // Create traffic particles group
-    const trafficGroup = g.append('g').attr('class', 'traffic-particles');
-    
-    // Create nodes group
-    const nodesGroup = g.append('g').attr('class', 'nodes');
+      trafficGradient.append('stop')
+        .attr('offset', '100%')
+        .attr('stop-color', 'hsl(142, 76%, 36%)')
+        .attr('stop-opacity', 0.8);
 
-    // Create link elements
-    const link = linksGroup.selectAll<SVGLineElement, D3Link>('line')
-      .data(d3Links)
-      .enter()
-      .append('line')
-      .attr('stroke', 'hsl(var(--muted-foreground))')
-      .attr('stroke-opacity', 0.3)
-      .attr('stroke-width', d => d.traffic ? Math.max(1.5, d.traffic / 25) : 1.5)
-      .attr('marker-end', 'url(#arrowhead)');
+      // Create container group for zoom/pan
+      const g = svg.append('g').attr('class', 'topology-container');
 
-    // Create animated traffic particles for edges with traffic
-    if (showTraffic) {
-      d3Links.filter(l => l.traffic && l.traffic > 0).forEach((linkData, i) => {
-        const particleCount = Math.ceil((linkData.traffic || 0) / 20);
-        
-        for (let p = 0; p < particleCount; p++) {
-          trafficGroup.append('circle')
-            .attr('class', `traffic-particle traffic-${i}-${p}`)
-            .attr('r', 3)
-            .attr('fill', 'hsl(142, 76%, 50%)')
-            .attr('opacity', 0.8);
-        }
-      });
-    }
+      // Add zoom behavior
+      const zoom = d3.zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.2, 4])
+        .on('zoom', (event) => {
+          g.attr('transform', event.transform);
+        });
 
-    // Create link labels
-    const linkLabels = linksGroup.selectAll<SVGTextElement, D3Link>('text')
-      .data(d3Links.filter(l => l.label))
-      .enter()
-      .append('text')
-      .attr('font-size', 10)
-      .attr('fill', 'hsl(var(--muted-foreground))')
-      .attr('text-anchor', 'middle')
-      .text(d => d.label || '');
+      zoomRef.current = zoom;
+      svg.call(zoom);
 
-    // Create node groups
-    const node = nodesGroup.selectAll<SVGGElement, D3Node>('g')
-      .data(d3Nodes)
-      .enter()
-      .append('g')
-      .attr('class', 'node')
-      .style('cursor', 'pointer')
-      .call(d3.drag<SVGGElement, D3Node>()
-        .on('start', dragstarted)
-        .on('drag', dragged)
-        .on('end', dragended)
-      );
+      // Create links group
+      const linksGroup = g.append('g').attr('class', 'links');
 
-    // Add outer glow for selected/current nodes
-    node.append('circle')
-      .attr('r', d => d.radius + 8)
-      .attr('fill', d => d.isCurrent ? d.color : 'transparent')
-      .attr('opacity', 0.15)
-      .attr('class', 'node-glow');
+      // Create traffic particles group
+      const trafficGroup = g.append('g').attr('class', 'traffic-particles');
 
-    // Add special glow effect for cluster node
-    node.filter(d => d.type === 'cluster')
-      .append('circle')
-      .attr('r', d => d.radius + 12)
-      .attr('fill', d => d.color)
-      .attr('opacity', 0.2)
-      .attr('class', 'cluster-glow')
-      .style('filter', 'blur(8px)');
-    
-    node.filter(d => d.type === 'cluster')
-      .append('circle')
-      .attr('r', d => d.radius + 6)
-      .attr('fill', d => d.color)
-      .attr('opacity', 0.3)
-      .attr('class', 'cluster-glow-inner');
+      // Create nodes group
+      const nodesGroup = g.append('g').attr('class', 'nodes');
 
-    // Add group indicator ring
-    node.filter(d => d.isGroup)
-      .append('circle')
-      .attr('r', d => d.radius + 4)
-      .attr('fill', 'none')
-      .attr('stroke', d => d.color)
-      .attr('stroke-width', 2)
-      .attr('stroke-dasharray', '4 2')
-      .attr('opacity', 0.6);
+      // Create link elements using paths for curved edges (Edge Bundling lite)
+      const link = linksGroup.selectAll<SVGPathElement, D3Link>('path')
+        .data(d3Links)
+        .enter()
+        .append('path')
+        .attr('stroke', 'hsl(var(--muted-foreground))')
+        .attr('stroke-opacity', 0.25)
+        .attr('stroke-width', d => d.traffic ? Math.max(1.5, d.traffic / 25) : 1.5)
+        .attr('fill', 'none')
+        .attr('marker-end', 'url(#arrowhead)');
 
-    // Add main circle
-    node.append('circle')
-      .attr('r', d => d.radius)
-      .attr('fill', d => d.color)
-      .attr('stroke', d => {
-        if (d.type === 'cluster') return 'hsl(var(--background))';
-        return d.isCurrent ? 'hsl(var(--background))' : 'transparent';
-      })
-      .attr('stroke-width', d => d.type === 'cluster' ? 4 : 3)
-      .attr('class', 'node-circle')
-      .style('filter', d => d.type === 'cluster' ? 'drop-shadow(0 4px 12px rgba(0,0,0,0.15))' : null)
-      .on('mouseenter', function(event, d) {
-        d3.select(this).transition().duration(200).attr('r', d.radius + 4);
-        setHoveredNode(d.id);
-      })
-      .on('mouseleave', function(event, d) {
-        d3.select(this).transition().duration(200).attr('r', d.radius);
-        setHoveredNode(null);
-      })
-      .on('click', (event, d) => {
-        if (d.isGroup && d.groupId) {
-          toggleGroup(d.groupId);
-        } else {
-          setSelectedNode(d.id);
-          onNodeClick?.(d as TopologyNode);
-        }
-      });
+      // Create animated traffic particles for edges with traffic
+      if (showTraffic) {
+        d3Links.filter(l => l.traffic && l.traffic > 0).forEach((linkData, i) => {
+          const particleCount = Math.ceil((linkData.traffic || 0) / 20);
 
-    // Add status indicator
-    node.filter(d => !!d.status && !d.isGroup)
-      .append('circle')
-      .attr('r', 6)
-      .attr('cx', d => d.radius * 0.6)
-      .attr('cy', d => -d.radius * 0.6)
-      .attr('fill', d => {
-        switch (d.status) {
-          case 'healthy': return 'hsl(142, 76%, 36%)';
-          case 'warning': return 'hsl(45, 93%, 47%)';
-          case 'error': return 'hsl(0, 72%, 51%)';
-          default: return 'hsl(var(--muted-foreground))';
-        }
-      })
-      .attr('stroke', 'hsl(var(--background))')
-      .attr('stroke-width', 2);
-
-    // Add traffic indicator for nodes
-    node.filter(d => !d.isGroup && d.traffic && d.traffic > 0)
-      .append('circle')
-      .attr('r', 4)
-      .attr('cx', d => -d.radius * 0.6)
-      .attr('cy', d => -d.radius * 0.6)
-      .attr('fill', 'hsl(142, 76%, 50%)')
-      .attr('class', 'traffic-indicator')
-      .style('animation', 'pulse 1s ease-in-out infinite');
-
-    // Add icon/text
-    node.append('text')
-      .attr('text-anchor', 'middle')
-      .attr('dominant-baseline', 'central')
-      .attr('fill', 'white')
-      .attr('font-size', d => d.isGroup ? 14 : Math.max(d.radius * 0.5, 12))
-      .attr('font-weight', 'bold')
-      .text(d => {
-        if (d.isGroup) {
-          return d.childCount || '?';
-        }
-        return resourceLabels[d.type]?.charAt(0) || '?';
-      });
-
-    // Add resource type label
-    node.append('text')
-      .attr('y', d => d.radius + 16)
-      .attr('text-anchor', 'middle')
-      .attr('font-size', 11)
-      .attr('font-weight', 600)
-      .attr('fill', 'hsl(var(--foreground))')
-      .text(d => d.isGroup ? d.name : resourceLabels[d.type]);
-
-    // Add resource name label
-    node.filter(d => !d.isGroup)
-      .append('text')
-      .attr('y', d => d.radius + 30)
-      .attr('text-anchor', 'middle')
-      .attr('font-size', 9)
-      .attr('fill', 'hsl(var(--muted-foreground))')
-      .text(d => d.name.length > 20 ? d.name.slice(0, 17) + '...' : d.name);
-
-    // Add collapse/expand indicator for groups
-    node.filter(d => d.isGroup)
-      .append('text')
-      .attr('y', d => d.radius + 30)
-      .attr('text-anchor', 'middle')
-      .attr('font-size', 9)
-      .attr('fill', 'hsl(var(--muted-foreground))')
-      .text('Click to expand');
-
-    // Create force simulation
-    const simulation = d3.forceSimulation(d3Nodes)
-      .force('link', d3.forceLink<D3Node, D3Link>(d3Links)
-        .id(d => d.id)
-        .distance(120)
-        .strength(0.5)
-      )
-      .force('charge', d3.forceManyBody()
-        .strength(-400)
-        .distanceMax(300)
-      )
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide<D3Node>()
-        .radius(d => d.radius + 30)
-        .strength(0.8)
-      )
-      .force('x', d3.forceX(width / 2).strength(0.05))
-      .force('y', d3.forceY(height / 2).strength(0.05));
-
-    simulationRef.current = simulation;
-
-    // Animate traffic particles
-    const animateTraffic = () => {
-      if (!showTraffic || cancelled) return;
-      
-      const time = Date.now();
-      d3Links.filter(l => l.traffic && l.traffic > 0).forEach((linkData, i) => {
-        const particleCount = Math.ceil((linkData.traffic || 0) / 20);
-        const source = linkData.source as D3Node;
-        const target = linkData.target as D3Node;
-        
-        if (!source.x || !source.y || !target.x || !target.y) return;
-        
-        for (let p = 0; p < particleCount; p++) {
-          const speed = 0.001 + (linkData.traffic || 0) / 10000;
-          const offset = p / particleCount;
-          const t = ((time * speed) + offset) % 1;
-          
-          const x = source.x + (target.x - source.x) * t;
-          const y = source.y + (target.y - source.y) * t;
-          
-          trafficGroup.select(`.traffic-${i}-${p}`)
-            .attr('cx', x)
-            .attr('cy', y);
-        }
-      });
-      
-      trafficAnimationFrameRef.current = requestAnimationFrame(animateTraffic);
-    };
-    
-    if (showTraffic) {
-      animateTraffic();
-    }
-
-    // Auto-fit function to scale content to fit screen
-    const autoFitToScreen = () => {
-      if (!svgRef.current || !zoomRef.current) return;
-      
-      const svgElement = svgRef.current;
-      const container = g.node();
-      if (!container) return;
-      
-      const bounds = container.getBBox();
-      if (bounds.width === 0 || bounds.height === 0) return;
-      
-      const padding = 60;
-      const fullWidth = width;
-      const fullHeight = height;
-      
-      const widthScale = (fullWidth - padding * 2) / bounds.width;
-      const heightScale = (fullHeight - padding * 2) / bounds.height;
-      const scale = Math.min(widthScale, heightScale, 1); // Don't zoom in past 100%
-      
-      const translateX = (fullWidth - bounds.width * scale) / 2 - bounds.x * scale;
-      const translateY = (fullHeight - bounds.height * scale) / 2 - bounds.y * scale;
-      
-      const transform = d3.zoomIdentity
-        .translate(translateX, translateY)
-        .scale(scale);
-      
-      d3.select(svgElement)
-        .transition()
-        .duration(750)
-        .call(zoomRef.current.transform as any, transform);
-    };
-
-    // Update positions on each tick
-    let tickCount = 0;
-    simulation.on('tick', () => {
-      tickCount++;
-      
-      link
-        .attr('x1', d => (d.source as D3Node).x!)
-        .attr('y1', d => (d.source as D3Node).y!)
-        .attr('x2', d => (d.target as D3Node).x!)
-        .attr('y2', d => (d.target as D3Node).y!);
-
-      linkLabels
-        .attr('x', d => ((d.source as D3Node).x! + (d.target as D3Node).x!) / 2)
-        .attr('y', d => ((d.source as D3Node).y! + (d.target as D3Node).y!) / 2);
-
-      node.attr('transform', d => `translate(${d.x},${d.y})`);
-      
-      // Auto-fit after simulation has stabilized initially (around 100 ticks)
-      if (tickCount === 100 && !hasAutoFitted && !cancelled) {
-        autoFitToScreen();
-        setHasAutoFitted(true);
+          for (let p = 0; p < particleCount; p++) {
+            trafficGroup.append('circle')
+              .attr('class', `traffic-particle traffic-${i}-${p}`)
+              .attr('r', 3)
+              .attr('fill', 'hsl(142, 76%, 50%)')
+              .attr('opacity', 0.8);
+          }
+        });
       }
-    });
 
-    // Drag functions
-    function dragstarted(event: d3.D3DragEvent<SVGGElement, D3Node, D3Node>, d: D3Node) {
-      if (!event.active) simulation.alphaTarget(0.3).restart();
-      d.fx = d.x;
-      d.fy = d.y;
-    }
+      // Create link labels
+      const linkLabels = linksGroup.selectAll<SVGTextElement, D3Link>('text')
+        .data(d3Links.filter(l => l.label))
+        .enter()
+        .append('text')
+        .attr('font-size', 10)
+        .attr('fill', 'hsl(var(--muted-foreground))')
+        .attr('text-anchor', 'middle')
+        .text(d => d.label || '');
 
-    function dragged(event: d3.D3DragEvent<SVGGElement, D3Node, D3Node>, d: D3Node) {
-      d.fx = event.x;
-      d.fy = event.y;
-    }
+      // Create node groups
+      const node = nodesGroup.selectAll<SVGGElement, D3Node>('g')
+        .data(d3Nodes)
+        .enter()
+        .append('g')
+        .attr('class', 'node')
+        .style('cursor', 'pointer')
+        .call(d3.drag<SVGGElement, D3Node>()
+          .on('start', dragstarted)
+          .on('drag', dragged)
+          .on('end', dragended)
+        );
 
-    function dragended(event: d3.D3DragEvent<SVGGElement, D3Node, D3Node>, d: D3Node) {
-      if (!event.active) simulation.alphaTarget(0);
-      d.fx = null;
-      d.fy = null;
-    }
+      // Add outer glow for selected/current nodes
+      node.append('circle')
+        .attr('r', d => d.radius + 8)
+        .attr('fill', d => d.isCurrent ? d.color : 'transparent')
+        .attr('opacity', 0.15)
+        .attr('class', 'node-glow');
+
+      // Add special glow effect for cluster node
+      node.filter(d => d.type === 'cluster')
+        .append('circle')
+        .attr('r', d => d.radius + 12)
+        .attr('fill', d => d.color)
+        .attr('opacity', 0.2)
+        .attr('class', 'cluster-glow')
+        .style('filter', 'blur(8px)');
+
+      node.filter(d => d.type === 'cluster')
+        .append('circle')
+        .attr('r', d => d.radius + 6)
+        .attr('fill', d => d.color)
+        .attr('opacity', 0.3)
+        .attr('class', 'cluster-glow-inner');
+
+      // Add group indicator ring
+      node.filter(d => d.isGroup)
+        .append('circle')
+        .attr('r', d => d.radius + 4)
+        .attr('fill', 'none')
+        .attr('stroke', d => d.color)
+        .attr('stroke-width', 2)
+        .attr('stroke-dasharray', '4 2')
+        .attr('opacity', 0.6);
+
+      // Add main circle
+      node.append('circle')
+        .attr('r', d => d.radius)
+        .attr('fill', d => d.color)
+        .attr('stroke', d => {
+          if (d.type === 'cluster') return 'hsl(var(--background))';
+          return d.isCurrent ? 'hsl(var(--background))' : 'transparent';
+        })
+        .attr('stroke-width', d => d.type === 'cluster' ? 4 : 3)
+        .attr('class', 'node-circle')
+        .style('filter', d => d.type === 'cluster' ? 'drop-shadow(0 4px 12px rgba(0,0,0,0.15))' : null)
+        .on('mouseenter', function (event, d) {
+          d3.select(this).transition().duration(200).attr('r', d.radius + 4);
+          setHoveredNode(d.id);
+        })
+        .on('mouseleave', function (event, d) {
+          d3.select(this).transition().duration(200).attr('r', d.radius);
+          setHoveredNode(null);
+        })
+        .on('click', (event, d) => {
+          if (d.isGroup && d.groupId) {
+            toggleGroup(d.groupId);
+          } else {
+            setSelectedNode(d.id);
+            onNodeClick?.(d as TopologyNode);
+          }
+        });
+
+      // Add status indicator
+      node.filter(d => !!d.status && !d.isGroup)
+        .append('circle')
+        .attr('r', 6)
+        .attr('cx', d => d.radius * 0.6)
+        .attr('cy', d => -d.radius * 0.6)
+        .attr('fill', d => {
+          switch (d.status) {
+            case 'healthy': return 'hsl(142, 76%, 36%)';
+            case 'warning': return 'hsl(45, 93%, 47%)';
+            case 'error': return 'hsl(0, 72%, 51%)';
+            default: return 'hsl(var(--muted-foreground))';
+          }
+        })
+        .attr('stroke', 'hsl(var(--background))')
+        .attr('stroke-width', 2);
+
+      // Add traffic indicator for nodes
+      node.filter(d => !d.isGroup && d.traffic && d.traffic > 0)
+        .append('circle')
+        .attr('r', 4)
+        .attr('cx', d => -d.radius * 0.6)
+        .attr('cy', d => -d.radius * 0.6)
+        .attr('fill', 'hsl(142, 76%, 50%)')
+        .attr('class', 'traffic-indicator')
+        .style('animation', 'pulse 1s ease-in-out infinite');
+
+      // Add icon/text
+      node.append('text')
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'central')
+        .attr('fill', 'white')
+        .attr('font-size', d => d.isGroup ? 14 : Math.max(d.radius * 0.5, 12))
+        .attr('font-weight', 'bold')
+        .text(d => {
+          if (d.isGroup) {
+            return d.childCount || '?';
+          }
+          return resourceLabels[d.type]?.charAt(0) || '?';
+        });
+
+      // Add resource type label
+      node.append('text')
+        .attr('y', d => d.radius + 16)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', 11)
+        .attr('font-weight', 600)
+        .attr('fill', 'hsl(var(--foreground))')
+        .text(d => d.isGroup ? d.name : resourceLabels[d.type]);
+
+      // Add resource name label
+      node.filter(d => !d.isGroup)
+        .append('text')
+        .attr('y', d => d.radius + 30)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', 9)
+        .attr('fill', 'hsl(var(--muted-foreground))')
+        .text(d => d.name.length > 20 ? d.name.slice(0, 17) + '...' : d.name);
+
+      // Add collapse/expand indicator for groups
+      node.filter(d => d.isGroup)
+        .append('text')
+        .attr('y', d => d.radius + 30)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', 9)
+        .attr('fill', 'hsl(var(--muted-foreground))')
+        .text('Click to expand');
+
+      // Create force simulation with clustering
+      const simulation = d3.forceSimulation(d3Nodes)
+        .force('link', d3.forceLink<D3Node, D3Link>(d3Links)
+          .id(d => d.id)
+          .distance(100)
+          .strength(0.3)
+        )
+        .force('charge', d3.forceManyBody<D3Node>()
+          .strength(d => d.type === 'cluster' ? -1000 : -300)
+          .distanceMax(400)
+        )
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide<D3Node>()
+          .radius(d => d.radius + 20)
+          .strength(0.9)
+        )
+        // Clustering force: pull nodes toward their namespace center
+        .force('cluster', (alpha: number) => {
+          const centers = new globalThis.Map<string, { x: number; y: number }>();
+          d3Nodes.filter(n => n.type === 'namespace' || n.isGroup).forEach(n => {
+            centers.set(n.namespace || n.groupId || '', { x: n.x || width / 2, y: n.y || height / 2 });
+          });
+
+          d3Nodes.forEach(n => {
+            const center = centers.get(n.namespace || '');
+            if (center) {
+              n.vx! += (center.x - n.x!) * alpha * 0.1;
+              n.vy! += (center.y - n.y!) * alpha * 0.1;
+            }
+          });
+        })
+        .force('x', d3.forceX(width / 2).strength(0.04))
+        .force('y', d3.forceY(height / 2).strength(0.04));
+
+      simulationRef.current = simulation;
+
+      // Animate traffic particles
+      const animateTraffic = () => {
+        if (!showTraffic || cancelled) return;
+
+        const time = Date.now();
+        d3Links.filter(l => l.traffic && l.traffic > 0).forEach((linkData, i) => {
+          const particleCount = Math.ceil((linkData.traffic || 0) / 20);
+          const source = linkData.source as D3Node;
+          const target = linkData.target as D3Node;
+
+          if (!source.x || !source.y || !target.x || !target.y) return;
+
+          for (let p = 0; p < particleCount; p++) {
+            const speed = 0.001 + (linkData.traffic || 0) / 10000;
+            const offset = p / particleCount;
+            const t = ((time * speed) + offset) % 1;
+
+            const x = source.x + (target.x - source.x) * t;
+            const y = source.y + (target.y - source.y) * t;
+
+            trafficGroup.select(`.traffic-${i}-${p}`)
+              .attr('cx', x)
+              .attr('cy', y);
+          }
+        });
+
+        trafficAnimationFrameRef.current = requestAnimationFrame(animateTraffic);
+      };
+
+      if (showTraffic) {
+        animateTraffic();
+      }
+
+      // Auto-fit function to scale content to fit screen
+      const autoFitToScreen = () => {
+        if (!svgRef.current || !zoomRef.current) return;
+
+        const svgElement = svgRef.current;
+        const container = g.node();
+        if (!container) return;
+
+        const bounds = container.getBBox();
+        if (bounds.width === 0 || bounds.height === 0) return;
+
+        const padding = 60;
+        const fullWidth = width;
+        const fullHeight = height;
+
+        const widthScale = (fullWidth - padding * 2) / bounds.width;
+        const heightScale = (fullHeight - padding * 2) / bounds.height;
+        const scale = Math.min(widthScale, heightScale, 1); // Don't zoom in past 100%
+
+        const translateX = (fullWidth - bounds.width * scale) / 2 - bounds.x * scale;
+        const translateY = (fullHeight - bounds.height * scale) / 2 - bounds.y * scale;
+
+        const transform = d3.zoomIdentity
+          .translate(translateX, translateY)
+          .scale(scale);
+
+        d3.select(svgElement)
+          .transition()
+          .duration(750)
+          .call(zoomRef.current.transform as any, transform);
+      };
+
+      // Update positions on each tick
+      let tickCount = 0;
+      simulation.on('tick', () => {
+        tickCount++;
+
+        link
+          .attr('d', d => {
+            const source = d.source as D3Node;
+            const target = d.target as D3Node;
+            const dx = target.x! - source.x!;
+            const dy = target.y! - source.y!;
+            const dr = Math.sqrt(dx * dx + dy * dy);
+            // Curve factor for "bundled" look
+            return `M${source.x},${source.y}A${dr},${dr} 0 0,1 ${target.x},${target.y}`;
+          });
+
+        linkLabels
+          .attr('x', d => {
+            const source = d.source as D3Node;
+            const target = d.target as D3Node;
+            return (source.x! + target.x!) / 2 + (target.y! - source.y!) / 4;
+          })
+          .attr('y', d => {
+            const source = d.source as D3Node;
+            const target = d.target as D3Node;
+            return (source.y! + target.y!) / 2 - (target.x! - source.x!) / 4;
+          });
+
+        node.attr('transform', d => `translate(${d.x},${d.y})`);
+
+        // Auto-fit after simulation has stabilized initially (around 100 ticks)
+        if (tickCount === 100 && !hasAutoFitted && !cancelled) {
+          autoFitToScreen();
+          setHasAutoFitted(true);
+        }
+      });
+
+      // Drag functions
+      function dragstarted(event: d3.D3DragEvent<SVGGElement, D3Node, D3Node>, d: D3Node) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+
+      function dragged(event: d3.D3DragEvent<SVGGElement, D3Node, D3Node>, d: D3Node) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
+
+      function dragended(event: d3.D3DragEvent<SVGGElement, D3Node, D3Node>, d: D3Node) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }
 
     }); // end requestAnimationFrame
 
@@ -867,28 +897,28 @@ export function D3TopologyCanvas({
 
   const handleFitToScreen = useCallback(() => {
     if (!svgRef.current || !zoomRef.current) return;
-    
+
     const svg = d3.select(svgRef.current);
     const container = svg.select('.topology-container').node() as SVGGElement;
     if (!container) return;
-    
+
     const bounds = container.getBBox();
     if (bounds.width === 0 || bounds.height === 0) return;
-    
+
     const padding = 60;
     const { width, height } = dimensions;
-    
+
     const widthScale = (width - padding * 2) / bounds.width;
     const heightScale = (height - padding * 2) / bounds.height;
     const scale = Math.min(widthScale, heightScale, 1);
-    
+
     const translateX = (width - bounds.width * scale) / 2 - bounds.x * scale;
     const translateY = (height - bounds.height * scale) / 2 - bounds.y * scale;
-    
+
     const transform = d3.zoomIdentity
       .translate(translateX, translateY)
       .scale(scale);
-    
+
     svg.transition().duration(500).call(zoomRef.current.transform as any, transform);
     resetSimulation();
   }, [dimensions, resetSimulation]);
@@ -900,7 +930,7 @@ export function D3TopologyCanvas({
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
-      
+
       switch (e.key.toLowerCase()) {
         case 'f':
           handleFitToScreen();
@@ -914,13 +944,13 @@ export function D3TopologyCanvas({
           break;
       }
     };
-    
+
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleFitToScreen, toggleSimulation, resetSimulation]);
 
   return (
-    <div 
+    <div
       ref={containerRef}
       className={cn('rounded-xl border border-border bg-card overflow-hidden', className)}
     >
@@ -935,7 +965,7 @@ export function D3TopologyCanvas({
             D3.js
           </Badge>
         </div>
-        
+
         <div className="flex items-center gap-3">
           {/* Grouping controls */}
           <div className="flex items-center gap-2">
@@ -951,7 +981,7 @@ export function D3TopologyCanvas({
               </SelectContent>
             </Select>
           </div>
-          
+
           {groupingMode !== 'none' && (
             <div className="flex items-center gap-1">
               <TooltipProvider delayDuration={200}>
@@ -992,14 +1022,14 @@ export function D3TopologyCanvas({
           </div>
 
           <div className="w-px h-4 bg-border" />
-          
+
           {/* Simulation controls */}
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="h-8 w-8"
                   onClick={toggleSimulation}
                 >
@@ -1014,12 +1044,12 @@ export function D3TopologyCanvas({
                 {isSimulationRunning ? 'Pause simulation' : 'Resume simulation'}
               </TooltipContent>
             </Tooltip>
-            
+
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="h-8 w-8"
                   onClick={resetSimulation}
                 >
@@ -1062,36 +1092,36 @@ export function D3TopologyCanvas({
               <TooltipContent>Export as PNG</TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          
+
           <div className="w-px h-4 bg-border" />
-          
+
           {/* Zoom controls */}
           <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-7 w-7 rounded-md" 
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 rounded-md"
               onClick={handleZoomOut}
             >
               <ZoomOut className="h-3.5 w-3.5" />
             </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-7 w-7 rounded-md" 
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 rounded-md"
               onClick={handleZoomIn}
             >
               <ZoomIn className="h-3.5 w-3.5" />
             </Button>
           </div>
-          
+
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8" 
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
                   onClick={handleFitToScreen}
                 >
                   <Maximize2 className="h-4 w-4" />
@@ -1102,18 +1132,18 @@ export function D3TopologyCanvas({
           </TooltipProvider>
         </div>
       </div>
-      
+
       {/* Canvas */}
       <div className="relative bg-gradient-to-b from-background to-muted/20 overflow-hidden">
-        <Badge 
-          variant="secondary" 
+        <Badge
+          variant="secondary"
           className="absolute top-4 right-4 z-10 font-medium text-xs"
         >
           {d3Nodes.length} Resources
         </Badge>
-        
-        <Badge 
-          variant={isSimulationRunning ? "default" : "secondary"} 
+
+        <Badge
+          variant={isSimulationRunning ? "default" : "secondary"}
           className="absolute top-4 left-4 z-10 font-medium text-xs gap-1 flex items-center"
         >
           {isSimulationRunning ? (
@@ -1128,10 +1158,10 @@ export function D3TopologyCanvas({
             </>
           )}
         </Badge>
-        
+
         {showTraffic && (
-          <Badge 
-            variant="outline" 
+          <Badge
+            variant="outline"
             className="absolute top-4 left-32 z-10 font-medium text-xs gap-1 flex items-center border-green-500/50 text-green-600"
           >
             <Zap className="h-3 w-3" />
@@ -1151,7 +1181,7 @@ export function D3TopologyCanvas({
             Mini-map
           </Button>
         )}
-        
+
         {overNodeCap && (
           <div className="absolute inset-0 flex items-center justify-center bg-muted/50 rounded-lg p-6 text-center">
             <p className="text-sm font-medium text-muted-foreground max-w-md">
@@ -1179,7 +1209,7 @@ export function D3TopologyCanvas({
             onClose={() => setShowMiniMap(false)}
           />
         )}
-        
+
         {/* Instructions overlay with keyboard shortcuts */}
         <div className="absolute bottom-4 left-4 text-xs text-muted-foreground bg-background/80 backdrop-blur-sm px-3 py-2 rounded-lg border border-border">
           <span className="font-medium">Controls:</span> Drag nodes • Scroll to zoom • Click to select

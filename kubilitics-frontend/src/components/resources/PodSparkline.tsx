@@ -13,62 +13,83 @@ interface SparklineProps {
   className?: string;
 }
 
-export function Sparkline({ 
-  data, 
-  width = 80, 
-  height = 24, 
+export function Sparkline({
+  data,
+  width = 80,
+  height = 24,
   color = 'hsl(var(--primary))',
   showLive = false,
-  className 
+  className
 }: SparklineProps) {
   const max = Math.max(...data, 1);
   const min = Math.min(...data, 0);
   const range = max - min || 1;
-  
+  const uniqueId = useRef(Math.random().toString(36).substr(2, 9));
+
   const points = data.map((value, index) => {
     const x = (index / (data.length - 1)) * width;
     const y = height - ((value - min) / range) * height;
-    return `${x},${y}`;
-  }).join(' ');
+    return { x, y };
+  });
 
-  const areaPoints = `0,${height} ${points} ${width},${height}`;
+  // Smooth path generator
+  const pathD = points.length > 0
+    ? points.reduce((acc, p, i, arr) => {
+      if (i === 0) return `M ${p.x},${p.y}`;
+      const prev = arr[i - 1];
+      const cp1x = prev.x + (p.x - prev.x) / 2;
+      return `${acc} C ${cp1x},${prev.y} ${cp1x},${p.y} ${p.x},${p.y}`;
+    }, '')
+    : '';
+
+  const areaD = points.length > 0
+    ? `${pathD} L ${width},${height} L 0,${height} Z`
+    : '';
 
   return (
     <div className={cn('relative', className)}>
       <svg width={width} height={height} className="overflow-visible">
         {/* Gradient fill */}
         <defs>
-          <linearGradient id={`gradient-${color.replace(/[^a-z0-9]/gi, '')}`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+          <linearGradient id={`gradient-${uniqueId.current}`} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.4" />
             <stop offset="100%" stopColor={color} stopOpacity="0" />
           </linearGradient>
         </defs>
-        
+
         {/* Area */}
-        <polygon
-          points={areaPoints}
-          fill={`url(#gradient-${color.replace(/[^a-z0-9]/gi, '')})`}
+        <motion.path
+          d={areaD}
+          fill={`url(#gradient-${uniqueId.current})`}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 1 }}
         />
-        
+
         {/* Line */}
-        <polyline
-          points={points}
+        <motion.path
+          d={pathD}
           fill="none"
           stroke={color}
-          strokeWidth="1.5"
+          strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
+          initial={{ pathLength: 0 }}
+          animate={{ pathLength: 1 }}
+          transition={{ duration: 1.2, ease: "easeInOut" }}
         />
-        
+
         {/* Current value dot */}
-        {showLive && data.length > 0 && (
+        {showLive && points.length > 0 && (
           <motion.circle
-            cx={width}
-            cy={height - ((data[data.length - 1] - min) / range) * height}
+            cx={points[points.length - 1].x}
+            cy={points[points.length - 1].y}
             r="3"
+            stroke="white"
+            strokeWidth="1"
             fill={color}
-            animate={{ scale: [1, 1.3, 1] }}
-            transition={{ duration: 1, repeat: Infinity }}
+            animate={{ scale: [1, 1.4, 1], opacity: [0.8, 1, 0.8] }}
+            transition={{ duration: 1.5, repeat: Infinity }}
           />
         )}
       </svg>
@@ -131,9 +152,7 @@ export function useLiveMetrics(podName: string, namespace = 'default') {
     if (!podMetrics) return;
 
     const cpuMillicores = parseCpu(podMetrics.CPU) ?? 0;
-    const memMiB = parseMemory(podMetrics.Memory) != null
-      ? (parseMemory(podMetrics.Memory)! / (1024 * 1024))  // bytes → MiB
-      : 0;
+    const memMiB = parseMemory(podMetrics.Memory) ?? 0;
 
     setCpuData(prev => {
       const next = [...prev, cpuMillicores];
@@ -173,11 +192,11 @@ export function useLiveMetrics(podName: string, namespace = 'default') {
 
   const cpuTrend: 'up' | 'down' | 'stable' =
     cpuData.length >= 3 && cpuData[cpuData.length - 1] > cpuData[cpuData.length - 3] + 5 ? 'up' :
-    cpuData.length >= 3 && cpuData[cpuData.length - 1] < cpuData[cpuData.length - 3] - 5 ? 'down' : 'stable';
+      cpuData.length >= 3 && cpuData[cpuData.length - 1] < cpuData[cpuData.length - 3] - 5 ? 'down' : 'stable';
 
   const memTrend: 'up' | 'down' | 'stable' =
     memData.length >= 3 && memData[memData.length - 1] > memData[memData.length - 3] + 10 ? 'up' :
-    memData.length >= 3 && memData[memData.length - 1] < memData[memData.length - 3] - 10 ? 'down' : 'stable';
+      memData.length >= 3 && memData[memData.length - 1] < memData[memData.length - 3] - 10 ? 'down' : 'stable';
 
   return {
     cpu: { data: cpuData, value: `${cpuValue}m`, trend: cpuTrend },

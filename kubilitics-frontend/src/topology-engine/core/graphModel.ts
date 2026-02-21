@@ -1,8 +1,5 @@
-/**
- * Graph Model – Core data structure for the topology engine
- * Provides indexing, lookup, and mutation methods
- */
 import type { TopologyGraph, TopologyNode, TopologyEdge, KubernetesKind, HealthStatus, RelationshipType } from '../types/topology.types';
+import { GraphEnhancer } from './GraphEnhancer';
 
 export class GraphModel {
   private nodeMap: Map<string, TopologyNode>;
@@ -16,13 +13,15 @@ export class GraphModel {
     this.outEdges = new Map();
     this.inEdges = new Map();
 
-    for (const node of graph.nodes) {
+    const enhancedGraph = new GraphEnhancer(graph).enhance();
+
+    for (const node of enhancedGraph.nodes) {
       this.nodeMap.set(node.id, node);
       this.outEdges.set(node.id, new Set());
       this.inEdges.set(node.id, new Set());
     }
 
-    for (const edge of graph.edges) {
+    for (const edge of enhancedGraph.edges) {
       this.edgeMap.set(edge.id, edge);
       this.outEdges.get(edge.source)?.add(edge.id);
       this.inEdges.get(edge.target)?.add(edge.id);
