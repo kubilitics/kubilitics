@@ -644,14 +644,39 @@ jobs:
           path: artifacts
 
       - name: Flatten artifacts for release upload
-        # download-artifact@v4 nests each artifact in its own sub-directory;
-        # flatten to a single level so action-gh-release picks them all up
+        # download-artifact@v4 nests each artifact in its own sub-directory.
+        # Only copy the final installer/binary files — not Tauri intermediate
+        # build outputs (hundreds of .so/.dll files from the bundle/ tree).
         run: |
           mkdir -p release-assets
-          find artifacts -type f -exec cp {} release-assets/ \; || \
-            (echo "ERROR: artifact flattening failed" && exit 1)
-          echo "Release assets:"
+          # Copy final installer and binary formats only
+          find artifacts -type f \( \
+            -name "*.dmg" \
+            -o -name "*.AppImage" \
+            -o -name "*.deb" \
+            -o -name "*.rpm" \
+            -o -name "*-setup.exe" \
+            -o -name "*.msi" \
+            -o -name "*.tar.gz" \
+            -o -name "*.tar.gz.sig" \
+            -o -name "*.AppImage.sig" \
+            -o -name "*.deb.sig" \
+            -o -name "*.rpm.sig" \
+            -o -name "*.exe.sig" \
+            -o -name "*.msi.sig" \
+            -o -name "kubilitics-backend-linux-*" \
+            -o -name "kubilitics-backend-darwin-*" \
+            -o -name "kubilitics-backend-windows-*" \
+            -o -name "kubilitics-ai-linux-*" \
+            -o -name "kubilitics-ai-darwin-*" \
+            -o -name "kubilitics-ai-windows-*" \
+            -o -name "kcli-linux-*" \
+            -o -name "kcli-darwin-*" \
+            -o -name "kcli-windows-*" \
+          \) -exec cp {} release-assets/ \;
+          echo "Release assets (installer/binary files only):"
           ls -lh release-assets/
+          echo "Total: $(ls release-assets/ | wc -l) files"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
