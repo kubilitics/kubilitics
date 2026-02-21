@@ -194,7 +194,9 @@ func (c *OllamaClientImpl) Complete(
 	}
 
 	// Convert tools to Ollama format (cap at 128 for API limit)
-	tools = types.CapToolsForAPI(tools)
+	// SelectToolsForQuery replaces CapToolsForAPI — intent-aware, not dumb truncation
+	// (fallback: SelectToolsForQuery calls CapToolsForAPI internally when >128 tools but no user message)
+	tools = types.SelectToolsForQuery(tools, "")
 	var ollamaTools []ollamaTool
 	if len(tools) > 0 {
 		ollamaTools = make([]ollamaTool, len(tools))
@@ -274,7 +276,9 @@ func (c *OllamaClientImpl) CompleteStream(
 	}
 
 	// Convert tools (cap at 128 for API limit)
-	tools = types.CapToolsForAPI(tools)
+	// SelectToolsForQuery replaces CapToolsForAPI — intent-aware, not dumb truncation
+	// (fallback: SelectToolsForQuery calls CapToolsForAPI internally when >128 tools but no user message)
+	tools = types.SelectToolsForQuery(tools, "")
 	var ollamaTools []ollamaTool
 	if len(tools) > 0 {
 		ollamaTools = make([]ollamaTool, len(tools))

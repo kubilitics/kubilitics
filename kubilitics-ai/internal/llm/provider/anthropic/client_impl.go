@@ -185,8 +185,15 @@ func (c *AnthropicClientImpl) Complete(ctx context.Context, messages []types.Mes
 	// Convert to Anthropic message format
 	anthMessages := convertMessages(filteredMessages)
 
-	// Convert tools to Anthropic format (cap at 128 for API limit)
-	tools = types.CapToolsForAPI(tools)
+	// Select tools relevant to the user's query (intent-aware, respects 128-tool API limit).
+	latestUserMsg := ""
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			latestUserMsg = messages[i].Content
+			break
+		}
+	}
+	tools = types.SelectToolsForQuery(tools, latestUserMsg)
 	anthTools := convertTools(tools)
 
 	req := anthRequest{
@@ -232,8 +239,15 @@ func (c *AnthropicClientImpl) CompleteStream(ctx context.Context, messages []typ
 	// Extract system message if present
 	system, filteredMessages := extractSystem(messages)
 
-	// Convert messages and tools (cap at 128 for API limit)
-	tools = types.CapToolsForAPI(tools)
+	// Select tools relevant to the user's query (intent-aware, respects 128-tool API limit).
+	latestUserMsgStream := ""
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			latestUserMsgStream = messages[i].Content
+			break
+		}
+	}
+	tools = types.SelectToolsForQuery(tools, latestUserMsgStream)
 	anthMessages := convertMessages(filteredMessages)
 	anthTools := convertTools(tools)
 

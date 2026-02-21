@@ -156,8 +156,17 @@ func (c *OpenAIClientImpl) Complete(
 		}
 	}
 
-	// Convert tools to OpenAI format (cap at 128 for API limit)
-	tools = types.CapToolsForAPI(tools)
+	// Select tools relevant to the user's query (intent-aware, respects 128-tool API limit).
+	// Extract the latest user message for intent scoring.
+	latestUserMsg := ""
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			latestUserMsg = messages[i].Content
+			break
+		}
+	}
+	tools = types.SelectToolsForQuery(tools, latestUserMsg)
+
 	var openAITools []openAITool
 	if len(tools) > 0 {
 		openAITools = make([]openAITool, len(tools))
@@ -240,8 +249,16 @@ func (c *OpenAIClientImpl) CompleteStream(
 		}
 	}
 
-	// Convert tools (cap at 128 for API limit)
-	tools = types.CapToolsForAPI(tools)
+	// Select tools relevant to the user's query (intent-aware, respects 128-tool API limit).
+	latestUserMsgStream := ""
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			latestUserMsgStream = messages[i].Content
+			break
+		}
+	}
+	tools = types.SelectToolsForQuery(tools, latestUserMsgStream)
+
 	var openAITools []openAITool
 	if len(tools) > 0 {
 		openAITools = make([]openAITool, len(tools))
