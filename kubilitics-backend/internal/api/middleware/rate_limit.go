@@ -123,14 +123,34 @@ func (l *apiRateLimiter) getLimiter(ip string, t rateLimitTier) *rate.Limiter {
 	return lim
 }
 
+// isLoopback returns true for localhost/loopback IPs (127.x.x.x and ::1).
+// Kubilitics is a desktop app — all traffic from 127.0.0.1 is the local
+// frontend, not untrusted external clients. Loopback traffic is exempt from
+// rate limiting so the UI polling loops never hit 429.
+func isLoopback(ip string) bool {
+	// Strip brackets from IPv6 (e.g. "[::1]" -> "::1")
+	ip = strings.Trim(ip, "[]")
+	if ip == "::1" || ip == "localhost" {
+		return true
+	}
+	// 127.0.0.0/8
+	return strings.HasPrefix(ip, "127.")
+}
+
 // RateLimit returns middleware that limits requests per IP (BE-FUNC-003).
-// Excludes /health and /metrics. Uses token bucket: 60/min standard, 120/min GET, 10/min exec/shell.
+// Excludes /health, /metrics, and loopback (127.x/::1 — desktop local traffic).
+// Uses token bucket: 60/min standard, 120/min GET, 10/min exec/shell.
 // Returns 429 with Retry-After and sets X-RateLimit-* headers.
 func RateLimit() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 			if path == "/health" || path == "/metrics" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Exempt loopback: desktop frontend always connects from 127.0.0.1/::1
+			if isLoopback(getClientIP(r)) {
 				next.ServeHTTP(w, r)
 				return
 			}

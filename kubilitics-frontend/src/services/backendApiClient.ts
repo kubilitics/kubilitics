@@ -172,27 +172,21 @@ export async function backendRequest<T>(
       }
     }
 
-    // Handle rate limiting (429) with user-visible feedback
+    // Handle rate limiting (429) with silent automatic retry.
+    // The backend exempts loopback (127.0.0.1/::1) from rate limiting in
+    // desktop mode, so 429 only fires when the backend is under real load.
+    // Either way, silently wait and retry — a toast for a transient backpressure
+    // signal creates constant noise for the user and is not actionable.
     if (response.status === 429) {
       const retryAfter = response.headers.get('Retry-After');
       const retryAfterSeconds = retryAfter ? parseInt(retryAfter, 10) : null;
-      const retryAfterMs = retryAfterSeconds ? retryAfterSeconds * 1000 : null;
-
-      // Show toast notification with retry information
-      const { toast } = await import('sonner');
-      const retryMessage = retryAfterSeconds
-        ? `Rate limit exceeded. Please retry after ${retryAfterSeconds} second${retryAfterSeconds !== 1 ? 's' : ''}.`
-        : 'Rate limit exceeded. Please retry in a moment.';
-      toast.error(retryMessage, {
-        duration: retryAfterMs ? Math.min(retryAfterMs, 10000) : 5000,
-      });
-
-      // If Retry-After is provided and reasonable, schedule automatic retry
-      if (retryAfterMs && retryAfterMs <= 30000) { // Only auto-retry if <= 30 seconds
-        await new Promise(resolve => setTimeout(resolve, retryAfterMs));
-        // Retry the request once
-        return backendRequest<T>(baseUrl, path, init);
-      }
+      // Cap wait to 10 s to keep the UI responsive; default 1 s if no header.
+      const waitMs = retryAfterSeconds
+        ? Math.min(retryAfterSeconds * 1000, 10_000)
+        : 1_000;
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      // Retry once silently.
+      return backendRequest<T>(baseUrl, path, init);
     }
 
     throw new BackendApiError(
