@@ -404,6 +404,27 @@ Also update `ARG KUBECTL_VERSION` in the Dockerfile whenever `k8s.io/client-go` 
 
 ---
 
+### P-08 — Blocking subprocess calls in watch loops cause CI test timeouts
+
+**Symptom:** `TestIncidentWatchContextCancellation` (or similar watch-loop tests) fails with:
+```
+incident --watch did not exit within 2s after context cancellation
+--- FAIL: TestIncidentWatchContextCancellation (2.00s)
+```
+
+**Root cause:** The watch loop calls `buildIncidentReport` → `fetchPods` / `fetchNodes` / `fetchEvents`, which each launch kubectl as an `exec.Command` subprocess. Without context, the subprocess blocks until kubectl times out on its own (which on a GHA runner with no cluster can take many seconds), so the watch loop cannot detect context cancellation until after the test deadline.
+
+**Fix applied:** Added `runner.CaptureKubectlCtx(ctx, args)` (uses `exec.CommandContext`) and wired `context.Context` through the entire call chain:
+- `fetchPods(ctx, a)`, `fetchNodes(ctx, a)`, `fetchEvents(ctx, a)`
+- `buildIncidentReport(ctx, a, window, threshold)` and all callers
+- `fetchPodHealthSummary(ctx, a)`, `fetchNodeHealthSummary(ctx, a)`
+
+When the watch loop's context is cancelled, the kubectl subprocess is killed immediately (typically sub-250ms). Test deadline also widened from 2s → 10s as belt-and-suspenders.
+
+**Rule:** Any function that spawns `kubectl` as a subprocess and is called from a watch loop or background goroutine **must** accept `context.Context` and use `exec.CommandContext` (or `runner.CaptureKubectlCtx`). Never use `exec.Command` for subprocess calls that can outlive their caller.
+
+---
+
 ## 8. Hotfix Releases
 
 Use when `main` has diverged and a critical fix is needed on an older release:
