@@ -12,11 +12,19 @@ import type { TopologyGraph, TopologyNode, TopologyEdge, KubernetesKind, Relatio
 export class GraphEnhancer {
     private nodeMap: Map<string, TopologyNode>;
     private edges: TopologyEdge[];
+    private edgeKeys = new Set<string>();   // "source→target:type" for O(1) dedup
+    private pairKeys = new Set<string>();   // "source→target" for O(1) 'contains' dedup
     private nextEdgeId: number = 1000;
 
     constructor(private graph: TopologyGraph) {
         this.nodeMap = new Map(graph.nodes.map(n => [n.id, n]));
         this.edges = [...graph.edges];
+
+        // Build dedup indexes from existing edges
+        for (const e of this.edges) {
+            this.edgeKeys.add(`${e.source}→${e.target}:${e.relationshipType}`);
+            this.pairKeys.add(`${e.source}→${e.target}`);
+        }
 
         // Set nextEdgeId based on existing edges to avoid collisions
         this.graph.edges.forEach(e => {
@@ -49,14 +57,18 @@ export class GraphEnhancer {
         // Avoid self-referential or invalid edges
         if (sourceId === targetId || !this.nodeMap.has(sourceId) || !this.nodeMap.has(targetId)) return;
 
-        // Avoid duplicates
-        // We check if an edge with same source, target, and type already exists
-        const exists = this.edges.some(e =>
-            e.source === sourceId &&
-            e.target === targetId &&
-            (e.relationshipType === type || type === 'contains')
-        );
-        if (exists) return;
+        // O(1) duplicate detection via Set lookups
+        const key = `${sourceId}→${targetId}:${type}`;
+        if (type === 'contains') {
+            // For 'contains', skip if ANY edge already exists between this pair
+            if (this.pairKeys.has(`${sourceId}→${targetId}`)) return;
+        } else {
+            if (this.edgeKeys.has(key)) return;
+        }
+
+        // Track in dedup indexes
+        this.edgeKeys.add(key);
+        this.pairKeys.add(`${sourceId}→${targetId}`);
 
         const edgeId = `e-gen-${sourceId.split('/').pop()}-${targetId.split('/').pop()}-${this.nextEdgeId++}`;
 
