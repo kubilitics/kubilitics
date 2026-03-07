@@ -1103,22 +1103,22 @@ export default function Topology() {
         {/* Node hover tooltip */}
         {hoveredNode && createPortal(
           <div
-            className="fixed z-[9998] max-w-[280px] rounded-lg border border-border bg-background/95 backdrop-blur-sm shadow-xl p-3 text-sm pointer-events-none"
+            className="fixed z-[9998] w-[300px] rounded-lg border border-border bg-background/95 backdrop-blur-sm shadow-xl p-3 text-sm pointer-events-none"
             style={{
-              left: Math.min(hoveredNode.position.x + 12, window.innerWidth - 300),
+              left: Math.min(hoveredNode.position.x + 12, window.innerWidth - 320),
               top: hoveredNode.position.y + 12,
             }}
           >
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-start gap-2.5 mb-2">
               <div
-                className="w-8 h-8 rounded-md flex items-center justify-center text-white text-xs font-bold shrink-0"
+                className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5"
                 style={{ backgroundColor: getKindColor(hoveredNode.node.kind) }}
               >
-                {hoveredNode.node.kind}
+                {hoveredNode.node.kind.substring(0, 3)}
               </div>
-              <div className="min-w-0">
-                <p className="font-semibold truncate">{hoveredNode.node.name}</p>
-                <p className="text-xs text-muted-foreground">{hoveredNode.node.kind}{hoveredNode.node.namespace ? ` • ${hoveredNode.node.namespace}` : ''}</p>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm leading-snug break-words">{hoveredNode.node.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{hoveredNode.node.kind}{hoveredNode.node.namespace ? ` · ${hoveredNode.node.namespace}` : ''}</p>
               </div>
             </div>
             <div className="space-y-1 text-xs">
