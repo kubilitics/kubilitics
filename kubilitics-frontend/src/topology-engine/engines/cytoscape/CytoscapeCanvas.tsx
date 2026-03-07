@@ -186,7 +186,7 @@ function buildHierarchicalGraph(graph: TopologyGraph): {
     levels.forEach((nodes, level) => {
       const y = baseY + (level - 1) * levelGap;
       nodes.forEach((node, idx) => {
-        const x = baseX + (nodes.length > 1 ? (idx - (nodes.length - 1) / 2) * 90 : 0);
+        const x = baseX + (nodes.length > 1 ? (idx - (nodes.length - 1) / 2) * 140 : 0);
         positions.set(node.id, { x, y });
       });
     });
@@ -210,7 +210,7 @@ function buildHierarchicalGraph(graph: TopologyGraph): {
         kind: node.kind,
         namespace: node.namespace,
         badge: node.kind,
-        statusBadge: node.computed?.health === 'warning' ? '⚠️' : node.computed?.health === 'critical' ? '🔴' : '',
+        health: node.computed?.health || 'healthy',
       },
       position: positions.get(node.id) || { x: (Math.random() - 0.5) * 1000, y: 1000 }
     }))
@@ -251,20 +251,31 @@ function getStaticStyles(): cytoscape.StylesheetStyle[] {
         'background-color': (ele: any) => RESOURCE_COLOR_MAP[ele.data('kind')] || '#64748b',
         'width': (ele: any) => {
           const kind = ele.data('kind');
-          if (kind === 'Cluster') return 170;
-          if (kind === 'Namespace' || kind === 'Node') return 130;
-          if (['Deployment', 'Service', 'Ingress'].includes(kind)) return 115;
-          return 100;
+          if (kind === 'Cluster') return 100;
+          if (kind === 'Namespace' || kind === 'Node') return 85;
+          if (['Deployment', 'Service', 'Ingress'].includes(kind)) return 70;
+          return 55;
         },
         'height': (ele: any) => {
           const kind = ele.data('kind');
-          if (kind === 'Cluster') return 170;
-          if (kind === 'Namespace' || kind === 'Node') return 130;
-          if (['Deployment', 'Service', 'Ingress'].includes(kind)) return 115;
-          return 100;
+          if (kind === 'Cluster') return 100;
+          if (kind === 'Namespace' || kind === 'Node') return 85;
+          if (['Deployment', 'Service', 'Ingress'].includes(kind)) return 70;
+          return 55;
         },
-        'border-width': 2.5,
-        'border-color': 'rgba(255,255,255,0.25)',
+        'border-width': (ele: any) => {
+          const health = ele.data('health');
+          if (health === 'warning' || health === 'critical') return 3.5;
+          if (health === 'healthy') return 3;
+          return 2;
+        },
+        'border-color': (ele: any) => {
+          const health = ele.data('health');
+          if (health === 'critical') return '#ef4444';
+          if (health === 'warning') return '#f59e0b';
+          if (health === 'healthy') return '#22c55e';
+          return 'rgba(255,255,255,0.25)';
+        },
         'shadow-blur': 15,
         'shadow-color': 'rgba(0,0,0,0.1)',
         'shadow-offset-x': 0,
@@ -272,39 +283,27 @@ function getStaticStyles(): cytoscape.StylesheetStyle[] {
         'shadow-opacity': 0.3,
 
         'label': (ele: any) => {
-          const kind = ele.data('kind') || '';
           const name = ele.data('name') || '';
-          if (kind === 'Cluster') return name;
-          const abbrevs: Record<string, string> = {
-            Pod: 'Pod', Deployment: 'Dep', ReplicaSet: 'RS', Service: 'Svc',
-            Node: 'N', Namespace: 'NS', ConfigMap: 'CM', Secret: 'Sec',
-            Ingress: 'Ing', StatefulSet: 'STS', DaemonSet: 'DS', Job: 'Job',
-            CronJob: 'CJ', PersistentVolume: 'PV', PersistentVolumeClaim: 'PVC',
-            ServiceAccount: 'SA', Role: 'Rol', ClusterRole: 'CR',
-            RoleBinding: 'RB', ClusterRoleBinding: 'CRB', Endpoints: 'EP',
-            EndpointSlice: 'EPS', NetworkPolicy: 'NP', HorizontalPodAutoscaler: 'HPA',
-          };
-          const abbr = abbrevs[kind] || kind.substring(0, 3);
-          const status = ele.data('statusBadge') || '';
-          const maxNameLen = 18;
+          const maxNameLen = 22;
           const nameStr = name.length > maxNameLen ? name.substring(0, maxNameLen - 1) + '…' : name;
-          return `${abbr}${status}\n${nameStr}`;
+          return nameStr;
         },
-        'text-valign': 'center',
+        'text-background-color': '#ffffff',
+        'text-background-opacity': 0.85,
+        'text-background-padding': '3px',
+        'text-background-shape': 'roundrectangle',
+        'text-valign': 'bottom',
         'text-halign': 'center',
-        'text-margin-y': 0,
-        'font-size': '13px',
-        'font-weight': '700',
+        'text-margin-y': 8,
+        'font-size': '11px',
+        'font-weight': '600',
         'font-family': '"Inter", "SF Pro Text", system-ui, sans-serif',
-        'color': (ele: any) => {
-          const lightKinds = ['ConfigMap', 'Job', 'CronJob'];
-          return lightKinds.includes(ele.data('kind')) ? '#1a1a1a' : '#ffffff';
-        },
+        'color': '#334155',
         'text-wrap': 'wrap',
         'text-max-width': 120,
         'line-height': 1.3,
-        'text-outline-color': 'rgba(0,0,0,0.15)',
-        'text-outline-width': 1,
+        'text-outline-color': 'rgba(255,255,255,0.8)',
+        'text-outline-width': 2,
         'min-zoomed-font-size': 8,
       } as any,
     },
@@ -337,8 +336,8 @@ function getStaticStyles(): cytoscape.StylesheetStyle[] {
         'text-margin-y': 0,
         'font-size': '18px',
         'font-weight': '800',
-        'width': 170,
-        'height': 170,
+        'width': 100,
+        'height': 100,
       } as any
     },
     {
