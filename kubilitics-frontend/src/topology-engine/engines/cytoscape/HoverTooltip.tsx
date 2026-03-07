@@ -143,16 +143,16 @@ export const HoverTooltip: React.FC<HoverTooltipProps> = ({
       style={{
         left: `${x}px`,
         top: `${y}px`,
-        maxWidth: '320px',
+        width: '300px',
       }}
     >
       {/* Tooltip Container */}
       <div className="bg-white rounded-lg border-2 border-slate-700 shadow-2xl">
         {/* Header: Kind Badge + Name */}
         <div className="px-4 py-3 border-b border-slate-200">
-          <div className="flex items-center gap-3">
+          <div className="flex items-start gap-3">
             {/* Kind Icon (Initials Badge) */}
-            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center">
+            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center mt-0.5">
               <span className="text-sm font-bold text-white">
                 {data.kind.substring(0, 3).toUpperCase()}
               </span>
@@ -160,7 +160,7 @@ export const HoverTooltip: React.FC<HoverTooltipProps> = ({
 
             {/* Name & Namespace */}
             <div className="flex-1 min-w-0">
-              <div className="font-bold text-slate-900 text-sm truncate">
+              <div className="font-bold text-slate-900 text-sm leading-snug break-words">
                 {data.name}
               </div>
               {data.namespace && (
