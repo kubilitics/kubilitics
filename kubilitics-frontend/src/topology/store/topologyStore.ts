@@ -202,7 +202,7 @@ export const useTopologyStore = create<TopologyState>()(
           selectedEdgeId: null,
           namespaceFilter: ns || state.namespaceFilter,
           navigationStack: [...state.navigationStack, entry],
-          breadcrumbs: buildBreadcrumbs("resource", ns || state.namespaceFilter ?? undefined, resourceId),
+          breadcrumbs: buildBreadcrumbs("resource", ns || (state.namespaceFilter ?? undefined), resourceId),
         });
       },
 
