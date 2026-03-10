@@ -40,10 +40,15 @@ export function TopologyDetailPanel({
 
   if (!node) {
     return (
-      <aside className="hidden w-80 shrink-0 border-l bg-background/60 p-4 text-xs text-muted-foreground md:block">
+      <aside className="hidden w-80 shrink-0 border-l border-gray-200 bg-gray-50/50 p-6 text-xs text-muted-foreground md:block">
         <div className="flex h-full flex-col items-center justify-center text-center">
-          <span className="text-2xl mb-2">Click a resource</span>
-          <p>Select any node to see its details, connections, and navigate between resources.</p>
+          <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
+            <svg className="w-7 h-7 text-gray-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.042 21.672 13.684 16.6m0 0-2.51 2.225.569-9.47 5.227 7.917-3.286-.672ZM12 2.25V4.5m5.834.166-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243-1.59-1.59" />
+            </svg>
+          </div>
+          <div className="text-sm font-semibold text-gray-500 mb-1">Select a resource</div>
+          <p className="text-gray-400 text-xs leading-relaxed max-w-[200px]">Click any node on the canvas to view its details, connections, and metrics.</p>
         </div>
       </aside>
     );
@@ -53,7 +58,7 @@ export function TopologyDetailPanel({
   const sColor = statusColor(node.status);
 
   return (
-    <aside className="hidden w-80 shrink-0 overflow-y-auto border-l bg-background/60 md:block">
+    <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-gray-200 bg-white md:block">
       {/* Header */}
       <div className="sticky top-0 border-b bg-background p-3">
         <div className="flex items-center gap-2">
