@@ -1327,12 +1327,10 @@ function EmptyState() {
 
 // ─── Main Page Component ──────────────────────────────────────────────────────
 
+// Topology V2 is enabled by default. Set VITE_FEATURE_TOPOLOGY_V2=false to revert to v1.
 const FEATURE_TOPOLOGY_V2 =
-  typeof import.meta !== 'undefined' &&
-  // Vite in-browser config
-  (import.meta.env?.VITE_FEATURE_TOPOLOGY_V2 === 'true' ||
-    // Fallback for tests / non-Vite environments
-    process.env.VITE_FEATURE_TOPOLOGY_V2 === 'true');
+  !(import.meta.env?.VITE_FEATURE_TOPOLOGY_V2 === 'false' ||
+    (typeof process !== 'undefined' && process.env?.VITE_FEATURE_TOPOLOGY_V2 === 'false'));
 
 export default function Topology() {
   if (FEATURE_TOPOLOGY_V2) {
