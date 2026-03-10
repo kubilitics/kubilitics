@@ -7,6 +7,7 @@ export type LabeledEdgeData = {
   detail?: string;
   relationshipCategory?: string;
   healthy?: boolean;
+  hideLabel?: boolean;
 };
 
 /** Category-based edge colors for visual distinction. */
@@ -29,6 +30,7 @@ function LabeledEdgeInner(props: EdgeProps<LabeledEdgeData>) {
 
   const color = categoryColors[data?.relationshipCategory ?? ""] ?? "#94a3b8";
   const isHealthy = data?.healthy !== false;
+  const hideLabel = data?.hideLabel === true;
 
   const [, labelX, labelY] = getBezierPath({
     sourceX, sourceY, targetX, targetY,
@@ -50,27 +52,29 @@ function LabeledEdgeInner(props: EdgeProps<LabeledEdgeData>) {
           transition: "stroke-width 0.15s, opacity 0.15s",
         }}
       />
-      <EdgeLabelRenderer>
-        <div
-          className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-default rounded border bg-background/95 px-1.5 py-0.5 text-[12px] leading-tight text-muted-foreground shadow-sm backdrop-blur-sm transition-opacity"
-          style={{
-            left: labelX,
-            top: labelY,
-            borderColor: color,
-            opacity: hovered ? 1 : 0.85,
-          }}
-          title={data?.detail}
-          role="img"
-          aria-label={`Relationship: ${label}${data?.detail ? ` — ${data.detail}` : ""}`}
-          onMouseEnter={onMouseEnter}
-          onMouseLeave={onMouseLeave}
-        >
-          {label}
-          {hovered && data?.detail && (
-            <div className="mt-0.5 text-[10px] text-muted-foreground/70">{data.detail}</div>
-          )}
-        </div>
-      </EdgeLabelRenderer>
+      {!hideLabel && (
+        <EdgeLabelRenderer>
+          <div
+            className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-default rounded-md border bg-white/95 px-1.5 py-0.5 text-[10px] leading-tight text-gray-500 shadow-sm backdrop-blur-sm transition-all"
+            style={{
+              left: labelX,
+              top: labelY,
+              borderColor: hovered ? color : "#e5e7eb",
+              opacity: hovered ? 1 : 0.8,
+            }}
+            title={data?.detail}
+            role="img"
+            aria-label={`Relationship: ${label}${data?.detail ? ` — ${data.detail}` : ""}`}
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+          >
+            {label}
+            {hovered && data?.detail && (
+              <div className="mt-0.5 text-[9px] text-gray-400">{data.detail}</div>
+            )}
+          </div>
+        </EdgeLabelRenderer>
+      )}
     </>
   );
 }

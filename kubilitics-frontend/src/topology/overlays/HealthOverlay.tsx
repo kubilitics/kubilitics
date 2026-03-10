@@ -53,9 +53,9 @@ export function HealthLegend({ visible }: { visible: boolean }) {
   if (!visible) return null;
 
   return (
-    <div className="absolute bottom-16 left-3 z-10 rounded-md border bg-background/90 p-2 text-[10px] shadow-sm backdrop-blur-sm">
-      <div className="mb-1 font-medium">Health Status</div>
-      <div className="space-y-0.5">
+    <div className="absolute bottom-16 left-3 z-10 rounded-lg border border-gray-200 bg-white/95 p-3 text-xs shadow-lg backdrop-blur-sm">
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Health Status</div>
+      <div className="space-y-1.5">
         <LegendItem color={healthColors.healthy} label="Healthy" />
         <LegendItem color={healthColors.warning} label="Warning" />
         <LegendItem color={healthColors.error} label="Error" />
@@ -67,12 +67,12 @@ export function HealthLegend({ visible }: { visible: boolean }) {
 
 function LegendItem({ color, label }: { color: string; label: string }) {
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-2">
       <span
-        className="inline-block h-2.5 w-2.5 rounded-sm"
-        style={{ backgroundColor: color }}
+        className="inline-block h-3 w-3 rounded-full ring-2 ring-offset-1"
+        style={{ backgroundColor: color, boxShadow: `0 0 0 2px white, 0 0 0 3px ${color}30` }}
       />
-      <span>{label}</span>
+      <span className="text-gray-700 font-medium">{label}</span>
     </div>
   );
 }

@@ -20,8 +20,7 @@ export type ExpandedNodeData = BaseNodeData & {
 
 /**
  * ExpandedNode: Full detail view at zoom > 1.5x.
- * Shows metrics, labels, status with rich layout.
- * Width: 280px.
+ * Rich card with metrics grid, labels, and detailed status.
  */
 function ExpandedNodeInner({ data }: NodeProps<ExpandedNodeData>) {
   const icon = categoryIcon(data.category);
@@ -32,60 +31,79 @@ function ExpandedNodeInner({ data }: NodeProps<ExpandedNodeData>) {
 
   return (
     <div
-      className={`w-[280px] rounded-lg border-2 ${borderColor} bg-background shadow-md`}
+      className={`w-[300px] rounded-xl border-2 ${borderColor} bg-white shadow-lg overflow-hidden`}
       role="treeitem"
       aria-label={`${data.kind} ${data.name} — ${data.statusReason ?? data.status}${metrics?.podCount != null ? `, ${metrics.readyCount ?? 0}/${metrics.podCount} pods ready` : ""}`}
     >
-      <Handle type="target" position={Position.Left} className="!w-2.5 !h-2.5 !bg-muted-foreground/40" />
+      <Handle type="target" position={Position.Left} className="!w-3 !h-3 !bg-gray-300 !border-white !border-2" />
+
       {/* Header */}
-      <div className={`flex items-center gap-2 rounded-t-md ${headerBg} px-3 py-1.5 text-white`}>
-        <span className="text-sm" aria-hidden="true">{icon}</span>
-        <span className="flex-1 truncate text-xs font-semibold">{data.kind}</span>
-        <div className={`h-2.5 w-2.5 rounded-full border border-white/50 ${sColor}`} role="img" aria-label={`Status: ${data.status}`} />
+      <div className={`flex items-center gap-2.5 ${headerBg} px-4 py-2`}>
+        <span className="text-base" aria-hidden="true">{icon}</span>
+        <div className="flex-1 min-w-0">
+          <span className="text-xs font-bold text-white tracking-wide uppercase">{data.kind}</span>
+        </div>
+        <div className={`h-3 w-3 rounded-full ${sColor} ring-2 ring-white/30`} role="img" aria-label={`Status: ${data.status}`} />
       </div>
+
       {/* Body */}
-      <div className="space-y-2 px-3 py-2">
+      <div className="px-4 py-3 space-y-3">
         <div>
-          <div className="truncate text-sm font-semibold">{data.name}</div>
+          <div className="text-sm font-bold text-gray-900 truncate">{data.name}</div>
           {data.namespace && (
-            <div className="text-[11px] text-muted-foreground">{data.namespace}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{data.namespace}</div>
           )}
         </div>
-        <div className="text-[11px]">
-          <span className="text-muted-foreground">Status: </span>
-          <span className="font-medium">{data.statusReason ?? data.status}</span>
+
+        <div className="flex items-center gap-2">
+          <div className={`h-2 w-2 rounded-full ${sColor}`} />
+          <span className="text-xs font-medium text-gray-700">{data.statusReason ?? data.status}</span>
         </div>
-        {/* Metrics */}
+
         {metrics && (
-          <div className="space-y-1 border-t pt-1.5" aria-label="Resource metrics">
+          <div className="grid grid-cols-2 gap-2 border-t border-gray-100 pt-3" aria-label="Resource metrics">
             {metrics.cpuRequest != null && (
-              <div className="flex justify-between text-[10px]">
-                <span className="text-muted-foreground">CPU Request</span>
-                <span className="font-mono">{formatCPU(metrics.cpuRequest)}</span>
-              </div>
+              <MetricCard label="CPU" value={formatCPU(metrics.cpuRequest)} />
             )}
             {metrics.memoryRequest != null && metrics.memoryRequest > 0 && (
-              <div className="flex justify-between text-[10px]">
-                <span className="text-muted-foreground">Memory Request</span>
-                <span className="font-mono">{formatBytes(metrics.memoryRequest)}</span>
-              </div>
+              <MetricCard label="Memory" value={formatBytes(metrics.memoryRequest)} />
             )}
             {metrics.podCount != null && (
-              <div className="flex justify-between text-[10px]">
-                <span className="text-muted-foreground">Pods</span>
-                <span className="font-mono">{metrics.readyCount ?? 0}/{metrics.podCount}</span>
-              </div>
+              <MetricCard label="Pods" value={`${metrics.readyCount ?? 0}/${metrics.podCount}`} />
             )}
             {metrics.restartCount != null && metrics.restartCount > 0 && (
-              <div className="flex justify-between text-[10px]">
-                <span className="text-muted-foreground">Restarts</span>
-                <span className="font-mono text-amber-600">{metrics.restartCount}</span>
-              </div>
+              <MetricCard label="Restarts" value={String(metrics.restartCount)} warning />
             )}
           </div>
         )}
+
+        {data.labels && Object.keys(data.labels).length > 0 && (
+          <div className="border-t border-gray-100 pt-2">
+            <div className="text-[9px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Labels</div>
+            <div className="flex flex-wrap gap-1">
+              {Object.entries(data.labels).slice(0, 3).map(([k, v]) => (
+                <span key={k} className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 text-[9px] text-gray-600 font-mono truncate max-w-[130px]">
+                  {k.split("/").pop()}={v}
+                </span>
+              ))}
+              {Object.keys(data.labels).length > 3 && (
+                <span className="text-[9px] text-gray-400 px-1">+{Object.keys(data.labels).length - 3}</span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
-      <Handle type="source" position={Position.Right} className="!w-2.5 !h-2.5 !bg-muted-foreground/40" />
+
+      <Handle type="source" position={Position.Right} className="!w-3 !h-3 !bg-gray-300 !border-white !border-2" />
+    </div>
+  );
+}
+
+function MetricCard({ label, value, warning }: { label: string; value: string; warning?: boolean }) {
+  return (
+    <div className={`rounded-md px-2.5 py-1.5 ${warning ? "bg-amber-50" : "bg-gray-50"}`}>
+      <div className="text-[9px] text-gray-400 font-medium uppercase tracking-wider">{label}</div>
+      <div className={`text-xs font-semibold font-mono mt-0.5 ${warning ? "text-amber-600" : "text-gray-800"}`}>{value}</div>
     </div>
   );
 }

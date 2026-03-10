@@ -40,11 +40,13 @@ export function TopologyEmptyState({
   const config = configs[type] ?? configs["empty-cluster"];
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
+    <div className="flex flex-1 flex-col items-center justify-center p-8 text-center bg-gray-50/50">
       <div className="max-w-sm">
-        <div className="mb-4 text-5xl">{config.icon}</div>
-        <h2 className="mb-2 text-lg font-semibold text-foreground">{config.title}</h2>
-        <p className="text-sm text-muted-foreground">{config.description}</p>
+        <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-5">
+          <span className="text-3xl">{config.icon}</span>
+        </div>
+        <h2 className="mb-2 text-base font-semibold text-gray-800">{config.title}</h2>
+        <p className="text-sm text-gray-500 leading-relaxed">{config.description}</p>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useEffect, useMemo } from "react";
+import { useCallback, useState, useEffect, useMemo } from "react";
 import {
   Background,
   Controls,
@@ -8,9 +8,9 @@ import {
   useNodesState,
   useEdgesState,
   ReactFlowProvider,
+  BackgroundVariant,
   type Viewport,
   type Node,
-  type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -64,11 +64,11 @@ function TopologyCanvasInner({
   // Expose fitView to parent
   useEffect(() => {
     if (fitViewRef) {
-      fitViewRef.current = () => reactFlow.fitView({ padding: 0.1, duration: 300 });
+      fitViewRef.current = () => reactFlow.fitView({ padding: 0.12, duration: 400 });
     }
   }, [reactFlow, fitViewRef]);
 
-  // Apply highlight/selection rings to nodes
+  // Apply highlight/selection styling to nodes
   const styledNodes = useMemo(() => {
     if (!selectedNodeId && highlightNodeIds.length === 0) return nodes;
     return nodes.map((n) => {
@@ -78,12 +78,21 @@ function TopologyCanvasInner({
       return {
         ...n,
         className: [
-          isSelected ? "ring-2 ring-primary ring-offset-2" : "",
-          isHighlighted ? "ring-1 ring-amber-400" : "",
+          isSelected ? "ring-2 ring-blue-500 ring-offset-2 rounded-lg" : "",
+          isHighlighted ? "ring-2 ring-amber-400 ring-offset-1 rounded-lg" : "",
         ].filter(Boolean).join(" "),
       };
     });
   }, [nodes, selectedNodeId, highlightNodeIds]);
+
+  // Hide edge labels when zoomed out (too cluttered with 1000+ edges)
+  const styledEdges = useMemo(() => {
+    if (currentZoom >= 0.4) return edges;
+    return edges.map((e) => ({
+      ...e,
+      data: { ...e.data, hideLabel: true },
+    }));
+  }, [edges, currentZoom]);
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: { id: string }) => {
@@ -97,14 +106,35 @@ function TopologyCanvasInner({
     setCurrentZoom(viewport.zoom);
   }, []);
 
+  // Category-based minimap colors
+  const miniMapNodeColor = useCallback((n: Node) => {
+    const category = (n.data as any)?.category;
+    const status = (n.data as any)?.status;
+
+    if (status === "error") return "#ef4444";
+    if (status === "warning") return "#f59e0b";
+
+    const catColors: Record<string, string> = {
+      compute: "#3b82f6",
+      networking: "#8b5cf6",
+      config: "#f59e0b",
+      storage: "#06b6d4",
+      security: "#ec4899",
+      scheduling: "#6b7280",
+      scaling: "#22c55e",
+      custom: "#94a3b8",
+    };
+    return catColors[category] ?? "#10b981";
+  }, []);
+
   return (
     <ReactFlow
       nodes={styledNodes}
-      edges={edges}
+      edges={styledEdges}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       fitView
-      fitViewOptions={{ padding: 0.1 }}
+      fitViewOptions={{ padding: 0.12 }}
       onlyRenderVisibleElements
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
@@ -112,21 +142,29 @@ function TopologyCanvasInner({
       onPaneClick={onPaneClick}
       onMoveEnd={onMoveEnd}
       maxZoom={4}
-      minZoom={0.05}
+      minZoom={0.02}
       proOptions={{ hideAttribution: true }}
+      className="!bg-[#f8f9fb]"
     >
-      <Background gap={20} size={1} />
-      <MiniMap
-        nodeColor={(n) => {
-          const status = (n.data as any)?.status;
-          if (status === "error") return "#ef4444";
-          if (status === "warning") return "#f59e0b";
-          if (status === "healthy") return "#10b981";
-          return "#9ca3af";
-        }}
-        maskColor="rgba(0, 0, 0, 0.08)"
+      <Background
+        variant={BackgroundVariant.Dots}
+        gap={24}
+        size={1}
+        color="#d4d4d8"
       />
-      <Controls showZoom showFitView showInteractive={false} />
+      <MiniMap
+        nodeColor={miniMapNodeColor}
+        nodeStrokeWidth={0}
+        maskColor="rgba(0, 0, 0, 0.06)"
+        className="!bg-white !border !border-gray-200 !rounded-lg !shadow-md"
+        style={{ width: 180, height: 120 }}
+      />
+      <Controls
+        showZoom
+        showFitView
+        showInteractive={false}
+        className="!bg-white !border !border-gray-200 !rounded-lg !shadow-md"
+      />
     </ReactFlow>
   );
 }
@@ -138,4 +176,3 @@ export function TopologyCanvas(props: TopologyCanvasProps) {
     </ReactFlowProvider>
   );
 }
-
