@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { useBackendConfigStore } from "@/stores/backendConfigStore";
 import { useClusterStore } from "@/stores/clusterStore";
 
@@ -35,13 +35,21 @@ export function TopologyPage() {
   const navigateBack = useTopologyStore((s) => s.navigateBack);
   const storeSetData = useTopologyStore((s) => s.setTopologyData);
 
-  const [selectedNamespaces, setSelectedNamespaces] = useState<Set<string>>(new Set());
+  // Default to "default" namespace (like kubectl) to avoid loading ALL namespaces at once
+  const [selectedNamespaces, setSelectedNamespaces] = useState<Set<string>>(new Set(["default"]));
+  const [hasAutoSelectedNs, setHasAutoSelectedNs] = useState(false);
   const [resource, setResource] = useState<string>("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const fitViewRef = useRef<(() => void) | null>(null);
   const exportRef = useRef<((format: ExportFormat, filename: string) => void) | null>(null);
+
+  // Wrap namespace selection — empty set means "All Namespaces", which is intentional
+  // when the user explicitly clicks "All" in the dropdown.
+  const handleNamespaceSelectionChange = useCallback((next: Set<string>) => {
+    setSelectedNamespaces(next);
+  }, []);
 
   // Helper to build export context
   const getExportCtx = useCallback(() => ({
@@ -58,6 +66,31 @@ export function TopologyPage() {
     resource: viewMode === "resource" ? resource : undefined,
     enabled: !!clusterId,
   });
+
+  // Auto-select "default" namespace on first data load.
+  // If the cluster doesn't have a "default" namespace, pick the first user namespace.
+  useEffect(() => {
+    if (hasAutoSelectedNs || allNamespaces.length === 0) return;
+    setHasAutoSelectedNs(true);
+
+    if (allNamespaces.includes("default")) {
+      // "default" exists — keep the initial selection
+      return;
+    }
+    // No "default" namespace — pick the first non-system namespace
+    const firstUserNs = allNamespaces.find(
+      (ns) => !ns.startsWith("kube-")
+    );
+    if (firstUserNs) {
+      setSelectedNamespaces(new Set([firstUserNs]));
+    }
+  }, [allNamespaces, hasAutoSelectedNs]);
+
+  // Reset namespace selection when cluster changes
+  useEffect(() => {
+    setSelectedNamespaces(new Set(["default"]));
+    setHasAutoSelectedNs(false);
+  }, [clusterId]);
 
   // Sync to store when data arrives
   useMemo(() => {
@@ -209,7 +242,7 @@ export function TopologyPage() {
         searchQuery={searchQuery}
         searchResults={searchResults}
         onViewModeChange={handleViewModeChange}
-        onNamespaceSelectionChange={setSelectedNamespaces}
+        onNamespaceSelectionChange={handleNamespaceSelectionChange}
         onSearchChange={setSearchQuery}
         onSearchSelect={handleSearchSelect}
         onFitView={handleFitView}
@@ -221,7 +254,7 @@ export function TopologyPage() {
         namespace={activeNamespace}
         resource={viewMode === "resource" ? resource : null}
         onNavigate={handleViewModeChange}
-        onClearNamespace={() => setSelectedNamespaces(new Set())}
+        onClearNamespace={() => setSelectedNamespaces(new Set(["default"]))}
       />
 
       {/* Partial error banner */}
