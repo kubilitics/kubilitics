@@ -294,23 +294,24 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 // Initial navigation logic.
-// After the unified onboarding flow (Welcome → Features → Mode Selection),
-// the user always has appMode set. This entry point just routes to /connect.
+// P0-002-T03: Auto-detect mode — eliminate manual mode selection.
+// Tauri → desktop mode. Browser → in-cluster mode. No user choice needed.
 // ModeSelection page is kept as a standalone route for direct navigation / Settings.
 function ModeSelectionEntryPoint() {
   const { appMode, setAppMode } = useClusterStore();
 
-  // Desktop (Tauri): auto-set desktop mode
+  // Auto-detect mode: Tauri = desktop, Browser = in-cluster
   useEffect(() => {
-    if (isTauri() && !appMode) setAppMode('desktop');
+    if (!appMode) {
+      setAppMode(isTauri() ? 'desktop' : 'in-cluster');
+    }
   }, [appMode, setAppMode]);
 
-  // If mode is set (from onboarding or Tauri), go to connect
+  // If mode is set, go to connect
   if (appMode) return <Navigate to="/connect" replace />;
 
-  // Fallback: if somehow appMode is missing (e.g. cleared storage partially),
-  // show ModeSelection as a safety net
-  return <ModeSelection />;
+  // Brief loading while mode auto-detects (< 1 frame)
+  return null;
 }
 
 import { GlobalErrorBoundary, RouteErrorBoundary } from "@/components/GlobalErrorBoundary";
@@ -582,23 +583,22 @@ function KubeconfigContextWrapper({ children }: { children: React.ReactNode }) {
 }
 
 /** Gate: unified onboarding flow for first-time users (Welcome → Features → Mode Selection).
- *  Desktop (Tauri): auto-sets 'desktop' mode and skips onboarding.
- *  In-cluster / browser: requires completing the full onboarding flow.
- *  Fallback: if desktop mode fails to set appMode, show WelcomeScreen as recovery. */
+ *  P0-002-T03: Streamlined onboarding gate.
+ *  Desktop (Tauri): auto-sets mode and skips welcome screen entirely.
+ *  In-cluster / browser: auto-sets mode and shows lightweight welcome on first visit only.
+ *  All modes: if appMode is set, user proceeds directly. */
 function OnboardingGate({ children }: { children: React.ReactNode }) {
   const hasCompletedWelcome = useOnboardingStore((s) => s.hasCompletedWelcome);
+  const completeWelcome = useOnboardingStore((s) => s.completeWelcome);
   const appMode = useClusterStore((s) => s.appMode);
 
+  // Desktop (Tauri): always skip welcome — go straight to cluster connect
   if (isTauri()) {
-    // Desktop: skip onboarding if mode is set (normal path)
-    if (appMode) return <>{children}</>;
-    // Fallback: if appMode somehow not set (corrupted state, first launch race),
-    // show onboarding so user can recover instead of seeing a broken app
-    if (!hasCompletedWelcome) return <WelcomeScreen />;
+    if (!hasCompletedWelcome) completeWelcome();
     return <>{children}</>;
   }
 
-  // Browser / in-cluster: always require onboarding completion
+  // Browser / in-cluster: show welcome only on very first visit
   if (!hasCompletedWelcome) return <WelcomeScreen />;
   return <>{children}</>;
 }

@@ -5,15 +5,13 @@ import {
  Brain,
  WifiOff,
  ArrowRight,
- Monitor,
- Cloud,
- CheckCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useClusterStore } from '@/stores/clusterStore';
 import { BrandLogo } from '@/components/BrandLogo';
+import { isTauri } from '@/lib/tauri';
 
 /* ─── Step data ─────────────────────────────────────────────── */
 
@@ -53,8 +51,8 @@ const features: FeatureCard[] = [
 ];
 
 /* ─── Steps ─────────────────────────────────────────────────── */
-
-const steps = ['welcome', 'features', 'mode'] as const;
+// P0-002-T03: Removed 'mode' step — mode is auto-detected now
+const steps = ['welcome', 'features'] as const;
 type Step = (typeof steps)[number];
 
 /* ─── Shared animation config ────────────────────────────────── */
@@ -70,23 +68,23 @@ export function WelcomeScreen() {
 
  const stepIndex = steps.indexOf(currentStep);
 
+ // P0-002-T03: Auto-complete onboarding and auto-detect mode
+ const handleComplete = () => {
+ setAppMode(isTauri() ? 'desktop' : 'in-cluster');
+ completeWelcome();
+ };
+
  const handleNext = () => {
  const nextIndex = stepIndex + 1;
  if (nextIndex < steps.length) {
  setCurrentStep(steps[nextIndex]);
+ } else {
+ handleComplete();
  }
  };
 
  const handleSkip = () => {
- // Skip goes directly to mode selection — user must still choose a mode
- setCurrentStep('mode');
- };
-
- const handleModeSelect = (mode: 'desktop' | 'in-cluster') => {
- setAppMode(mode);
- completeWelcome();
- // After onboarding completes, OnboardingGate unmounts this component
- // and the router takes over → ModeSelectionEntryPoint → /connect
+ handleComplete();
  };
 
  return (
@@ -111,10 +109,7 @@ export function WelcomeScreen() {
  <WelcomeStep key="welcome" onNext={handleNext} onSkip={handleSkip} />
  )}
  {currentStep === 'features' && (
- <FeaturesStep key="features" onNext={handleNext} onSkip={handleSkip} />
- )}
- {currentStep === 'mode' && (
- <ModeStep key="mode" onSelect={handleModeSelect} />
+ <FeaturesStep key="features" onNext={handleComplete} onSkip={handleSkip} />
  )}
  </AnimatePresence>
 
@@ -303,138 +298,10 @@ function FeaturesStep({
  onClick={onNext}
  className="gap-2 px-8 bg-primary hover:bg-primary/90 text-primary-foreground rounded-2xl h-12 font-semibold shadow-lg shadow-primary/20"
  >
- Continue
+ Connect My Cluster
  <ArrowRight className="h-4 w-4" />
  </Button>
  </motion.div>
- </motion.div>
- );
-}
-
-/* ─── Step 3: Mode Selection (integrated) ───────────────────── */
-
-function ModeStep({
- onSelect,
-}: {
- onSelect: (mode: 'desktop' | 'in-cluster') => void;
-}) {
- return (
- <motion.div
- initial={{ opacity: 0, y: 20 }}
- animate={{ opacity: 1, y: 0 }}
- exit={{ opacity: 0, y: -20 }}
- transition={{ duration: 0.4, ease }}
- >
- <div className="text-center mb-10">
- <h2 className="text-3xl font-bold tracking-tight text-foreground mb-3">
- How will you use Kubilitics?
- </h2>
- <p className="text-muted-foreground font-medium max-w-lg mx-auto">
- Pick the setup that fits your workflow. You can change this later in Settings.
- </p>
- </div>
-
- <div className="grid md:grid-cols-2 gap-6">
- {/* Desktop Engine */}
- <motion.button
- initial={{ opacity: 0, x: -20 }}
- animate={{ opacity: 1, x: 0 }}
- transition={{ delay: 0.1, duration: 0.4 }}
- onClick={() => onSelect('desktop')}
- className={cn(
- 'group relative text-left p-8 rounded-[2rem] border border-border bg-card/50',
- 'hover:border-primary/40 hover:bg-card hover:shadow-[var(--apple-shadow)] hover:-translate-y-1',
- 'transition-all duration-500 cursor-pointer'
- )}
- >
- <div className="absolute -top-8 -right-8 w-32 h-32 bg-primary/5 rounded-full blur-3xl group-hover:bg-primary/10 transition-colors duration-700" />
-
- <div className="relative z-10">
- <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 border border-primary/20 group-hover:bg-primary group-hover:scale-110 transition-all duration-500">
- <Monitor className="text-primary group-hover:text-primary-foreground transition-colors duration-300" size={28} />
- </div>
-
- <h3 className="text-xl font-bold text-foreground mb-2 group-hover:text-primary transition-colors">
- Desktop Engine
- </h3>
- <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
- Runs locally on your machine. Auto-detects your kubeconfig.
- Zero latency, maximum privacy.
- </p>
-
- <ul className="space-y-2.5">
- {[
- 'Auto-discovers local clusters',
- 'Offline-first — no cloud needed',
- 'Optimized for your hardware',
- ].map((f) => (
- <li
- key={f}
- className="flex items-center gap-2.5 text-xs text-muted-foreground font-medium"
- >
- <CheckCircle2 size={14} className="text-primary shrink-0" />
- {f}
- </li>
- ))}
- </ul>
-
- <div className="mt-8 flex items-center gap-2 text-sm font-semibold text-primary group-hover:text-primary/80">
- Launch Desktop
- <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
- </div>
- </div>
- </motion.button>
-
- {/* In-Cluster OS */}
- <motion.button
- initial={{ opacity: 0, x: 20 }}
- animate={{ opacity: 1, x: 0 }}
- transition={{ delay: 0.2, duration: 0.4 }}
- onClick={() => onSelect('in-cluster')}
- className={cn(
- 'group relative text-left p-8 rounded-[2rem] border border-border bg-card/50',
- 'hover:border-[hsl(var(--cosmic-purple))]/40 hover:bg-card hover:shadow-[var(--apple-shadow)] hover:-translate-y-1',
- 'transition-all duration-500 cursor-pointer'
- )}
- >
- <div className="absolute -top-8 -right-8 w-32 h-32 bg-[hsl(var(--cosmic-purple))]/5 rounded-full blur-3xl group-hover:bg-[hsl(var(--cosmic-purple))]/10 transition-colors duration-700" />
-
- <div className="relative z-10">
- <div className="w-14 h-14 rounded-2xl bg-[hsl(var(--cosmic-purple))]/10 flex items-center justify-center mb-6 border border-[hsl(var(--cosmic-purple))]/20 group-hover:bg-[hsl(var(--cosmic-purple))] group-hover:scale-110 transition-all duration-500">
- <Cloud className="text-[hsl(var(--cosmic-purple))] group-hover:text-white transition-colors duration-300" size={28} />
- </div>
-
- <h3 className="text-xl font-bold text-foreground mb-2 group-hover:text-[hsl(var(--cosmic-purple))] transition-colors">
- In-Cluster OS
- </h3>
- <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
- Deploys inside your cluster. Perfect for teams, persistent
- monitoring, and organization-wide visibility.
- </p>
-
- <ul className="space-y-2.5">
- {[
- 'Native Helm deployment',
- 'Team collaboration built-in',
- 'Persistent cloud analytics',
- ].map((f) => (
- <li
- key={f}
- className="flex items-center gap-2.5 text-xs text-muted-foreground font-medium"
- >
- <CheckCircle2 size={14} className="text-[hsl(var(--cosmic-purple))] shrink-0" />
- {f}
- </li>
- ))}
- </ul>
-
- <div className="mt-8 flex items-center gap-2 text-sm font-semibold text-[hsl(var(--cosmic-purple))] group-hover:text-[hsl(var(--cosmic-purple))]/80">
- Deploy Cluster OS
- <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
- </div>
- </div>
- </motion.button>
- </div>
  </motion.div>
  );
 }
