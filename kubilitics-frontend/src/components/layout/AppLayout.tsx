@@ -15,9 +15,12 @@ import { analyticsService } from '@/services/analyticsService';
 import { cn } from '@/lib/utils';
 import { isTauri } from '@/lib/tauri';
 import { RouteErrorBoundary } from '@/components/GlobalErrorBoundary';
+import { useSidebarAutoCollapse } from '@/stores/uiStore';
 
 export function AppLayout() {
   useRecentlyVisited();
+  // P0-005-T02: Auto-collapse sidebar at < 1280px, re-expand when viewport grows
+  useSidebarAutoCollapse();
   const navigate = useNavigate();
   const location = useLocation();
   const reduceMotion = useReducedMotion();
