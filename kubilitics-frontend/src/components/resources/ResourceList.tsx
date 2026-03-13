@@ -1,4 +1,4 @@
-import { useState, ReactNode, useRef, useMemo, useEffect } from 'react';
+import { useState, useDeferredValue, ReactNode, useRef, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -110,6 +110,8 @@ export function ResourceList<T extends object>({
   pageSize: pageSizeProp,
 }: ResourceListProps<T>) {
   const [searchQuery, setSearchQuery] = useState('');
+  // P0-003-T06: Defer search value so typing remains responsive even with 10k+ items
+  const deferredSearch = useDeferredValue(searchQuery);
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
 
   const tableId = resizableTableId ?? title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
@@ -119,16 +121,16 @@ export function ResourceList<T extends object>({
     return { defaultWidth: 150, minWidth: 70 };
   };
 
-  const filterValues = filterKey 
+  const filterValues = filterKey
     ? ['all', ...Array.from(new Set(items.map(item => String(item[filterKey]))))]
     : [];
 
-  const filteredItems = items.filter((item) => {
+  const filteredItems = useMemo(() => items.filter((item) => {
     const searchableString = Object.values(item).join(' ').toLowerCase();
-    const matchesSearch = searchableString.includes(searchQuery.toLowerCase());
+    const matchesSearch = searchableString.includes(deferredSearch.toLowerCase());
     const matchesFilter = !filterKey || selectedFilter === 'all' || String(item[filterKey]) === selectedFilter;
     return matchesSearch && matchesFilter;
-  });
+  }), [items, deferredSearch, selectedFilter, filterKey]);
 
   const pageSize = pageSizeProp ?? 0;
   const [internalPage, setInternalPage] = useState(1);

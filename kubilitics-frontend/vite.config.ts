@@ -1,5 +1,6 @@
 import { defineConfig, createLogger, Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
+import { visualizer } from "rollup-plugin-visualizer";
 import path from "path";
 
 const isTauriBuild = process.env.TAURI_BUILD === 'true';
@@ -112,6 +113,14 @@ export default defineConfig(({ mode }) => ({
     react(),
     // Only strip crossorigin in Tauri desktop builds
     isTauriBuild && removeCrossOriginPlugin(),
+    // Bundle analysis — generates stats.html when ANALYZE=true
+    process.env.ANALYZE === 'true' && visualizer({
+      filename: 'dist/stats.html',
+      open: false,
+      gzipSize: true,
+      brotliSize: true,
+      template: 'treemap',
+    }),
   ].filter(Boolean),
   resolve: {
     alias: {
@@ -144,10 +153,23 @@ export default defineConfig(({ mode }) => ({
         ...(isTauriBuild ? {} : {
           manualChunks(id) {
             if (id.includes('node_modules')) {
+              // React core — loaded first, small, cached aggressively
+              if (id.includes('react-dom') || (id.includes('/react/') && !id.includes('react-'))) return 'vendor-react';
+              // Icons — large but rarely change
               if (id.includes('lucide-react')) return 'vendor-icons';
+              // Animation engine — loaded on demand
               if (id.includes('framer-motion')) return 'vendor-animation';
+              // Radix UI primitives
               if (id.includes('@radix-ui')) return 'vendor-ui';
-              if (id.includes('cytoscape') || id.includes('elkjs')) return 'vendor-graph';
+              // Topology visualization — heavy, lazy-loaded
+              if (id.includes('cytoscape') || id.includes('elkjs') || id.includes('three') || id.includes('@react-three')) return 'vendor-graph';
+              // Data layer — react-query, zustand
+              if (id.includes('@tanstack') || id.includes('zustand')) return 'vendor-data';
+              // Code editor — very heavy, lazy-loaded
+              if (id.includes('monaco') || id.includes('yaml') || id.includes('js-yaml')) return 'vendor-editor';
+              // Charting
+              if (id.includes('recharts') || id.includes('d3')) return 'vendor-charts';
+              // Everything else
               return 'vendor';
             }
           },
