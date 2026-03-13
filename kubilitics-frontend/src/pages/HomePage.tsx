@@ -38,6 +38,7 @@ import { useClustersFromBackend } from '@/hooks/useClustersFromBackend';
 import { useBackendCircuitOpen } from '@/hooks/useBackendCircuitOpen';
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
 import { useClusterOverview } from '@/hooks/useClusterOverview';
+import { useClusterUtilization } from '@/hooks/useClusterUtilization';
 import { useHealthScore } from '@/hooks/useHealthScore';
 import { HealthRing } from '@/components/HealthRing';
 import { AISetupModal } from '@/features/ai/AISetupModal';
@@ -83,6 +84,7 @@ export default function HomePage() {
   const circuitOpen = useBackendCircuitOpen();
   const currentClusterId = useActiveClusterId();
   const { data: overview } = useClusterOverview(currentClusterId ?? undefined);
+  const { utilization: clusterUtil } = useClusterUtilization(currentClusterId ?? undefined);
   const health = useHealthScore();
 
   const deleteClusterMutation = useMutation({
@@ -140,9 +142,8 @@ export default function HomePage() {
     () => clusters.reduce((acc, c) => acc + (c.node_count || 0), 0),
     [clusters]
   );
-  const hasUtilization = overview?.utilization != null;
-  const cpuUtil = overview?.utilization?.cpu_percent ?? null;
-  const memUtil = overview?.utilization?.memory_percent ?? null;
+  const cpuUtil = clusterUtil?.metricsAvailable ? clusterUtil.cpuPercent : null;
+  const memUtil = clusterUtil?.metricsAvailable ? clusterUtil.memoryPercent : null;
 
   /* ─── Helpers ─── */
   const cpuColor = (cpuUtil ?? 0) > 80 ? 'from-red-500 to-orange-500' : (cpuUtil ?? 0) > 50 ? 'from-amber-500 to-yellow-500' : 'from-blue-500 to-indigo-500';
