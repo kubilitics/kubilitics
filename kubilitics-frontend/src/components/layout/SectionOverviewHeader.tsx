@@ -1,7 +1,8 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { RefreshCcw, Zap, LucideIcon } from 'lucide-react';
+import { RefreshCcw, Zap, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { motion } from 'framer-motion';
 
 interface SectionOverviewHeaderProps {
     title: string;
@@ -25,11 +26,16 @@ export function SectionOverviewHeader({
     extraActions,
 }: SectionOverviewHeaderProps) {
     return (
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, ease: 'easeOut' }}
+            className="flex flex-col md:flex-row md:items-center justify-between gap-4"
+        >
             <div className="flex items-start gap-4">
                 {Icon && (
                     <div className="p-3 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 text-primary shadow-sm border border-primary/10">
-                        <Icon className="h-8 w-8" />
+                        <Icon className="h-8 w-8" aria-hidden />
                     </div>
                 )}
                 <div>
@@ -59,6 +65,6 @@ export function SectionOverviewHeader({
                     </Button>
                 )}
             </div>
-        </div>
+        </motion.div>
     );
 }
