@@ -272,14 +272,14 @@ export default function HomePage() {
                   <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-md shadow-blue-500/15">
                     <Cpu className="h-3.5 w-3.5 text-white" />
                   </div>
-                  <p className="label-xs">CPU</p>
+                  <p className="label-xs">CPU Usage</p>
+                  {cpuUtil != null && (
+                    <span className="ml-auto text-sm font-bold tabular-nums text-slate-900">{Math.round(cpuUtil)}%</span>
+                  )}
                 </div>
                 {cpuUtil != null ? (
                   <>
-                    <p className="text-2xl font-bold tabular-nums text-slate-900 leading-none">
-                      {Math.round(cpuUtil)}<span className="text-sm text-slate-400 ml-0.5">%</span>
-                    </p>
-                    <div className="progress-track mt-3">
+                    <div className="progress-track">
                       <motion.div
                         initial={{ width: 0 }}
                         animate={{ width: `${Math.min(100, cpuUtil)}%` }}
@@ -291,12 +291,14 @@ export default function HomePage() {
                         aria-valuemax={100}
                       />
                     </div>
-                    <p className="text-xs text-slate-400 mt-1.5">Cluster average</p>
+                    <div className="flex justify-between text-xs text-slate-400 mt-1.5 tabular-nums">
+                      <span>{(clusterUtil!.cpuUsedMillicores / 1000).toFixed(1)} Cores</span>
+                      <span>of {(clusterUtil!.cpuTotalMillicores / 1000).toFixed(1)} Cores</span>
+                    </div>
                   </>
                 ) : (
                   <>
-                    <p className="text-2xl font-bold text-slate-300 leading-none">—</p>
-                    <div className="progress-track mt-3" />
+                    <div className="progress-track" />
                     <p className="text-xs text-slate-400 mt-1.5">No metrics available</p>
                   </>
                 )}
@@ -316,14 +318,14 @@ export default function HomePage() {
                   <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center shadow-md shadow-violet-500/15">
                     <HardDrive className="h-3.5 w-3.5 text-white" />
                   </div>
-                  <p className="label-xs">Memory</p>
+                  <p className="label-xs">Memory Usage</p>
+                  {memUtil != null && (
+                    <span className="ml-auto text-sm font-bold tabular-nums text-slate-900">{Math.round(memUtil)}%</span>
+                  )}
                 </div>
                 {memUtil != null ? (
                   <>
-                    <p className="text-2xl font-bold tabular-nums text-slate-900 leading-none">
-                      {Math.round(memUtil)}<span className="text-sm text-slate-400 ml-0.5">%</span>
-                    </p>
-                    <div className="progress-track mt-3">
+                    <div className="progress-track">
                       <motion.div
                         initial={{ width: 0 }}
                         animate={{ width: `${Math.min(100, memUtil)}%` }}
@@ -335,12 +337,14 @@ export default function HomePage() {
                         aria-valuemax={100}
                       />
                     </div>
-                    <p className="text-xs text-slate-400 mt-1.5">Cluster average</p>
+                    <div className="flex justify-between text-xs text-slate-400 mt-1.5 tabular-nums">
+                      <span>{(clusterUtil!.memoryUsedBytes / (1024 ** 3)).toFixed(1)} GiB</span>
+                      <span>of {(clusterUtil!.memoryTotalBytes / (1024 ** 3)).toFixed(1)} GiB</span>
+                    </div>
                   </>
                 ) : (
                   <>
-                    <p className="text-2xl font-bold text-slate-300 leading-none">—</p>
-                    <div className="progress-track mt-3" />
+                    <div className="progress-track" />
                     <p className="text-xs text-slate-400 mt-1.5">No metrics available</p>
                   </>
                 )}
