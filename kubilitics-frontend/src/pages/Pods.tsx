@@ -48,6 +48,8 @@ import { objectsToYaml, downloadBlob, downloadResourceJson } from '@/lib/exportU
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Progress } from '@/components/ui/progress';
 import { buildAutoWidthColumns } from '@/lib/tableSizing';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { SearchHighlight } from '@/components/list/SearchHighlight';
 
 interface PodResource extends KubernetesResource {
  spec: {
@@ -204,6 +206,7 @@ export default function Pods() {
  const navigate = useNavigate();
  const [searchParams] = useSearchParams();
  const [searchQuery, setSearchQuery] = useState('');
+ const debouncedSearch = useDebouncedValue(searchQuery, 250);
  const [selectedNamespaces, setSelectedNamespaces] = useState<Set<string>>(new Set());
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; pod: Pod | null; bulk?: boolean }>({ open: false, pod: null });
  const [portForwardDialog, setPortForwardDialog] = useState<{ open: boolean; pod: Pod | null }>({ open: false, pod: null });
@@ -262,16 +265,17 @@ export default function Pods() {
  }, [data?.items]);
 
  const currentFilteredPods = useMemo(() => {
+ const q = debouncedSearch.toLowerCase();
  return fullPods.filter((pod) => {
- const matchesSearch =
- pod.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
- pod.status.toLowerCase().includes(searchQuery.toLowerCase()) ||
- pod.node.toLowerCase().includes(searchQuery.toLowerCase()) ||
- pod.internalIP.includes(searchQuery);
+ const matchesSearch = !q ||
+ pod.name.toLowerCase().includes(q) ||
+ pod.status.toLowerCase().includes(q) ||
+ pod.node.toLowerCase().includes(q) ||
+ pod.internalIP.includes(debouncedSearch);
  const matchesNs = selectedNamespaces.size === 0 || selectedNamespaces.has(pod.namespace);
  return matchesSearch && matchesNs;
  });
- }, [fullPods, searchQuery, selectedNamespaces]);
+ }, [fullPods, debouncedSearch, selectedNamespaces]);
 
  // High-level stats aligned with the current global scope (search + namespace filter)
  const stats = useMemo(
@@ -1175,7 +1179,7 @@ export default function Pods() {
  onClick={(e) => e.stopPropagation()}
  >
  <Box className="h-4 w-4 text-muted-foreground flex-shrink-0" />
- <span className="truncate">{pod.name}</span>
+ <span className="truncate"><SearchHighlight text={pod.name} query={debouncedSearch} /></span>
  </Link>
  </TooltipTrigger>
  <TooltipContent side="top" className="max-w-md">

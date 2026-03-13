@@ -36,6 +36,8 @@ export {
 export { TableFilterCell, type TableFilterCellProps } from './TableFilterCell';
 export { TableFilterProvider, useTableFilterVisible } from './TableFilterContext';
 
+export { SearchHighlight, type SearchHighlightProps } from './SearchHighlight';
+export { BulkActionToolbar, type BulkActionToolbarProps } from './BulkActionToolbar';
 // ...
 export * from './VirtualDataTable';
 export const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
