@@ -48,6 +48,7 @@ import { useMetalLBInstalled } from '@/hooks/useMetalLBInstalled';
 import { useAIStatus } from '@/hooks/useAIStatus';
 import { useUIStore } from '@/stores/uiStore';
 import { useProjectStore } from '@/stores/projectStore';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 interface NavItemProps {
   to: string;
@@ -691,20 +692,25 @@ export function Sidebar() {
           <Settings className={cn("h-4 w-4 transition-colors shrink-0", isSettingsActive ? "text-primary" : "text-slate-700 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white")} />
           <span className={cn("font-semibold text-[13px]", isSettingsActive ? "text-slate-900 dark:text-white" : "text-slate-800 dark:text-slate-200 group-hover:text-slate-900 dark:group-hover:text-white")}>Settings</span>
         </NavLink>
-        {!collapsed && (
-          <button
-            type="button"
-            onClick={() => setCollapsed(true)}
-            className={cn(
-              "flex items-center justify-start gap-3 w-full px-4 py-2.5 rounded-xl border h-11 transition-all duration-500 group",
-              "bg-transparent text-slate-800 dark:text-slate-200 hover:bg-slate-100/60 dark:hover:bg-white/5 border-transparent hover:border-slate-100 dark:hover:border-white/5"
-            )}
-            aria-label="Collapse sidebar"
-          >
-            <ChevronLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5 shrink-0" aria-hidden />
-            <span className="font-semibold text-[13px]">Collapse Sidebar</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              className={cn(
+                "flex-1 flex items-center justify-start gap-3 px-4 py-2.5 rounded-xl border h-11 transition-all duration-500 group",
+                "bg-transparent text-slate-800 dark:text-slate-200 hover:bg-slate-100/60 dark:hover:bg-white/5 border-transparent hover:border-slate-100 dark:hover:border-white/5"
+              )}
+              aria-label="Collapse sidebar"
+            >
+              <ChevronLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5 shrink-0" aria-hidden />
+              <span className="font-semibold text-[13px]">Collapse</span>
+            </button>
+          )}
+          <div className="shrink-0">
+            <ThemeToggle />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -740,6 +746,7 @@ export function Sidebar() {
 
           <NavItemIconOnly to="/audit-log" icon={ClipboardList} label="Audit Log" iconColor="text-indigo-600 dark:text-indigo-400 group-hover:text-indigo-700" />
           <NavItemIconOnly to="/settings" icon={Settings} label="Settings" iconColor="text-slate-800 dark:text-slate-200 group-hover:text-slate-900 dark:group-hover:text-white" />
+          <ThemeToggle />
           <button
             type="button"
             onClick={() => setCollapsed(false)}
