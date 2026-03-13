@@ -11,7 +11,6 @@ import { cn } from '@/lib/utils';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useClusterStore } from '@/stores/clusterStore';
 import { BrandLogo } from '@/components/BrandLogo';
-import { isTauri } from '@/lib/tauri';
 
 /* ─── Step data ─────────────────────────────────────────────── */
 
@@ -68,9 +67,11 @@ export function WelcomeScreen() {
 
  const stepIndex = steps.indexOf(currentStep);
 
- // P0-002-T03: Auto-complete onboarding and auto-detect mode
+ // P0-002-T03: Auto-complete onboarding and default to desktop mode.
+ // Both Tauri and browser default to 'desktop' (kubeconfig connect flow).
+ // The backend will signal 'in-cluster' availability if running inside a pod.
  const handleComplete = () => {
- setAppMode(isTauri() ? 'desktop' : 'in-cluster');
+ setAppMode('desktop');
  completeWelcome();
  };
 

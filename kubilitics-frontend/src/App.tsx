@@ -295,15 +295,18 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 // Initial navigation logic.
 // P0-002-T03: Auto-detect mode — eliminate manual mode selection.
-// Tauri → desktop mode. Browser → in-cluster mode. No user choice needed.
-// ModeSelection page is kept as a standalone route for direct navigation / Settings.
+// Tauri → desktop mode. Browser → desktop mode (default).
+// In-cluster mode is only set when the backend reports in-cluster access,
+// not from the frontend alone (a browser can't detect if it's inside a pod).
+// ModeSelection page is kept as a standalone route for Settings / manual override.
 function ModeSelectionEntryPoint() {
   const { appMode, setAppMode } = useClusterStore();
 
-  // Auto-detect mode: Tauri = desktop, Browser = in-cluster
+  // Auto-detect mode: both Tauri and browser default to 'desktop' (kubeconfig connect).
+  // The backend will signal 'in-cluster' availability if it detects a service account.
   useEffect(() => {
     if (!appMode) {
-      setAppMode(isTauri() ? 'desktop' : 'in-cluster');
+      setAppMode('desktop');
     }
   }, [appMode, setAppMode]);
 
