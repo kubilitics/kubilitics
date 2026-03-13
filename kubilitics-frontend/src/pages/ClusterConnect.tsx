@@ -622,7 +622,7 @@ export default function ClusterConnect() {
             </Button>
           </Card>
 
-          <button onClick={() => navigate('/')} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <button onClick={() => navigate('/mode-selection')} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Go back to mode selection
           </button>
         </motion.div>
