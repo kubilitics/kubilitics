@@ -141,60 +141,67 @@ export function useResourceCounts(): { counts: ResourceCounts; isLoading: boolea
     isBackendConfigured() && currentClusterId ? currentClusterId : undefined
   );
 
-  // Direct K8s fallback path: only enabled when K8s is connected AND backend is NOT configured.
-  // When backend IS configured, the summary endpoint provides all counts in ONE request.
-  // Previously this fired 46 individual queries even with backend configured — causing
-  // massive connection pool saturation and 34+ req/sec to the cluster.
-  const countersEnabled = isConnected && !isBackendConfigured();
-  const directOptions = { ...DIRECT_K8S_QUERY_OPTIONS, enabled: countersEnabled };
+  // Direct K8s path: enabled when K8s is connected.
+  // When backend IS configured, the summary endpoint only covers ~10 key resource types
+  // (pods, deployments, services, nodes, namespaces, statefulsets, replicasets, daemonsets,
+  // jobs, cronjobs). For all OTHER resource types we still need direct K8s queries.
+  // We use two option sets: one for types covered by the summary (disabled when backend
+  // is configured), and one for types NOT covered (always enabled when connected).
+  const backendCovers = isBackendConfigured();
+  const coveredEnabled = isConnected && !backendCovers;
+  const uncoveredEnabled = isConnected;
+  const coveredOptions = { ...DIRECT_K8S_QUERY_OPTIONS, enabled: coveredEnabled };
+  const uncoveredOptions = { ...DIRECT_K8S_QUERY_OPTIONS, enabled: uncoveredEnabled };
 
-  // Only fetch the resource types that are commonly shown in sidebar nav with counts
-  const pods = useK8sResourceList<KubernetesResource>('pods', undefined, directOptions);
-  const deployments = useK8sResourceList<KubernetesResource>('deployments', undefined, directOptions);
-  const services = useK8sResourceList<KubernetesResource>('services', undefined, directOptions);
-  const nodes = useK8sResourceList<KubernetesResource>('nodes', undefined, directOptions);
-  const namespaces = useK8sResourceList<KubernetesResource>('namespaces', undefined, directOptions);
-  const statefulsets = useK8sResourceList<KubernetesResource>('statefulsets', undefined, directOptions);
-  const daemonsets = useK8sResourceList<KubernetesResource>('daemonsets', undefined, directOptions);
-  const jobs = useK8sResourceList<KubernetesResource>('jobs', undefined, directOptions);
-  const cronjobs = useK8sResourceList<KubernetesResource>('cronjobs', undefined, directOptions);
-  const ingresses = useK8sResourceList<KubernetesResource>('ingresses', undefined, directOptions);
-  const configmaps = useK8sResourceList<KubernetesResource>('configmaps', undefined, directOptions);
-  const secrets = useK8sResourceList<KubernetesResource>('secrets', undefined, directOptions);
-  const persistentvolumeclaims = useK8sResourceList<KubernetesResource>('persistentvolumeclaims', undefined, directOptions);
-  const replicasets = useK8sResourceList<KubernetesResource>('replicasets', undefined, directOptions);
-  const podtemplates = useK8sResourceList<KubernetesResource>('podtemplates', undefined, directOptions);
-  const controllerrevisions = useK8sResourceList<KubernetesResource>('controllerrevisions', undefined, directOptions);
-  const resourceslices = useK8sResourceList<KubernetesResource>('resourceslices', undefined, directOptions);
-  const deviceclasses = useK8sResourceList<KubernetesResource>('deviceclasses', undefined, directOptions);
-  const ipaddresspools = useK8sResourceList<KubernetesResource>('ipaddresspools', undefined, directOptions);
-  const bgppeers = useK8sResourceList<KubernetesResource>('bgppeers', undefined, directOptions);
-  const ingressclasses = useK8sResourceList<KubernetesResource>('ingressclasses', undefined, directOptions);
-  const endpoints = useK8sResourceList<KubernetesResource>('endpoints', undefined, directOptions);
-  const endpointslices = useK8sResourceList<KubernetesResource>('endpointslices', undefined, directOptions);
-  const networkpolicies = useK8sResourceList<KubernetesResource>('networkpolicies', undefined, directOptions);
-  const persistentvolumes = useK8sResourceList<KubernetesResource>('persistentvolumes', undefined, directOptions);
-  const storageclasses = useK8sResourceList<KubernetesResource>('storageclasses', undefined, directOptions);
-  const volumeattachments = useK8sResourceList<KubernetesResource>('volumeattachments', undefined, directOptions);
-  const volumesnapshots = useK8sResourceList<KubernetesResource>('volumesnapshots', undefined, directOptions);
-  const volumesnapshotclasses = useK8sResourceList<KubernetesResource>('volumesnapshotclasses', undefined, directOptions);
-  const volumesnapshotcontents = useK8sResourceList<KubernetesResource>('volumesnapshotcontents', undefined, directOptions);
-  const apiservices = useK8sResourceList<KubernetesResource>('apiservices', undefined, directOptions);
-  const leases = useK8sResourceList<KubernetesResource>('leases', undefined, directOptions);
-  const serviceaccounts = useK8sResourceList<KubernetesResource>('serviceaccounts', undefined, directOptions);
-  const roles = useK8sResourceList<KubernetesResource>('roles', undefined, directOptions);
-  const clusterroles = useK8sResourceList<KubernetesResource>('clusterroles', undefined, directOptions);
-  const rolebindings = useK8sResourceList<KubernetesResource>('rolebindings', undefined, directOptions);
-  const clusterrolebindings = useK8sResourceList<KubernetesResource>('clusterrolebindings', undefined, directOptions);
-  const priorityclasses = useK8sResourceList<KubernetesResource>('priorityclasses', undefined, directOptions);
-  const resourcequotas = useK8sResourceList<KubernetesResource>('resourcequotas', undefined, directOptions);
-  const limitranges = useK8sResourceList<KubernetesResource>('limitranges', undefined, directOptions);
-  const horizontalpodautoscalers = useK8sResourceList<KubernetesResource>('horizontalpodautoscalers', undefined, directOptions);
-  const verticalpodautoscalers = useK8sResourceList<KubernetesResource>('verticalpodautoscalers', undefined, directOptions);
-  const poddisruptionbudgets = useK8sResourceList<KubernetesResource>('poddisruptionbudgets', undefined, directOptions);
-  const customresourcedefinitions = useK8sResourceList<KubernetesResource>('customresourcedefinitions', undefined, directOptions);
-  const mutatingwebhookconfigurations = useK8sResourceList<KubernetesResource>('mutatingwebhookconfigurations', undefined, directOptions);
-  const validatingwebhookconfigurations = useK8sResourceList<KubernetesResource>('validatingwebhookconfigurations', undefined, directOptions);
+  // Types covered by backend summary — skip direct K8s when backend is configured
+  const pods = useK8sResourceList<KubernetesResource>('pods', undefined, coveredOptions);
+  const deployments = useK8sResourceList<KubernetesResource>('deployments', undefined, coveredOptions);
+  const services = useK8sResourceList<KubernetesResource>('services', undefined, coveredOptions);
+  const nodes = useK8sResourceList<KubernetesResource>('nodes', undefined, coveredOptions);
+  const namespaces = useK8sResourceList<KubernetesResource>('namespaces', undefined, coveredOptions);
+  const statefulsets = useK8sResourceList<KubernetesResource>('statefulsets', undefined, coveredOptions);
+  const daemonsets = useK8sResourceList<KubernetesResource>('daemonsets', undefined, coveredOptions);
+  const jobs = useK8sResourceList<KubernetesResource>('jobs', undefined, coveredOptions);
+  const cronjobs = useK8sResourceList<KubernetesResource>('cronjobs', undefined, coveredOptions);
+  const replicasets = useK8sResourceList<KubernetesResource>('replicasets', undefined, coveredOptions);
+
+  // Types NOT covered by backend summary — always query direct K8s when connected
+  const ingresses = useK8sResourceList<KubernetesResource>('ingresses', undefined, uncoveredOptions);
+  const configmaps = useK8sResourceList<KubernetesResource>('configmaps', undefined, uncoveredOptions);
+  const secrets = useK8sResourceList<KubernetesResource>('secrets', undefined, uncoveredOptions);
+  const persistentvolumeclaims = useK8sResourceList<KubernetesResource>('persistentvolumeclaims', undefined, uncoveredOptions);
+  const podtemplates = useK8sResourceList<KubernetesResource>('podtemplates', undefined, uncoveredOptions);
+  const controllerrevisions = useK8sResourceList<KubernetesResource>('controllerrevisions', undefined, uncoveredOptions);
+  const resourceslices = useK8sResourceList<KubernetesResource>('resourceslices', undefined, uncoveredOptions);
+  const deviceclasses = useK8sResourceList<KubernetesResource>('deviceclasses', undefined, uncoveredOptions);
+  const ipaddresspools = useK8sResourceList<KubernetesResource>('ipaddresspools', undefined, uncoveredOptions);
+  const bgppeers = useK8sResourceList<KubernetesResource>('bgppeers', undefined, uncoveredOptions);
+  const ingressclasses = useK8sResourceList<KubernetesResource>('ingressclasses', undefined, uncoveredOptions);
+  const endpoints = useK8sResourceList<KubernetesResource>('endpoints', undefined, uncoveredOptions);
+  const endpointslices = useK8sResourceList<KubernetesResource>('endpointslices', undefined, uncoveredOptions);
+  const networkpolicies = useK8sResourceList<KubernetesResource>('networkpolicies', undefined, uncoveredOptions);
+  const persistentvolumes = useK8sResourceList<KubernetesResource>('persistentvolumes', undefined, uncoveredOptions);
+  const storageclasses = useK8sResourceList<KubernetesResource>('storageclasses', undefined, uncoveredOptions);
+  const volumeattachments = useK8sResourceList<KubernetesResource>('volumeattachments', undefined, uncoveredOptions);
+  const volumesnapshots = useK8sResourceList<KubernetesResource>('volumesnapshots', undefined, uncoveredOptions);
+  const volumesnapshotclasses = useK8sResourceList<KubernetesResource>('volumesnapshotclasses', undefined, uncoveredOptions);
+  const volumesnapshotcontents = useK8sResourceList<KubernetesResource>('volumesnapshotcontents', undefined, uncoveredOptions);
+  const apiservices = useK8sResourceList<KubernetesResource>('apiservices', undefined, uncoveredOptions);
+  const leases = useK8sResourceList<KubernetesResource>('leases', undefined, uncoveredOptions);
+  const serviceaccounts = useK8sResourceList<KubernetesResource>('serviceaccounts', undefined, uncoveredOptions);
+  const roles = useK8sResourceList<KubernetesResource>('roles', undefined, uncoveredOptions);
+  const clusterroles = useK8sResourceList<KubernetesResource>('clusterroles', undefined, uncoveredOptions);
+  const rolebindings = useK8sResourceList<KubernetesResource>('rolebindings', undefined, uncoveredOptions);
+  const clusterrolebindings = useK8sResourceList<KubernetesResource>('clusterrolebindings', undefined, uncoveredOptions);
+  const priorityclasses = useK8sResourceList<KubernetesResource>('priorityclasses', undefined, uncoveredOptions);
+  const resourcequotas = useK8sResourceList<KubernetesResource>('resourcequotas', undefined, uncoveredOptions);
+  const limitranges = useK8sResourceList<KubernetesResource>('limitranges', undefined, uncoveredOptions);
+  const horizontalpodautoscalers = useK8sResourceList<KubernetesResource>('horizontalpodautoscalers', undefined, uncoveredOptions);
+  const verticalpodautoscalers = useK8sResourceList<KubernetesResource>('verticalpodautoscalers', undefined, uncoveredOptions);
+  const poddisruptionbudgets = useK8sResourceList<KubernetesResource>('poddisruptionbudgets', undefined, uncoveredOptions);
+  const customresourcedefinitions = useK8sResourceList<KubernetesResource>('customresourcedefinitions', undefined, uncoveredOptions);
+  const mutatingwebhookconfigurations = useK8sResourceList<KubernetesResource>('mutatingwebhookconfigurations', undefined, uncoveredOptions);
+  const validatingwebhookconfigurations = useK8sResourceList<KubernetesResource>('validatingwebhookconfigurations', undefined, uncoveredOptions);
 
   const counts = useMemo<ResourceCounts>(() => {
     if (!isConnected) {
@@ -359,8 +366,8 @@ export function useResourceCounts(): { counts: ResourceCounts; isLoading: boolea
     customresourcedefinitions, mutatingwebhookconfigurations, validatingwebhookconfigurations
   ];
 
-  const isLoading = isBackendConfigured()
-    ? summaryQuery.isLoading
+  const isLoading = backendCovers
+    ? summaryQuery.isLoading || allQueries.some(q => q.isLoading)
     : allQueries.some(q => q.isLoading);
 
   const isInitialLoad = isLoading && !summaryQuery.data && !pods.data;
