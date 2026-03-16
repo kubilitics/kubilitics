@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubilitics
 description: Kubilitics backend — Kubernetes API gateway, topology, and observability
 type: application
-version: 0.1.1
-appVersion: "0.1.1"
+version: 1.0.0
+appVersion: "1.0.0"
 kubeVersion: ">=1.24.0"
 keywords:
   - kubernetes
@@ -12,7 +12,7 @@ keywords:
   - observability
   - api-gateway
   - monitoring
-home: https://github.com/kubilitics/kubilitics-os-emergent
+home: https://kubilitics.com
 sources:
   - https://github.com/kubilitics/kubilitics-os-emergent
 maintainers:

@@ -23,7 +23,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/kubilitics/kubilitics-backend
-  tag: "0.1.1"
+  tag: "1.0.0"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
@@ -375,7 +375,7 @@ ai:
   
   image:
     repository: ghcr.io/kubilitics/kubilitics-ai
-    tag: "0.1.1"
+    tag: "1.0.0"
     pullPolicy: IfNotPresent
   
   serviceAccount:

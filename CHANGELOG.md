@@ -5,13 +5,38 @@ All notable changes to Kubilitics will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v1.0.0] - 2026-03-14
+## [v1.0.0] - 2026-03-16
 
 ### Highlights
 
-Kubilitics v1.0.0 is the first stable release — a major milestone with 67 commits of new features, design overhaul, and production hardening since v0.1.3.
+Kubilitics v1.0.0 is the first stable release — a major milestone of new features, design overhaul, and production hardening since v0.1.3. Multi-cluster support verified with Docker Desktop, AWS EKS, and Azure AKS.
 
 ### Added
+
+**In-Cluster Helm Deployment**
+- 3-step guided in-cluster setup wizard (Install → Connect → Access) in ClusterConnect
+- OCI-based Helm chart at `oci://ghcr.io/kubilitics/charts/kubilitics`
+- Backend URL configuration with connection testing
+- Mode Selection page (Personal vs Team Server) shown on first browser visit
+- Copy-to-clipboard Helm commands with advanced options (Ingress, AI backend)
+
+**Multi-Cluster Consistency**
+- Unified "Add Cluster" flow — all entry points (Settings, Header, HomePage, FleetDashboard) route to `/connect?addCluster=true`
+- Fixed "page coming and disappearing" when adding cluster from existing session (session-restore auto-redirect now skipped in add-cluster mode)
+- ClusterCapacity dashboard widget with Recharts donut gauges (Pods/CPU/Memory)
+
+**Enterprise Features (94 PRD tasks)**
+- Fleet Dashboard for multi-cluster overview
+- Cost Dashboard, SLO Dashboard, Compliance Dashboard
+- RBAC Management and RBAC Reports pages
+- Alert Configuration, Backup/Restore pages
+- Plugin Marketplace, Gateway API (Gateways + GatewayDetail) pages
+- AI components: Investigation, Safety Guard, Setup Wizard, Blast Radius Calculator
+- Cross-cluster search, notification center, audit log export
+- SSO enforcement, SCIM configuration, secret management settings
+- Storybook setup with component stories (Badge, Button, Card, StatusBadge)
+- Design tokens (colors, motion, spacing, typography CSS)
+- Skeleton loaders for Dashboard, ResourceList, ResourceDetail, Topology
 
 **Topology v2 Engine**
 - Complete topology v2 visualization engine with React Flow, ELK layout, and semantic zoom
@@ -175,8 +200,8 @@ Your `~/.kube/config` is auto-detected on first launch.
 
 **Helm (In-Cluster)**
 ```bash
-helm install kubilitics deploy/helm/kubilitics \
-  --set image.tag=1.0.0 \
+helm install kubilitics oci://ghcr.io/kubilitics/charts/kubilitics \
+  --version 1.0.0 \
   --namespace kubilitics --create-namespace
 ```
 

@@ -1200,7 +1200,7 @@ function InClusterSetupView({ isBackendConfigured, health, handleConnect, naviga
   const helmCommands = {
     installBasic: `helm install kubilitics \\
   oci://ghcr.io/kubilitics/charts/kubilitics \\
-  --version 0.1.1 \\
+  --version 1.0.0 \\
   --namespace kubilitics --create-namespace`,
     installFromSource: `# Or install directly from the source repo
 git clone https://github.com/kubilitics/kubiltics.git
@@ -1208,14 +1208,14 @@ helm install kubilitics ./deploy/helm/kubilitics \\
   --namespace kubilitics --create-namespace`,
     installWithIngress: `helm install kubilitics \\
   oci://ghcr.io/kubilitics/charts/kubilitics \\
-  --version 0.1.1 \\
+  --version 1.0.0 \\
   --namespace kubilitics --create-namespace \\
   --set ingress.enabled=true \\
   --set ingress.hosts[0].host=kubilitics.example.com \\
   --set config.allowedOrigins="https://kubilitics.example.com"`,
     installWithAI: `helm install kubilitics \\
   oci://ghcr.io/kubilitics/charts/kubilitics \\
-  --version 0.1.1 \\
+  --version 1.0.0 \\
   --namespace kubilitics --create-namespace \\
   --set ai.enabled=true \\
   --set ai.secret.enabled=true \\
@@ -1363,7 +1363,7 @@ kubectl get svc -n kubilitics`,
                 <div className="mt-5 p-4 rounded-xl bg-blue-500/5 border border-blue-200/40 dark:border-blue-800/40">
                   <p className="text-sm text-blue-700 dark:text-blue-300 font-medium mb-1">Configuration reference</p>
                   <p className="text-xs text-blue-600/70 dark:text-blue-400/70">
-                    Full list of values: <code className="bg-blue-500/10 px-1.5 py-0.5 rounded text-xs">helm show values oci://ghcr.io/kubilitics/charts/kubilitics --version 0.1.1</code>.
+                    Full list of values: <code className="bg-blue-500/10 px-1.5 py-0.5 rounded text-xs">helm show values oci://ghcr.io/kubilitics/charts/kubilitics --version 1.0.0</code>.
                     Includes database (SQLite/PostgreSQL), RBAC, TLS, autoscaling, backup, Prometheus/Grafana, and more.
                   </p>
                 </div>
