@@ -964,6 +964,14 @@ export default function PodDetail() {
               setPortForwardInitial({ containerName, port });
               setShowPortForwardDialog(true);
             }}
+            onOpenShell={(containerName) => {
+              setSelectedTerminalContainer(containerName);
+              setActiveTab('terminal');
+            }}
+            onOpenLogs={(containerName) => {
+              setSelectedLogContainer(containerName);
+              setActiveTab('logs');
+            }}
           />
         </div>
       ),

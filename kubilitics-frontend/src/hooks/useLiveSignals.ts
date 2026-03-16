@@ -63,16 +63,16 @@ export function useLiveSignals(): LiveSignals {
   const summaryQuery = useClusterSummary(clusterId ?? undefined);
   const overviewQuery = useClusterOverview(clusterId ?? undefined);
 
-  // Direct K8s fallback: only fire when backend is NOT configured
-  const directK8sEnabled = !isBackendConfigured && !!activeCluster;
+  // Pod + Node lists: needed in ALL modes for restart counts and node pressure
+  const anyClusterConnected = !!activeCluster || (isBackendConfigured && !!clusterId);
 
   const podsList = useK8sResourceList('pods', undefined, {
-    enabled: directK8sEnabled,
-    limit: 500,
+    enabled: anyClusterConnected,
+    limit: 5000,
     staleTime: 30_000,
   });
   const nodesList = useK8sResourceList('nodes', undefined, {
-    enabled: directK8sEnabled,
+    enabled: anyClusterConnected,
     limit: 500,
     staleTime: 60_000,
   });
@@ -89,7 +89,7 @@ export function useLiveSignals(): LiveSignals {
     const totalClusters = Array.isArray(clusters) ? clusters.length : activeCluster ? 1 : 0;
 
     if (isBackendConfigured && overviewQuery.data) {
-      // Prefer backend overview for pod status counts — no extra requests needed
+      // Prefer backend overview for pod status counts
       const ps = overviewQuery.data.pod_status;
       const totalNodes = summaryQuery.data?.node_count ?? overviewQuery.data.counts.nodes ?? 0;
 
@@ -104,14 +104,29 @@ export function useLiveSignals(): LiveSignals {
       }
       const activeAlerts = warningEvents + errorEvents;
 
+      // Compute real restart counts from pod list (fetched for all modes)
+      const podItems = podsList.data?.items ?? [];
+      let podRestarts = 0;
+      for (const pod of podItems) {
+        podRestarts += getRestartCount(pod as Parameters<typeof getRestartCount>[0]);
+      }
+
+      // Compute real node pressure from node list
+      const nodeItems = nodesList.data?.items ?? [];
+      const nodePressureCount = nodeItems.filter((n) => {
+        const ready = isNodeReady(n as Parameters<typeof isNodeReady>[0]);
+        const pressure = hasNodePressure(n as Parameters<typeof hasNodePressure>[0]);
+        return !ready || pressure;
+      }).length;
+
       return {
         totalClusters,
         totalNodes,
         runningPods: ps?.running ?? 0,
         failedPods: ps?.failed ?? 0,
         pendingPods: ps?.pending ?? 0,
-        podRestarts: 0, // Not available from overview; shown on pod list page
-        nodePressureCount: 0, // Not available from overview; shown on nodes page
+        podRestarts,
+        nodePressureCount,
         activeAlerts,
         warningEvents,
         errorEvents,

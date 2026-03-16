@@ -60,16 +60,16 @@ interface ReplicaSet {
 }
 
 const REPLICASETS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 130, minWidth: 100 },
- { id: 'status', defaultWidth: 110, minWidth: 88 },
- { id: 'desired', defaultWidth: 88, minWidth: 78 },
- { id: 'current', defaultWidth: 88, minWidth: 78 },
- { id: 'ready', defaultWidth: 88, minWidth: 72 },
- { id: 'owner', defaultWidth: 140, minWidth: 80 },
- { id: 'cpu', defaultWidth: 110, minWidth: 80 },
- { id: 'memory', defaultWidth: 120, minWidth: 85 },
- { id: 'age', defaultWidth: 90, minWidth: 60 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'desired', defaultWidth: 100, minWidth: 70 },
+ { id: 'current', defaultWidth: 100, minWidth: 70 },
+ { id: 'ready', defaultWidth: 100, minWidth: 70 },
+ { id: 'owner', defaultWidth: 160, minWidth: 100 },
+ { id: 'cpu', defaultWidth: 130, minWidth: 90 },
+ { id: 'memory', defaultWidth: 130, minWidth: 90 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const REPLICASETS_COLUMNS_FOR_VISIBILITY = [

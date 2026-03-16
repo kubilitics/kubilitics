@@ -52,15 +52,15 @@ export function useHealthScore(): HealthScore {
     staleTime: 60_000,
   });
 
-  // Direct K8s fallback: only fire when backend is NOT configured
-  const directK8sEnabled = !isBackendConfigured && !!activeCluster;
+  // Pod + Node list: needed in ALL modes for restart counts, node readiness
+  const podsEnabled = !!activeCluster || (isBackendConfigured && !!clusterId);
   const podsList = useK8sResourceList('pods', undefined, {
-    enabled: directK8sEnabled,
-    limit: 500,
+    enabled: podsEnabled,
+    limit: 5000,
     staleTime: 30_000,
   });
   const nodesList = useK8sResourceList('nodes', undefined, {
-    enabled: directK8sEnabled,
+    enabled: podsEnabled,
     limit: 500,
     staleTime: 60_000,
   });
@@ -98,12 +98,27 @@ export function useHealthScore(): HealthScore {
       if (podsFailed > 0) details.push(`${podsFailed} pod(s) in failed state`);
       if (podsPending > 2) details.push(`${podsPending} pod(s) pending`);
 
-      // Node Health (30% weight) — from backend overview health score if available
-      const nodeHealthPct = ov.health?.score ? Math.min(100, ov.health.score) : 100;
+      // Node Health (30% weight) — compute from real node conditions
+      const nodeItems = nodesList.data?.items ?? [];
+      let nodeHealthPct: number;
+      if (nodeItems.length > 0) {
+        const readyNodes = nodeItems.filter((n) => isNodeReady(n as Parameters<typeof isNodeReady>[0])).length;
+        nodeHealthPct = Math.round((readyNodes / nodeItems.length) * 100);
+      } else {
+        nodeHealthPct = ov.health?.score ? Math.min(100, ov.health.score) : 100;
+      }
       const nodeHealth = totalNodes > 0 ? nodeHealthPct : 100;
+      if (totalNodes > 0 && nodeHealth < 100) details.push(`${Math.round((1 - nodeHealth / 100) * totalNodes)} node(s) not ready`);
 
-      // Stability (20% weight) — no restart data in overview; default to good
-      const stability = 90;
+      // Stability (20% weight) — compute from REAL pod restart counts
+      const podItems = podsList.data?.items ?? [];
+      let restartCount = 0;
+      for (const pod of podItems) {
+        restartCount += getRestartCount(pod as Parameters<typeof getRestartCount>[0]);
+      }
+      let stability = 100;
+      if (restartCount > 0) stability = Math.max(0, 100 - restartCount * 2);
+      if (restartCount > 10) details.push(`High restart count: ${restartCount} restarts across pods`);
 
       // Event Health (10% weight)
       const warningEvents = ov.alerts?.warnings ?? 0;

@@ -120,14 +120,14 @@ function formatLeaseTime(iso: string): string {
 }
 
 const LEASE_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 100 },
- { id: 'namespace', defaultWidth: 140, minWidth: 80 },
- { id: 'holder', defaultWidth: 160, minWidth: 80 },
- { id: 'acquireTime', defaultWidth: 180, minWidth: 120 },
- { id: 'renewTime', defaultWidth: 180, minWidth: 120 },
- { id: 'leaseType', defaultWidth: 140, minWidth: 90 },
- { id: 'duration', defaultWidth: 90, minWidth: 60 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'holder', defaultWidth: 160, minWidth: 100 },
+ { id: 'acquireTime', defaultWidth: 160, minWidth: 100 },
+ { id: 'renewTime', defaultWidth: 160, minWidth: 100 },
+ { id: 'leaseType', defaultWidth: 160, minWidth: 100 },
+ { id: 'duration', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const LEASE_COLUMNS_FOR_VISIBILITY = [

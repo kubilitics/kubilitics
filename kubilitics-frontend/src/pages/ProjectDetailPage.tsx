@@ -137,8 +137,8 @@ export default function ProjectDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center py-16">
         <p className="text-muted-foreground">Project not found</p>
-        <Button variant="link" onClick={() => navigate('/home')}>
-          Back to Home
+        <Button variant="link" onClick={() => navigate('/dashboard')}>
+          Back to Dashboard
         </Button>
       </div>
     );
@@ -160,8 +160,8 @@ export default function ProjectDetailPage() {
         <p className="text-sm text-muted-foreground mt-2">
           {projectQuery.error instanceof Error ? projectQuery.error.message : 'Unknown error'}
         </p>
-        <Button variant="outline" onClick={() => navigate('/home')} className="mt-4">
-          Back to Home
+        <Button variant="outline" onClick={() => navigate('/dashboard')} className="mt-4">
+          Back to Dashboard
         </Button>
       </div>
     );
@@ -178,7 +178,7 @@ export default function ProjectDetailPage() {
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/home')} aria-label="Back">
+          <Button variant="ghost" size="icon" onClick={() => navigate('/dashboard')} aria-label="Back">
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex items-center gap-3">

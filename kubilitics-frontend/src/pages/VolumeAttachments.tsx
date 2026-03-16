@@ -71,13 +71,13 @@ interface K8sVolumeAttachment {
 }
 
 const VA_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 220, minWidth: 120 },
- { id: 'attacher', defaultWidth: 180, minWidth: 100 },
- { id: 'node', defaultWidth: 140, minWidth: 90 },
- { id: 'volume', defaultWidth: 160, minWidth: 90 },
- { id: 'attached', defaultWidth: 100, minWidth: 70 },
- { id: 'attachError', defaultWidth: 140, minWidth: 80 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'attacher', defaultWidth: 220, minWidth: 120 },
+ { id: 'node', defaultWidth: 160, minWidth: 100 },
+ { id: 'volume', defaultWidth: 220, minWidth: 120 },
+ { id: 'attached', defaultWidth: 140, minWidth: 100 },
+ { id: 'attachError', defaultWidth: 300, minWidth: 150 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const VA_COLUMNS_FOR_VISIBILITY = [
@@ -106,7 +106,7 @@ function mapVA(item: K8sVolumeAttachment): VolumeAttachment {
 export default function VolumeAttachments() {
  const navigate = useNavigate();
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sVolumeAttachment>('volumeattachments');
+ const { data, isLoading, isError, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sVolumeAttachment>('volumeattachments');
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: VolumeAttachment | null; bulk?: boolean }>({ open: false, item: null });
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());

@@ -292,7 +292,7 @@ function EmptyState() {
           Connect your first cluster to see fleet-wide health, metrics, and status at a glance.
         </p>
       </div>
-      <Button onClick={() => navigate('/connect')} variant="default" size="sm">
+      <Button onClick={() => navigate('/connect?addCluster=true')} variant="default" size="sm">
         Connect Cluster
       </Button>
     </div>

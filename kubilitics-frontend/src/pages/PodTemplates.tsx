@@ -51,10 +51,10 @@ interface K8sPodTemplate extends KubernetesResource {
 }
 
 const PT_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 220, minWidth: 120 },
- { id: 'namespace', defaultWidth: 130, minWidth: 80 },
- { id: 'labels', defaultWidth: 240, minWidth: 120 },
- { id: 'age', defaultWidth: 100, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'labels', defaultWidth: 220, minWidth: 120 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const PT_COLUMNS_FOR_VISIBILITY = [
@@ -85,7 +85,7 @@ function mapPodTemplate(pt: K8sPodTemplate): PodTemplate {
 export default function PodTemplates() {
  const navigate = useNavigate();
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sPodTemplate>('podtemplates');
+ const { data, isLoading, isError, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sPodTemplate>('podtemplates');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: PodTemplate | null; bulk?: boolean }>({ open: false, item: null });
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());

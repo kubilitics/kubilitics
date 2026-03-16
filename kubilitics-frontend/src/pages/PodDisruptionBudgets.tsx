@@ -116,15 +116,15 @@ function transformPDB(p: PDBResource): PDBRow {
 }
 
 const PDB_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 160, minWidth: 100 },
- { id: 'namespace', defaultWidth: 120, minWidth: 80 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
  { id: 'minAvailable', defaultWidth: 100, minWidth: 70 },
- { id: 'maxUnavailable', defaultWidth: 110, minWidth: 70 },
+ { id: 'maxUnavailable', defaultWidth: 100, minWidth: 70 },
  { id: 'currentHealthy', defaultWidth: 100, minWidth: 70 },
  { id: 'desiredHealthy', defaultWidth: 100, minWidth: 70 },
- { id: 'disruptionsAllowed', defaultWidth: 120, minWidth: 80 },
- { id: 'selector', defaultWidth: 140, minWidth: 80 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'disruptionsAllowed', defaultWidth: 100, minWidth: 70 },
+ { id: 'selector', defaultWidth: 220, minWidth: 120 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const PDB_COLUMNS_FOR_VISIBILITY = [

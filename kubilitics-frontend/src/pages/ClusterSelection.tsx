@@ -272,7 +272,7 @@ export default function ClusterSelection() {
             <BrandLogo height={32} />
             <span className="text-xl font-semibold">Kubilitics Setup</span>
           </div>
-          <Button variant="ghost" onClick={() => navigate('/setup/kubeconfig')}>
+          <Button variant="ghost" onClick={() => navigate('/connect')}>
             Back
           </Button>
         </motion.div>
@@ -446,7 +446,7 @@ export default function ClusterSelection() {
               <p className="text-muted-foreground mb-4">No clusters available. Set the backend URL in Settings (e.g. {DEFAULT_BACKEND_BASE_URL}) to use Docker Desktop or other clusters, or go back to add kubeconfig.</p>
               <div className="flex gap-2 justify-center flex-wrap">
                 <Button variant="outline" onClick={() => navigate('/settings')}>Settings</Button>
-                <Button variant="outline" onClick={() => navigate('/setup/kubeconfig')}>Back to kubeconfig</Button>
+                <Button variant="outline" onClick={() => navigate('/connect')}>Back to kubeconfig</Button>
               </div>
             </div>
           )}
@@ -556,7 +556,7 @@ export default function ClusterSelection() {
           <div className="flex items-center justify-between">
             <Button
               variant="outline"
-              onClick={() => navigate('/setup/kubeconfig')}
+              onClick={() => navigate('/connect')}
               className="gap-2"
             >
               <Plus className="h-4 w-4" />

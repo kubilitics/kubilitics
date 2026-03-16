@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { Save, RotateCcw, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Download, Palette, Keyboard, Info, Sun, Moon, Monitor } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Save, RotateCcw, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Download, Palette, Keyboard, Info, Sun, Moon, Monitor, Server, Trash2, Plus, FolderKanban, Focus } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -12,9 +14,21 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { useBackendConfigStore } from '@/stores/backendConfigStore';
+import {
+  AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
+import { useClusterStore } from '@/stores/clusterStore';
 import { useAIConfigStore, toBackendProvider, type AIProvider } from '@/stores/aiConfigStore';
-import { getHealth } from '@/services/backendApiClient';
+import { getHealth, deleteCluster, getProjects, deleteProject, type BackendCluster, type BackendProject } from '@/services/backendApiClient';
+import { useClustersFromBackend } from '@/hooks/useClustersFromBackend';
+import { useActiveClusterId } from '@/hooks/useActiveClusterId';
+import { useBackendCircuitOpen } from '@/hooks/useBackendCircuitOpen';
+import { backendClusterToCluster } from '@/lib/backendClusterAdapter';
+import { CreateProjectDialog } from '@/components/projects/CreateProjectDialog';
+import { ProjectCard } from '@/components/projects/ProjectCard';
+import { ProjectSettingsDialog } from '@/components/projects/ProjectSettingsDialog';
 import {
   getAIHealth,
   getAIConfiguration,
@@ -62,6 +76,61 @@ export default function Settings() {
     setAiBackendUrl,
     setAiWsUrl
   } = useBackendConfigStore();
+  const effectiveBackendBaseUrl = useMemo(() => getEffectiveBackendBaseUrl(backendBaseUrl), [backendBaseUrl]);
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
+  const setCurrentClusterId = useBackendConfigStore((s) => s.setCurrentClusterId);
+  const setActiveCluster = useClusterStore((s) => s.setActiveCluster);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const { data: clustersFromBackend } = useClustersFromBackend();
+  const clusters = useMemo(() => clustersFromBackend || [], [clustersFromBackend]);
+  const currentClusterId = useActiveClusterId();
+  const circuitOpen = useBackendCircuitOpen();
+
+  const [clusterToRemove, setClusterToRemove] = useState<BackendCluster | null>(null);
+  const [projectToRemove, setProjectToRemove] = useState<BackendProject | null>(null);
+  const [settingsProject, setSettingsProject] = useState<any>(null);
+
+  // Cluster delete mutation
+  const deleteClusterMutation = useMutation({
+    mutationFn: async (cluster: BackendCluster) => {
+      await deleteCluster(effectiveBackendBaseUrl, cluster.id);
+    },
+    onSuccess: (_, cluster) => {
+      queryClient.invalidateQueries({ queryKey: ['backend', 'clusters', effectiveBackendBaseUrl] });
+      if (cluster.id === currentClusterId) {
+        const remaining = clusters.filter((c) => c.id !== cluster.id);
+        setCurrentClusterId(remaining[0]?.id ?? null);
+        if (remaining[0]) setActiveCluster(backendClusterToCluster(remaining[0]));
+      }
+      setClusterToRemove(null);
+      toast.success('Cluster removed');
+    },
+    onError: (err: Error) => toast.error(`Failed to remove cluster: ${err.message}`),
+  });
+
+  // Projects query
+  const { data: projectsFromBackend, isLoading: isProjectsLoading } = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => getProjects(effectiveBackendBaseUrl),
+    enabled: isBackendConfigured && !circuitOpen,
+  });
+  const projects = useMemo(() => projectsFromBackend || [], [projectsFromBackend]);
+
+  // Project delete mutation
+  const deleteProjectMutation = useMutation({
+    mutationFn: async (project: BackendProject) => {
+      await deleteProject(effectiveBackendBaseUrl, project.id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      setProjectToRemove(null);
+      toast.success('Project removed');
+    },
+    onError: (err: Error) => toast.error(`Failed to remove project: ${err.message}`),
+  });
+
   const { provider, apiKey, model, customEndpoint, enabled, setProvider, setApiKey, setModel, setCustomEndpoint, setEnabled } = useAIConfigStore();
   const [isTesting, setIsTesting] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<Record<string, 'success' | 'error' | null>>({});
@@ -308,7 +377,7 @@ export default function Settings() {
   };
 
   return (
-    <div className="container max-w-2xl py-10 space-y-8">
+    <div className="container max-w-4xl py-10 space-y-8">
       <div>
         <h1 className="text-3xl font-bold">Settings</h1>
         <p className="text-muted-foreground">Configure connection endpoints for Kubilitics.</p>
@@ -321,6 +390,126 @@ export default function Settings() {
           Changing these values will reload the application. Ensure the new endpoints are reachable.
         </AlertDescription>
       </Alert>
+
+      {/* ─── Clusters ─── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Server className="h-5 w-5" />
+                Clusters
+              </CardTitle>
+              <CardDescription>Manage your connected Kubernetes clusters.</CardDescription>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => navigate('/connect?addCluster=true')}>
+              <Plus className="h-4 w-4 mr-1.5" />
+              Add Cluster
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {clusters.length === 0 ? (
+            <div className="text-center py-8">
+              <Server className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">No clusters connected</p>
+              <Button className="mt-4" onClick={() => navigate('/connect?addCluster=true')}>
+                <Plus className="h-4 w-4 mr-2" />
+                Connect Cluster
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {clusters.map((cluster) => {
+                const isActive = cluster.id === currentClusterId;
+                return (
+                  <div key={cluster.id} className={cn(
+                    "flex items-center justify-between p-4 rounded-xl border transition-colors",
+                    isActive ? "border-primary/30 bg-primary/5" : "border-border hover:border-border/80"
+                  )}>
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className={cn("h-2 w-2 rounded-full shrink-0", isActive ? "bg-primary" : "bg-emerald-500")} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate">{cluster.name}</span>
+                          {isActive && <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded uppercase">Current</span>}
+                        </div>
+                        <span className="text-xs text-muted-foreground">{cluster.provider || 'Kubernetes'} · {cluster.node_count ?? 0} node{(cluster.node_count ?? 0) !== 1 ? 's' : ''}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {!isActive && (
+                        <Button variant="outline" size="sm" onClick={() => {
+                          setCurrentClusterId(cluster.id);
+                          setActiveCluster(backendClusterToCluster(cluster));
+                          toast.success(`Switched to ${cluster.name}`);
+                        }}>
+                          Switch
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => setClusterToRemove(cluster)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ─── Projects ─── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <FolderKanban className="h-5 w-5" />
+                Projects
+              </CardTitle>
+              <CardDescription>Organize workloads into logical groups with governance.</CardDescription>
+            </div>
+            <CreateProjectDialog>
+              <Button variant="outline" size="sm">
+                <Plus className="h-4 w-4 mr-1.5" />
+                New Project
+              </Button>
+            </CreateProjectDialog>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isProjectsLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">Loading projects...</span>
+            </div>
+          ) : projects.length === 0 ? (
+            <div className="text-center py-8">
+              <Focus className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">No projects yet</p>
+              <CreateProjectDialog>
+                <Button className="mt-4">
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Project
+                </Button>
+              </CreateProjectDialog>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {projects.map((project) => (
+                <ProjectCard
+                  key={project.id}
+                  project={project}
+                  onClick={() => navigate(`/projects/${project.id}/dashboard`)}
+                  onSettingsClick={() => setSettingsProject(project)}
+                  onDeleteClick={() => setProjectToRemove(project)}
+                />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -844,6 +1033,50 @@ export default function Settings() {
 
       {/* ─── About ─── */}
       <AboutSection />
+
+      {/* Cluster Remove Dialog */}
+      <AlertDialog open={!!clusterToRemove} onOpenChange={(open) => !open && setClusterToRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove cluster?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will unregister <strong>{clusterToRemove?.name}</strong> from Kubilitics. This does not modify your kubeconfig file.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteClusterMutation.isPending}>Cancel</AlertDialogCancel>
+            <Button variant="destructive" onClick={() => clusterToRemove && deleteClusterMutation.mutate(clusterToRemove)} disabled={deleteClusterMutation.isPending}>
+              {deleteClusterMutation.isPending ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Removing...</> : 'Remove'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Project Delete Dialog */}
+      <AlertDialog open={!!projectToRemove} onOpenChange={(open) => !open && setProjectToRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              All cluster associations and resource links for <strong>{projectToRemove?.name}</strong> will be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteProjectMutation.isPending}>Cancel</AlertDialogCancel>
+            <Button variant="destructive" onClick={() => projectToRemove && deleteProjectMutation.mutate(projectToRemove)} disabled={deleteProjectMutation.isPending}>
+              {deleteProjectMutation.isPending ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Deleting...</> : 'Confirm Delete'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {settingsProject && (
+        <ProjectSettingsDialog
+          project={settingsProject}
+          open={!!settingsProject}
+          onOpenChange={(open) => !open && setSettingsProject(null)}
+        />
+      )}
     </div>
   );
 }

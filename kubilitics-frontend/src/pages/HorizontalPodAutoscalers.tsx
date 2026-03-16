@@ -134,15 +134,15 @@ function transformHPA(h: HPAResource): HPARow {
 }
 
 const HPA_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 160, minWidth: 100 },
- { id: 'namespace', defaultWidth: 120, minWidth: 80 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
  { id: 'target', defaultWidth: 160, minWidth: 100 },
  { id: 'minMaxReplicas', defaultWidth: 100, minWidth: 70 },
- { id: 'current', defaultWidth: 90, minWidth: 56 },
- { id: 'cpuTarget', defaultWidth: 95, minWidth: 60 },
- { id: 'cpuCurrent', defaultWidth: 95, minWidth: 60 },
- { id: 'lastScale', defaultWidth: 100, minWidth: 64 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'current', defaultWidth: 100, minWidth: 70 },
+ { id: 'cpuTarget', defaultWidth: 130, minWidth: 90 },
+ { id: 'cpuCurrent', defaultWidth: 130, minWidth: 90 },
+ { id: 'lastScale', defaultWidth: 160, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const HPA_COLUMNS_FOR_VISIBILITY = [

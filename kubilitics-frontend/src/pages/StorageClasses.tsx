@@ -72,14 +72,14 @@ interface K8sStorageClass extends KubernetesResource {
 }
 
 const SC_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 100 },
- { id: 'provisioner', defaultWidth: 180, minWidth: 100 },
- { id: 'reclaimPolicy', defaultWidth: 120, minWidth: 80 },
- { id: 'volumeBindingMode', defaultWidth: 130, minWidth: 90 },
- { id: 'allowVolumeExpansion', defaultWidth: 100, minWidth: 70 },
- { id: 'pvCount', defaultWidth: 90, minWidth: 70 },
- { id: 'default', defaultWidth: 90, minWidth: 70 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'provisioner', defaultWidth: 220, minWidth: 120 },
+ { id: 'reclaimPolicy', defaultWidth: 160, minWidth: 100 },
+ { id: 'volumeBindingMode', defaultWidth: 160, minWidth: 100 },
+ { id: 'allowVolumeExpansion', defaultWidth: 160, minWidth: 100 },
+ { id: 'pvCount', defaultWidth: 100, minWidth: 70 },
+ { id: 'default', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const SC_COLUMNS_FOR_VISIBILITY = [
@@ -109,7 +109,7 @@ function mapSC(sc: K8sStorageClass): StorageClass {
 export default function StorageClasses() {
  const navigate = useNavigate();
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sStorageClass>('storageclasses');
+ const { data, isLoading, isError, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sStorageClass>('storageclasses');
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: StorageClass | null; bulk?: boolean }>({ open: false, item: null });
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());

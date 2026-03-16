@@ -59,7 +59,7 @@ export default function ProjectDashboardPage() {
 
   const handleExitProject = () => {
     clearActiveProject();
-    navigate('/home');
+    navigate('/dashboard');
   };
 
   const handleConnectCluster = (clusterId: string) => {
@@ -77,7 +77,7 @@ export default function ProjectDashboardPage() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
         <p className="text-muted-foreground">Project not found</p>
-        <Button variant="link" onClick={() => navigate('/home')}>Back to Home</Button>
+        <Button variant="link" onClick={() => navigate('/dashboard')}>Back to Dashboard</Button>
       </div>
     );
   }
@@ -95,7 +95,7 @@ export default function ProjectDashboardPage() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 rounded-xl border border-destructive/50 bg-destructive/5 p-6">
         <p className="text-destructive font-medium">Failed to load project</p>
-        <Button variant="outline" onClick={() => navigate('/home')}>Back to Home</Button>
+        <Button variant="outline" onClick={() => navigate('/dashboard')}>Back to Dashboard</Button>
       </div>
     );
   }
@@ -175,7 +175,7 @@ export default function ProjectDashboardPage() {
       <div className="shrink-0 border-b border-border bg-card/50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 flex-wrap">
           <nav className="flex items-center gap-2 text-sm text-muted-foreground" aria-label="Breadcrumb">
-            <Link to="/home" className="hover:text-foreground transition-colors">Home</Link>
+            <Link to="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
             <span aria-hidden>/</span>
             <Link to={`/projects/${projectId}`} className="hover:text-foreground transition-colors truncate max-w-[140px]">
               {project.name}

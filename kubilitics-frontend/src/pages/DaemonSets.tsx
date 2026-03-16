@@ -69,19 +69,19 @@ const statusConfig = {
 };
 
 const DAEMONSETS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 140, minWidth: 100 },
- { id: 'status', defaultWidth: 120, minWidth: 90 },
- { id: 'desired', defaultWidth: 100, minWidth: 80 },
- { id: 'current', defaultWidth: 100, minWidth: 80 },
- { id: 'ready', defaultWidth: 100, minWidth: 80 },
- { id: 'upToDate', defaultWidth: 120, minWidth: 100 },
- { id: 'available', defaultWidth: 120, minWidth: 100 },
- { id: 'nodeCoverage', defaultWidth: 180, minWidth: 130 },
- { id: 'updateStrategy', defaultWidth: 180, minWidth: 140 },
- { id: 'cpu', defaultWidth: 120, minWidth: 85 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'desired', defaultWidth: 100, minWidth: 70 },
+ { id: 'current', defaultWidth: 100, minWidth: 70 },
+ { id: 'ready', defaultWidth: 100, minWidth: 70 },
+ { id: 'upToDate', defaultWidth: 100, minWidth: 70 },
+ { id: 'available', defaultWidth: 100, minWidth: 70 },
+ { id: 'nodeCoverage', defaultWidth: 160, minWidth: 100 },
+ { id: 'updateStrategy', defaultWidth: 160, minWidth: 100 },
+ { id: 'cpu', defaultWidth: 130, minWidth: 90 },
  { id: 'memory', defaultWidth: 130, minWidth: 90 },
- { id: 'age', defaultWidth: 100, minWidth: 65 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const DAEMONSETS_COLUMNS_FOR_VISIBILITY = [

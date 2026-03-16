@@ -71,14 +71,14 @@ interface CustomResourceDefinition {
 }
 
 const CRD_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 280, minWidth: 160 },
- { id: 'group', defaultWidth: 180, minWidth: 100 },
- { id: 'kind', defaultWidth: 140, minWidth: 90 },
- { id: 'scope', defaultWidth: 110, minWidth: 80 },
- { id: 'version', defaultWidth: 90, minWidth: 60 },
- { id: 'versions', defaultWidth: 80, minWidth: 50 },
- { id: 'established', defaultWidth: 100, minWidth: 80 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 300, minWidth: 150 },
+ { id: 'group', defaultWidth: 220, minWidth: 120 },
+ { id: 'kind', defaultWidth: 160, minWidth: 100 },
+ { id: 'scope', defaultWidth: 160, minWidth: 100 },
+ { id: 'version', defaultWidth: 160, minWidth: 100 },
+ { id: 'versions', defaultWidth: 100, minWidth: 70 },
+ { id: 'established', defaultWidth: 140, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const CRD_COLUMNS_FOR_VISIBILITY = [

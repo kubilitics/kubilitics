@@ -101,15 +101,15 @@ function transformNamespaceResource(resource: NamespaceResource): Namespace {
 }
 
 const NS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 180, minWidth: 100 },
- { id: 'status', defaultWidth: 110, minWidth: 80 },
- { id: 'pods', defaultWidth: 80, minWidth: 50 },
- { id: 'deployments', defaultWidth: 100, minWidth: 70 },
- { id: 'services', defaultWidth: 90, minWidth: 60 },
- { id: 'configmaps', defaultWidth: 100, minWidth: 70 },
- { id: 'secrets', defaultWidth: 80, minWidth: 50 },
- { id: 'labels', defaultWidth: 160, minWidth: 80 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'status', defaultWidth: 140, minWidth: 100 },
+ { id: 'pods', defaultWidth: 100, minWidth: 70 },
+ { id: 'deployments', defaultWidth: 130, minWidth: 90 },
+ { id: 'services', defaultWidth: 100, minWidth: 70 },
+ { id: 'configmaps', defaultWidth: 130, minWidth: 90 },
+ { id: 'secrets', defaultWidth: 100, minWidth: 70 },
+ { id: 'labels', defaultWidth: 220, minWidth: 120 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const NS_COLUMNS_FOR_VISIBILITY = [
@@ -133,7 +133,7 @@ export default function Namespaces() {
  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
  const clusterId = currentClusterId ?? null;
 
- const { data, isLoading, refetch, pagination: hookPagination } = usePaginatedResourceList<NamespaceResource>('namespaces');
+ const { data, isLoading, isError, refetch, pagination: hookPagination } = usePaginatedResourceList<NamespaceResource>('namespaces');
  const deleteResource = useDeleteK8sResource('namespaces');
 
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: Namespace | null; bulk?: boolean }>({ open: false, item: null });

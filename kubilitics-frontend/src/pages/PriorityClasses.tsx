@@ -92,13 +92,13 @@ function transformPriorityClass(r: PriorityClassResource): PriorityClassRow {
 }
 
 const PRIORITY_CLASS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 100 },
- { id: 'value', defaultWidth: 100, minWidth: 60 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'value', defaultWidth: 100, minWidth: 70 },
  { id: 'globalDefault', defaultWidth: 100, minWidth: 70 },
- { id: 'preemptionPolicy', defaultWidth: 140, minWidth: 90 },
- { id: 'podsUsing', defaultWidth: 90, minWidth: 50 },
- { id: 'description', defaultWidth: 200, minWidth: 100 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'preemptionPolicy', defaultWidth: 160, minWidth: 100 },
+ { id: 'podsUsing', defaultWidth: 100, minWidth: 70 },
+ { id: 'description', defaultWidth: 300, minWidth: 150 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const PRIORITY_CLASS_COLUMNS_FOR_VISIBILITY = [

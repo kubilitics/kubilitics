@@ -125,14 +125,14 @@ function transformRole(r: RoleResource): Role {
 }
 
 const ROLE_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 180, minWidth: 100 },
- { id: 'namespace', defaultWidth: 130, minWidth: 80 },
- { id: 'rules', defaultWidth: 80, minWidth: 50 },
- { id: 'apiGroups', defaultWidth: 140, minWidth: 80 },
- { id: 'resources', defaultWidth: 180, minWidth: 100 },
- { id: 'verbs', defaultWidth: 160, minWidth: 90 },
- { id: 'bindings', defaultWidth: 80, minWidth: 50 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'rules', defaultWidth: 100, minWidth: 70 },
+ { id: 'apiGroups', defaultWidth: 160, minWidth: 100 },
+ { id: 'resources', defaultWidth: 160, minWidth: 100 },
+ { id: 'verbs', defaultWidth: 160, minWidth: 100 },
+ { id: 'bindings', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const ROLES_COLUMNS_FOR_VISIBILITY = [

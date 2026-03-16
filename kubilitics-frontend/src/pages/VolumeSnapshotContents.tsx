@@ -48,13 +48,13 @@ interface K8sVolumeSnapshotContent extends KubernetesResource {
 }
 
 const VSC_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 260, minWidth: 140 },
- { id: 'status', defaultWidth: 110, minWidth: 80 },
- { id: 'source', defaultWidth: 180, minWidth: 120 },
+ { id: 'name', defaultWidth: 300, minWidth: 150 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'source', defaultWidth: 220, minWidth: 120 },
  { id: 'snapshotClass', defaultWidth: 160, minWidth: 100 },
- { id: 'capacity', defaultWidth: 100, minWidth: 70 },
- { id: 'deletionPolicy', defaultWidth: 120, minWidth: 90 },
- { id: 'age', defaultWidth: 100, minWidth: 56 },
+ { id: 'capacity', defaultWidth: 130, minWidth: 90 },
+ { id: 'deletionPolicy', defaultWidth: 160, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const VSC_COLUMNS_FOR_VISIBILITY = [
@@ -116,7 +116,7 @@ function mapVSC(vsc: K8sVolumeSnapshotContent): VolumeSnapshotContent {
 export default function VolumeSnapshotContents() {
  const navigate = useNavigate();
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, isFetching, dataUpdatedAt, refetch } = usePaginatedResourceList<K8sVolumeSnapshotContent>('volumesnapshotcontents');
+ const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = usePaginatedResourceList<K8sVolumeSnapshotContent>('volumesnapshotcontents');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: VolumeSnapshotContent | null; bulk?: boolean }>({ open: false, item: null });
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
  const [searchQuery, setSearchQuery] = useState('');

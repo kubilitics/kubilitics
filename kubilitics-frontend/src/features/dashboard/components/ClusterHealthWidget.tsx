@@ -4,7 +4,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer, Label } from "recharts";
-import { Info, CheckCircle2, AlertTriangle, AlertCircle, ChevronRight } from "lucide-react";
+import { Info, CheckCircle2, AlertTriangle, AlertCircle, ChevronRight, Boxes, Server, RefreshCw, ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Progress } from "@/components/ui/progress";
@@ -81,7 +81,7 @@ export const ClusterHealthWidget = () => {
       </CardHeader>
 
       <CardContent className="flex-1 flex flex-col pt-2 pb-6 px-6 relative z-10">
-        <div className="flex items-center justify-center shrink-0" style={{ height: "180px" }}>
+        <div className="flex items-center justify-center shrink-0" style={{ height: "160px" }}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart aria-label="Cluster health score chart">
               <defs>
@@ -94,8 +94,8 @@ export const ClusterHealthWidget = () => {
                 data={data}
                 cx="50%"
                 cy="50%"
-                innerRadius={56}
-                outerRadius={72}
+                innerRadius={48}
+                outerRadius={64}
                 startAngle={90}
                 endAngle={-270}
                 dataKey="value"
@@ -128,25 +128,31 @@ export const ClusterHealthWidget = () => {
           </ResponsiveContainer>
         </div>
 
-        {/* Breakdown — 4 factors */}
-        <div className="space-y-2 pt-2 border-t border-border/50">
+        {/* Breakdown — 4 factors (matches Resource Allocation vertical style) */}
+        <div className="space-y-2 pt-3 mt-auto border-t border-border/50">
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Health factors</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-            {(["podHealth", "nodeHealth", "stability", "eventHealth"] as const).map((key) => (
-              <div key={key} className="space-y-1">
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-muted-foreground">{BREAKDOWN_LABELS[key]}</span>
-                  <span className="font-semibold tabular-nums">{Math.min(100, Math.max(0, breakdown[key]))}%</span>
+          <div className="space-y-3">
+            {(["podHealth", "nodeHealth", "stability", "eventHealth"] as const).map((key) => {
+              const val = Math.min(100, Math.max(0, breakdown[key]));
+              const Icon = key === "podHealth" ? Boxes : key === "nodeHealth" ? Server : key === "stability" ? RefreshCw : ShieldAlert;
+              return (
+                <div key={key} className="space-y-1">
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-muted-foreground flex items-center gap-1.5">
+                      <Icon className="w-3 h-3" /> {BREAKDOWN_LABELS[key]}
+                    </span>
+                    <span className="font-semibold tabular-nums">{val}%</span>
+                  </div>
+                  <Progress
+                    value={val}
+                    className="h-1.5 bg-muted/50"
+                    indicatorClassName={cn(
+                      val >= 80 ? "bg-emerald-500" : val >= 60 ? "bg-amber-500" : "bg-rose-500"
+                    )}
+                  />
                 </div>
-                <Progress
-                  value={Math.min(100, Math.max(0, breakdown[key]))}
-                  className="h-1.5 bg-muted/50"
-                  indicatorClassName={cn(
-                    breakdown[key] >= 80 ? "bg-emerald-500" : breakdown[key] >= 60 ? "bg-amber-500" : "bg-rose-500"
-                  )}
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

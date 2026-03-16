@@ -153,15 +153,15 @@ function transformClusterRole(r: ClusterRoleResource): ClusterRoleRow {
 }
 
 const CLUSTER_ROLE_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 100 },
- { id: 'rules', defaultWidth: 80, minWidth: 50 },
- { id: 'apiGroups', defaultWidth: 140, minWidth: 80 },
- { id: 'resources', defaultWidth: 160, minWidth: 90 },
- { id: 'verbs', defaultWidth: 140, minWidth: 80 },
- { id: 'nonResourceURLs', defaultWidth: 100, minWidth: 60 },
- { id: 'aggregation', defaultWidth: 120, minWidth: 60 },
- { id: 'bindings', defaultWidth: 80, minWidth: 50 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'rules', defaultWidth: 100, minWidth: 70 },
+ { id: 'apiGroups', defaultWidth: 160, minWidth: 100 },
+ { id: 'resources', defaultWidth: 160, minWidth: 100 },
+ { id: 'verbs', defaultWidth: 160, minWidth: 100 },
+ { id: 'nonResourceURLs', defaultWidth: 160, minWidth: 100 },
+ { id: 'aggregation', defaultWidth: 160, minWidth: 100 },
+ { id: 'bindings', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const CLUSTERROLES_COLUMNS_FOR_VISIBILITY = [

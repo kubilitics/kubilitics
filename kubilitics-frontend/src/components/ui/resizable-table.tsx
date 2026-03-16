@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { TableHead, TableCell } from '@/components/ui/table';
 
 const STORAGE_KEY_PREFIX = 'kubilitics-resizable-table-';
-const MIN_WIDTH = 48;
+const MIN_WIDTH = 80;
 const MAX_WIDTH = 800;
 
 export interface ResizableColumnConfig {
@@ -213,7 +213,6 @@ export const ResizableTableHead = React.forwardRef<HTMLTableCellElement, Resizab
           ...style,
           width: width ?? style?.width,
           minWidth: minWidth ?? style?.minWidth,
-          maxWidth: width ?? style?.maxWidth,
         }}
         {...props}
       >
@@ -245,7 +244,6 @@ export const ResizableTableCell = React.forwardRef<HTMLTableCellElement, Resizab
           ...style,
           width: width ?? style?.width,
           minWidth: minWidth ?? style?.minWidth,
-          maxWidth: width ?? style?.maxWidth,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
         }}

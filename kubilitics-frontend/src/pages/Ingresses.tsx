@@ -87,18 +87,18 @@ interface Ingress {
 }
 
 const INGRESSES_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 130, minWidth: 90 },
- { id: 'status', defaultWidth: 100, minWidth: 75 },
- { id: 'class', defaultWidth: 120, minWidth: 85 },
- { id: 'hosts', defaultWidth: 200, minWidth: 120 },
- { id: 'addresses', defaultWidth: 140, minWidth: 95 },
- { id: 'tls', defaultWidth: 90, minWidth: 60 },
- { id: 'rules', defaultWidth: 70, minWidth: 50 },
- { id: 'defaultBackend', defaultWidth: 140, minWidth: 90 },
- { id: 'requestsSec', defaultWidth: 90, minWidth: 60 },
- { id: 'errorRate', defaultWidth: 90, minWidth: 60 },
- { id: 'age', defaultWidth: 90, minWidth: 60 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'class', defaultWidth: 160, minWidth: 100 },
+ { id: 'hosts', defaultWidth: 220, minWidth: 120 },
+ { id: 'addresses', defaultWidth: 160, minWidth: 120 },
+ { id: 'tls', defaultWidth: 100, minWidth: 70 },
+ { id: 'rules', defaultWidth: 100, minWidth: 70 },
+ { id: 'defaultBackend', defaultWidth: 160, minWidth: 100 },
+ { id: 'requestsSec', defaultWidth: 100, minWidth: 70 },
+ { id: 'errorRate', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const INGRESSES_COLUMNS_FOR_VISIBILITY = [

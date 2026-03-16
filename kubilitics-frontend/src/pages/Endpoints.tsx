@@ -66,14 +66,14 @@ interface Endpoint {
 }
 
 const ENDPOINTS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 140, minWidth: 90 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
  { id: 'readyCount', defaultWidth: 100, minWidth: 70 },
- { id: 'notReadyCount', defaultWidth: 110, minWidth: 80 },
- { id: 'totalAddresses', defaultWidth: 90, minWidth: 70 },
- { id: 'ports', defaultWidth: 140, minWidth: 80 },
- { id: 'service', defaultWidth: 140, minWidth: 90 },
- { id: 'age', defaultWidth: 90, minWidth: 60 },
+ { id: 'notReadyCount', defaultWidth: 100, minWidth: 70 },
+ { id: 'totalAddresses', defaultWidth: 100, minWidth: 70 },
+ { id: 'ports', defaultWidth: 160, minWidth: 100 },
+ { id: 'service', defaultWidth: 160, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const ENDPOINTS_COLUMNS_FOR_VISIBILITY = [

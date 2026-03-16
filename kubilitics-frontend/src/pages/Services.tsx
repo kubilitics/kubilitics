@@ -97,21 +97,21 @@ interface Service {
 }
 
 const SERVICES_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 140, minWidth: 100 },
- { id: 'status', defaultWidth: 100, minWidth: 82 },
- { id: 'type', defaultWidth: 130, minWidth: 95 },
- { id: 'clusterIP', defaultWidth: 130, minWidth: 90 },
- { id: 'externalIP', defaultWidth: 140, minWidth: 95 },
- { id: 'ports', defaultWidth: 160, minWidth: 90 },
- { id: 'endpoints', defaultWidth: 110, minWidth: 85 },
- { id: 'selector', defaultWidth: 160, minWidth: 90 },
- { id: 'sessionAffinity', defaultWidth: 130, minWidth: 95 },
- { id: 'trafficPolicy', defaultWidth: 110, minWidth: 85 },
- { id: 'requestsSec', defaultWidth: 90, minWidth: 60 },
- { id: 'latencyP99', defaultWidth: 90, minWidth: 60 },
- { id: 'errorRate', defaultWidth: 90, minWidth: 60 },
- { id: 'age', defaultWidth: 100, minWidth: 65 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'status', defaultWidth: 140, minWidth: 100 },
+ { id: 'type', defaultWidth: 160, minWidth: 100 },
+ { id: 'clusterIP', defaultWidth: 160, minWidth: 120 },
+ { id: 'externalIP', defaultWidth: 160, minWidth: 120 },
+ { id: 'ports', defaultWidth: 220, minWidth: 120 },
+ { id: 'endpoints', defaultWidth: 130, minWidth: 90 },
+ { id: 'selector', defaultWidth: 220, minWidth: 120 },
+ { id: 'sessionAffinity', defaultWidth: 160, minWidth: 100 },
+ { id: 'trafficPolicy', defaultWidth: 160, minWidth: 100 },
+ { id: 'requestsSec', defaultWidth: 100, minWidth: 70 },
+ { id: 'latencyP99', defaultWidth: 100, minWidth: 70 },
+ { id: 'errorRate', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const SERVICES_COLUMNS_FOR_VISIBILITY = [

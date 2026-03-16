@@ -2,8 +2,9 @@
  * Dashboard — The main control surface.
  *
  * Layout hierarchy:
- *   1. Hero band       — Cluster Health + Pod Status Distribution (tallest, most prominent)
+ *   1. Hero band       — Cluster Health + Cluster Capacity (tallest, most prominent)
  *   2. Resource shelf   — 3×3 metric tiles inside a subtle container panel
+ *   2b. Pod distribution — Pod Status Distribution (moved below resources)
  *   3. Intelligence row — Resource Intelligence + Quick Actions (equal columns)
  *   4. Pod health       — Utilisation stacked bar
  *   5. Alerts           — Warning / critical event stream
@@ -18,6 +19,7 @@ import { PodHealthSummary } from "./PodHealthSummary";
 import { AlertsStrip } from "./AlertsStrip";
 import { QuickActionsGrid } from "./QuickActionsGrid";
 import { PodStatusDistribution } from "./PodStatusDistribution";
+import { ClusterCapacity } from "./ClusterCapacity";
 import { ClusterResourceIntelligence } from "@/components/dashboard/ClusterEfficiencyCard";
 import { MetricCardsGrid } from "./MetricCardsGrid";
 
@@ -56,7 +58,7 @@ export const DashboardLayout = () => {
               <ClusterHealthWidget />
             </div>
             <div className="lg:col-span-8 flex flex-col min-h-[28rem]">
-              <PodStatusDistribution />
+              <ClusterCapacity />
             </div>
           </section>
 
@@ -64,6 +66,11 @@ export const DashboardLayout = () => {
           <section>
             <SectionHeader icon={Boxes} title="Resources" />
             <MetricCardsGrid />
+          </section>
+
+          {/* ────────────────── Row 2b: Pod Status Distribution ────────────────── */}
+          <section>
+            <PodStatusDistribution />
           </section>
 
           {/* ────────────────── Row 3: Intelligence + Quick Actions ────────────────── */}

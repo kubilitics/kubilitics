@@ -105,17 +105,17 @@ function transformServiceAccount(sa: ServiceAccountResource): ServiceAccount {
 }
 
 const SA_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 180, minWidth: 100 },
- { id: 'namespace', defaultWidth: 130, minWidth: 80 },
- { id: 'secrets', defaultWidth: 80, minWidth: 50 },
- { id: 'imagePullSecrets', defaultWidth: 120, minWidth: 80 },
- { id: 'tokens', defaultWidth: 70, minWidth: 50 },
- { id: 'usedByPods', defaultWidth: 90, minWidth: 60 },
- { id: 'roles', defaultWidth: 70, minWidth: 50 },
- { id: 'clusterRoles', defaultWidth: 90, minWidth: 60 },
- { id: 'permissions', defaultWidth: 100, minWidth: 70 },
- { id: 'automountToken', defaultWidth: 110, minWidth: 80 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'secrets', defaultWidth: 100, minWidth: 70 },
+ { id: 'imagePullSecrets', defaultWidth: 160, minWidth: 100 },
+ { id: 'tokens', defaultWidth: 100, minWidth: 70 },
+ { id: 'usedByPods', defaultWidth: 100, minWidth: 70 },
+ { id: 'roles', defaultWidth: 100, minWidth: 70 },
+ { id: 'clusterRoles', defaultWidth: 100, minWidth: 70 },
+ { id: 'permissions', defaultWidth: 160, minWidth: 100 },
+ { id: 'automountToken', defaultWidth: 160, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const SA_COLUMNS_FOR_VISIBILITY = [

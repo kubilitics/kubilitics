@@ -50,9 +50,9 @@ const RECOMMENDATION_ICONS = {
 } as const;
 
 const SEVERITY_STYLES: Record<string, { bg: string; border: string; text: string }> = {
-  critical: { bg: "bg-rose-50", border: "border-rose-200", text: "text-rose-700" },
-  warning: { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-700" },
-  info: { bg: "bg-sky-50", border: "border-sky-200", text: "text-sky-700" },
+  critical: { bg: "bg-rose-50 dark:bg-rose-500/10", border: "border-rose-200 dark:border-rose-500/20", text: "text-rose-700 dark:text-rose-400" },
+  warning: { bg: "bg-amber-50 dark:bg-amber-500/10", border: "border-amber-200 dark:border-amber-500/20", text: "text-amber-700 dark:text-amber-400" },
+  info: { bg: "bg-sky-50 dark:bg-sky-500/10", border: "border-sky-200 dark:border-sky-500/20", text: "text-sky-700 dark:text-sky-400" },
 };
 
 // ─── SVG Radial Gauge ────────────────────────────────────────────────────────
@@ -375,9 +375,9 @@ export function ClusterResourceIntelligence() {
             {metricsAvailable && avgOverprov > 0 && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 border border-amber-200 cursor-help">
-                    <TrendingDown className="h-3 w-3 text-amber-600" />
-                    <span className="text-[11px] font-semibold text-amber-700 tabular-nums">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 cursor-help">
+                    <TrendingDown className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                    <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 tabular-nums">
                       {avgOverprov}% overprovisioned
                     </span>
                   </div>
@@ -457,7 +457,10 @@ export function ClusterResourceIntelligence() {
                     />
                   </div>
                   <span className="text-[10px] tabular-nums text-muted-foreground font-medium w-[5.5rem] text-right">
-                    {(ns.cpu / 1000).toFixed(1)}m / {(ns.mem / (1024 * 1024)).toFixed(0)}Mi
+                    {ns.cpu >= 1000
+                      ? `${(ns.cpu / 1000).toFixed(1)}C`
+                      : `${Math.round(ns.cpu)}m`
+                    } / {(ns.mem / (1024 * 1024)).toFixed(0)}Mi
                   </span>
                 </div>
               );

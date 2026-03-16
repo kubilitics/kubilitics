@@ -140,17 +140,17 @@ function transformResourceQuota(r: ResourceQuotaResource): ResourceQuotaRow {
 }
 
 const RQ_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 160, minWidth: 100 },
- { id: 'namespace', defaultWidth: 120, minWidth: 80 },
- { id: 'cpuRequests', defaultWidth: 110, minWidth: 80 },
- { id: 'cpuLimits', defaultWidth: 110, minWidth: 80 },
- { id: 'memoryRequests', defaultWidth: 120, minWidth: 80 },
- { id: 'memoryLimits', defaultWidth: 120, minWidth: 80 },
- { id: 'pods', defaultWidth: 80, minWidth: 50 },
- { id: 'services', defaultWidth: 90, minWidth: 50 },
- { id: 'pvcs', defaultWidth: 90, minWidth: 50 },
- { id: 'overallUsage', defaultWidth: 100, minWidth: 70 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'cpuRequests', defaultWidth: 130, minWidth: 90 },
+ { id: 'cpuLimits', defaultWidth: 130, minWidth: 90 },
+ { id: 'memoryRequests', defaultWidth: 130, minWidth: 90 },
+ { id: 'memoryLimits', defaultWidth: 130, minWidth: 90 },
+ { id: 'pods', defaultWidth: 100, minWidth: 70 },
+ { id: 'services', defaultWidth: 100, minWidth: 70 },
+ { id: 'pvcs', defaultWidth: 100, minWidth: 70 },
+ { id: 'overallUsage', defaultWidth: 130, minWidth: 90 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const RQ_COLUMNS_FOR_VISIBILITY = [

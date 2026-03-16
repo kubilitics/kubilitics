@@ -114,14 +114,14 @@ function transformLimitRange(r: LimitRangeResource): LimitRangeRow {
 }
 
 const LR_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 160, minWidth: 100 },
- { id: 'namespace', defaultWidth: 120, minWidth: 80 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
  { id: 'types', defaultWidth: 160, minWidth: 100 },
- { id: 'defaultCpu', defaultWidth: 100, minWidth: 70 },
- { id: 'defaultMemory', defaultWidth: 110, minWidth: 80 },
- { id: 'maxCpu', defaultWidth: 90, minWidth: 60 },
- { id: 'maxMemory', defaultWidth: 110, minWidth: 80 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'defaultCpu', defaultWidth: 130, minWidth: 90 },
+ { id: 'defaultMemory', defaultWidth: 130, minWidth: 90 },
+ { id: 'maxCpu', defaultWidth: 130, minWidth: 90 },
+ { id: 'maxMemory', defaultWidth: 130, minWidth: 90 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const LR_COLUMNS_FOR_VISIBILITY = [

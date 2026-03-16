@@ -1,6 +1,6 @@
 /**
  * Dedicated route: apply cluster from Connect page and redirect to home (P1-7).
- * Stays outside ProtectedRoute so we always apply state, then go to /home.
+ * Stays outside ProtectedRoute so we always apply state, then go to /dashboard.
  * If location.state is lost (e.g. refresh), uses clusterId from URL and fetches cluster from backend.
  * Runs apply+redirect exactly once (ref guard) to avoid Strict Mode double-run races.
  */
@@ -14,8 +14,8 @@ import { backendClusterToCluster } from '@/lib/backendClusterAdapter';
 import { Loader2 } from 'lucide-react';
 
 function getPostConnectPath(returnUrl: string | null): string {
-  if (!returnUrl || !returnUrl.startsWith('/') || returnUrl.startsWith('//')) return '/home';
-  if (returnUrl === '/' || returnUrl === '/connect' || returnUrl.startsWith('/connect?') || returnUrl === '/mode-selection') return '/home';
+  if (!returnUrl || !returnUrl.startsWith('/') || returnUrl.startsWith('//')) return '/dashboard';
+  if (returnUrl === '/' || returnUrl === '/connect' || returnUrl.startsWith('/connect?') || returnUrl === '/mode-selection') return '/dashboard';
   return returnUrl;
 }
 

@@ -27,8 +27,8 @@ export const useUIStore = create<UIState>()(
         (set) => ({
             isSidebarCollapsed: false,
             isAutoCollapsed: false,
-            expandedResourceCategories: [],
-            isResourcesSectionOpen: false,
+            expandedResourceCategories: ['workloads'],
+            isResourcesSectionOpen: true,
             setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed, isAutoCollapsed: false }),
             toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed, isAutoCollapsed: false })),
             setAutoCollapsed: (auto) => set({ isAutoCollapsed: auto }),

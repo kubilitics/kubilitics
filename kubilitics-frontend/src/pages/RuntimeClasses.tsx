@@ -58,12 +58,12 @@ interface RuntimeClass {
 }
 
 const RC_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 220, minWidth: 120 },
- { id: 'handler', defaultWidth: 150, minWidth: 90 },
- { id: 'overheadCpu', defaultWidth: 130, minWidth: 80 },
- { id: 'overheadMemory', defaultWidth: 130, minWidth: 80 },
- { id: 'scheduling', defaultWidth: 130, minWidth: 80 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'handler', defaultWidth: 160, minWidth: 100 },
+ { id: 'overheadCpu', defaultWidth: 130, minWidth: 90 },
+ { id: 'overheadMemory', defaultWidth: 130, minWidth: 90 },
+ { id: 'scheduling', defaultWidth: 160, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const RC_COLUMNS_FOR_VISIBILITY = [

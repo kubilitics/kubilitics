@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Folder, Clock, Download, Trash2, Box, Globe, Settings, Layers, Package, Database, Shield, Activity, Loader2, Network, GitCompare } from 'lucide-react';
+import { Folder, Clock, Download, Trash2, Box, Globe, Settings, Layers, Package, Database, Shield, Activity, Loader2, Network, GitCompare, ChevronRight, BarChart2, Boxes, HardDrive, ArrowUpRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -93,22 +93,41 @@ export default function NamespaceDetail() {
     }
   };
 
-  const podsList = useK8sResourceList<KubernetesResource>('pods', nsName, { enabled: !!nsName && isConnected, limit: 5000 });
-  const deploymentsList = useK8sResourceList<KubernetesResource>('deployments', nsName, { enabled: !!nsName && isConnected, limit: 500 });
-  const servicesList = useK8sResourceList<KubernetesResource>('services', nsName, { enabled: !!nsName && isConnected, limit: 500 });
-  const configMapsList = useK8sResourceList<KubernetesResource>('configmaps', nsName, { enabled: !!nsName && isConnected, limit: 500 });
-  const secretsList = useK8sResourceList<KubernetesResource>('secrets', nsName, { enabled: !!nsName && isConnected, limit: 500 });
-  const resourceQuotasList = useK8sResourceList<KubernetesResource>('resourcequotas', nsName, { enabled: !!nsName && isConnected, limit: 100 });
+  const queryOpts = { enabled: !!nsName && isConnected, limit: 500 };
+  const podsList = useK8sResourceList<KubernetesResource>('pods', nsName, { ...queryOpts, limit: 5000 });
+  const deploymentsList = useK8sResourceList<KubernetesResource>('deployments', nsName, queryOpts);
+  const servicesList = useK8sResourceList<KubernetesResource>('services', nsName, queryOpts);
+  const configMapsList = useK8sResourceList<KubernetesResource>('configmaps', nsName, queryOpts);
+  const secretsList = useK8sResourceList<KubernetesResource>('secrets', nsName, queryOpts);
+  const replicaSetsList = useK8sResourceList<KubernetesResource>('replicasets', nsName, queryOpts);
+  const statefulSetsList = useK8sResourceList<KubernetesResource>('statefulsets', nsName, queryOpts);
+  const daemonSetsList = useK8sResourceList<KubernetesResource>('daemonsets', nsName, queryOpts);
+  const jobsList = useK8sResourceList<KubernetesResource>('jobs', nsName, queryOpts);
+  const ingressesList = useK8sResourceList<KubernetesResource>('ingresses', nsName, queryOpts);
+  const pvcList = useK8sResourceList<KubernetesResource>('persistentvolumeclaims', nsName, queryOpts);
+  const resourceQuotasList = useK8sResourceList<KubernetesResource>('resourcequotas', nsName, { ...queryOpts, limit: 100 });
+  const limitRangesList = useK8sResourceList<KubernetesResource>('limitranges', nsName, { ...queryOpts, limit: 100 });
 
+  const getCount = (q: { data?: { items?: unknown[] } }) => q.data?.items?.length;
   const resourceCounts = useMemo(() => {
-    if (!isConnected || !nsName) return { pods: '–', deployments: '–', services: '–', configmaps: '–', secrets: '–' };
-    const pods = podsList.data?.items?.length ?? '–';
-    const deployments = deploymentsList.data?.items?.length ?? '–';
-    const services = servicesList.data?.items?.length ?? '–';
-    const configmaps = configMapsList.data?.items?.length ?? '–';
-    const secrets = secretsList.data?.items?.length ?? '–';
-    return { pods, deployments, services, configmaps, secrets };
-  }, [isConnected, nsName, podsList.data?.items?.length, deploymentsList.data?.items?.length, servicesList.data?.items?.length, configMapsList.data?.items?.length, secretsList.data?.items?.length]);
+    if (!isConnected || !nsName) return {
+      pods: '–', deployments: '–', services: '–', configmaps: '–', secrets: '–',
+      replicasets: '–', statefulsets: '–', daemonsets: '–', jobs: '–', ingresses: '–', pvcs: '–',
+    };
+    return {
+      pods: getCount(podsList) ?? '–',
+      deployments: getCount(deploymentsList) ?? '–',
+      services: getCount(servicesList) ?? '–',
+      configmaps: getCount(configMapsList) ?? '–',
+      secrets: getCount(secretsList) ?? '–',
+      replicasets: getCount(replicaSetsList) ?? '–',
+      statefulsets: getCount(statefulSetsList) ?? '–',
+      daemonsets: getCount(daemonSetsList) ?? '–',
+      jobs: getCount(jobsList) ?? '–',
+      ingresses: getCount(ingressesList) ?? '–',
+      pvcs: getCount(pvcList) ?? '–',
+    };
+  }, [isConnected, nsName, podsList.data, deploymentsList.data, servicesList.data, configMapsList.data, secretsList.data, replicaSetsList.data, statefulSetsList.data, daemonSetsList.data, jobsList.data, ingressesList.data, pvcList.data]);
 
   const resourceQuotas = useMemo(() => resourceQuotasList.data?.items ?? [], [resourceQuotasList.data?.items]);
   const hasQuota = resourceQuotas.length > 0;
@@ -139,11 +158,14 @@ export default function NamespaceDetail() {
     );
   }
 
+  const totalResources = Object.values(resourceCounts).reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
+
   const statusCards = [
     { label: 'Status', value: phase, icon: Box, iconColor: (phase === 'Active' ? 'success' : 'warning') as any },
     { label: 'Pods', value: String(resourceCounts.pods), icon: Package, iconColor: 'primary' as any },
     { label: 'Deployments', value: String(resourceCounts.deployments), icon: Layers, iconColor: 'info' as any },
     { label: 'Services', value: String(resourceCounts.services), icon: Globe, iconColor: 'success' as any },
+    { label: 'Total Resources', value: totalResources > 0 ? String(totalResources) : '–', icon: Boxes, iconColor: 'primary' as any },
     { label: 'Age', value: age, icon: Clock, iconColor: 'muted' as any },
   ];
 
@@ -154,39 +176,71 @@ export default function NamespaceDetail() {
       content: (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Namespace Info */}
             <SectionCard icon={Folder} title="Namespace Info" tooltip="Phase, finalizers, labels, annotations">
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
                 <div>
-                  <p className="text-muted-foreground mb-1">Phase</p>
-                  <Badge variant={phase === 'Active' ? 'default' : 'secondary'}>{phase}</Badge>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Phase</p>
+                  <Badge variant={phase === 'Active' ? 'default' : 'secondary'} className={phase === 'Active' ? 'bg-emerald-600 hover:bg-emerald-600' : ''}>{phase}</Badge>
                 </div>
-                <div><p className="text-muted-foreground mb-1">Age</p><p>{age}</p></div>
-                <div><p className="text-muted-foreground mb-1">Finalizers</p><p>{finalizers.length ? finalizers.join(', ') : 'None'}</p></div>
-                <div><p className="text-muted-foreground mb-1">Labels</p><p>{Object.keys(labels).length} labels</p></div>
-                <div><p className="text-muted-foreground mb-1">Annotations</p><p>{Object.keys(annotations).length} annotations</p></div>
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Age</p>
+                  <p className="font-medium">{age}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Finalizers</p>
+                  <p className="text-muted-foreground">{finalizers.length ? finalizers.join(', ') : 'None'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Labels</p>
+                  <p className="font-medium">{Object.keys(labels).length} labels</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Annotations</p>
+                  <p className="font-medium">{Object.keys(annotations).length} annotations</p>
+                </div>
+                {hasQuota && (
+                  <div>
+                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Resource Quotas</p>
+                    <p className="font-medium">{resourceQuotas.length} quota{resourceQuotas.length !== 1 ? 's' : ''}</p>
+                  </div>
+                )}
               </div>
             </SectionCard>
+
+            {/* Labels */}
             <MetadataCard title="Labels" items={labels} variant="badges" />
-            <SectionCard icon={Package} title="Resource Summary" tooltip="Counts of resources in this namespace" className="lg:col-span-2">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                  { label: 'Pods', value: resourceCounts.pods, icon: Package, path: '/pods' },
-                  { label: 'Deployments', value: resourceCounts.deployments, icon: Layers, path: '/deployments' },
-                  { label: 'Services', value: resourceCounts.services, icon: Globe, path: '/services' },
-                  { label: 'ConfigMaps', value: resourceCounts.configmaps, icon: Database, path: '/configmaps' },
-                  { label: 'Secrets', value: resourceCounts.secrets, icon: Shield, path: '/secrets' },
-                ].map(({ label, value, icon: Icon, path }) => (
-                  <div
+
+            {/* Resource Summary — full grid */}
+            <SectionCard icon={Boxes} title="Resource Summary" tooltip="Counts of all resource types in this namespace" className="lg:col-span-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                {([
+                  { label: 'Pods', value: resourceCounts.pods, icon: Package, path: '/pods', color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-500/10' },
+                  { label: 'Deployments', value: resourceCounts.deployments, icon: Layers, path: '/deployments', color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-500/10' },
+                  { label: 'ReplicaSets', value: resourceCounts.replicasets, icon: Boxes, path: '/replicasets', color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-500/10' },
+                  { label: 'StatefulSets', value: resourceCounts.statefulsets, icon: Database, path: '/statefulsets', color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-500/10' },
+                  { label: 'DaemonSets', value: resourceCounts.daemonsets, icon: Activity, path: '/daemonsets', color: 'text-fuchsia-600 dark:text-fuchsia-400', bg: 'bg-fuchsia-500/10' },
+                  { label: 'Jobs', value: resourceCounts.jobs, icon: BarChart2, path: '/jobs', color: 'text-cyan-600 dark:text-cyan-400', bg: 'bg-cyan-500/10' },
+                  { label: 'Services', value: resourceCounts.services, icon: Globe, path: '/services', color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10' },
+                  { label: 'Ingresses', value: resourceCounts.ingresses, icon: Network, path: '/ingresses', color: 'text-teal-600 dark:text-teal-400', bg: 'bg-teal-500/10' },
+                  { label: 'ConfigMaps', value: resourceCounts.configmaps, icon: Settings, path: '/configmaps', color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10' },
+                  { label: 'Secrets', value: resourceCounts.secrets, icon: Shield, path: '/secrets', color: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10' },
+                  { label: 'PVCs', value: resourceCounts.pvcs, icon: HardDrive, path: '/persistentvolumeclaims', color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-500/10' },
+                ] as const).map(({ label, value, icon: Icon, path, color, bg }) => (
+                  <button
                     key={label}
-                    className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted transition-colors"
+                    className="group relative p-4 rounded-xl border border-border/50 bg-card hover:border-primary/30 hover:shadow-md transition-all duration-200 text-left cursor-pointer"
                     onClick={() => navigate(`${path}?namespace=${encodeURIComponent(nsName)}`)}
                   >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Icon className="h-4 w-4 text-primary" />
-                      <span className="text-sm font-medium">{label}</span>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className={`h-8 w-8 rounded-lg ${bg} flex items-center justify-center`}>
+                        <Icon className={`h-4 w-4 ${color}`} />
+                      </div>
+                      <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground/0 group-hover:text-primary group-hover:text-muted-foreground transition-all" />
                     </div>
-                    <p className="text-2xl font-bold">{value}</p>
-                  </div>
+                    <p className="text-2xl font-bold tabular-nums text-foreground">{value}</p>
+                    <p className="text-[11px] font-medium text-muted-foreground mt-0.5">{label}</p>
+                  </button>
                 ))}
               </div>
             </SectionCard>
