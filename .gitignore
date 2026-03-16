@@ -159,3 +159,4 @@ systematic-restart.sh
 
 # Temporary topology file
 Topology.tsx
+.vite/
