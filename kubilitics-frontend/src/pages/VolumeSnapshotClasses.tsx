@@ -37,11 +37,11 @@ interface K8sVolumeSnapshotClass extends KubernetesResource {
 }
 
 const VSC_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 220, minWidth: 120 },
- { id: 'driver', defaultWidth: 200, minWidth: 120 },
- { id: 'deletionPolicy', defaultWidth: 140, minWidth: 100 },
- { id: 'isDefault', defaultWidth: 100, minWidth: 80 },
- { id: 'age', defaultWidth: 100, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'driver', defaultWidth: 220, minWidth: 120 },
+ { id: 'deletionPolicy', defaultWidth: 160, minWidth: 100 },
+ { id: 'isDefault', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const VSClass_COLUMNS_FOR_VISIBILITY = [
@@ -69,7 +69,7 @@ function mapVSC(vsc: K8sVolumeSnapshotClass): VolumeSnapshotClass {
 export default function VolumeSnapshotClasses() {
  const navigate = useNavigate();
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, isFetching, dataUpdatedAt, refetch } = usePaginatedResourceList<K8sVolumeSnapshotClass>('volumesnapshotclasses');
+ const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = usePaginatedResourceList<K8sVolumeSnapshotClass>('volumesnapshotclasses');
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: VolumeSnapshotClass | null; bulk?: boolean }>({ open: false, item: null });
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());

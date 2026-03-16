@@ -119,16 +119,16 @@ function TLSExpiryCell({ info }: { info: TLSSecretInfo | undefined }) {
 }
 
 const SECRETS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 220, minWidth: 120 },
- { id: 'namespace', defaultWidth: 130, minWidth: 80 },
- { id: 'type', defaultWidth: 120, minWidth: 80 },
- { id: 'dataKeys', defaultWidth: 90, minWidth: 70 },
- { id: 'totalSize', defaultWidth: 90, minWidth: 70 },
- { id: 'usedBy', defaultWidth: 90, minWidth: 70 },
- { id: 'tlsExpiry', defaultWidth: 110, minWidth: 80 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'type', defaultWidth: 160, minWidth: 100 },
+ { id: 'dataKeys', defaultWidth: 100, minWidth: 70 },
+ { id: 'totalSize', defaultWidth: 100, minWidth: 70 },
+ { id: 'usedBy', defaultWidth: 100, minWidth: 70 },
+ { id: 'tlsExpiry', defaultWidth: 160, minWidth: 100 },
  { id: 'immutable', defaultWidth: 100, minWidth: 70 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
- { id: 'lastModified', defaultWidth: 110, minWidth: 90 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
+ { id: 'lastModified', defaultWidth: 160, minWidth: 100 },
 ];
 
 const SECRETS_COLUMNS_FOR_VISIBILITY = [

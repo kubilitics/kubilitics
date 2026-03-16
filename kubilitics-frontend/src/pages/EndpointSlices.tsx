@@ -68,12 +68,12 @@ interface EndpointSlice {
 }
 
 const ENDPOINTSLICES_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 140, minWidth: 90 },
- { id: 'addressType', defaultWidth: 100, minWidth: 80 },
- { id: 'endpoints', defaultWidth: 90, minWidth: 70 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'addressType', defaultWidth: 160, minWidth: 100 },
+ { id: 'endpoints', defaultWidth: 100, minWidth: 70 },
  { id: 'serviceName', defaultWidth: 160, minWidth: 100 },
- { id: 'age', defaultWidth: 90, minWidth: 60 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const ENDPOINTSLICES_COLUMNS_FOR_VISIBILITY = [

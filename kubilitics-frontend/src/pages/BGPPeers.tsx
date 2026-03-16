@@ -46,12 +46,12 @@ function mapPeer(p: K8sBGPPeer): BGPPeer {
 }
 
 const PEER_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 140, minWidth: 100 },
- { id: 'peerAddress', defaultWidth: 160, minWidth: 100 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'peerAddress', defaultWidth: 160, minWidth: 120 },
  { id: 'peerASN', defaultWidth: 100, minWidth: 70 },
  { id: 'myASN', defaultWidth: 100, minWidth: 70 },
- { id: 'age', defaultWidth: 100, minWidth: 56 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const PEER_COLUMNS_FOR_VISIBILITY = [
@@ -65,7 +65,7 @@ const PEER_COLUMNS_FOR_VISIBILITY = [
 export default function BGPPeers() {
  const navigate = useNavigate();
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, isFetching, dataUpdatedAt, refetch } = usePaginatedResourceList<K8sBGPPeer>('bgppeers');
+ const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = usePaginatedResourceList<K8sBGPPeer>('bgppeers');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: BGPPeer | null; bulk?: boolean }>({ open: false, item: null });
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
  const [searchQuery, setSearchQuery] = useState('');

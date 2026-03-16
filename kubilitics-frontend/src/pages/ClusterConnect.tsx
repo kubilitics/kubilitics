@@ -31,6 +31,14 @@ import {
   Settings,
   ClipboardPaste,
   FolderOpen,
+  Copy,
+  ExternalLink,
+  Package,
+  Shield,
+  Globe,
+  BookOpen,
+  ChevronRight,
+  Database,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
@@ -126,8 +134,8 @@ function extractContextFromKubeconfig(text: string): string {
 
 /** Safe target after connect: use returnUrl only if it's a relative app path (no open redirect). */
 function getPostConnectPath(returnUrl: string | null): string {
-  if (!returnUrl || !returnUrl.startsWith('/') || returnUrl.startsWith('//')) return '/home';
-  if (returnUrl === '/' || returnUrl === '/connect' || returnUrl.startsWith('/connect?') || returnUrl === '/mode-selection') return '/home';
+  if (!returnUrl || !returnUrl.startsWith('/') || returnUrl.startsWith('//')) return '/dashboard';
+  if (returnUrl === '/' || returnUrl === '/connect' || returnUrl.startsWith('/connect?') || returnUrl === '/mode-selection') return '/dashboard';
   return returnUrl;
 }
 
@@ -135,6 +143,7 @@ export default function ClusterConnect() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const returnUrl = searchParams.get('returnUrl');
+  const isAddClusterMode = searchParams.get('addCluster') === 'true';
   const postConnectPath = getPostConnectPath(returnUrl);
   const { activeCluster, setActiveCluster, setClusters, setDemo, appMode, setAppMode, signOut } = useClusterStore();
   const storedBackendUrl = useBackendConfigStore((s) => s.backendBaseUrl);
@@ -230,6 +239,9 @@ export default function ClusterConnect() {
       return;
     }
 
+    // Don't auto-redirect when user explicitly clicked "Add Cluster" — they want to stay on this page
+    if (isAddClusterMode) return;
+
     const registered = clustersFromBackend.data.map(backendToDetected);
     const cid = currentClusterId?.trim();
 
@@ -316,6 +328,7 @@ export default function ClusterConnect() {
     clustersFromBackend.isLoading,
     currentClusterId,
     logoutFlag,
+    isAddClusterMode,
     storedBackendUrl,
     setCurrentClusterId,
     setClusters,
@@ -627,51 +640,14 @@ export default function ClusterConnect() {
     );
   }
 
-  // Specialized view for In-Cluster mode
+  // Specialized view for In-Cluster / Helm mode
   if (appMode === 'in-cluster') {
-    return (
-      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-xl text-center">
-          <div className="p-4 rounded-2xl bg-purple-500/10 w-fit mx-auto mb-8">
-            <Cloud className="h-10 w-10 text-purple-400" />
-          </div>
-          <h1 className="text-3xl font-bold mb-4 tracking-tight">In-Cluster Connection</h1>
-          <p className="text-muted-foreground mb-10 leading-relaxed">
-            Kubilitics is running inside your cluster. We'll use the pod's service account to discover resources automatically.
-          </p>
-
-          <Card className="bg-card border-border p-8 mb-8 backdrop-blur-xl">
-            <div className="flex items-center gap-4 text-left mb-6">
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-                <CheckCircle2 className="text-emerald-400" />
-              </div>
-              <div>
-                <p className="font-semibold">Service Account Detected</p>
-                <p className="text-xs text-muted-foreground">Automatically authenticated via kubernetes.default.svc</p>
-              </div>
-            </div>
-
-            <Button
-              onClick={() => handleConnect({
-                id: 'in-cluster',
-                name: 'In-Cluster',
-                context: 'service-account',
-                server: 'kubernetes.default.svc',
-                status: 'healthy'
-              })}
-              className="w-full bg-purple-600 hover:bg-purple-500 h-12 text-base font-medium"
-            >
-              Initialize In-Cluster Access
-              <ArrowRight className="ml-2" size={18} />
-            </Button>
-          </Card>
-
-          <button onClick={() => navigate('/mode-selection')} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Go back to mode selection
-          </button>
-        </motion.div>
-      </div>
-    );
+    return <InClusterSetupView
+      isBackendConfigured={isBackendConfigured}
+      health={health}
+      handleConnect={handleConnect}
+      navigate={navigate}
+    />;
   }
 
   return (
@@ -1167,6 +1143,475 @@ users:
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────── */
+/*  In-Cluster / Helm Setup View                               */
+/* ─────────────────────────────────────────────────────────── */
+
+interface InClusterSetupViewProps {
+  isBackendConfigured: boolean;
+  health: ReturnType<typeof useBackendHealth>;
+  handleConnect: (cluster: DetectedCluster, isNew?: boolean) => void;
+  navigate: ReturnType<typeof useNavigate>;
+}
+
+function InClusterSetupView({ isBackendConfigured, health, handleConnect, navigate }: InClusterSetupViewProps) {
+  const [activeStep, setActiveStep] = useState(0);
+  const [backendUrl, setBackendUrl] = useState('');
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const { setBackendBaseUrl } = useBackendConfigStore();
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const isBackendHealthy = isBackendConfigured && health.isSuccess;
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(label);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const handleTestConnection = async () => {
+    if (!backendUrl.trim()) return;
+    setIsTestingConnection(true);
+    setConnectionStatus('idle');
+    try {
+      const url = backendUrl.replace(/\/$/, '');
+      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        setBackendBaseUrl(url);
+        setConnectionStatus('success');
+        toast.success('Backend connected', { description: url });
+      } else {
+        setConnectionStatus('error');
+        toast.error('Backend unreachable', { description: `HTTP ${res.status}` });
+      }
+    } catch (err) {
+      setConnectionStatus('error');
+      toast.error('Connection failed', { description: String(err) });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  const helmCommands = {
+    installBasic: `helm install kubilitics \\
+  oci://ghcr.io/kubilitics/charts/kubilitics \\
+  --version 0.1.1 \\
+  --namespace kubilitics --create-namespace`,
+    installFromSource: `# Or install directly from the source repo
+git clone https://github.com/kubilitics/kubiltics.git
+helm install kubilitics ./deploy/helm/kubilitics \\
+  --namespace kubilitics --create-namespace`,
+    installWithIngress: `helm install kubilitics \\
+  oci://ghcr.io/kubilitics/charts/kubilitics \\
+  --version 0.1.1 \\
+  --namespace kubilitics --create-namespace \\
+  --set ingress.enabled=true \\
+  --set ingress.hosts[0].host=kubilitics.example.com \\
+  --set config.allowedOrigins="https://kubilitics.example.com"`,
+    installWithAI: `helm install kubilitics \\
+  oci://ghcr.io/kubilitics/charts/kubilitics \\
+  --version 0.1.1 \\
+  --namespace kubilitics --create-namespace \\
+  --set ai.enabled=true \\
+  --set ai.secret.enabled=true \\
+  --set ai.secret.anthropicApiKey="sk-ant-..."`,
+    verify: `kubectl get pods -n kubilitics
+kubectl get svc -n kubilitics`,
+    portForward: `kubectl port-forward -n kubilitics svc/kubilitics 819:819`,
+  };
+
+  const steps = [
+    { label: 'Install', icon: Package, description: 'Deploy via Helm' },
+    { label: 'Connect', icon: Globe, description: 'Configure backend URL' },
+    { label: 'Access', icon: Shield, description: 'Initialize cluster' },
+  ];
+
+  return (
+    <div className="min-h-screen bg-background text-foreground overflow-y-auto">
+      <div className="max-w-4xl mx-auto px-6 py-10">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+          {/* Header */}
+          <div className="text-center mb-10">
+            <div className="p-3.5 rounded-2xl bg-gradient-to-br from-purple-500/10 to-violet-500/10 w-fit mx-auto mb-5 border border-purple-200/30 dark:border-purple-800/30">
+              <Cloud className="h-9 w-9 text-purple-500" />
+            </div>
+            <h1 className="text-3xl font-bold mb-2 tracking-tight">Team Server Setup</h1>
+            <p className="text-muted-foreground max-w-lg mx-auto">
+              Deploy Kubilitics to your Kubernetes cluster via Helm and access it from your browser.
+            </p>
+          </div>
+
+          {/* Step indicator */}
+          <div className="flex items-center justify-center gap-2 mb-10">
+            {steps.map((step, i) => {
+              const StepIcon = step.icon;
+              const isActive = i === activeStep;
+              const isDone = i < activeStep || (i === 2 && isBackendHealthy);
+              return (
+                <button
+                  key={step.label}
+                  onClick={() => setActiveStep(i)}
+                  className={cn(
+                    'flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-300',
+                    isActive
+                      ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20'
+                      : isDone
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-800/50'
+                        : 'bg-muted/50 text-muted-foreground hover:bg-muted border border-transparent'
+                  )}
+                >
+                  {isDone && !isActive ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <StepIcon className="h-4 w-4" />
+                  )}
+                  <span className="hidden sm:inline">{step.label}</span>
+                  <span className="text-xs opacity-70 hidden md:inline">— {step.description}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Step 1: Helm Installation */}
+          {activeStep === 0 && (
+            <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+              {/* Prerequisites */}
+              <Card className="p-6 bg-card border-border">
+                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                  <BookOpen className="h-5 w-5 text-purple-500" />
+                  Prerequisites
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {[
+                    { name: 'Kubernetes', version: '≥ 1.24', icon: Server },
+                    { name: 'Helm', version: '≥ 3.x', icon: Package },
+                    { name: 'kubectl', version: 'configured', icon: Terminal },
+                  ].map((req) => (
+                    <div key={req.name} className="flex items-center gap-3 p-3 rounded-xl bg-muted/50 border border-border/50">
+                      <req.icon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">{req.name}</p>
+                        <p className="text-xs text-muted-foreground">{req.version}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              {/* Quick Start */}
+              <Card className="p-6 bg-card border-border">
+                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                  <Zap className="h-5 w-5 text-amber-500" />
+                  Quick Start
+                </h3>
+
+                <div className="space-y-4">
+                  <InClusterCodeBlock
+                    label="1. Install Kubilitics (OCI registry)"
+                    code={helmCommands.installBasic}
+                    copied={copied}
+                    onCopy={copyToClipboard}
+                  />
+                  <InClusterCodeBlock
+                    label="Or install from source"
+                    code={helmCommands.installFromSource}
+                    copied={copied}
+                    onCopy={copyToClipboard}
+                  />
+                  <InClusterCodeBlock
+                    label="2. Verify installation"
+                    code={helmCommands.verify}
+                    copied={copied}
+                    onCopy={copyToClipboard}
+                  />
+                </div>
+
+                <div className="mt-4 p-3.5 rounded-xl bg-purple-500/5 border border-purple-200/40 dark:border-purple-800/40">
+                  <p className="text-xs text-purple-600 dark:text-purple-400">
+                    Charts are published as OCI artifacts to <code className="bg-purple-500/10 px-1.5 py-0.5 rounded">ghcr.io/kubilitics/charts</code>. No <code className="bg-purple-500/10 px-1.5 py-0.5 rounded">helm repo add</code> needed — Helm 3.8+ pulls OCI charts directly.
+                  </p>
+                </div>
+              </Card>
+
+              {/* Advanced Options */}
+              <Card className="p-6 bg-card border-border">
+                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                  <Settings className="h-5 w-5 text-slate-500" />
+                  Advanced Installation Options
+                </h3>
+
+                <div className="space-y-4">
+                  <InClusterCodeBlock
+                    label="With Ingress & custom domain"
+                    code={helmCommands.installWithIngress}
+                    copied={copied}
+                    onCopy={copyToClipboard}
+                  />
+                  <InClusterCodeBlock
+                    label="With AI backend (Claude/OpenAI)"
+                    code={helmCommands.installWithAI}
+                    copied={copied}
+                    onCopy={copyToClipboard}
+                  />
+                </div>
+
+                <div className="mt-5 p-4 rounded-xl bg-blue-500/5 border border-blue-200/40 dark:border-blue-800/40">
+                  <p className="text-sm text-blue-700 dark:text-blue-300 font-medium mb-1">Configuration reference</p>
+                  <p className="text-xs text-blue-600/70 dark:text-blue-400/70">
+                    Full list of values: <code className="bg-blue-500/10 px-1.5 py-0.5 rounded text-xs">helm show values oci://ghcr.io/kubilitics/charts/kubilitics --version 0.1.1</code>.
+                    Includes database (SQLite/PostgreSQL), RBAC, TLS, autoscaling, backup, Prometheus/Grafana, and more.
+                  </p>
+                </div>
+              </Card>
+
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  onClick={() => navigate('/mode-selection')}
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  ← Back to mode selection
+                </button>
+                <Button onClick={() => setActiveStep(1)} className="bg-purple-600 hover:bg-purple-700 text-white">
+                  Next: Connect Backend
+                  <ChevronRight className="ml-1 h-4 w-4" />
+                </Button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Step 2: Connect Backend */}
+          {activeStep === 1 && (
+            <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+              <Card className="p-6 bg-card border-border">
+                <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
+                  <Globe className="h-5 w-5 text-purple-500" />
+                  Backend URL
+                </h3>
+                <p className="text-sm text-muted-foreground mb-5">
+                  Enter the URL where Kubilitics backend is accessible. This is the Service or Ingress endpoint from your Helm installation.
+                </p>
+
+                {/* Port-forward hint */}
+                <div className="mb-5 p-4 rounded-xl bg-amber-500/5 border border-amber-200/40 dark:border-amber-800/40">
+                  <p className="text-sm text-amber-700 dark:text-amber-300 font-medium mb-2 flex items-center gap-1.5">
+                    <Terminal className="h-4 w-4" />
+                    For local testing (port-forward)
+                  </p>
+                  <InClusterCodeBlock
+                    code={helmCommands.portForward}
+                    copied={copied}
+                    onCopy={copyToClipboard}
+                  />
+                  <p className="text-xs text-amber-600/70 dark:text-amber-400/70 mt-2">
+                    Then use <code className="bg-amber-500/10 px-1.5 py-0.5 rounded">http://localhost:819</code> as the backend URL below.
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={backendUrl}
+                      onChange={(e) => { setBackendUrl(e.target.value); setConnectionStatus('idle'); }}
+                      placeholder="http://localhost:819 or https://kubilitics.example.com"
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-muted/50 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 placeholder:text-muted-foreground/50"
+                    />
+                    <Button
+                      onClick={handleTestConnection}
+                      disabled={!backendUrl.trim() || isTestingConnection}
+                      className={cn(
+                        'px-5 rounded-xl',
+                        connectionStatus === 'success'
+                          ? 'bg-emerald-600 hover:bg-emerald-700'
+                          : 'bg-purple-600 hover:bg-purple-700'
+                      )}
+                    >
+                      {isTestingConnection ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : connectionStatus === 'success' ? (
+                        <><CheckCircle2 className="h-4 w-4 mr-1" /> Connected</>
+                      ) : (
+                        'Test'
+                      )}
+                    </Button>
+                  </div>
+
+                  {connectionStatus === 'error' && (
+                    <div className="flex items-center gap-2 p-3 rounded-xl bg-rose-500/10 border border-rose-200/40 dark:border-rose-800/40">
+                      <XCircle className="h-4 w-4 text-rose-500 flex-shrink-0" />
+                      <p className="text-sm text-rose-600 dark:text-rose-400">
+                        Could not reach backend. Verify the URL and ensure port-forwarding or ingress is configured.
+                      </p>
+                    </div>
+                  )}
+
+                  {connectionStatus === 'success' && (
+                    <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-200/40 dark:border-emerald-800/40">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+                      <p className="text-sm text-emerald-600 dark:text-emerald-400">
+                        Backend is healthy and connected.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Already configured notice */}
+                {isBackendHealthy && (
+                  <div className="mt-5 flex items-center gap-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-200/40 dark:border-emerald-800/40">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+                    <p className="text-sm text-emerald-600 dark:text-emerald-400">
+                      Backend already configured and healthy. You can proceed to the next step.
+                    </p>
+                  </div>
+                )}
+              </Card>
+
+              {/* Common URLs help */}
+              <Card className="p-5 bg-card border-border">
+                <p className="text-sm font-medium mb-3 text-muted-foreground">Common backend URLs</p>
+                <div className="space-y-2">
+                  {[
+                    { url: 'http://localhost:819', desc: 'Port-forwarded (local testing)' },
+                    { url: 'http://kubilitics.kubilitics.svc:819', desc: 'In-cluster Service DNS' },
+                    { url: 'https://kubilitics.example.com', desc: 'Ingress endpoint (production)' },
+                  ].map((item) => (
+                    <button
+                      key={item.url}
+                      onClick={() => { setBackendUrl(item.url); setConnectionStatus('idle'); }}
+                      className="w-full flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/60 border border-transparent hover:border-border/50 transition-all text-left group"
+                    >
+                      <div>
+                        <p className="text-sm font-mono text-foreground">{item.url}</p>
+                        <p className="text-xs text-muted-foreground">{item.desc}</p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </button>
+                  ))}
+                </div>
+              </Card>
+
+              <div className="flex items-center justify-between pt-2">
+                <Button variant="ghost" onClick={() => setActiveStep(0)}>
+                  ← Installation
+                </Button>
+                <Button
+                  onClick={() => setActiveStep(2)}
+                  disabled={!isBackendHealthy && connectionStatus !== 'success'}
+                  className="bg-purple-600 hover:bg-purple-700 text-white"
+                >
+                  Next: Initialize Access
+                  <ChevronRight className="ml-1 h-4 w-4" />
+                </Button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Step 3: Initialize Cluster Access */}
+          {activeStep === 2 && (
+            <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+              <Card className="p-8 bg-card border-border text-center">
+                <div className="p-3 rounded-2xl bg-emerald-500/10 w-fit mx-auto mb-6">
+                  <Shield className="h-8 w-8 text-emerald-500" />
+                </div>
+                <h3 className="text-xl font-bold mb-2">Ready to Connect</h3>
+                <p className="text-muted-foreground mb-8 max-w-md mx-auto">
+                  The backend is deployed and accessible. Initialize in-cluster access to start monitoring your Kubernetes resources.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
+                  {[
+                    { label: 'Backend', status: isBackendHealthy ? 'Healthy' : 'Not configured', ok: isBackendHealthy, icon: Server },
+                    { label: 'Service Account', status: 'Auto-detected', ok: true, icon: Shield },
+                    { label: 'RBAC', status: 'Configured by Helm', ok: true, icon: Database },
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-center gap-3 p-3.5 rounded-xl bg-muted/50 border border-border/50">
+                      <div className={cn('p-2 rounded-lg', item.ok ? 'bg-emerald-500/10' : 'bg-amber-500/10')}>
+                        <item.icon className={cn('h-4 w-4', item.ok ? 'text-emerald-500' : 'text-amber-500')} />
+                      </div>
+                      <div className="text-left">
+                        <p className="text-sm font-medium">{item.label}</p>
+                        <p className={cn('text-xs', item.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400')}>
+                          {item.status}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <Button
+                  onClick={() => handleConnect({
+                    id: 'in-cluster',
+                    name: 'In-Cluster',
+                    context: 'service-account',
+                    server: 'kubernetes.default.svc',
+                    status: 'healthy',
+                  })}
+                  disabled={!isBackendHealthy}
+                  className="w-full max-w-sm mx-auto bg-purple-600 hover:bg-purple-500 h-12 text-base font-semibold rounded-xl shadow-lg shadow-purple-600/20"
+                >
+                  Initialize In-Cluster Access
+                  <ArrowRight className="ml-2" size={18} />
+                </Button>
+
+                {!isBackendHealthy && (
+                  <p className="text-xs text-amber-500 mt-3">
+                    Backend is not reachable. Go back to Step 2 to configure the connection.
+                  </p>
+                )}
+              </Card>
+
+              <div className="flex items-center justify-between pt-2">
+                <Button variant="ghost" onClick={() => setActiveStep(1)}>
+                  ← Backend URL
+                </Button>
+                <button
+                  onClick={() => navigate('/mode-selection')}
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Switch to Personal mode
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </motion.div>
+      </div>
+    </div>
+  );
+}
+
+/* Code block with copy button for Helm commands */
+function InClusterCodeBlock({
+  label,
+  code,
+  copied,
+  onCopy,
+}: {
+  label?: string;
+  code: string;
+  copied: string | null;
+  onCopy: (text: string, label: string) => void;
+}) {
+  const id = label ?? code.slice(0, 30);
+  return (
+    <div>
+      {label && <p className="text-sm font-medium mb-1.5 text-foreground">{label}</p>}
+      <div className="relative group">
+        <pre className="p-4 rounded-xl bg-slate-950 dark:bg-slate-900/80 text-slate-200 text-[13px] leading-relaxed overflow-x-auto border border-slate-800/60 font-mono">
+          {code}
+        </pre>
+        <button
+          onClick={() => onCopy(code, id)}
+          className="absolute top-2.5 right-2.5 p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 opacity-0 group-hover:opacity-100 transition-all"
+          title="Copy to clipboard"
+        >
+          {copied === id ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+        </button>
+      </div>
     </div>
   );
 }

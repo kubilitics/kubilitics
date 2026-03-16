@@ -46,11 +46,11 @@ interface ComponentStatus {
 }
 
 const CS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 220, minWidth: 120 },
- { id: 'status', defaultWidth: 120, minWidth: 80 },
- { id: 'message', defaultWidth: 280, minWidth: 120 },
- { id: 'error', defaultWidth: 200, minWidth: 100 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'message', defaultWidth: 300, minWidth: 150 },
+ { id: 'error', defaultWidth: 300, minWidth: 150 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const CS_COLUMNS_FOR_VISIBILITY = [

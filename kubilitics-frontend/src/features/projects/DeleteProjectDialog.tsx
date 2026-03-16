@@ -37,7 +37,7 @@ export function DeleteProjectDialog({
       await remove.mutateAsync(projectId);
       toast.success('Project deleted');
       onOpenChange(false);
-      navigate('/home?tab=projects');
+      navigate('/dashboard');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete project');
     }

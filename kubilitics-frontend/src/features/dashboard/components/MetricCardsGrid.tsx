@@ -149,7 +149,7 @@ export const MetricCardsGrid = () => {
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
       {cards.map((c, i) => {
         const scopeTag = isProjectScope
           ? CLUSTER_WIDE.has(c.title) ? "Cluster" : "Project"
@@ -169,9 +169,9 @@ export const MetricCardsGrid = () => {
                 "border border-slate-200 dark:border-slate-700",
                 "rounded-2xl overflow-hidden",
                 "shadow",
-                /* Layout */
-                "flex items-center gap-4",
-                "py-5 pl-0 pr-5",
+                /* Layout — taller cards with more padding */
+                "flex items-center gap-5",
+                "py-6 pl-0 pr-6",
                 /* Hover */
                 "transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
                 c.hoverBorder,
@@ -180,30 +180,30 @@ export const MetricCardsGrid = () => {
               )}
             >
               {/* ── Left accent stripe ── */}
-              <div className={cn("w-[3px] self-stretch rounded-r-full shrink-0", c.accent)} />
+              <div className={cn("w-[4px] self-stretch rounded-r-full shrink-0", c.accent)} />
 
-              {/* ── Icon ── */}
+              {/* ── Icon — larger ── */}
               <div
                 className={cn(
-                  "h-11 w-11 rounded-xl flex items-center justify-center shrink-0",
+                  "h-14 w-14 rounded-xl flex items-center justify-center shrink-0",
                   "transition-transform duration-500 ease-[cubic-bezier(0.175,0.885,0.32,1.275)]",
                   "group-hover:scale-110",
                   c.iconBg,
                 )}
               >
-                <c.icon className={cn("h-5 w-5", c.iconColor)} strokeWidth={1.75} />
+                <c.icon className={cn("h-6 w-6", c.iconColor)} strokeWidth={1.75} />
               </div>
 
-              {/* ── Content ── */}
+              {/* ── Content — larger numbers ── */}
               <div className="flex flex-col min-w-0">
-                <span className="text-2xl font-bold tracking-tight text-foreground tabular-nums leading-none">
+                <span className="text-3xl font-extrabold tracking-tight text-foreground tabular-nums leading-none">
                   {c.value}
                 </span>
-                <span className="text-[13px] font-medium text-muted-foreground mt-1 leading-tight truncate">
+                <span className="text-sm font-medium text-muted-foreground mt-1.5 leading-tight truncate">
                   {c.title}
                 </span>
                 {scopeTag && (
-                  <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider mt-px">
+                  <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider mt-0.5">
                     {scopeTag}
                   </span>
                 )}
@@ -211,7 +211,7 @@ export const MetricCardsGrid = () => {
 
               {/* ── Navigate chevron ── */}
               <ArrowUpRight
-                className="ml-auto h-4 w-4 shrink-0 text-muted-foreground/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                className="ml-auto h-4.5 w-4.5 shrink-0 text-muted-foreground/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
                 strokeWidth={2}
               />
             </div>

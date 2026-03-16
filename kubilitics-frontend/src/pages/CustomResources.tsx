@@ -81,9 +81,9 @@ function mapInstance(r: KubernetesResource): CRInstance {
 }
 
 const CR_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 260, minWidth: 140 },
- { id: 'namespace', defaultWidth: 140, minWidth: 100 },
- { id: 'age', defaultWidth: 100, minWidth: 56 },
+ { id: 'name', defaultWidth: 300, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const CR_COLUMNS_FOR_VISIBILITY = [
@@ -105,6 +105,7 @@ export default function CustomResources() {
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
 
  const { items: rawItems, isLoading, isFetching, dataUpdatedAt, error, refetch } = useCRDInstances(crdName, namespaceFilter || undefined, { limit: 5000 });
+ const isError = !!error;
 
  const items: CRInstance[] = useMemo(
  () => (isConnected && rawItems ? rawItems.map(mapInstance) : []),

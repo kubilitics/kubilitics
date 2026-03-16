@@ -1,7 +1,6 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import {
-  Home,
   LayoutDashboard,
   Box,
   Layers,
@@ -34,10 +33,6 @@ import {
   Puzzle,
   ClipboardList,
   HardDrive as StorageIcon,
-  Bot,
-  BarChart3,
-  ShieldAlert,
-  Brain,
   FolderKanban,
   LogOut,
   Search,
@@ -48,7 +43,6 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useResourceCounts } from '@/hooks/useResourceCounts';
 import { useMetalLBInstalled } from '@/hooks/useMetalLBInstalled';
-import { useAIStatus } from '@/hooks/useAIStatus';
 import { useUIStore } from '@/stores/uiStore';
 import { useProjectStore } from '@/stores/projectStore';
 import { RecentResources } from '@/components/layout/RecentResources';
@@ -78,16 +72,15 @@ interface ResourceCategory {
 
 // ─── Path Constants ──────────────────────────────────────────────────────────
 
-const WORKLOAD_PATHS = ['/pods', '/deployments', '/replicasets', '/statefulsets', '/daemonsets', '/jobs', '/cronjobs', '/podtemplates', '/controllerrevisions'];
+const WORKLOAD_PATHS = ['/workloads', '/pods', '/deployments', '/replicasets', '/statefulsets', '/daemonsets', '/jobs', '/cronjobs', '/podtemplates', '/controllerrevisions'];
 const NETWORKING_PATHS = ['/networking', '/services', '/ingresses', '/ingressclasses', '/endpoints', '/endpointslices', '/networkpolicies', '/ipaddresspools', '/bgppeers'];
 const STORAGE_PATHS = ['/storage', '/configmaps', '/secrets', '/persistentvolumes', '/persistentvolumeclaims', '/storageclasses', '/volumeattachments', '/volumesnapshots', '/volume-snapshots', '/volumesnapshotclasses', '/volume-snapshot-classes', '/volumesnapshotcontents', '/volume-snapshot-contents'];
-const CLUSTER_PATHS = ['/cluster-overview', '/nodes', '/namespaces', '/events', '/apiservices', '/leases'];
+const CLUSTER_PATHS = ['/cluster', '/cluster-overview', '/nodes', '/namespaces', '/events', '/apiservices', '/leases'];
 const SECURITY_PATHS = ['/serviceaccounts', '/roles', '/clusterroles', '/rolebindings', '/clusterrolebindings', '/priorityclasses'];
 const RESOURCES_PATHS = ['/resources', '/resourcequotas', '/limitranges', '/resourceslices', '/deviceclasses', '/device-classes'];
 const SCALING_PATHS = ['/scaling', '/horizontalpodautoscalers', '/verticalpodautoscalers', '/poddisruptionbudgets'];
 const CRD_PATHS = ['/crds', '/customresourcedefinitions', '/customresources'];
 const ADMISSION_PATHS = ['/admission', '/mutatingwebhooks', '/validatingwebhooks'];
-const AI_PATHS = ['/analytics', '/security', '/ml-analytics'];
 
 const ALL_RESOURCE_PATHS = [
   '/workloads',
@@ -304,6 +297,7 @@ function ResourceSubCategory({
   const location = useLocation();
   const pathname = location.pathname;
   const Icon = category.icon;
+  const colors = CATEGORY_COLORS[category.id] ?? DEFAULT_CATEGORY_COLOR;
 
   // Filter items by search
   const visibleItems = useMemo(() => {
@@ -334,15 +328,20 @@ function ResourceSubCategory({
         onClick={onToggle}
         aria-expanded={isExpanded}
         className={cn(
-          "flex items-center justify-between w-full px-3 py-2 rounded-lg transition-all duration-200 group text-left",
+          "flex items-center justify-between w-full px-2.5 py-2 rounded-lg transition-all duration-200 group text-left",
           isCategoryActive
-            ? "text-primary bg-primary/5 dark:bg-primary/10"
+            ? cn("text-foreground", colors.activeBg)
             : "text-slate-700 dark:text-slate-300 hover:bg-slate-100/60 dark:hover:bg-slate-800/60"
         )}
       >
         <div className="flex items-center gap-2.5 min-w-0">
-          <Icon className={cn("h-3.5 w-3.5 shrink-0", isCategoryActive ? "text-primary" : "text-slate-500 dark:text-slate-400")} />
-          <span className={cn("text-[12px] font-semibold tracking-wide uppercase truncate", isCategoryActive ? "text-primary" : "text-slate-600 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200")}>
+          <div className={cn(
+            "h-6 w-6 rounded-md flex items-center justify-center shrink-0 transition-colors",
+            isCategoryActive ? colors.iconBg : "bg-slate-100/80 dark:bg-slate-800/80 group-hover:bg-slate-200/80 dark:group-hover:bg-slate-700/80"
+          )}>
+            <Icon className={cn("h-3.5 w-3.5 shrink-0 transition-colors", isCategoryActive ? colors.icon : "text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200")} />
+          </div>
+          <span className={cn("text-[12px] font-semibold tracking-wide uppercase truncate", isCategoryActive ? "text-foreground" : "text-slate-600 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200")}>
             {category.label}
           </span>
         </div>
@@ -355,7 +354,7 @@ function ResourceSubCategory({
           <ChevronRight
             className={cn(
               'h-3.5 w-3.5 transition-transform duration-200',
-              isCategoryActive ? 'text-primary' : 'text-slate-400 dark:text-slate-500',
+              isCategoryActive ? colors.icon : 'text-slate-400 dark:text-slate-500',
               isExpanded && 'rotate-90'
             )}
           />
@@ -371,7 +370,7 @@ function ResourceSubCategory({
             transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
             className="overflow-hidden"
           >
-            <div className="pl-3 ml-2 border-l-2 border-primary/15 dark:border-primary/20 my-1 space-y-0.5">
+            <div className={cn("pl-3 ml-3 border-l-2 my-1 space-y-0.5", colors.border)}>
               {visibleItems.map((item) => (
                 <NavItem
                   key={item.to}
@@ -414,6 +413,28 @@ function SyncingIndicator({ isLoading, isInitialLoad }: { isLoading: boolean; is
 
 // ─── Top-Level Nav Link ──────────────────────────────────────────────────────
 
+// Color map for top-level nav icons
+const TOP_NAV_COLORS: Record<string, { active: string; activeBg: string; idle: string; idleBg: string }> = {
+  '/dashboard': {
+    active: 'text-blue-600 dark:text-blue-400',
+    activeBg: 'bg-blue-100 dark:bg-blue-500/20',
+    idle: 'text-slate-600 dark:text-slate-400',
+    idleBg: 'bg-slate-100/80 dark:bg-slate-800/80',
+  },
+  '/fleet': {
+    active: 'text-indigo-600 dark:text-indigo-400',
+    activeBg: 'bg-indigo-100 dark:bg-indigo-500/20',
+    idle: 'text-slate-600 dark:text-slate-400',
+    idleBg: 'bg-slate-100/80 dark:bg-slate-800/80',
+  },
+  '/topology': {
+    active: 'text-violet-600 dark:text-violet-400',
+    activeBg: 'bg-violet-100 dark:bg-violet-500/20',
+    idle: 'text-slate-600 dark:text-slate-400',
+    idleBg: 'bg-slate-100/80 dark:bg-slate-800/80',
+  },
+};
+
 function TopLevelNavLink({
   to,
   icon: Icon,
@@ -425,21 +446,101 @@ function TopLevelNavLink({
   label: string;
   isActive: boolean;
 }) {
+  const navColors = TOP_NAV_COLORS[to];
   return (
     <NavLink
       to={to}
       className={cn(
-        "flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-500 group border h-12",
+        "flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all duration-300 group border h-11",
         isActive
-          ? "bg-white dark:bg-slate-800 text-primary border-slate-100 dark:border-slate-700/40 shadow-apple"
+          ? "bg-white dark:bg-slate-800 text-foreground border-slate-200/60 dark:border-slate-700/40 shadow-apple"
           : "bg-transparent text-slate-800 dark:text-slate-300 hover:bg-slate-100/60 dark:hover:bg-slate-800/60 border-transparent hover:border-slate-100 dark:hover:border-slate-700/50"
       )}
     >
-      <Icon className={cn("h-5 w-5 transition-colors", isActive ? "text-primary" : "text-slate-700 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-100")} />
-      <span className={cn("font-semibold text-sm", isActive ? "text-slate-900 dark:text-slate-100" : "text-slate-800 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-slate-100")}>{label}</span>
+      <div className={cn(
+        "h-7 w-7 rounded-lg flex items-center justify-center shrink-0 transition-colors",
+        isActive
+          ? navColors?.activeBg ?? 'bg-primary/10'
+          : cn(navColors?.idleBg ?? 'bg-slate-100/80 dark:bg-slate-800/80', "group-hover:bg-slate-200/80 dark:group-hover:bg-slate-700/80")
+      )}>
+        <Icon className={cn(
+          "h-4 w-4 transition-colors",
+          isActive
+            ? navColors?.active ?? 'text-primary'
+            : cn(navColors?.idle ?? 'text-slate-600 dark:text-slate-400', "group-hover:text-slate-800 dark:group-hover:text-slate-100")
+        )} />
+      </div>
+      <span className={cn("font-semibold text-[13px]", isActive ? "text-slate-900 dark:text-slate-100" : "text-slate-800 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-slate-100")}>{label}</span>
     </NavLink>
   );
 }
+
+// ─── Category Color Map ──────────────────────────────────────────────────────
+// Each resource category gets a distinct accent color for its icon, border, and active state.
+
+const CATEGORY_COLORS: Record<string, { icon: string; iconBg: string; border: string; activeBg: string }> = {
+  [CATEGORY_IDS.WORKLOADS]: {
+    icon: 'text-amber-600 dark:text-amber-400',
+    iconBg: 'bg-amber-100 dark:bg-amber-500/15',
+    border: 'border-l-amber-400 dark:border-l-amber-500/60',
+    activeBg: 'bg-amber-50/60 dark:bg-amber-500/5',
+  },
+  [CATEGORY_IDS.NETWORKING]: {
+    icon: 'text-cyan-600 dark:text-cyan-400',
+    iconBg: 'bg-cyan-100 dark:bg-cyan-500/15',
+    border: 'border-l-cyan-400 dark:border-l-cyan-500/60',
+    activeBg: 'bg-cyan-50/60 dark:bg-cyan-500/5',
+  },
+  [CATEGORY_IDS.STORAGE]: {
+    icon: 'text-violet-600 dark:text-violet-400',
+    iconBg: 'bg-violet-100 dark:bg-violet-500/15',
+    border: 'border-l-violet-400 dark:border-l-violet-500/60',
+    activeBg: 'bg-violet-50/60 dark:bg-violet-500/5',
+  },
+  [CATEGORY_IDS.CLUSTER]: {
+    icon: 'text-blue-600 dark:text-blue-400',
+    iconBg: 'bg-blue-100 dark:bg-blue-500/15',
+    border: 'border-l-blue-400 dark:border-l-blue-500/60',
+    activeBg: 'bg-blue-50/60 dark:bg-blue-500/5',
+  },
+  [CATEGORY_IDS.SECURITY]: {
+    icon: 'text-rose-600 dark:text-rose-400',
+    iconBg: 'bg-rose-100 dark:bg-rose-500/15',
+    border: 'border-l-rose-400 dark:border-l-rose-500/60',
+    activeBg: 'bg-rose-50/60 dark:bg-rose-500/5',
+  },
+  [CATEGORY_IDS.RESOURCES]: {
+    icon: 'text-emerald-600 dark:text-emerald-400',
+    iconBg: 'bg-emerald-100 dark:bg-emerald-500/15',
+    border: 'border-l-emerald-400 dark:border-l-emerald-500/60',
+    activeBg: 'bg-emerald-50/60 dark:bg-emerald-500/5',
+  },
+  [CATEGORY_IDS.SCALING]: {
+    icon: 'text-orange-600 dark:text-orange-400',
+    iconBg: 'bg-orange-100 dark:bg-orange-500/15',
+    border: 'border-l-orange-400 dark:border-l-orange-500/60',
+    activeBg: 'bg-orange-50/60 dark:bg-orange-500/5',
+  },
+  [CATEGORY_IDS.CRDS]: {
+    icon: 'text-indigo-600 dark:text-indigo-400',
+    iconBg: 'bg-indigo-100 dark:bg-indigo-500/15',
+    border: 'border-l-indigo-400 dark:border-l-indigo-500/60',
+    activeBg: 'bg-indigo-50/60 dark:bg-indigo-500/5',
+  },
+  [CATEGORY_IDS.ADMISSION]: {
+    icon: 'text-teal-600 dark:text-teal-400',
+    iconBg: 'bg-teal-100 dark:bg-teal-500/15',
+    border: 'border-l-teal-400 dark:border-l-teal-500/60',
+    activeBg: 'bg-teal-50/60 dark:bg-teal-500/5',
+  },
+};
+
+const DEFAULT_CATEGORY_COLOR = {
+  icon: 'text-slate-600 dark:text-slate-400',
+  iconBg: 'bg-slate-100 dark:bg-slate-500/15',
+  border: 'border-l-slate-400 dark:border-l-slate-500/60',
+  activeBg: 'bg-slate-50/60 dark:bg-slate-500/5',
+};
 
 // ─── Resource Categories Definition ──────────────────────────────────────────
 
@@ -451,6 +552,7 @@ function useResourceCategories(metallbInstalled: boolean): ResourceCategory[] {
         label: 'Workloads',
         icon: Cpu,
         items: [
+          { to: '/workloads', icon: LayoutDashboard, label: 'Overview' },
           { to: '/pods', icon: Box, label: 'Pods', countKey: 'pods' },
           { to: '/deployments', icon: Container, label: 'Deployments', countKey: 'deployments' },
           { to: '/replicasets', icon: Layers, label: 'ReplicaSets', countKey: 'replicasets' },
@@ -467,6 +569,7 @@ function useResourceCategories(metallbInstalled: boolean): ResourceCategory[] {
         label: 'Networking',
         icon: Globe,
         items: [
+          { to: '/networking', icon: LayoutDashboard, label: 'Overview' },
           { to: '/services', icon: Globe, label: 'Services', countKey: 'services' },
           { to: '/ingresses', icon: Globe, label: 'Ingresses', countKey: 'ingresses' },
           { to: '/ingressclasses', icon: Route, label: 'Ingress Classes', countKey: 'ingressclasses' },
@@ -482,6 +585,7 @@ function useResourceCategories(metallbInstalled: boolean): ResourceCategory[] {
         label: 'Storage & Config',
         icon: StorageIcon,
         items: [
+          { to: '/storage', icon: LayoutDashboard, label: 'Overview' },
           { to: '/configmaps', icon: Settings, label: 'ConfigMaps', countKey: 'configmaps' },
           { to: '/secrets', icon: Key, label: 'Secrets', countKey: 'secrets' },
           { to: '/persistentvolumes', icon: HardDrive, label: 'Persistent Volumes', countKey: 'persistentvolumes' },
@@ -498,6 +602,7 @@ function useResourceCategories(metallbInstalled: boolean): ResourceCategory[] {
         label: 'Cluster',
         icon: Server,
         items: [
+          { to: '/cluster', icon: LayoutDashboard, label: 'Overview' },
           { to: '/nodes', icon: Server, label: 'Nodes', countKey: 'nodes' },
           { to: '/namespaces', icon: FileText, label: 'Namespaces', countKey: 'namespaces' },
           { to: '/events', icon: Activity, label: 'Events' },
@@ -523,6 +628,7 @@ function useResourceCategories(metallbInstalled: boolean): ResourceCategory[] {
         label: 'Resources & DRA',
         icon: Gauge,
         items: [
+          { to: '/resources', icon: LayoutDashboard, label: 'Overview' },
           { to: '/resourcequotas', icon: Gauge, label: 'Resource Quotas', countKey: 'resourcequotas' },
           { to: '/limitranges', icon: Scale, label: 'Limit Ranges', countKey: 'limitranges' },
           { to: '/resourceslices', icon: Cpu, label: 'Resource Slices (DRA)', countKey: 'resourceslices' },
@@ -534,6 +640,7 @@ function useResourceCategories(metallbInstalled: boolean): ResourceCategory[] {
         label: 'Scaling & Policies',
         icon: Zap,
         items: [
+          { to: '/scaling', icon: LayoutDashboard, label: 'Overview' },
           { to: '/horizontalpodautoscalers', icon: Scale, label: 'HPAs', countKey: 'horizontalpodautoscalers' },
           { to: '/verticalpodautoscalers', icon: Scale, label: 'VPAs', countKey: 'verticalpodautoscalers' },
           { to: '/poddisruptionbudgets', icon: Shield, label: 'PDBs', countKey: 'poddisruptionbudgets' },
@@ -544,6 +651,7 @@ function useResourceCategories(metallbInstalled: boolean): ResourceCategory[] {
         label: 'Custom Resources',
         icon: FileCode,
         items: [
+          { to: '/crds', icon: LayoutDashboard, label: 'Overview' },
           { to: '/customresourcedefinitions', icon: FileCode, label: 'Definitions', countKey: 'customresourcedefinitions' },
           { to: '/customresources', icon: FileCode, label: 'Instances' },
         ],
@@ -553,6 +661,7 @@ function useResourceCategories(metallbInstalled: boolean): ResourceCategory[] {
         label: 'Admission Control',
         icon: Webhook,
         items: [
+          { to: '/admission', icon: LayoutDashboard, label: 'Overview' },
           { to: '/mutatingwebhooks', icon: Webhook, label: 'Mutating Webhooks', countKey: 'mutatingwebhookconfigurations' },
           { to: '/validatingwebhooks', icon: Webhook, label: 'Validating Webhooks', countKey: 'validatingwebhookconfigurations' },
         ],
@@ -569,18 +678,15 @@ function SidebarContent({
   isLoading,
   isInitialLoad,
   metallbInstalled,
-  aiActive,
 }: {
   counts: ReturnType<typeof useResourceCounts>['counts'];
   isLoading: boolean;
   isInitialLoad: boolean;
   metallbInstalled: boolean;
-  aiActive: boolean;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
   const pathname = location.pathname;
-  const isHomeActive = pathname === '/home';
   const isDashboardActive = pathname === '/dashboard';
   const isFleetActive = pathname === '/fleet';
   const isTopologyActive = pathname === '/topology';
@@ -629,7 +735,7 @@ function SidebarContent({
 
   const handleExitProject = () => {
     clearActiveProject();
-    navigate('/home');
+    navigate('/dashboard');
   };
 
   // Filter categories based on search
@@ -671,8 +777,7 @@ function SidebarContent({
       <SyncingIndicator isLoading={isLoading} isInitialLoad={isInitialLoad} />
 
       {/* Top-level navigation */}
-      <div className="space-y-1.5">
-        <TopLevelNavLink to="/home" icon={Home} label="Home" isActive={isHomeActive} />
+      <div className="space-y-1">
         <TopLevelNavLink to="/dashboard" icon={LayoutDashboard} label="Dashboard" isActive={isDashboardActive} />
         <TopLevelNavLink to="/fleet" icon={Layers} label="Fleet" isActive={isFleetActive} />
         <TopLevelNavLink to="/topology" icon={Network} label="Topology" isActive={isTopologyActive} />
@@ -683,6 +788,12 @@ function SidebarContent({
 
       {/* Resources — single expandable section containing all K8s resource categories */}
       <div className="space-y-1">
+        {/* Section divider label */}
+        <div className="flex items-center gap-2 px-2 pt-2 pb-1">
+          <div className="h-px flex-1 bg-slate-200/60 dark:bg-slate-700/60" />
+          <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-[0.15em] select-none">Kubernetes</span>
+          <div className="h-px flex-1 bg-slate-200/60 dark:bg-slate-700/60" />
+        </div>
         <button
           onClick={handleResourcesToggle}
           aria-expanded={isResourcesSectionOpen}
@@ -698,10 +809,12 @@ function SidebarContent({
         >
           <div className="flex items-center gap-3">
             <div className={cn(
-              "p-1.5 rounded-lg transition-colors",
-              isAnyResourceActive ? "bg-primary/5 text-primary" : "bg-slate-200/50 dark:bg-slate-700/50 text-slate-700 dark:text-slate-400 group-hover:bg-white dark:group-hover:bg-slate-700 group-hover:text-slate-900 dark:group-hover:text-slate-100"
+              "h-7 w-7 rounded-lg flex items-center justify-center transition-colors",
+              isAnyResourceActive
+                ? "bg-primary/10 dark:bg-primary/20"
+                : "bg-slate-200/60 dark:bg-slate-700/60 group-hover:bg-slate-300/60 dark:group-hover:bg-slate-600/60"
             )}>
-              <Package className="h-4 w-4" />
+              <Package className={cn("h-4 w-4 transition-colors", isAnyResourceActive ? "text-primary" : "text-slate-600 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200")} />
             </div>
             <span className={cn(
               "text-[11px] font-bold tracking-[0.05em] uppercase",
@@ -752,35 +865,47 @@ function SidebarContent({
       </div>
 
       {/* Add-ons */}
-      <div className="space-y-1.5">
-        <TopLevelNavLink to="/addons" icon={Puzzle} label="Add-ons" isActive={isAddOnsActive} />
+      <div className="space-y-1">
+        <NavLink
+          to="/addons"
+          className={cn(
+            "flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all duration-300 group border h-11",
+            isAddOnsActive
+              ? "bg-white dark:bg-slate-800 text-foreground border-slate-200/60 dark:border-slate-700/40 shadow-apple"
+              : "bg-transparent text-slate-800 dark:text-slate-300 hover:bg-slate-100/60 dark:hover:bg-slate-800/60 border-transparent hover:border-slate-100 dark:hover:border-slate-700/50"
+          )}
+        >
+          <div className={cn(
+            "h-7 w-7 rounded-lg flex items-center justify-center shrink-0 transition-colors",
+            isAddOnsActive
+              ? "bg-purple-100 dark:bg-purple-500/20"
+              : "bg-slate-100/80 dark:bg-slate-800/80 group-hover:bg-slate-200/80 dark:group-hover:bg-slate-700/80"
+          )}>
+            <Puzzle className={cn(
+              "h-4 w-4 transition-colors",
+              isAddOnsActive
+                ? "text-purple-600 dark:text-purple-400"
+                : "text-slate-600 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-100"
+            )} />
+          </div>
+          <span className={cn("font-semibold text-[13px]", isAddOnsActive ? "text-slate-900 dark:text-slate-100" : "text-slate-800 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-slate-100")}>Add-ons</span>
+        </NavLink>
       </div>
 
-      {/* AI Section (only when AI features are available) */}
-      {aiActive && (
-        <div className="space-y-1.5">
-          <div className="px-4 pt-2">
-            <span className="text-[10px] font-bold tracking-[0.08em] uppercase text-slate-400 dark:text-slate-500">AI</span>
-          </div>
-          <NavItem to="/analytics" icon={BarChart3} label="Analytics" />
-          <NavItem to="/ml-analytics" icon={Brain} label="ML Analytics" />
-        </div>
-      )}
+      {/* AI section removed — will be redesigned in a future version */}
     </div>
   );
 }
 
 // ─── Section Routes for auto-expand ──────────────────────────────────────────
 
-const SECTION_ROUTES = ['/workloads', '/topology', '/addons', ...WORKLOAD_PATHS, ...NETWORKING_PATHS, ...STORAGE_PATHS, ...CLUSTER_PATHS, ...SECURITY_PATHS, ...RESOURCES_PATHS, ...SCALING_PATHS, ...CRD_PATHS, ...ADMISSION_PATHS, ...AI_PATHS];
+const SECTION_ROUTES = ['/workloads', '/topology', '/addons', ...WORKLOAD_PATHS, ...NETWORKING_PATHS, ...STORAGE_PATHS, ...CLUSTER_PATHS, ...SECURITY_PATHS, ...RESOURCES_PATHS, ...SCALING_PATHS, ...CRD_PATHS, ...ADMISSION_PATHS];
 
 // ─── Main Sidebar ────────────────────────────────────────────────────────────
 
 export function Sidebar() {
   const { counts, isLoading, isInitialLoad } = useResourceCounts();
   const { installed: metallbInstalled } = useMetalLBInstalled();
-  const aiStatus = useAIStatus();
-  const aiActive = aiStatus.status === 'active' || aiStatus.status === 'unconfigured';
   const collapsed = useUIStore((s) => s.isSidebarCollapsed);
   const setCollapsed = useUIStore((s) => s.setSidebarCollapsed);
   const [flyoutOpen, setFlyoutOpen] = useState(false);
@@ -813,25 +938,30 @@ export function Sidebar() {
   const fullContent = (
     <div className="flex flex-col flex-1 min-h-0 bg-slate-50/10 dark:bg-transparent">
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-6 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700 hover:scrollbar-thumb-slate-300 dark:hover:scrollbar-thumb-slate-600">
-        <SidebarContent counts={counts} isLoading={isLoading} isInitialLoad={isInitialLoad} metallbInstalled={metallbInstalled} aiActive={aiActive} />
+        <SidebarContent counts={counts} isLoading={isLoading} isInitialLoad={isInitialLoad} metallbInstalled={metallbInstalled} />
       </div>
 
       {/* Fixed footer */}
-      <div className="shrink-0 px-5 pb-6 pt-4 border-t border-slate-100/60 dark:border-slate-800/60 bg-white/40 dark:bg-slate-900/40 backdrop-blur-md space-y-2">
+      <div className="shrink-0 px-5 pb-6 pt-4 border-t border-slate-100/60 dark:border-slate-800/60 bg-white/40 dark:bg-slate-900/40 backdrop-blur-md space-y-1.5">
         <NavLink
           to="/audit-log"
           className={({ isActive }) =>
             cn(
-              "flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-500 group border h-11",
+              "flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all duration-300 group border h-11",
               isActive
-                ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/40 shadow-apple"
+                ? "bg-white dark:bg-slate-800 text-foreground border-slate-200/60 dark:border-slate-700/40 shadow-apple"
                 : "bg-transparent text-slate-800 dark:text-slate-300 hover:bg-slate-100/60 dark:hover:bg-slate-800/60 border-transparent hover:border-slate-100 dark:hover:border-slate-700/50"
             )
           }
         >
           {({ isActive }) => (
             <>
-              <ClipboardList className={cn("h-4 w-4 transition-colors shrink-0", isActive ? "text-indigo-600 dark:text-indigo-400" : "text-slate-700 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-100")} />
+              <div className={cn(
+                "h-7 w-7 rounded-lg flex items-center justify-center shrink-0 transition-colors",
+                isActive ? "bg-indigo-100 dark:bg-indigo-500/20" : "bg-slate-100/80 dark:bg-slate-800/80 group-hover:bg-slate-200/80 dark:group-hover:bg-slate-700/80"
+              )}>
+                <ClipboardList className={cn("h-4 w-4 transition-colors", isActive ? "text-indigo-600 dark:text-indigo-400" : "text-slate-600 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-100")} />
+              </div>
               <span className={cn("font-semibold text-[13px]", isActive ? "text-slate-900 dark:text-slate-100" : "text-slate-800 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-slate-100")}>Audit Log</span>
             </>
           )}
@@ -839,13 +969,18 @@ export function Sidebar() {
         <NavLink
           to="/settings"
           className={cn(
-            "flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-500 group border h-11",
+            "flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all duration-300 group border h-11",
             isSettingsActive
-              ? "bg-white dark:bg-slate-800 text-primary border-slate-100 dark:border-slate-700/40 shadow-apple"
+              ? "bg-white dark:bg-slate-800 text-foreground border-slate-200/60 dark:border-slate-700/40 shadow-apple"
               : "bg-transparent text-slate-800 dark:text-slate-300 hover:bg-slate-100/60 dark:hover:bg-slate-800/60 border-transparent hover:border-slate-100 dark:hover:border-slate-700/50"
           )}
         >
-          <Settings className={cn("h-4 w-4 transition-colors shrink-0", isSettingsActive ? "text-primary" : "text-slate-700 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-100")} />
+          <div className={cn(
+            "h-7 w-7 rounded-lg flex items-center justify-center shrink-0 transition-colors",
+            isSettingsActive ? "bg-slate-200 dark:bg-slate-700" : "bg-slate-100/80 dark:bg-slate-800/80 group-hover:bg-slate-200/80 dark:group-hover:bg-slate-700/80"
+          )}>
+            <Settings className={cn("h-4 w-4 transition-colors", isSettingsActive ? "text-slate-700 dark:text-slate-300" : "text-slate-600 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-100")} />
+          </div>
           <span className={cn("font-semibold text-[13px]", isSettingsActive ? "text-slate-900 dark:text-slate-100" : "text-slate-800 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-slate-100")}>Settings</span>
         </NavLink>
         {!collapsed && (
@@ -890,13 +1025,6 @@ export function Sidebar() {
           <NavItemIconOnly to="/services" icon={Globe} label="Services" iconColor="text-cyan-600 group-hover:text-cyan-700" />
           <NavItemIconOnly to="/events" icon={Activity} label="Events" iconColor="text-amber-600 group-hover:text-amber-700" />
           <NavItemIconOnly to="/resources" icon={Gauge} label="Resources & DRA" iconColor="text-blue-600 group-hover:text-blue-700" />
-          {aiActive && (
-            <>
-              <div className="w-12 h-px bg-border/50 my-2" />
-              <NavItemIconOnly to="/analytics" icon={BarChart3} label="Analytics" iconColor="text-purple-600 group-hover:text-purple-700" />
-              <NavItemIconOnly to="/ml-analytics" icon={Brain} label="ML Analytics" iconColor="text-cyan-600 group-hover:text-cyan-700" />
-            </>
-          )}
 
           <div className="flex-1" />
 

@@ -104,17 +104,17 @@ function formatAccessMode(mode: string): string {
 }
 
 const PVC_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 220, minWidth: 120 },
- { id: 'namespace', defaultWidth: 130, minWidth: 80 },
- { id: 'status', defaultWidth: 100, minWidth: 80 },
- { id: 'capacity', defaultWidth: 100, minWidth: 70 },
- { id: 'used', defaultWidth: 90, minWidth: 70 },
- { id: 'accessModes', defaultWidth: 120, minWidth: 80 },
- { id: 'storageClass', defaultWidth: 130, minWidth: 90 },
- { id: 'volume', defaultWidth: 160, minWidth: 90 },
- { id: 'volumeMode', defaultWidth: 100, minWidth: 70 },
- { id: 'usedBy', defaultWidth: 90, minWidth: 70 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'capacity', defaultWidth: 130, minWidth: 90 },
+ { id: 'used', defaultWidth: 130, minWidth: 90 },
+ { id: 'accessModes', defaultWidth: 160, minWidth: 100 },
+ { id: 'storageClass', defaultWidth: 160, minWidth: 100 },
+ { id: 'volume', defaultWidth: 220, minWidth: 120 },
+ { id: 'volumeMode', defaultWidth: 160, minWidth: 100 },
+ { id: 'usedBy', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const PVC_COLUMNS_FOR_VISIBILITY = [
@@ -150,7 +150,7 @@ function mapPVC(pvc: K8sPVC): PVC {
 export default function PersistentVolumeClaims() {
  const navigate = useNavigate();
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sPVC>('persistentvolumeclaims');
+ const { data, isLoading, isError, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sPVC>('persistentvolumeclaims');
  const deleteResource = useDeleteK8sResource('persistentvolumeclaims');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: PVC | null; bulk?: boolean }>({ open: false, item: null });
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());

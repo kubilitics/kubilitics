@@ -78,20 +78,20 @@ interface Deployment {
 }
 
 const DEPLOYMENTS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 100 },
- { id: 'namespace', defaultWidth: 130, minWidth: 80 },
- { id: 'status', defaultWidth: 110, minWidth: 70 },
- { id: 'ready', defaultWidth: 80, minWidth: 50 },
- { id: 'upToDate', defaultWidth: 90, minWidth: 50 },
- { id: 'available', defaultWidth: 90, minWidth: 50 },
- { id: 'strategy', defaultWidth: 110, minWidth: 70 },
- { id: 'maxSurge', defaultWidth: 90, minWidth: 60 },
- { id: 'maxUnavailable', defaultWidth: 110, minWidth: 70 },
- { id: 'revision', defaultWidth: 80, minWidth: 50 },
- { id: 'images', defaultWidth: 180, minWidth: 100 },
- { id: 'cpu', defaultWidth: 110, minWidth: 80 },
- { id: 'memory', defaultWidth: 120, minWidth: 80 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'ready', defaultWidth: 100, minWidth: 70 },
+ { id: 'upToDate', defaultWidth: 100, minWidth: 70 },
+ { id: 'available', defaultWidth: 100, minWidth: 70 },
+ { id: 'strategy', defaultWidth: 160, minWidth: 100 },
+ { id: 'maxSurge', defaultWidth: 100, minWidth: 70 },
+ { id: 'maxUnavailable', defaultWidth: 160, minWidth: 100 },
+ { id: 'revision', defaultWidth: 100, minWidth: 70 },
+ { id: 'images', defaultWidth: 220, minWidth: 120 },
+ { id: 'cpu', defaultWidth: 130, minWidth: 90 },
+ { id: 'memory', defaultWidth: 130, minWidth: 90 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const DEPLOYMENTS_COLUMNS_FOR_VISIBILITY = [

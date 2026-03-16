@@ -57,14 +57,14 @@ interface ReplicationController {
 }
 
 const RC_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 130, minWidth: 80 },
- { id: 'status', defaultWidth: 120, minWidth: 80 },
- { id: 'ready', defaultWidth: 130, minWidth: 90 },
- { id: 'current', defaultWidth: 80, minWidth: 56 },
- { id: 'available', defaultWidth: 90, minWidth: 56 },
- { id: 'selector', defaultWidth: 200, minWidth: 100 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'ready', defaultWidth: 100, minWidth: 70 },
+ { id: 'current', defaultWidth: 100, minWidth: 70 },
+ { id: 'available', defaultWidth: 100, minWidth: 70 },
+ { id: 'selector', defaultWidth: 220, minWidth: 120 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const RC_COLUMNS_FOR_VISIBILITY = [

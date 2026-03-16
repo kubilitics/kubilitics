@@ -53,14 +53,14 @@ interface VolumeSnapshot {
 }
 
 const VS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 130, minWidth: 80 },
- { id: 'status', defaultWidth: 110, minWidth: 80 },
- { id: 'sourcePVC', defaultWidth: 180, minWidth: 120 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'sourcePVC', defaultWidth: 220, minWidth: 120 },
  { id: 'snapshotClass', defaultWidth: 160, minWidth: 100 },
- { id: 'restoreSize', defaultWidth: 110, minWidth: 80 },
- { id: 'creationTime', defaultWidth: 160, minWidth: 120 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'restoreSize', defaultWidth: 130, minWidth: 90 },
+ { id: 'creationTime', defaultWidth: 160, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const VS_COLUMNS_FOR_VISIBILITY = [

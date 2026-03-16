@@ -111,14 +111,14 @@ function transformRoleBinding(r: RoleBindingResource): RoleBindingRow {
 }
 
 const ROLE_BINDING_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 180, minWidth: 100 },
- { id: 'namespace', defaultWidth: 130, minWidth: 80 },
- { id: 'role', defaultWidth: 140, minWidth: 80 },
- { id: 'roleKind', defaultWidth: 100, minWidth: 70 },
- { id: 'subjects', defaultWidth: 200, minWidth: 100 },
- { id: 'subjectKinds', defaultWidth: 140, minWidth: 90 },
- { id: 'subjectCount', defaultWidth: 90, minWidth: 50 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'role', defaultWidth: 160, minWidth: 100 },
+ { id: 'roleKind', defaultWidth: 160, minWidth: 100 },
+ { id: 'subjects', defaultWidth: 220, minWidth: 120 },
+ { id: 'subjectKinds', defaultWidth: 160, minWidth: 100 },
+ { id: 'subjectCount', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const ROLEBINDINGS_COLUMNS_FOR_VISIBILITY = [

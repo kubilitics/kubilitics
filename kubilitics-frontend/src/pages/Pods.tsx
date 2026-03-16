@@ -94,16 +94,16 @@ interface Pod {
 }
 
 const PODS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 220, minWidth: 120 },
- { id: 'namespace', defaultWidth: 120, minWidth: 80 },
- { id: 'status', defaultWidth: 130, minWidth: 90 },
- { id: 'ready', defaultWidth: 70, minWidth: 50 },
- { id: 'restarts', defaultWidth: 70, minWidth: 50 },
- { id: 'ip', defaultWidth: 140, minWidth: 100 },
- { id: 'cpu', defaultWidth: 100, minWidth: 70 },
- { id: 'memory', defaultWidth: 100, minWidth: 70 },
- { id: 'age', defaultWidth: 80, minWidth: 60 },
- { id: 'node', defaultWidth: 140, minWidth: 100 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'ready', defaultWidth: 100, minWidth: 70 },
+ { id: 'restarts', defaultWidth: 100, minWidth: 70 },
+ { id: 'ip', defaultWidth: 160, minWidth: 120 },
+ { id: 'cpu', defaultWidth: 130, minWidth: 90 },
+ { id: 'memory', defaultWidth: 130, minWidth: 90 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
+ { id: 'node', defaultWidth: 260, minWidth: 150 },
 ];
 
 const PODS_COLUMNS_FOR_VISIBILITY = [

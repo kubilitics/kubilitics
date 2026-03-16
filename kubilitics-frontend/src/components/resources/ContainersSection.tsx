@@ -75,6 +75,10 @@ export interface ContainersSectionProps {
   className?: string;
   /** Called when user clicks "Forward port" for a container port; PodDetail can open PortForwardDialog. */
   onForwardPort?: (containerName: string, port: number) => void;
+  /** Called when user clicks "Shell" on a container — switches to Terminal tab with that container pre-selected. */
+  onOpenShell?: (containerName: string) => void;
+  /** Called when user clicks "Logs" on a container — switches to Logs tab with that container pre-selected. */
+  onOpenLogs?: (containerName: string) => void;
 }
 
 const stateConfig = {
@@ -128,7 +132,7 @@ function probeToChips(probe: Record<string, unknown> | undefined): string[] {
   return chips;
 }
 
-export function ContainersSection({ containers, className, onForwardPort }: ContainersSectionProps) {
+export function ContainersSection({ containers, className, onForwardPort, onOpenShell, onOpenLogs }: ContainersSectionProps) {
   return (
     <div className={cn('space-y-4', className)}>
       {containers.map((container, index) => {
@@ -160,11 +164,21 @@ export function ContainersSection({ containers, className, onForwardPort }: Cont
                       {state.label}
                       {container.stateReason && ` (${container.stateReason})`}
                     </Badge>
-                    <Button variant="outline" size="sm" className="gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => onOpenShell?.(container.name)}
+                    >
                       <Terminal className="h-3.5 w-3.5" />
                       Shell
                     </Button>
-                    <Button variant="outline" size="sm" className="gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => onOpenLogs?.(container.name)}
+                    >
                       <FileText className="h-3.5 w-3.5" />
                       Logs
                     </Button>

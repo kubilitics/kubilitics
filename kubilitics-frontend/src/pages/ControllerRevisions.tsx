@@ -55,11 +55,11 @@ interface K8sControllerRevision extends KubernetesResource {
 }
 
 const CR_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 260, minWidth: 140 },
- { id: 'namespace', defaultWidth: 130, minWidth: 80 },
- { id: 'owner', defaultWidth: 220, minWidth: 140 },
+ { id: 'name', defaultWidth: 300, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'owner', defaultWidth: 160, minWidth: 100 },
  { id: 'revision', defaultWidth: 100, minWidth: 70 },
- { id: 'age', defaultWidth: 100, minWidth: 56 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const CR_COLUMNS_FOR_VISIBILITY = [
@@ -95,7 +95,7 @@ function ownerLink(item: ControllerRevision): string | null {
 export default function ControllerRevisions() {
  const navigate = useNavigate();
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sControllerRevision>('controllerrevisions');
+ const { data, isLoading, isError, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sControllerRevision>('controllerrevisions');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: ControllerRevision | null; bulk?: boolean }>({ open: false, item: null });
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());

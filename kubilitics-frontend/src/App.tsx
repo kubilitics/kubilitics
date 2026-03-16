@@ -29,7 +29,7 @@ const KubeConfigSetup = lazy(() => import("./pages/KubeConfigSetup"));
 const ClusterSelection = lazy(() => import("./pages/ClusterSelection"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const FleetDashboard = lazy(() => import("./pages/FleetDashboard"));
-const HomePage = lazy(() => import("./pages/HomePage"));
+// HomePage removed — cluster/project management moved to Settings; Dashboard is the landing page
 const ProjectDetailPage = lazy(() => import("./pages/ProjectDetailPage"));
 const ProjectDashboardPage = lazy(() => import("./pages/ProjectDashboardPage"));
 
@@ -295,26 +295,27 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 // Initial navigation logic.
-// P0-002-T03: Auto-detect mode — eliminate manual mode selection.
-// Tauri → desktop mode. Browser → desktop mode (default).
-// In-cluster mode is only set when the backend reports in-cluster access,
-// not from the frontend alone (a browser can't detect if it's inside a pod).
-// ModeSelection page is kept as a standalone route for Settings / manual override.
+// Tauri (desktop app) → always 'desktop' mode (auto-set, skip mode selection).
+// Browser (first visit, no mode persisted) → show ModeSelection so the user can
+//   choose Personal (desktop/kubeconfig) or Team Server (in-cluster Helm).
+// Browser (returning visit, mode persisted) → straight to /connect.
 function ModeSelectionEntryPoint() {
   const { appMode, setAppMode } = useClusterStore();
 
-  // Auto-detect mode: both Tauri and browser default to 'desktop' (kubeconfig connect).
-  // The backend will signal 'in-cluster' availability if it detects a service account.
+  // Tauri is always desktop mode — no need for mode selection
   useEffect(() => {
-    if (!appMode) {
+    if (!appMode && isTauri()) {
       setAppMode('desktop');
     }
   }, [appMode, setAppMode]);
 
-  // If mode is set, go to connect
+  // If mode is already chosen (or auto-set by Tauri), go to connect
   if (appMode) return <Navigate to="/connect" replace />;
 
-  // Brief loading while mode auto-detects (< 1 frame)
+  // Browser with no mode chosen yet → show mode selection page
+  if (!isTauri()) return <Navigate to="/mode-selection" replace />;
+
+  // Brief loading while Tauri mode auto-detects (< 1 frame)
   return null;
 }
 
@@ -649,7 +650,7 @@ const App = () => (
                       <Route element={<ModeSelection />} path="/mode-selection" />
                       <Route element={<ClusterConnect />} path="/connect" />
                       <Route element={<ConnectedRedirect />} path="/connected" />
-                      <Route element={<KubeConfigSetup />} path="/setup/kubeconfig" />
+                      <Route element={<Navigate to="/connect?addCluster=true" replace />} path="/setup/kubeconfig" />
                       <Route element={<ClusterSelection />} path="/setup/clusters" />
 
                       {/* App routes — require cluster connection only */}
@@ -660,7 +661,8 @@ const App = () => (
                           </ProtectedRoute>
                         }
                       >
-                        <Route path="/home" element={<HomePage />} />
+                        {/* /home redirects to /dashboard — HomePage eliminated */}
+                        <Route path="/home" element={<Navigate to="/dashboard" replace />} />
                         <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
                         <Route path="/projects/:projectId/dashboard" element={<ProjectDashboardPage />} />
                         <Route path="/dashboard" element={<DashboardPage />} />
@@ -752,6 +754,7 @@ const App = () => (
                         <Route path="/volume-snapshot-contents/:name" element={<VolumeSnapshotContentDetail />} />
 
                         {/* Cluster */}
+                        <Route path="/cluster" element={<ClusterOverview />} />
                         <Route path="/cluster-overview" element={<ClusterOverview />} />
                         <Route path="/nodes" element={<Nodes />} />
                         <Route path="/nodes/:name" element={<NodeDetail />} />

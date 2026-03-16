@@ -51,12 +51,12 @@ interface MutatingWebhook {
 }
 
 const MW_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 250, minWidth: 140 },
- { id: 'webhooks', defaultWidth: 90, minWidth: 60 },
- { id: 'failurePolicy', defaultWidth: 120, minWidth: 80 },
+ { id: 'name', defaultWidth: 300, minWidth: 150 },
+ { id: 'webhooks', defaultWidth: 100, minWidth: 70 },
+ { id: 'failurePolicy', defaultWidth: 160, minWidth: 100 },
  { id: 'sideEffects', defaultWidth: 160, minWidth: 100 },
- { id: 'matchPolicy', defaultWidth: 130, minWidth: 90 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'matchPolicy', defaultWidth: 160, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const MW_COLUMNS_FOR_VISIBILITY = [

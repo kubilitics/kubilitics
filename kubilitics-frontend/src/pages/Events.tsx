@@ -111,15 +111,15 @@ function backendEventToRow(ev: BackendEvent): EventRow {
 }
 
 const EVENTS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'type', defaultWidth: 90, minWidth: 70 },
- { id: 'reason', defaultWidth: 140, minWidth: 80 },
- { id: 'message', defaultWidth: 220, minWidth: 100 },
- { id: 'involved', defaultWidth: 180, minWidth: 100 },
- { id: 'namespace', defaultWidth: 120, minWidth: 80 },
- { id: 'source', defaultWidth: 120, minWidth: 80 },
- { id: 'count', defaultWidth: 70, minWidth: 50 },
- { id: 'firstSeen', defaultWidth: 90, minWidth: 70 },
- { id: 'lastSeen', defaultWidth: 90, minWidth: 70 },
+ { id: 'type', defaultWidth: 160, minWidth: 100 },
+ { id: 'reason', defaultWidth: 160, minWidth: 100 },
+ { id: 'message', defaultWidth: 300, minWidth: 150 },
+ { id: 'involved', defaultWidth: 260, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'source', defaultWidth: 160, minWidth: 100 },
+ { id: 'count', defaultWidth: 100, minWidth: 70 },
+ { id: 'firstSeen', defaultWidth: 110, minWidth: 80 },
+ { id: 'lastSeen', defaultWidth: 110, minWidth: 80 },
 ];
 
 const EVENTS_COLUMNS_FOR_VISIBILITY = [

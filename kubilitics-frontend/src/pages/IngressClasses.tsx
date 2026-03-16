@@ -62,12 +62,12 @@ interface IngressClass {
 }
 
 const INGRESSCLASSES_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 180, minWidth: 100 },
- { id: 'controller', defaultWidth: 220, minWidth: 140 },
- { id: 'default', defaultWidth: 90, minWidth: 70 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'controller', defaultWidth: 260, minWidth: 150 },
+ { id: 'default', defaultWidth: 100, minWidth: 70 },
  { id: 'ingresses', defaultWidth: 100, minWidth: 70 },
- { id: 'parameters', defaultWidth: 140, minWidth: 90 },
- { id: 'age', defaultWidth: 90, minWidth: 60 },
+ { id: 'parameters', defaultWidth: 160, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const INGRESSCLASSES_COLUMNS_FOR_VISIBILITY = [

@@ -71,16 +71,16 @@ interface NetworkPolicy {
 }
 
 const NETWORKPOLICIES_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 140, minWidth: 90 },
- { id: 'podSelector', defaultWidth: 180, minWidth: 100 },
- { id: 'affectedPods', defaultWidth: 110, minWidth: 80 },
- { id: 'policyTypes', defaultWidth: 140, minWidth: 90 },
- { id: 'ingressRules', defaultWidth: 110, minWidth: 80 },
- { id: 'egressRules', defaultWidth: 110, minWidth: 80 },
- { id: 'allowedSources', defaultWidth: 120, minWidth: 85 },
- { id: 'allowedDestinations', defaultWidth: 140, minWidth: 95 },
- { id: 'age', defaultWidth: 90, minWidth: 60 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'podSelector', defaultWidth: 220, minWidth: 120 },
+ { id: 'affectedPods', defaultWidth: 100, minWidth: 70 },
+ { id: 'policyTypes', defaultWidth: 160, minWidth: 100 },
+ { id: 'ingressRules', defaultWidth: 100, minWidth: 70 },
+ { id: 'egressRules', defaultWidth: 100, minWidth: 70 },
+ { id: 'allowedSources', defaultWidth: 100, minWidth: 70 },
+ { id: 'allowedDestinations', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const NETWORKPOLICIES_COLUMNS_FOR_VISIBILITY = [

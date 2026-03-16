@@ -93,13 +93,13 @@ function transformAPIService(item: APIServiceResource): APIService {
 }
 
 const API_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 100 },
- { id: 'service', defaultWidth: 160, minWidth: 80 },
- { id: 'group', defaultWidth: 140, minWidth: 80 },
- { id: 'version', defaultWidth: 90, minWidth: 60 },
- { id: 'status', defaultWidth: 110, minWidth: 80 },
- { id: 'insecureSkipTLS', defaultWidth: 120, minWidth: 90 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'service', defaultWidth: 160, minWidth: 100 },
+ { id: 'group', defaultWidth: 220, minWidth: 120 },
+ { id: 'version', defaultWidth: 160, minWidth: 100 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'insecureSkipTLS', defaultWidth: 160, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const API_COLUMNS_FOR_VISIBILITY = [

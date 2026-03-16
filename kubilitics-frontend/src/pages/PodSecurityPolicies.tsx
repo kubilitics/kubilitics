@@ -55,13 +55,13 @@ interface PodSecurityPolicy {
 }
 
 const PSP_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 220, minWidth: 120 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
  { id: 'privileged', defaultWidth: 100, minWidth: 70 },
  { id: 'volumes', defaultWidth: 220, minWidth: 120 },
- { id: 'hostNetwork', defaultWidth: 110, minWidth: 80 },
- { id: 'hostPID', defaultWidth: 90, minWidth: 70 },
- { id: 'runAsUser', defaultWidth: 150, minWidth: 90 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'hostNetwork', defaultWidth: 160, minWidth: 100 },
+ { id: 'hostPID', defaultWidth: 100, minWidth: 70 },
+ { id: 'runAsUser', defaultWidth: 160, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const PSP_COLUMNS_FOR_VISIBILITY = [

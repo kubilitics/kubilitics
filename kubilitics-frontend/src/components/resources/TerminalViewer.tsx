@@ -11,12 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+// DropdownMenu removed — container selector now uses inline segmented control
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -837,30 +832,27 @@ export function TerminalViewer({
         </div>
 
         <div className="flex items-center gap-1">
-          {/* Container selector */}
+          {/* Container selector — prominent segmented control */}
           {containers.length > 1 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-7 text-xs text-[hsl(0_0%_100%/0.7)] hover:text-white hover:bg-[hsl(0_0%_100%/0.1)] mr-1">
-                  {selectedContainer}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                {containers.map(c => (
-                  <DropdownMenuItem
-                    key={c}
-                    onClick={() => {
-                      setSelectedContainer(c);
-                      onContainerChange?.(c);
-                    }}
-                    className={cn(c === selectedContainer && 'font-semibold')}
-                  >
-                    {c}
-                    {c === selectedContainer && ' (active)'}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="flex items-center gap-0.5 mr-2 bg-[hsl(0_0%_100%/0.06)] rounded-md p-0.5">
+              {containers.map(c => (
+                <button
+                  key={c}
+                  onClick={() => {
+                    setSelectedContainer(c);
+                    onContainerChange?.(c);
+                  }}
+                  className={cn(
+                    'px-2.5 py-1 rounded text-[11px] font-medium transition-all duration-150',
+                    c === selectedContainer
+                      ? 'bg-[hsl(0_0%_100%/0.15)] text-white shadow-sm'
+                      : 'text-[hsl(0_0%_100%/0.45)] hover:text-[hsl(0_0%_100%/0.7)] hover:bg-[hsl(0_0%_100%/0.06)]'
+                  )}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
           )}
 
           <Button

@@ -68,10 +68,10 @@ function mapDC(dc: K8sDeviceClass): DeviceClass {
 }
 
 const DC_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 260, minWidth: 140 },
- { id: 'selectors', defaultWidth: 280, minWidth: 120 },
- { id: 'config', defaultWidth: 200, minWidth: 100 },
- { id: 'age', defaultWidth: 100, minWidth: 56 },
+ { id: 'name', defaultWidth: 300, minWidth: 150 },
+ { id: 'selectors', defaultWidth: 220, minWidth: 120 },
+ { id: 'config', defaultWidth: 220, minWidth: 120 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const DC_COLUMNS_FOR_VISIBILITY = [
@@ -83,7 +83,7 @@ const DC_COLUMNS_FOR_VISIBILITY = [
 export default function DeviceClasses() {
  const navigate = useNavigate();
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sDeviceClass>('deviceclasses');
+ const { data, isLoading, isError, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sDeviceClass>('deviceclasses');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: DeviceClass | null; bulk?: boolean }>({ open: false, item: null });
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());

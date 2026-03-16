@@ -77,20 +77,20 @@ const statusConfig = {
 };
 
 const JOBS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 140, minWidth: 100 },
- { id: 'status', defaultWidth: 120, minWidth: 90 },
- { id: 'completions', defaultWidth: 140, minWidth: 115 },
- { id: 'parallelism', defaultWidth: 130, minWidth: 105 },
- { id: 'active', defaultWidth: 100, minWidth: 75 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'completions', defaultWidth: 160, minWidth: 120 },
+ { id: 'parallelism', defaultWidth: 130, minWidth: 100 },
+ { id: 'active', defaultWidth: 100, minWidth: 70 },
  { id: 'succeeded', defaultWidth: 130, minWidth: 100 },
- { id: 'failed', defaultWidth: 100, minWidth: 80 },
- { id: 'duration', defaultWidth: 130, minWidth: 100 },
- { id: 'backoffLimit', defaultWidth: 150, minWidth: 120 },
- { id: 'owner', defaultWidth: 140, minWidth: 95 },
- { id: 'cpu', defaultWidth: 120, minWidth: 85 },
+ { id: 'failed', defaultWidth: 100, minWidth: 70 },
+ { id: 'duration', defaultWidth: 160, minWidth: 100 },
+ { id: 'backoffLimit', defaultWidth: 160, minWidth: 120 },
+ { id: 'owner', defaultWidth: 160, minWidth: 100 },
+ { id: 'cpu', defaultWidth: 130, minWidth: 90 },
  { id: 'memory', defaultWidth: 130, minWidth: 90 },
- { id: 'age', defaultWidth: 100, minWidth: 65 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const JOBS_COLUMNS_FOR_VISIBILITY = [

@@ -68,18 +68,18 @@ const statusConfig = {
 
 const CRONJOBS_TABLE_COLUMNS: ResizableColumnConfig[] = [
  { id: 'expand', defaultWidth: 40, minWidth: 36 },
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 140, minWidth: 100 },
- { id: 'status', defaultWidth: 120, minWidth: 90 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
  { id: 'schedule', defaultWidth: 160, minWidth: 100 },
- { id: 'lastSchedule', defaultWidth: 140, minWidth: 115 },
- { id: 'nextSchedule', defaultWidth: 140, minWidth: 115 },
- { id: 'active', defaultWidth: 100, minWidth: 75 },
- { id: 'concurrencyPolicy', defaultWidth: 200, minWidth: 160 },
- { id: 'suspend', defaultWidth: 100, minWidth: 80 },
- { id: 'historyLimit', defaultWidth: 140, minWidth: 115 },
- { id: 'lastResult', defaultWidth: 130, minWidth: 105 },
- { id: 'age', defaultWidth: 100, minWidth: 65 },
+ { id: 'lastSchedule', defaultWidth: 160, minWidth: 100 },
+ { id: 'nextSchedule', defaultWidth: 160, minWidth: 100 },
+ { id: 'active', defaultWidth: 100, minWidth: 70 },
+ { id: 'concurrencyPolicy', defaultWidth: 160, minWidth: 100 },
+ { id: 'suspend', defaultWidth: 100, minWidth: 70 },
+ { id: 'historyLimit', defaultWidth: 100, minWidth: 70 },
+ { id: 'lastResult', defaultWidth: 160, minWidth: 100 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const CRONJOBS_COLUMNS_FOR_VISIBILITY = [

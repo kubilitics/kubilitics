@@ -17,9 +17,9 @@ const NotFound = () => {
             <ArrowLeft className="h-4 w-4" />
             Go Back
           </Button>
-          <Button onClick={() => navigate('/home')} className="gap-2 rounded-xl">
+          <Button onClick={() => navigate('/dashboard')} className="gap-2 rounded-xl">
             <Home className="h-4 w-4" />
-            Go to Home
+            Go to Dashboard
           </Button>
         </div>
       </div>

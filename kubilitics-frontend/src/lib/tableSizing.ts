@@ -3,7 +3,7 @@ import type { ResizableColumnConfig } from '@/components/ui/resizable-table';
 interface EstimateWidthOptions {
   /** Minimum width in pixels (defaults to column minWidth or 80). */
   minPx?: number;
-  /** Maximum width in pixels (defaults to 320). */
+  /** Maximum width in pixels (defaults to 400). */
   maxPx?: number;
   /** Base padding in pixels added regardless of content length (defaults to 48). */
   basePx?: number;
@@ -22,7 +22,7 @@ export function estimateTextColumnWidth(
 ): number {
   const {
     minPx = 80,
-    maxPx = 320,
+    maxPx = 400,
     basePx = 48,
     pxPerChar = 7,
   } = options;
@@ -82,7 +82,7 @@ export function buildAutoWidthColumns<T>(
     const perColumnOpts = options?.perColumn?.[col.id];
     const estimated = estimateTextColumnWidth(values, {
       minPx: col.minWidth ?? perColumnOpts?.minPx ?? 80,
-      maxPx: perColumnOpts?.maxPx ?? 320,
+      maxPx: perColumnOpts?.maxPx ?? 400,
       basePx: perColumnOpts?.basePx ?? 48,
       pxPerChar: perColumnOpts?.pxPerChar ?? 7,
     });

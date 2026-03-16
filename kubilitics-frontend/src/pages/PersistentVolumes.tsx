@@ -97,17 +97,17 @@ function formatAccessMode(mode: string): string {
 }
 
 const PV_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 100 },
- { id: 'status', defaultWidth: 110, minWidth: 80 },
- { id: 'capacity', defaultWidth: 100, minWidth: 70 },
- { id: 'accessModes', defaultWidth: 120, minWidth: 80 },
- { id: 'reclaimPolicy', defaultWidth: 110, minWidth: 80 },
- { id: 'storageClass', defaultWidth: 130, minWidth: 90 },
- { id: 'provisioner', defaultWidth: 140, minWidth: 90 },
- { id: 'claim', defaultWidth: 180, minWidth: 100 },
- { id: 'volumeMode', defaultWidth: 100, minWidth: 70 },
- { id: 'usage', defaultWidth: 90, minWidth: 70 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'capacity', defaultWidth: 130, minWidth: 90 },
+ { id: 'accessModes', defaultWidth: 160, minWidth: 100 },
+ { id: 'reclaimPolicy', defaultWidth: 160, minWidth: 100 },
+ { id: 'storageClass', defaultWidth: 160, minWidth: 100 },
+ { id: 'provisioner', defaultWidth: 160, minWidth: 100 },
+ { id: 'claim', defaultWidth: 220, minWidth: 120 },
+ { id: 'volumeMode', defaultWidth: 160, minWidth: 100 },
+ { id: 'usage', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const PV_COLUMNS_FOR_VISIBILITY = [

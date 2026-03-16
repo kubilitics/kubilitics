@@ -540,9 +540,11 @@ export default function NodeDetail() {
     {
       id: 'pods',
       label: 'Pods',
+      icon: Box,
+      badge: runningPods.length.toString(),
       content: (
         <SectionCard icon={Box} title={`Pods on this node (${runningPods.length})`} tooltip={<p className="text-xs text-muted-foreground">Pods scheduled on this node (fieldSelector=spec.nodeName). Click a row to open pod detail.</p>}>
-          <DetailPodTable pods={runningPods} namespace="" />
+          <DetailPodTable pods={runningPodsRaw as any} namespace="" />
         </SectionCard>
       ),
     },

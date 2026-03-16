@@ -108,13 +108,13 @@ function transformVPA(v: VPAResource): VPARow {
 }
 
 const VPA_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 160, minWidth: 100 },
- { id: 'namespace', defaultWidth: 120, minWidth: 80 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
  { id: 'target', defaultWidth: 160, minWidth: 100 },
- { id: 'updateMode', defaultWidth: 100, minWidth: 70 },
- { id: 'cpuRec', defaultWidth: 140, minWidth: 90 },
- { id: 'memoryRec', defaultWidth: 140, minWidth: 90 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'updateMode', defaultWidth: 160, minWidth: 100 },
+ { id: 'cpuRec', defaultWidth: 130, minWidth: 90 },
+ { id: 'memoryRec', defaultWidth: 130, minWidth: 90 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const VPA_COLUMNS_FOR_VISIBILITY = [

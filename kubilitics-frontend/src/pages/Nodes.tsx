@@ -218,17 +218,17 @@ function transformNodeResource(resource: NodeResource): Node {
 }
 
 const NODES_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 180, minWidth: 100 },
- { id: 'status', defaultWidth: 110, minWidth: 80 },
- { id: 'roles', defaultWidth: 140, minWidth: 90 },
- { id: 'conditions', defaultWidth: 120, minWidth: 80 },
- { id: 'cpu', defaultWidth: 100, minWidth: 70 },
- { id: 'memory', defaultWidth: 100, minWidth: 70 },
- { id: 'pods', defaultWidth: 80, minWidth: 50 },
- { id: 'version', defaultWidth: 100, minWidth: 70 },
- { id: 'osArch', defaultWidth: 120, minWidth: 80 },
- { id: 'taints', defaultWidth: 70, minWidth: 50 },
- { id: 'age', defaultWidth: 90, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'status', defaultWidth: 150, minWidth: 100 },
+ { id: 'roles', defaultWidth: 160, minWidth: 100 },
+ { id: 'conditions', defaultWidth: 160, minWidth: 100 },
+ { id: 'cpu', defaultWidth: 130, minWidth: 90 },
+ { id: 'memory', defaultWidth: 130, minWidth: 90 },
+ { id: 'pods', defaultWidth: 100, minWidth: 70 },
+ { id: 'version', defaultWidth: 160, minWidth: 100 },
+ { id: 'osArch', defaultWidth: 160, minWidth: 100 },
+ { id: 'taints', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const NODES_COLUMNS_FOR_VISIBILITY = [

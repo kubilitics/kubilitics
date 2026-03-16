@@ -230,9 +230,9 @@ export function Header() {
             collapsed ? 'w-[5.5rem] justify-center px-0' : 'w-72 justify-start px-5'
           )}>
             <button
-              onClick={() => navigate('/home')}
+              onClick={() => navigate('/dashboard')}
               className="flex items-center gap-3 group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 rounded-xl p-1.5 transition-all press-effect"
-              aria-label="Go to Home"
+              aria-label="Go to Dashboard"
             >
               <BrandLogo
                 mark
@@ -349,7 +349,7 @@ export function Header() {
                         </DropdownMenuItem>
                       ))}
                       <DropdownMenuSeparator className="my-2 bg-slate-100/60" />
-                      <DropdownMenuItem onClick={() => navigate('/setup/kubeconfig')} className="gap-3 cursor-pointer py-4 px-4 rounded-2xl text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors">
+                      <DropdownMenuItem onClick={() => navigate('/connect?addCluster=true')} className="gap-3 cursor-pointer py-4 px-4 rounded-2xl text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors">
                         <div className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center">
                           <Plus className="h-4 w-4" />
                         </div>
@@ -522,7 +522,7 @@ export function Header() {
                       <Settings className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm">Settings</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => navigate('/setup/kubeconfig')} className="gap-2 py-2.5 cursor-pointer">
+                    <DropdownMenuItem onClick={() => navigate('/connect?addCluster=true')} className="gap-2 py-2.5 cursor-pointer">
                       <Plus className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm">Add Cluster</span>
                     </DropdownMenuItem>

@@ -116,9 +116,11 @@ export function ResourceList<T extends object>({
 
   const tableId = resizableTableId ?? title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
   const defaultColumnConfig = (key: string, idx: number): { defaultWidth: number; minWidth: number } => {
-    if (key === 'name' || idx === 0) return { defaultWidth: 220, minWidth: 120 };
-    if (key === 'age') return { defaultWidth: 90, minWidth: 56 };
-    return { defaultWidth: 150, minWidth: 70 };
+    if (key === 'name' || idx === 0) return { defaultWidth: 260, minWidth: 140 };
+    if (key === 'namespace') return { defaultWidth: 180, minWidth: 120 };
+    if (key === 'age') return { defaultWidth: 110, minWidth: 80 };
+    if (key === 'status') return { defaultWidth: 140, minWidth: 100 };
+    return { defaultWidth: 170, minWidth: 100 };
   };
 
   const filterValues = filterKey
@@ -200,6 +202,18 @@ export function ResourceList<T extends object>({
   }, [tableId, baseResizableConfig, resizableColumnConfig, displayItems, columns]);
 
   const useResizable = tableId.length > 0 && effectiveResizableConfig.length > 0;
+
+  // Calculate total column width so the table can scroll horizontally instead of squeezing
+  const totalColumnWidth = useMemo(() => {
+    if (!useResizable) return 0;
+    let total = 0;
+    for (const col of effectiveResizableConfig) {
+      total += col.defaultWidth;
+    }
+    // Add space for actions column if present
+    if (actions.length > 0) total += 56;
+    return total;
+  }, [useResizable, effectiveResizableConfig, actions.length]);
 
   const useVirtual = displayItems.length > VIRTUAL_THRESHOLD;
   const parentRef = useRef<HTMLDivElement>(null);
@@ -386,15 +400,15 @@ export function ResourceList<T extends object>({
           >
             {useResizable ? (
               <ResizableTableProvider tableId={tableId} columnConfig={effectiveResizableConfig}>
-                <Table className="table-fixed">
+                <Table className="table-fixed" style={totalColumnWidth > 0 ? { minWidth: totalColumnWidth } : undefined}>
                   <TableHeader>
                     <TableRow className={cn(headerRowClass, stickyHeaderClass)}>
                       {columns.map((col) => (
-                        <ResizableTableHead key={col.key} columnId={col.key} className={cn('font-semibold overflow-hidden', col.className)}>
+                        <ResizableTableHead key={col.key} columnId={col.key} className={cn('font-semibold overflow-hidden whitespace-nowrap', col.className)}>
                           {col.header}
                         </ResizableTableHead>
                       ))}
-                      {actions.length > 0 && <TableHead className="w-12 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>}
+                      {actions.length > 0 && <TableHead className="w-14 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>}
                     </TableRow>
                   </TableHeader>
               <TableBody>
@@ -478,15 +492,15 @@ export function ResourceList<T extends object>({
           </div>
         ) : useResizable ? (
           <ResizableTableProvider tableId={tableId} columnConfig={effectiveResizableConfig}>
-            <Table className="table-fixed">
+            <Table className="table-fixed" style={totalColumnWidth > 0 ? { minWidth: totalColumnWidth } : undefined}>
               <TableHeader>
                 <TableRow className={headerRowClass}>
                   {columns.map((col) => (
-                    <ResizableTableHead key={col.key} columnId={col.key} className={cn('font-semibold overflow-hidden', col.className)}>
+                    <ResizableTableHead key={col.key} columnId={col.key} className={cn('font-semibold overflow-hidden whitespace-nowrap', col.className)}>
                       {col.header}
                     </ResizableTableHead>
                   ))}
-                  {actions.length > 0 && <TableHead className="w-12 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>}
+                  {actions.length > 0 && <TableHead className="w-14 text-center"><span className="sr-only">Actions</span><MoreHorizontal className="h-4 w-4 inline-block text-muted-foreground" aria-hidden /></TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>

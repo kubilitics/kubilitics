@@ -71,12 +71,12 @@ function mapRS(rs: K8sResourceSlice): ResourceSlice {
 }
 
 const RS_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 260, minWidth: 140 },
+ { id: 'name', defaultWidth: 300, minWidth: 150 },
  { id: 'node', defaultWidth: 160, minWidth: 100 },
- { id: 'driver', defaultWidth: 180, minWidth: 100 },
+ { id: 'driver', defaultWidth: 220, minWidth: 120 },
  { id: 'pool', defaultWidth: 160, minWidth: 100 },
- { id: 'capacity', defaultWidth: 180, minWidth: 100 },
- { id: 'age', defaultWidth: 100, minWidth: 56 },
+ { id: 'capacity', defaultWidth: 130, minWidth: 90 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const RS_COLUMNS_FOR_VISIBILITY = [
@@ -90,7 +90,7 @@ const RS_COLUMNS_FOR_VISIBILITY = [
 export default function ResourceSlices() {
  const navigate = useNavigate();
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sResourceSlice>('resourceslices');
+ const { data, isLoading, isError, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sResourceSlice>('resourceslices');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: ResourceSlice | null; bulk?: boolean }>({ open: false, item: null });
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());

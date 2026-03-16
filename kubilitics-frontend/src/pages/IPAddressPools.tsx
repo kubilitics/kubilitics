@@ -54,12 +54,12 @@ function mapPool(p: K8sIPAddressPool): IPAddressPool {
 }
 
 const POOL_TABLE_COLUMNS: ResizableColumnConfig[] = [
- { id: 'name', defaultWidth: 200, minWidth: 120 },
- { id: 'namespace', defaultWidth: 140, minWidth: 100 },
- { id: 'addresses', defaultWidth: 260, minWidth: 140 },
- { id: 'assigned', defaultWidth: 90, minWidth: 60 },
- { id: 'available', defaultWidth: 90, minWidth: 60 },
- { id: 'age', defaultWidth: 100, minWidth: 56 },
+ { id: 'name', defaultWidth: 280, minWidth: 150 },
+ { id: 'namespace', defaultWidth: 180, minWidth: 120 },
+ { id: 'addresses', defaultWidth: 260, minWidth: 120 },
+ { id: 'assigned', defaultWidth: 100, minWidth: 70 },
+ { id: 'available', defaultWidth: 100, minWidth: 70 },
+ { id: 'age', defaultWidth: 110, minWidth: 80 },
 ];
 
 const POOL_COLUMNS_FOR_VISIBILITY = [
@@ -73,7 +73,7 @@ const POOL_COLUMNS_FOR_VISIBILITY = [
 export default function IPAddressPools() {
  const navigate = useNavigate();
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, isFetching, dataUpdatedAt, refetch } = usePaginatedResourceList<K8sIPAddressPool>('ipaddresspools');
+ const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = usePaginatedResourceList<K8sIPAddressPool>('ipaddresspools');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: IPAddressPool | null; bulk?: boolean }>({ open: false, item: null });
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
  const [searchQuery, setSearchQuery] = useState('');
