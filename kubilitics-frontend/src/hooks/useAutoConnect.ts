@@ -246,53 +246,10 @@ export function useAutoConnect(): UseAutoConnectReturn {
 
         const allContexts = allBackend.map(backendToDiscovered);
 
-        if (allBackend.length === 1) {
-          // Single context: auto-connect immediately
-          const single = allBackend[0];
-          let targetCluster: BackendCluster;
-
-          if (registeredContexts.has(single.context)) {
-            // Already registered
-            targetCluster = single;
-          } else {
-            // Need to register first
-            if (!single.kubeconfig_path) {
-              throw new Error('No kubeconfig path for discovered context');
-            }
-            targetCluster = await addCluster(baseUrl, single.kubeconfig_path, single.context);
-          }
-
-          if (controller.signal.aborted) return;
-
-          // Fetch fresh cluster list after potential registration
-          const freshList = await getClusters(baseUrl);
-
-          if (controller.signal.aborted) return;
-
-          const finalCluster = freshList.find((c) => c.id === targetCluster.id) ?? targetCluster;
-          const connectedCluster = backendClusterToCluster(finalCluster);
-          const allClusters = freshList.map(backendClusterToCluster);
-
-          setCurrentClusterId(finalCluster.id);
-          setClusters(allClusters);
-          setActiveCluster(connectedCluster);
-          setDemo(false);
-
-          queryClient.invalidateQueries({ queryKey: ['backend', 'clusters'] });
-
-          toast.success(`Connected to ${finalCluster.name}`, {
-            description: `Context: ${finalCluster.context}`,
-          });
-
-          clearTimeout(timeoutId);
-          setIsAutoConnecting(false);
-          setIsResolved(true);
-          navigate('/home', { replace: true });
-          return;
-        }
-
-        // Multiple contexts: show picker
-        console.log('[auto-connect] multiple contexts detected, showing picker');
+        // Always show context picker and let the user choose — never auto-connect
+        // silently, even with a single cluster. This avoids confusing error toasts
+        // and gives the user control over which cluster they connect to.
+        console.log('[auto-connect] showing context picker for', allContexts.length, 'context(s)');
         setContexts(allContexts);
 
         // Pre-select the current-context if available
