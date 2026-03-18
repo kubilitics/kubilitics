@@ -282,34 +282,19 @@ export function Header() {
             <div className="flex items-center gap-2 lg:gap-4 shrink-0 ml-auto">
               <TooltipProvider delayDuration={300}>
 
-                {/* Cluster selector with backend status indicator */}
+                {/* Cluster selector — single status dot (unified cluster + backend) */}
                 {activeCluster && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button className={cn(BTN, 'shrink-0 max-w-[160px] lg:max-w-[240px] group press-effect')} aria-label="Select cluster">
-                        <div className="relative">
-                          <span className={cn('absolute inset-0 blur-sm opacity-50 rounded-full', statusColors[activeCluster.status])} />
-                          <span className={cn('relative block w-2.5 h-2.5 rounded-full shrink-0 ring-2 ring-white', statusColors[activeCluster.status])} />
-                        </div>
+                        <span className={cn(
+                          'block w-2 h-2 rounded-full shrink-0',
+                          // If backend is unhealthy, show that; otherwise show cluster status
+                          backendStatus === 'error' ? 'bg-red-500' :
+                            backendStatus === 'warning' ? 'bg-amber-500' :
+                              statusColors[activeCluster.status]
+                        )} />
                         <span className="truncate text-base font-bold tracking-tight">{activeCluster.name}</span>
-                        {/* Subtle backend status indicator */}
-                        {backendStatus && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div className={cn(
-                                'w-1.5 h-1.5 rounded-full shrink-0',
-                                backendStatus === 'healthy' ? 'bg-emerald-500' :
-                                  backendStatus === 'warning' ? 'bg-amber-500' :
-                                    'bg-red-500'
-                              )} />
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom" sideOffset={8}>
-                              {backendStatus === 'healthy' ? 'Backend connected' :
-                                backendStatus === 'warning' ? 'Backend slow or stale data' :
-                                  'Backend unreachable'}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
                         <ChevronDown className="h-5 w-5 text-slate-400 group-hover:text-slate-600 transition-colors shrink-0" />
                       </button>
                     </DropdownMenuTrigger>

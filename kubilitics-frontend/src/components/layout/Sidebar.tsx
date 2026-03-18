@@ -783,9 +783,6 @@ function SidebarContent({
         <TopLevelNavLink to="/topology" icon={Network} label="Topology" isActive={isTopologyActive} />
       </div>
 
-      {/* Recent Resources */}
-      <RecentResources />
-
       {/* Resources — single expandable section containing all K8s resource categories */}
       <div className="space-y-1">
         {/* Section divider label */}
@@ -891,6 +888,9 @@ function SidebarContent({
           <span className={cn("font-semibold text-[13px]", isAddOnsActive ? "text-slate-900 dark:text-slate-100" : "text-slate-800 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-slate-100")}>Add-ons</span>
         </NavLink>
       </div>
+
+      {/* Recent Resources — bottom of scrollable area, non-intrusive */}
+      <RecentResources />
 
       {/* AI section removed — will be redesigned in a future version */}
     </div>
