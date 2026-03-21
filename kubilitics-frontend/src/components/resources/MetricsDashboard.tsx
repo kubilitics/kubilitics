@@ -72,6 +72,7 @@ const METRICS_SUMMARY_TYPES: MetricsSummaryResourceType[] = [
   'daemonset',
   'job',
   'cronjob',
+  'service',
 ];
 
 function isMetricsSummaryType(t: string): t is MetricsSummaryResourceType {

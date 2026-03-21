@@ -17,7 +17,8 @@ export type MetricsSummaryResourceType =
   | 'statefulset'
   | 'daemonset'
   | 'job'
-  | 'cronjob';
+  | 'cronjob'
+  | 'service';
 
 export function useMetricsSummary(
   resourceType: MetricsSummaryResourceType,
