@@ -19,6 +19,7 @@ import {
   ResourceTopologyView,
   ResourceComparisonView,
   PortForwardDialog,
+  MetricsDashboard,
   LabelList,
   AnnotationList,
   type ResourceStatus,
@@ -684,82 +685,120 @@ export default function ServiceDetail() {
       id: 'dns',
       label: 'DNS',
       content: (
-        <div className="space-y-4">
-          <SectionCard title="Primary DNS Name" icon={Globe}>
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">Full DNS name for this service within the cluster:</p>
-              <code className="block w-full rounded-md bg-muted px-4 py-2 font-mono text-sm select-all break-all">
+        <div className="space-y-5">
+          {/* Primary DNS — hero card */}
+          <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-transparent p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Globe className="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold">Service DNS</h3>
+                <p className="text-xs text-muted-foreground">Fully qualified domain name within the cluster</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-card border border-border/50">
+              <code className="flex-1 font-mono text-sm font-semibold select-all break-all text-primary">
                 {dnsName || '—'}
               </code>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" onClick={copyDns} disabled={!dnsName}>
-                  <Copy className="h-3.5 w-3.5 mr-1" /> Copy DNS name
-                </Button>
-              </div>
-              {clusterIP === 'None' && (
-                <div className="mt-3 space-y-2">
-                  <p className="text-sm font-medium text-blue-600 dark:text-blue-400">Headless service</p>
-                  <p className="text-xs text-muted-foreground">Per-pod DNS entries (resolve to individual pod IPs):</p>
-                  {endpointRows.some((r) => r.podRef) ? (
-                    <div className="space-y-1.5">
-                      {endpointRows.filter((r) => r.podRef).map((row, i) => {
-                        const podDns = `${row.podRef!.name}.${svcName}.${namespace}.svc.cluster.local`;
-                        return (
-                          <div key={i} className="flex items-center gap-2 flex-wrap">
-                            <code className="flex-1 min-w-0 font-mono text-xs bg-muted rounded px-2 py-1.5 break-all">{podDns}</code>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 shrink-0"
-                              onClick={() => {
-                                navigator.clipboard.writeText(podDns);
-                                toast.success('DNS name copied');
-                              }}
-                            >
-                              <Copy className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <code className="block font-mono text-xs bg-muted rounded px-2 py-1 break-all">
-                      &lt;pod-name&gt;.{svcName}.{namespace}.svc.cluster.local
-                    </code>
-                  )}
-                </div>
-              )}
+              <Button size="sm" variant="outline" onClick={copyDns} disabled={!dnsName} className="shrink-0">
+                <Copy className="h-3.5 w-3.5 mr-1" /> Copy
+              </Button>
             </div>
-          </SectionCard>
+            <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
+              <span>Short name: <code className="bg-muted px-1.5 py-0.5 rounded font-semibold text-foreground">{svcName}</code></span>
+              <span>Namespace: <code className="bg-muted px-1.5 py-0.5 rounded font-semibold text-foreground">{namespace}</code></span>
+              <span>Type: <code className="bg-muted px-1.5 py-0.5 rounded font-semibold text-foreground">{serviceType}</code></span>
+            </div>
+          </div>
+
+          {/* Headless service per-pod DNS */}
+          {clusterIP === 'None' && (
+            <SectionCard title="Headless Service — Per-Pod DNS" icon={Server}>
+              <p className="text-xs text-muted-foreground mb-3">Each pod gets its own DNS record that resolves to the pod&apos;s IP address:</p>
+              {endpointRows.some((r) => r.podRef) ? (
+                <div className="space-y-1.5">
+                  {endpointRows.filter((r) => r.podRef).map((row, i) => {
+                    const podDns = `${row.podRef!.name}.${svcName}.${namespace}.svc.cluster.local`;
+                    return (
+                      <div key={i} className="flex items-center gap-2 p-2 rounded-md bg-muted/30 border border-border/30">
+                        <div className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                        <code className="flex-1 min-w-0 font-mono text-xs break-all">{podDns}</code>
+                        <button
+                          className="text-muted-foreground hover:text-primary shrink-0"
+                          onClick={() => { navigator.clipboard.writeText(podDns); toast.success('Copied'); }}
+                        >
+                          <Copy className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <code className="block font-mono text-xs bg-muted rounded px-3 py-2 break-all">
+                  &lt;pod-name&gt;.{svcName}.{namespace}.svc.cluster.local
+                </code>
+              )}
+            </SectionCard>
+          )}
+
+          {/* SRV Records */}
           {ports.length > 0 && (
-            <SectionCard title="Port-Specific DNS (SRV Records)" icon={Globe}>
-              <p className="text-sm text-muted-foreground mb-3">SRV records are generated per port for service discovery:</p>
-              <div className="space-y-2">
+            <SectionCard title="SRV Records" icon={Layers}>
+              <p className="text-xs text-muted-foreground mb-3">Port-specific DNS records for service discovery:</p>
+              <div className="rounded-lg border border-border/50 overflow-hidden">
+                <div className="grid grid-cols-[1fr_auto] gap-2 p-2.5 bg-muted/40 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/30">
+                  <span>SRV Record</span>
+                  <span>Port</span>
+                </div>
                 {ports.map((port, idx) => {
                   const portName = port.name || `port-${idx}`;
                   const protocol = (port.protocol || 'TCP').toLowerCase();
                   const srvRecord = `_${portName}._${protocol}.${svcName}.${namespace}.svc.cluster.local`;
                   return (
-                    <div key={port.name || idx} className="flex items-center justify-between p-2 rounded-md bg-muted/50">
-                      <div className="min-w-0 flex-1">
+                    <div key={port.name || idx} className="grid grid-cols-[1fr_auto] gap-2 items-center p-2.5 border-b border-border/20 last:border-0 hover:bg-muted/20 transition-colors">
+                      <div className="flex items-center gap-2 min-w-0">
                         <code className="font-mono text-xs break-all">{srvRecord}</code>
+                        <button
+                          className="text-muted-foreground hover:text-primary shrink-0"
+                          onClick={() => { navigator.clipboard.writeText(srvRecord); toast.success('Copied'); }}
+                        >
+                          <Copy className="h-3 w-3" />
+                        </button>
                       </div>
-                      <Badge variant="outline" className="ml-2 shrink-0 font-mono text-xs">{port.port}</Badge>
+                      <Badge variant="secondary" className="font-mono text-xs shrink-0">{port.port}</Badge>
                     </div>
                   );
                 })}
               </div>
             </SectionCard>
           )}
-          <SectionCard title="DNS Notes" icon={Globe}>
-            <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-              <li>A/AAAA records are created automatically for this service in the cluster DNS.</li>
-              <li>Short name <code className="text-xs bg-muted px-1 rounded">{svcName}</code> resolves within the same namespace.</li>
-              <li>Cross-namespace access requires the full FQDN: <code className="text-xs bg-muted px-1 rounded">{dnsName}</code></li>
-              {serviceType === 'ExternalName' && svc.spec?.externalName && (
-                <li>ExternalName services create a CNAME record pointing to <code className="text-xs bg-muted px-1 rounded">{svc.spec.externalName}</code></li>
-              )}
-            </ul>
+
+          {/* DNS Reference */}
+          <SectionCard title="How DNS Resolution Works" icon={Activity}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="p-3 rounded-lg bg-muted/30 border border-border/30">
+                <p className="text-xs font-semibold mb-1">Same Namespace</p>
+                <code className="text-xs font-mono text-primary">{svcName}</code>
+                <p className="text-[10px] text-muted-foreground mt-1">Simplest — use the short name</p>
+              </div>
+              <div className="p-3 rounded-lg bg-muted/30 border border-border/30">
+                <p className="text-xs font-semibold mb-1">Cross Namespace</p>
+                <code className="text-xs font-mono text-primary">{svcName}.{namespace}</code>
+                <p className="text-[10px] text-muted-foreground mt-1">Include namespace for cross-ns access</p>
+              </div>
+              <div className="p-3 rounded-lg bg-muted/30 border border-border/30">
+                <p className="text-xs font-semibold mb-1">Full FQDN</p>
+                <code className="text-xs font-mono text-primary break-all">{dnsName}</code>
+                <p className="text-[10px] text-muted-foreground mt-1">Fully qualified — works everywhere</p>
+              </div>
+            </div>
+            {serviceType === 'ExternalName' && svc.spec?.externalName && (
+              <div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">ExternalName Service</p>
+                <p className="text-xs text-muted-foreground mt-1">Creates a CNAME record → <code className="bg-muted px-1 rounded font-mono">{svc.spec.externalName}</code></p>
+              </div>
+            )}
           </SectionCard>
         </div>
       ),
@@ -860,21 +899,11 @@ export default function ServiceDetail() {
       id: 'metrics',
       label: 'Metrics',
       content: (
-        <SectionCard title="Metrics" icon={Activity}>
-          <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/30 border border-border/50 mb-4">
-            <Activity className="h-5 w-5 text-muted-foreground shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Metrics require a metrics server</p>
-              <p className="text-xs text-muted-foreground/70 mt-0.5">Install a metrics pipeline (e.g. Prometheus + kube-prometheus-stack) in your cluster to view traffic, latency, and error rate metrics here.</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card><CardContent className="pt-4"><p className="text-sm font-medium">Request rate</p><p className="text-muted-foreground text-xs">—</p></CardContent></Card>
-            <Card><CardContent className="pt-4"><p className="text-sm font-medium">Latency</p><p className="text-muted-foreground text-xs">—</p></CardContent></Card>
-            <Card><CardContent className="pt-4"><p className="text-sm font-medium">Error rate</p><p className="text-muted-foreground text-xs">—</p></CardContent></Card>
-            <Card><CardContent className="pt-4"><p className="text-sm font-medium">Connections</p><p className="text-muted-foreground text-xs">—</p></CardContent></Card>
-          </div>
-        </SectionCard>
+        <MetricsDashboard
+          resourceType="service"
+          resourceName={svcName}
+          namespace={svcNamespace}
+        />
       ),
     },
     { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={svcName} editable onSave={handleSaveYaml} /> },
