@@ -135,6 +135,9 @@ const TIME_RANGES = [
   { label: '15m', value: '15m' },
   { label: '30m', value: '30m' },
   { label: '1h', value: '1h' },
+  { label: '6h', value: '6h' },
+  { label: '24h', value: '24h' },
+  { label: '7d', value: '168h' },
 ] as const;
 
 export function MetricsDashboard({ resourceType, resourceName, namespace, podResource }: MetricsDashboardProps) {
@@ -155,20 +158,13 @@ export function MetricsDashboard({ resourceType, resourceName, namespace, podRes
 
   const summary = queryResult?.summary;
 
-  // Fetch real history from backend ring buffer (always fetch 1h, filter client-side by timeRange)
+  // Fetch history from backend (SQLite for long ranges, ring buffer for short)
   const { data: historyResult, refetch: refetchHistory } = useMetricsHistory(summaryType ?? 'pod', namespace, resourceName, {
     enabled: !!summaryType && !!resourceName && (resourceType === 'node' || !!namespace),
-    duration: '1h',
+    duration: timeRange,
   });
 
-  // Filter history points by selected time range
-  const filteredHistory = useMemo(() => {
-    const points = historyResult?.points ?? [];
-    if (points.length === 0) return points;
-    const rangeMs = timeRange === '5m' ? 5 * 60_000 : timeRange === '15m' ? 15 * 60_000 : timeRange === '30m' ? 30 * 60_000 : 60 * 60_000;
-    const cutoff = (Date.now() - rangeMs) / 1000;
-    return points.filter((p) => p.ts >= cutoff);
-  }, [historyResult, timeRange]);
+  const filteredHistory = historyResult?.points ?? [];
 
   const historyPointCount = filteredHistory.length;
 

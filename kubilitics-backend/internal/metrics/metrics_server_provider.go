@@ -133,6 +133,42 @@ type kubeletIfaceStats struct {
 	TxBytes int64  `json:"txBytes"`
 }
 
+// BulkPodUsage holds raw numeric metrics for a single pod (used by bulk collector).
+type BulkPodUsage struct {
+	Name      string
+	Namespace string
+	CPUMilli  float64
+	MemoryMiB float64
+}
+
+// GetAllPodMetrics fetches current CPU/memory for ALL pods across all namespaces in one API call.
+// This is much more efficient than per-pod queries for continuous background collection.
+func (p *MetricsServerProvider) GetAllPodMetrics(ctx context.Context, client *k8s.Client) ([]BulkPodUsage, error) {
+	metricsClient, err := versioned.NewForConfig(client.Config)
+	if err != nil {
+		return nil, fmt.Errorf("metrics client: %w", err)
+	}
+	pmList, err := metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list all pod metrics: %w", err)
+	}
+	result := make([]BulkPodUsage, 0, len(pmList.Items))
+	for _, pm := range pmList.Items {
+		var totalCPU, totalMem float64
+		for _, c := range pm.Containers {
+			totalCPU += c.Usage.Cpu().AsApproximateFloat64() * 1000
+			totalMem += float64(c.Usage.Memory().Value()) / (1024 * 1024)
+		}
+		result = append(result, BulkPodUsage{
+			Name:      pm.Name,
+			Namespace: pm.Namespace,
+			CPUMilli:  totalCPU,
+			MemoryMiB: totalMem,
+		})
+	}
+	return result, nil
+}
+
 // GetNodeUsage returns current CPU and memory for the given node.
 func (p *MetricsServerProvider) GetNodeUsage(ctx context.Context, client *k8s.Client, nodeName string) (cpu, memory string, err error) {
 	metricsClient, err := versioned.NewForConfig(client.Config)

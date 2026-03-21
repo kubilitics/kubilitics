@@ -33,7 +33,7 @@ func (h *Handler) GetMetricsHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	duration := 60 * time.Minute
 	if d := r.URL.Query().Get("duration"); d != "" {
-		if parsed, err := time.ParseDuration(d); err == nil && parsed > 0 && parsed <= 60*time.Minute {
+		if parsed, err := time.ParseDuration(d); err == nil && parsed > 0 && parsed <= 7*24*time.Hour {
 			duration = parsed
 		}
 	}
@@ -41,7 +41,7 @@ func (h *Handler) GetMetricsHistory(w http.ResponseWriter, r *http.Request) {
 		ClusterID: clusterID, Namespace: namespace,
 		ResourceType: rt, ResourceName: resourceName,
 	}
-	respondJSON(w, http.StatusOK, h.unifiedMetricsService.GetHistory(id, duration))
+	respondJSON(w, http.StatusOK, h.unifiedMetricsService.GetHistory(r.Context(), id, duration))
 }
 
 // GetMetricsSummary handles GET /clusters/{clusterId}/metrics/summary?namespace=&resource_type=&resource_name=
