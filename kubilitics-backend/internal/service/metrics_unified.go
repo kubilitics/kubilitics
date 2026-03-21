@@ -10,6 +10,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/metrics"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/repository"
 )
 
 // UnifiedMetricsService exposes a single GetSummary(ResourceIdentity) and uses
@@ -20,6 +21,7 @@ type UnifiedMetricsService struct {
 	resolver       *metrics.ControllerMetricsResolver
 	cache          metrics.MetricsCache
 	history        *metrics.MetricsHistoryStore
+	repo           *repository.SQLiteRepository
 }
 
 // NewUnifiedMetricsService builds the service with the default provider and resolver.
@@ -28,6 +30,7 @@ func NewUnifiedMetricsService(
 	provider metrics.MetricsProvider,
 	resolver *metrics.ControllerMetricsResolver,
 	cache metrics.MetricsCache,
+	repo ...*repository.SQLiteRepository,
 ) *UnifiedMetricsService {
 	if provider == nil {
 		provider = metrics.NewMetricsServerProvider()
@@ -38,12 +41,17 @@ func NewUnifiedMetricsService(
 	if cache == nil {
 		cache = metrics.NewInMemoryMetricsCache(30 * time.Second)
 	}
+	var sqlRepo *repository.SQLiteRepository
+	if len(repo) > 0 && repo[0] != nil {
+		sqlRepo = repo[0]
+	}
 	return &UnifiedMetricsService{
 		clusterService: clusterService,
 		provider:       provider,
 		resolver:       resolver,
 		cache:          cache,
 		history:        metrics.NewMetricsHistoryStore(),
+		repo:           sqlRepo,
 	}
 }
 
@@ -98,23 +106,89 @@ func (s *UnifiedMetricsService) GetSummary(ctx context.Context, id models.Resour
 	return result
 }
 
-// GetHistory returns stored history points for the given resource.
-func (s *UnifiedMetricsService) GetHistory(id models.ResourceIdentity, duration time.Duration) *models.MetricsHistoryResponse {
+// GetHistory returns stored history points from SQLite (persistent) or in-memory ring buffer.
+func (s *UnifiedMetricsService) GetHistory(ctx context.Context, id models.ResourceIdentity, duration time.Duration) *models.MetricsHistoryResponse {
+	now := time.Now()
+	since := now.Add(-duration)
+
+	// Determine aggregation interval based on requested duration
+	intervalSec := 30
+	if duration > 6*time.Hour {
+		intervalSec = 300 // 5-min averages for 6h+
+	} else if duration > 1*time.Hour {
+		intervalSec = 60 // 1-min averages for 1-6h
+	}
+
+	resp := &models.MetricsHistoryResponse{
+		ClusterID:    id.ClusterID,
+		Namespace:    id.Namespace,
+		ResourceType: id.ResourceType,
+		ResourceName: id.ResourceName,
+		IntervalSec:  intervalSec,
+		MaxDuration:  "7d",
+	}
+
+	// For pods: query SQLite directly by pod name
+	if id.ResourceType == models.ResourceTypePod && s.repo != nil {
+		var rows []repository.MetricsHistoryRow
+		var err error
+		if intervalSec > 30 {
+			rows, err = s.repo.QueryAggregatedMetricsHistory(ctx, id.ClusterID, id.Namespace, id.ResourceName, since, now, intervalSec)
+		} else {
+			rows, err = s.repo.QueryMetricsHistory(ctx, id.ClusterID, id.Namespace, id.ResourceName, since, now)
+		}
+		if err == nil && len(rows) > 0 {
+			resp.Points = make([]models.MetricsHistoryPoint, 0, len(rows))
+			for _, r := range rows {
+				resp.Points = append(resp.Points, models.MetricsHistoryPoint{
+					Timestamp: r.Timestamp,
+					CPUMilli:  r.CPUMilli,
+					MemoryMiB: r.MemoryMiB,
+					NetworkRx: r.NetworkRx,
+					NetworkTx: r.NetworkTx,
+				})
+			}
+			return resp
+		}
+	}
+
+	// For controllers or if SQLite has no data: try resolving pod names and aggregating
+	if id.ResourceType.IsController() && s.repo != nil {
+		client, err := s.clusterService.GetClient(id.ClusterID)
+		if err == nil {
+			podRefs, err := s.resolver.ResolvePods(ctx, client, id)
+			if err == nil && len(podRefs) > 0 {
+				podNames := make([]string, 0, len(podRefs))
+				for _, pr := range podRefs {
+					podNames = append(podNames, pr.Name)
+				}
+				rows, err := s.repo.QueryControllerMetricsHistory(ctx, id.ClusterID, id.Namespace, podNames, since, now, intervalSec)
+				if err == nil && len(rows) > 0 {
+					resp.Points = make([]models.MetricsHistoryPoint, 0, len(rows))
+					for _, r := range rows {
+						resp.Points = append(resp.Points, models.MetricsHistoryPoint{
+							Timestamp: r.Timestamp,
+							CPUMilli:  r.CPUMilli,
+							MemoryMiB: r.MemoryMiB,
+							NetworkRx: r.NetworkRx,
+							NetworkTx: r.NetworkTx,
+						})
+					}
+					return resp
+				}
+			}
+		}
+	}
+
+	// Fallback: in-memory ring buffer (for nodes or when SQLite has no data yet)
 	key := metrics.CacheKey(id.ClusterID, id.Namespace, id.ResourceType, id.ResourceName)
 	s.history.MarkWatched(key)
 	points := s.history.Query(key, duration)
 	if points == nil {
 		points = []models.MetricsHistoryPoint{}
 	}
-	return &models.MetricsHistoryResponse{
-		ClusterID:    id.ClusterID,
-		Namespace:    id.Namespace,
-		ResourceType: id.ResourceType,
-		ResourceName: id.ResourceName,
-		Points:       points,
-		IntervalSec:  15,
-		MaxDuration:  "1h",
-	}
+	resp.Points = points
+	return resp
 }
 
 // StartCollector starts a background goroutine that periodically re-fetches
