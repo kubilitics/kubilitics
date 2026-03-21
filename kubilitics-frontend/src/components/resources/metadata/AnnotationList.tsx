@@ -8,6 +8,7 @@
 
 import { useState, useMemo } from 'react';
 import { FileText, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { SectionCard } from '../SectionCard';
@@ -78,12 +79,12 @@ export function AnnotationList({
             return (
               <div
                 key={key}
-                className="flex flex-col gap-1 rounded-lg bg-muted/50 p-3 text-sm group"
+                className="flex flex-col gap-1.5 rounded-xl border border-border/40 bg-gradient-to-r from-muted/30 to-transparent p-3.5 text-sm group hover:border-border/60 transition-colors"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-muted-foreground text-xs break-all min-w-0">
+                  <Badge variant="outline" className="font-mono text-[10px] bg-violet-500/5 text-violet-700 dark:text-violet-300 border-violet-500/20 max-w-full truncate shrink">
                     {key}
-                  </span>
+                  </Badge>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button

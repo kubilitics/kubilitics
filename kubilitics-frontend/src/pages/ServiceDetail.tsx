@@ -520,87 +520,128 @@ export default function ServiceDetail() {
       id: 'overview',
       label: 'Overview',
       content: (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <SectionCard title="Service info" icon={Globe}>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-8 text-sm">
-              <DetailRow label="Type" value={
-                <Badge variant="secondary" className="font-semibold">{serviceType}</Badge>
-              } />
-              <DetailRow label="Cluster IP" value={
-                clusterIP !== '—' && clusterIP !== 'None' ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="font-mono font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded">{clusterIP}</span>
-                    <button onClick={() => { navigator.clipboard.writeText(clusterIP); toast.success('IP copied'); }} className="text-muted-foreground hover:text-primary" title="Copy IP"><Copy className="h-3 w-3" /></button>
-                  </span>
-                ) : <span className="text-muted-foreground">{clusterIP}</span>
-              } />
-              {svc.spec?.externalName != null && <DetailRow label="External Name" value={
-                <span className="font-mono text-blue-500">{svc.spec.externalName}</span>
-              } />}
-              <DetailRow label="Session Affinity" value={
-                <Badge variant={sessionAffinity === 'None' ? 'outline' : 'secondary'}>{sessionAffinity}</Badge>
-              } />
-              <DetailRow label="External Traffic Policy" value={
-                <Badge variant="outline">{svc.spec?.externalTrafficPolicy ?? 'Cluster'}</Badge>
-              } />
-              <DetailRow label="Internal Traffic Policy" value={
-                <Badge variant="outline">{svc.spec?.internalTrafficPolicy ?? 'Cluster'}</Badge>
-              } />
-              <DetailRow label="IP Families" value={
-                <span className="font-mono">{svc.spec?.ipFamilies?.join(', ') ?? '—'}</span>
-              } />
-              <DetailRow label="IP Family Policy" value={
-                <Badge variant="outline">{svc.spec?.ipFamilyPolicy ?? '—'}</Badge>
-              } />
-              <DetailRow label="Publish Not Ready" value={
-                <span className={cn('font-semibold', svc.spec?.publishNotReadyAddresses ? 'text-destructive' : 'text-muted-foreground')}>
-                  {svc.spec?.publishNotReadyAddresses ? 'Yes' : 'No'}
-                </span>
-              } />
-              <DetailRow label="Age" value={
-                <span className="font-medium">{age}</span>
-              } />
+        <div className="space-y-6">
+          {/* Network Identity — hero row */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Cluster IP */}
+            <div className="relative overflow-hidden rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/5 via-transparent to-transparent p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="h-7 w-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                  <Network className="h-3.5 w-3.5 text-blue-500" />
+                </div>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cluster IP</span>
+              </div>
+              {clusterIP !== '—' && clusterIP !== 'None' ? (
+                <div className="flex items-center gap-2">
+                  <code className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">{clusterIP}</code>
+                  <button onClick={() => { navigator.clipboard.writeText(clusterIP); toast.success('IP copied'); }} className="text-muted-foreground/50 hover:text-blue-500 transition-colors" title="Copy IP"><Copy className="h-3.5 w-3.5" /></button>
+                </div>
+              ) : (
+                <p className="text-lg font-mono font-bold text-muted-foreground">{clusterIP}</p>
+              )}
             </div>
-          </SectionCard>
-          <SectionCard title="Ports" icon={Layers}>
-            <div className="space-y-2">
-              {ports.length === 0 ? <p className="text-muted-foreground text-sm">No ports</p> : ports.map((port, idx) => (
-                <div key={port.name || idx} className="flex items-center justify-between p-3 rounded-lg border border-border/50 bg-card hover:bg-muted/30 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Layers className="h-4 w-4 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-semibold">{port.name || `port-${idx}`}</p>
-                      <p className="text-xs text-muted-foreground">{port.protocol || 'TCP'}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-mono text-sm">
-                      <span className="text-primary font-semibold">{port.port}</span>
-                      <span className="text-muted-foreground mx-1">→</span>
-                      <span className="font-semibold">{port.targetPort ?? '—'}</span>
-                    </span>
-                    {port.nodePort != null && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        nodePort: <span className="font-mono text-amber-600 dark:text-amber-400 font-semibold">{port.nodePort}</span>
-                      </p>
+            {/* External IP */}
+            <div className="relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="h-7 w-7 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                  <Globe className="h-3.5 w-3.5 text-emerald-500" />
+                </div>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">External IP</span>
+              </div>
+              <p className="text-lg font-mono font-bold text-foreground">{externalIP ?? '—'}</p>
+            </div>
+            {/* DNS */}
+            <div className="relative overflow-hidden rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-500/5 via-transparent to-transparent p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="h-7 w-7 rounded-lg bg-violet-500/10 flex items-center justify-center">
+                  <Globe className="h-3.5 w-3.5 text-violet-500" />
+                </div>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">DNS Name</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="text-sm font-mono font-semibold text-violet-600 dark:text-violet-400 truncate">{dnsName || '—'}</code>
+                {dnsName && <button onClick={copyDns} className="text-muted-foreground/50 hover:text-violet-500 transition-colors shrink-0" title="Copy DNS"><Copy className="h-3.5 w-3.5" /></button>}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Service Configuration */}
+            <SectionCard title="Configuration" icon={Globe}>
+              <div className="space-y-0 divide-y divide-border/40">
+                {[
+                  { label: 'Service Type', value: serviceType, color: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20' },
+                  { label: 'Session Affinity', value: sessionAffinity, color: sessionAffinity === 'None' ? '' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20' },
+                  { label: 'External Traffic', value: svc.spec?.externalTrafficPolicy ?? 'Cluster', color: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20' },
+                  { label: 'Internal Traffic', value: svc.spec?.internalTrafficPolicy ?? 'Cluster', color: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/20' },
+                  { label: 'IP Family Policy', value: svc.spec?.ipFamilyPolicy ?? '—', color: '' },
+                  { label: 'IP Families', value: svc.spec?.ipFamilies?.join(', ') ?? '—', color: '', mono: true },
+                  { label: 'Publish Not Ready', value: svc.spec?.publishNotReadyAddresses ? 'Yes' : 'No', color: svc.spec?.publishNotReadyAddresses ? 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20' : '' },
+                  { label: 'Age', value: age, color: '', bold: true },
+                ].map((row) => (
+                  <div key={row.label} className="flex items-center justify-between py-2.5 px-1">
+                    <span className="text-sm text-muted-foreground">{row.label}</span>
+                    {row.color ? (
+                      <Badge variant="outline" className={cn('font-semibold text-xs border', row.color)}>{row.value}</Badge>
+                    ) : (
+                      <span className={cn('text-sm', row.mono && 'font-mono', row.bold && 'font-semibold')}>{row.value}</span>
                     )}
                   </div>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-          <SectionCard title="Selector" icon={Server}>
-            {Object.keys(selector).length === 0 ? <p className="text-muted-foreground text-sm">No selector</p> : (
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(selector).map(([key, value]) => (
-                  <Badge key={key} variant="outline" className="font-mono text-xs">{key}={value}</Badge>
                 ))}
               </div>
-            )}
-          </SectionCard>
-          <LabelList labels={svc.metadata?.labels ?? {}} />
+            </SectionCard>
+
+            {/* Ports */}
+            <SectionCard title="Ports" icon={Layers}>
+              <div className="space-y-2">
+                {ports.length === 0 ? <p className="text-muted-foreground text-sm">No ports configured</p> : ports.map((port, idx) => (
+                  <div key={port.name || idx} className="group relative overflow-hidden rounded-xl border border-border/50 bg-gradient-to-r from-card to-transparent p-4 hover:border-primary/30 transition-all duration-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border border-primary/10">
+                          <Layers className="h-4.5 w-4.5 text-primary" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-sm">{port.name || `port-${idx}`}</p>
+                          <Badge variant="outline" className="text-[10px] h-5 mt-0.5 font-mono">{port.protocol || 'TCP'}</Badge>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="flex items-center gap-1.5 font-mono">
+                          <span className="text-lg font-bold text-primary">{port.port}</span>
+                          <span className="text-muted-foreground text-sm">→</span>
+                          <span className="text-lg font-bold">{port.targetPort ?? '—'}</span>
+                        </div>
+                        {port.nodePort != null && (
+                          <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20">
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400">nodePort</span>
+                            <span className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">{port.nodePort}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SectionCard>
+
+            {/* Selector */}
+            <SectionCard title="Selector" icon={Server}>
+              {Object.keys(selector).length === 0 ? <p className="text-muted-foreground text-sm">No selector defined</p> : (
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(selector).map(([key, value]) => (
+                    <Badge key={key} variant="outline" className="font-mono text-xs bg-cyan-500/5 border-cyan-500/20 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/10 transition-colors cursor-default">
+                      <span className="opacity-60">{key}=</span>{value}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+
+            <LabelList labels={svc.metadata?.labels ?? {}} />
+          </div>
+
+          {/* Annotations — full width for better readability */}
           <AnnotationList annotations={svc.metadata?.annotations ?? {}} />
         </div>
       ),
@@ -686,28 +727,40 @@ export default function ServiceDetail() {
       content: (
         <div className="space-y-5">
           {/* Primary DNS — hero card */}
-          <div className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-transparent p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Globe className="h-4 w-4 text-primary" />
+          <div className="relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-teal-500/3 to-transparent p-6">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
+            <div className="relative">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 flex items-center justify-center border border-emerald-500/10">
+                  <Globe className="h-5 w-5 text-emerald-500" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold tracking-tight">Service DNS</h3>
+                  <p className="text-xs text-muted-foreground">Fully qualified domain name within the cluster</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-sm font-semibold">Service DNS</h3>
-                <p className="text-xs text-muted-foreground">Fully qualified domain name within the cluster</p>
+              <div className="flex items-center gap-3 p-3.5 rounded-xl bg-card/80 backdrop-blur-sm border border-emerald-500/10 shadow-sm">
+                <code className="flex-1 font-mono text-base font-bold select-all break-all text-emerald-600 dark:text-emerald-400">
+                  {dnsName || '—'}
+                </code>
+                <Button size="sm" variant="outline" onClick={copyDns} disabled={!dnsName} className="shrink-0 border-emerald-500/20 hover:bg-emerald-500/10 hover:text-emerald-600">
+                  <Copy className="h-3.5 w-3.5 mr-1.5" /> Copy
+                </Button>
               </div>
-            </div>
-            <div className="flex items-center gap-3 p-3 rounded-lg bg-card border border-border/50">
-              <code className="flex-1 font-mono text-sm font-semibold select-all break-all text-primary">
-                {dnsName || '—'}
-              </code>
-              <Button size="sm" variant="outline" onClick={copyDns} disabled={!dnsName} className="shrink-0">
-                <Copy className="h-3.5 w-3.5 mr-1" /> Copy
-              </Button>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
-              <span>Short name: <code className="bg-muted px-1.5 py-0.5 rounded font-semibold text-foreground">{svcName}</code></span>
-              <span>Namespace: <code className="bg-muted px-1.5 py-0.5 rounded font-semibold text-foreground">{namespace}</code></span>
-              <span>Type: <code className="bg-muted px-1.5 py-0.5 rounded font-semibold text-foreground">{serviceType}</code></span>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-card/60 border border-border/30 text-xs">
+                  <span className="text-muted-foreground">Short:</span>
+                  <code className="font-semibold text-foreground">{svcName}</code>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-card/60 border border-border/30 text-xs">
+                  <span className="text-muted-foreground">Namespace:</span>
+                  <code className="font-semibold text-foreground">{namespace}</code>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-card/60 border border-border/30 text-xs">
+                  <span className="text-muted-foreground">Type:</span>
+                  <code className="font-semibold text-foreground">{serviceType}</code>
+                </span>
+              </div>
             </div>
           </div>
 
@@ -743,62 +796,88 @@ export default function ServiceDetail() {
 
           {/* SRV Records */}
           {ports.length > 0 && (
-            <SectionCard title="SRV Records" icon={Layers}>
-              <p className="text-xs text-muted-foreground mb-3">Port-specific DNS records for service discovery:</p>
-              <div className="rounded-lg border border-border/50 overflow-hidden">
-                <div className="grid grid-cols-[1fr_auto] gap-2 p-2.5 bg-muted/40 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/30">
-                  <span>SRV Record</span>
-                  <span>Port</span>
+            <div className="rounded-xl border border-blue-500/20 overflow-hidden">
+              <div className="flex items-center gap-2 p-4 bg-gradient-to-r from-blue-500/5 to-transparent border-b border-blue-500/10">
+                <div className="h-7 w-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                  <Layers className="h-3.5 w-3.5 text-blue-500" />
                 </div>
-                {ports.map((port, idx) => {
-                  const portName = port.name || `port-${idx}`;
-                  const protocol = (port.protocol || 'TCP').toLowerCase();
-                  const srvRecord = `_${portName}._${protocol}.${svcName}.${namespace}.svc.cluster.local`;
-                  return (
-                    <div key={port.name || idx} className="grid grid-cols-[1fr_auto] gap-2 items-center p-2.5 border-b border-border/20 last:border-0 hover:bg-muted/20 transition-colors">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <code className="font-mono text-xs break-all">{srvRecord}</code>
-                        <button
-                          className="text-muted-foreground hover:text-primary shrink-0"
-                          onClick={() => { navigator.clipboard.writeText(srvRecord); toast.success('Copied'); }}
-                        >
-                          <Copy className="h-3 w-3" />
-                        </button>
-                      </div>
-                      <Badge variant="secondary" className="font-mono text-xs shrink-0">{port.port}</Badge>
-                    </div>
-                  );
-                })}
+                <div>
+                  <h3 className="text-sm font-bold">SRV Records</h3>
+                  <p className="text-[10px] text-muted-foreground">Port-specific DNS for service discovery</p>
+                </div>
               </div>
-            </SectionCard>
+              {ports.map((port, idx) => {
+                const portName = port.name || `port-${idx}`;
+                const protocol = (port.protocol || 'TCP').toLowerCase();
+                const srvRecord = `_${portName}._${protocol}.${svcName}.${namespace}.svc.cluster.local`;
+                return (
+                  <div key={port.name || idx} className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border/10 last:border-0 hover:bg-blue-500/3 transition-colors group">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <code className="font-mono text-xs break-all text-blue-600 dark:text-blue-400">{srvRecord}</code>
+                      <button
+                        className="text-muted-foreground/40 hover:text-blue-500 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => { navigator.clipboard.writeText(srvRecord); toast.success('Copied'); }}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <Badge className="font-mono text-xs shrink-0 bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20">{port.port}</Badge>
+                  </div>
+                );
+              })}
+            </div>
           )}
 
-          {/* DNS Reference */}
-          <SectionCard title="How DNS Resolution Works" icon={Activity}>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="p-3 rounded-lg bg-muted/30 border border-border/30">
-                <p className="text-xs font-semibold mb-1">Same Namespace</p>
-                <code className="text-xs font-mono text-primary">{svcName}</code>
-                <p className="text-[10px] text-muted-foreground mt-1">Simplest — use the short name</p>
+          {/* DNS Resolution Guide */}
+          <div className="rounded-xl border border-amber-500/20 overflow-hidden">
+            <div className="flex items-center gap-2 p-4 bg-gradient-to-r from-amber-500/5 to-transparent border-b border-amber-500/10">
+              <div className="h-7 w-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <Activity className="h-3.5 w-3.5 text-amber-500" />
               </div>
-              <div className="p-3 rounded-lg bg-muted/30 border border-border/30">
-                <p className="text-xs font-semibold mb-1">Cross Namespace</p>
-                <code className="text-xs font-mono text-primary">{svcName}.{namespace}</code>
-                <p className="text-[10px] text-muted-foreground mt-1">Include namespace for cross-ns access</p>
+              <div>
+                <h3 className="text-sm font-bold">DNS Resolution Guide</h3>
+                <p className="text-[10px] text-muted-foreground">How to reach this service from different locations</p>
               </div>
-              <div className="p-3 rounded-lg bg-muted/30 border border-border/30">
-                <p className="text-xs font-semibold mb-1">Full FQDN</p>
-                <code className="text-xs font-mono text-primary break-all">{dnsName}</code>
-                <p className="text-[10px] text-muted-foreground mt-1">Fully qualified — works everywhere</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border/20">
+              <div className="p-4 hover:bg-amber-500/3 transition-colors">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="h-5 w-5 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                    <span className="text-[8px] font-bold text-emerald-500">1</span>
+                  </div>
+                  <p className="text-xs font-bold">Same Namespace</p>
+                </div>
+                <code className="text-sm font-mono font-semibold text-emerald-600 dark:text-emerald-400">{svcName}</code>
+                <p className="text-[10px] text-muted-foreground mt-1.5">Simplest — just the service name</p>
+              </div>
+              <div className="p-4 hover:bg-amber-500/3 transition-colors">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="h-5 w-5 rounded-full bg-blue-500/10 flex items-center justify-center">
+                    <span className="text-[8px] font-bold text-blue-500">2</span>
+                  </div>
+                  <p className="text-xs font-bold">Cross Namespace</p>
+                </div>
+                <code className="text-sm font-mono font-semibold text-blue-600 dark:text-blue-400">{svcName}.{namespace}</code>
+                <p className="text-[10px] text-muted-foreground mt-1.5">Include namespace for cross-ns access</p>
+              </div>
+              <div className="p-4 hover:bg-amber-500/3 transition-colors">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="h-5 w-5 rounded-full bg-violet-500/10 flex items-center justify-center">
+                    <span className="text-[8px] font-bold text-violet-500">3</span>
+                  </div>
+                  <p className="text-xs font-bold">Full FQDN</p>
+                </div>
+                <code className="text-xs font-mono font-semibold text-violet-600 dark:text-violet-400 break-all">{dnsName}</code>
+                <p className="text-[10px] text-muted-foreground mt-1.5">Fully qualified — works everywhere</p>
               </div>
             </div>
             {serviceType === 'ExternalName' && svc.spec?.externalName && (
-              <div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">ExternalName Service</p>
-                <p className="text-xs text-muted-foreground mt-1">Creates a CNAME record → <code className="bg-muted px-1 rounded font-mono">{svc.spec.externalName}</code></p>
+              <div className="mx-4 mb-4 p-3 rounded-xl bg-gradient-to-r from-amber-500/10 to-transparent border border-amber-500/20">
+                <p className="text-xs font-bold text-amber-600 dark:text-amber-400">ExternalName Service</p>
+                <p className="text-xs text-muted-foreground mt-1">Creates a CNAME record → <code className="bg-muted px-1.5 py-0.5 rounded font-mono font-semibold">{svc.spec.externalName}</code></p>
               </div>
             )}
-          </SectionCard>
+          </div>
         </div>
       ),
     },
