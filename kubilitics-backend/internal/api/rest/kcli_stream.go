@@ -280,14 +280,15 @@ func (h *Handler) makeKCLIStreamCommand(ctx context.Context, clusterContext, kub
 	ctxArg := strings.ReplaceAll(clusterContext, "'", "'\"'\"'")
 	var sb strings.Builder
 
+	// Suppress macOS bash deprecation warning
+	sb.WriteString("export BASH_SILENCE_DEPRECATION_WARNING=1\n")
+
 	if kcliErr == nil {
 		// kcli is available — set up a rich kcli-powered shell
 		sb.WriteString("export KCLI_BIN='" + strings.ReplaceAll(kcliBin, "'", "'\"'\"'") + "'\n")
 
 		if sh == "/bin/bash" {
-			// Source kcli shell completion
 			sb.WriteString("source <(\"$KCLI_BIN\" completion bash 2>/dev/null) 2>/dev/null\n")
-			// Also try kubectl completion as fallback
 			sb.WriteString("source <(kubectl completion bash 2>/dev/null) 2>/dev/null\n")
 		}
 
@@ -310,7 +311,7 @@ func (h *Handler) makeKCLIStreamCommand(ctx context.Context, clusterContext, kub
 			sb.WriteString("\"$KCLI_BIN\" ns '" + nsArg + "' 2>/dev/null || kubectl config set-context --current --namespace='" + nsArg + "' 2>/dev/null\n")
 		}
 
-		// Custom PS1 prompt showing kcli context/namespace (eval kcli prompt; fallback if prompt fails)
+		// Custom PS1 prompt showing kcli context/namespace
 		sb.WriteString("eval \"$(\\\"$KCLI_BIN\\\" prompt 2>/dev/null)\" 2>/dev/null || export PS1='\\[\\033[1;32m\\][kcli: $(\"$KCLI_BIN\" kubeconfig current-context 2>/dev/null)]\\[\\033[0m\\] \\$ '\n")
 	} else {
 		// kcli not available — fall back to plain kubectl shell
@@ -327,13 +328,20 @@ func (h *Handler) makeKCLIStreamCommand(ctx context.Context, clusterContext, kub
 		sb.WriteString("export PS1='\\[\\033[1;33m\\][kubectl]\\[\\033[0m\\] \\$ '\n")
 	}
 
-	if sh == "/bin/bash" {
-		sb.WriteString("exec bash -i\n")
-	} else {
-		sb.WriteString("exec sh -i\n")
+	// Write init commands to a temp rcfile so bash --rcfile sources them
+	// in the interactive shell itself (preserving aliases, PS1, completions).
+	rcfile := fmt.Sprintf("/tmp/kubilitics-kcli-%d.rc", time.Now().UnixNano())
+	if err := os.WriteFile(rcfile, []byte(sb.String()), 0600); err != nil {
+		return nil, fmt.Errorf("failed to write rcfile: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, sh, "-c", sb.String())
+	var cmd *exec.Cmd
+	if sh == "/bin/bash" {
+		cmd = exec.CommandContext(ctx, sh, "--rcfile", rcfile)
+	} else {
+		env = append(env, "ENV="+rcfile)
+		cmd = exec.CommandContext(ctx, sh, "-i")
+	}
 	cmd.Env = env
 	cmd.Dir = workDir
 	return cmd, nil

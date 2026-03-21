@@ -75,11 +75,13 @@ type ContainerUsage struct {
 
 // PodUsage is usage for a single pod (from Metrics Server or aggregation).
 type PodUsage struct {
-	Name       string            `json:"name"`
-	Namespace  string            `json:"namespace"`
-	CPU        string            `json:"cpu"`
-	Memory     string            `json:"memory"`
-	Containers []ContainerUsage  `json:"containers,omitempty"`
+	Name           string            `json:"name"`
+	Namespace      string            `json:"namespace"`
+	CPU            string            `json:"cpu"`
+	Memory         string            `json:"memory"`
+	Containers     []ContainerUsage  `json:"containers,omitempty"`
+	NetworkRxBytes int64             `json:"network_rx_bytes,omitempty"` // from kubelet stats/summary
+	NetworkTxBytes int64             `json:"network_tx_bytes,omitempty"`
 }
 
 // MetricsSummary is the unified response for GET /metrics/summary.
@@ -91,10 +93,12 @@ type MetricsSummary struct {
 	ResourceType ResourceType `json:"resource_type"`
 	ResourceName string       `json:"resource_name"`
 	// Usage
-	TotalCPU    string      `json:"total_cpu"`    // e.g. "125.00m"
-	TotalMemory string      `json:"total_memory"` // e.g. "256.50Mi"
-	PodCount    int         `json:"pod_count"`   // 1 for pod, N for controller
-	Pods        []PodUsage  `json:"pods,omitempty"` // per-pod breakdown for controllers
+	TotalCPU       string      `json:"total_cpu"`    // e.g. "125.00m"
+	TotalMemory    string      `json:"total_memory"` // e.g. "256.50Mi"
+	TotalNetworkRx int64       `json:"total_network_rx,omitempty"` // bytes received (all pods)
+	TotalNetworkTx int64       `json:"total_network_tx,omitempty"` // bytes transmitted (all pods)
+	PodCount       int         `json:"pod_count"`   // 1 for pod, N for controller
+	Pods           []PodUsage  `json:"pods,omitempty"` // per-pod breakdown for controllers
 	// Observability: why data might be missing (no silent failures)
 	Source   string `json:"source"`   // e.g. "metrics_server"
 	Warning  string `json:"warning,omitempty"`  // e.g. "3 pods skipped (not yet scheduled)"

@@ -89,19 +89,19 @@ export const TOOLTIP_LAST_EXIT =
   'Last time the container exited (reason and exit code). Check logs for details.';
 
 export const TOOLTIP_METRICS_CPU_USAGE =
-  'Pod-level CPU usage from Metrics Server. Same source as the Pod list CPU column; here shown for this pod. Values in millicores (m) or percentage depending on backend.';
+  'How much processing power this pod is using right now. Measured in "millicores" (m) — 1000m = 1 full CPU core. Example: 50m means the pod is using 5% of one CPU core.';
 
 export const TOOLTIP_METRICS_MEMORY_USAGE =
-  'Pod-level memory usage from Metrics Server. Same source as the Pod list Memory column; here shown for this pod. Values in Mi or percentage depending on backend.';
+  'How much RAM this pod is using right now. Measured in MiB (Mebibytes). Example: 128Mi means the pod is using about 128 MB of memory. If this keeps growing, the pod might get killed (OOMKilled).';
 
 export const TOOLTIP_METRICS_LIST_VS_DETAIL =
-  'List view shows current usage per pod (e.g. 50m, 128Mi). This tab shows the same metrics for this single pod.';
+  'These are live resource usage numbers from the Kubernetes Metrics Server running in your cluster. They update every ~60 seconds.';
 
 export const TOOLTIP_METRICS_NETWORK_IO =
-  'Network bytes in/out for this pod when provided by the cluster. May be zero if not available.';
+  'Total data sent and received by this pod over the network since it started. Measured in MB (Megabytes). Higher values mean the pod is handling more traffic. Data comes from the kubelet running on the node.';
 
 export const TOOLTIP_POD_USAGE_SAME_AS_LIST =
-  'Raw CPU and memory from Metrics Server. This is what you see in the Pod list (e.g. 2.00m, 35.00Mi).';
+  'Current CPU and memory usage for each pod. CPU is in millicores (1000m = 1 CPU core). Memory is in MiB. These are the same values shown in the Pods list.';
 
 export const TOOLTIP_USAGE_VS_LIMITS =
-  'Percentage of each container\'s CPU/memory limit. Same idea as in the Containers tab.';
+  'Shows how close this pod is to hitting its resource limits. If CPU hits 100%, the pod gets throttled (slowed down). If memory hits 100%, the pod gets killed and restarted (OOMKilled). Ideally keep both under 80%.';
