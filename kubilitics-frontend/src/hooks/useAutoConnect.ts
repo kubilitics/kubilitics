@@ -220,11 +220,27 @@ export function useAutoConnect(): UseAutoConnectReturn {
         const baseUrl = getEffectiveBackendBaseUrl(storedBackendUrl);
         console.debug('[auto-connect] baseUrl:', baseUrl || '(empty, using proxy)');
 
+        // Wait for backend to be ready (Tauri sidecar cold start).
+        // Retry health check up to 6 times with 1s delay (covers ~6s cold start).
+        for (let attempt = 0; attempt < 6; attempt++) {
+          try {
+            const resp = await fetch(`${baseUrl || ''}/api/v1/health`, { signal: controller.signal });
+            if (resp.ok) break;
+          } catch {
+            // Backend not ready yet
+          }
+          if (controller.signal.aborted) return;
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+
         // Fetch registered + discovered in parallel
-        const [registered, discovered] = await Promise.all([
-          getClusters(baseUrl).catch((e) => { console.warn('[auto-connect] getClusters failed:', e); return [] as BackendCluster[]; }),
-          discoverClusters(baseUrl).catch((e) => { console.warn('[auto-connect] discoverClusters failed:', e); return [] as BackendCluster[]; }),
+        const [registeredRaw, discoveredRaw] = await Promise.all([
+          getClusters(baseUrl).catch((e) => { console.warn('[auto-connect] getClusters failed:', e); return null; }),
+          discoverClusters(baseUrl).catch((e) => { console.warn('[auto-connect] discoverClusters failed:', e); return null; }),
         ]);
+        // API may return null instead of [] — normalize to arrays
+        const registered = Array.isArray(registeredRaw) ? registeredRaw : [] as BackendCluster[];
+        const discovered = Array.isArray(discoveredRaw) ? discoveredRaw : [] as BackendCluster[];
 
         console.debug('[auto-connect] registered:', registered.length, 'discovered:', discovered.length);
 

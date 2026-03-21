@@ -108,8 +108,14 @@ func (s *UnifiedMetricsService) resolveAndFetch(ctx context.Context, client *k8s
 		if err != nil {
 			return nil, err
 		}
+		// Best-effort network stats from kubelet stats/summary API
+		rx, tx, _ := s.provider.GetPodNetworkStats(ctx, client, id.Namespace, id.ResourceName)
+		usage.NetworkRxBytes = rx
+		usage.NetworkTxBytes = tx
 		summary.TotalCPU = usage.CPU
 		summary.TotalMemory = usage.Memory
+		summary.TotalNetworkRx = rx
+		summary.TotalNetworkTx = tx
 		summary.PodCount = 1
 		summary.Pods = []models.PodUsage{*usage}
 		return summary, nil
@@ -139,6 +145,10 @@ func (s *UnifiedMetricsService) resolveAndFetch(ctx context.Context, client *k8s
 			skipped++
 			continue
 		}
+		// Best-effort network stats
+		rx, tx, _ := s.provider.GetPodNetworkStats(ctx, client, ref.Namespace, ref.Name)
+		u.NetworkRxBytes = rx
+		u.NetworkTxBytes = tx
 		usages = append(usages, u)
 	}
 	if skipped > 0 {
@@ -149,9 +159,14 @@ func (s *UnifiedMetricsService) resolveAndFetch(ctx context.Context, client *k8s
 	summary.TotalMemory = totalMemory
 	summary.PodCount = len(usages)
 	summary.Pods = make([]models.PodUsage, 0, len(usages))
+	var totalRx, totalTx int64
 	for _, u := range usages {
+		totalRx += u.NetworkRxBytes
+		totalTx += u.NetworkTxBytes
 		summary.Pods = append(summary.Pods, *u)
 	}
+	summary.TotalNetworkRx = totalRx
+	summary.TotalNetworkTx = totalTx
 	return summary, nil
 }
 

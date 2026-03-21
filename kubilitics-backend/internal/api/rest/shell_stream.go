@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -93,6 +94,9 @@ func (h *Handler) GetShellStream(w http.ResponseWriter, r *http.Request) {
 	ctxArg := strings.ReplaceAll(cluster.Context, "'", "'\"'\"'")
 	var sb strings.Builder
 
+	// Suppress macOS bash deprecation warning
+	sb.WriteString("export BASH_SILENCE_DEPRECATION_WARNING=1\n")
+
 	if kcliErr == nil {
 		// kcli is available — set up a rich kcli-powered shell with aliases and completion
 		sb.WriteString("export KCLI_BIN='" + strings.ReplaceAll(kcliBin, "'", "'\"'\"'") + "'\n")
@@ -130,14 +134,27 @@ func (h *Handler) GetShellStream(w http.ResponseWriter, r *http.Request) {
 		sb.WriteString("export PS1='\\[\\033[1;33m\\][kubectl]\\[\\033[0m\\] \\$ '\n")
 	}
 
-	if shell == "/bin/bash" {
-		sb.WriteString("exec bash -i\n")
-	} else {
-		sb.WriteString("exec sh -i\n")
+	// Write init commands to a temp rcfile so bash --rcfile sources them
+	// in the interactive shell itself (not a parent that gets replaced).
+	// This preserves aliases, PS1, and completions across the session.
+	rcfile := fmt.Sprintf("/tmp/kubilitics-shell-%d.rc", time.Now().UnixNano())
+	if err := os.WriteFile(rcfile, []byte(sb.String()), 0600); err != nil {
+		log.Printf("Terminal: failed to write rcfile: %v", err)
+		// Fallback: use bash -c with exec
+		cmd := exec.CommandContext(ctx, shell, "-c", sb.String()+"exec bash -i\n")
+		cmd.Env = env
+		cmd.Dir = workDir
+		_ = cmd // will be overwritten below
 	}
 
-	wrapper := sb.String()
-	cmd := exec.CommandContext(ctx, shell, "-c", wrapper)
+	var cmd *exec.Cmd
+	if shell == "/bin/bash" {
+		cmd = exec.CommandContext(ctx, shell, "--rcfile", rcfile)
+	} else {
+		// /bin/sh doesn't support --rcfile; use ENV variable
+		env = append(env, "ENV="+rcfile)
+		cmd = exec.CommandContext(ctx, shell, "-i")
+	}
 	cmd.Env = env
 	cmd.Dir = workDir
 

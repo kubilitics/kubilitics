@@ -1441,6 +1441,8 @@ export interface BackendMetricsSummaryPod {
   cpu: string;
   memory: string;
   containers?: BackendContainerMetrics[];
+  network_rx_bytes?: number;
+  network_tx_bytes?: number;
 }
 
 /** Unified metrics summary: one API for pod, node, deployment, replicaset, statefulset, daemonset, job, cronjob. */
@@ -1451,6 +1453,8 @@ export interface BackendMetricsSummary {
   resource_name: string;
   total_cpu: string;
   total_memory: string;
+  total_network_rx?: number;
+  total_network_tx?: number;
   pod_count: number;
   pods?: BackendMetricsSummaryPod[];
   source?: string;

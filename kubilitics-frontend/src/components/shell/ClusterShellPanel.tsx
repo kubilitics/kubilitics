@@ -1,25 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { Terminal as TerminalIcon, X, GripHorizontal, Maximize2, Minimize2, Trash2, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getKCLIComplete, getKCLIShellStreamUrl, getKCLITUIState, getKubectlShellStreamUrl, getShellComplete, isBackendCircuitOpen, type ShellStatusResult } from '@/services/backendApiClient';
+import { getKCLIComplete, getKCLITUIState, getKubectlShellStreamUrl, getShellComplete, type ShellStatusResult } from '@/services/backendApiClient';
 import { useNavigate } from 'react-router-dom';
 import { applyCompletionToLine, updateLineBuffer } from './completionEngine';
 import { useClusterStore } from '@/stores/clusterStore';
 import { useBackendCircuitOpen } from '@/hooks/useBackendCircuitOpen';
-import { isTauri } from '@/lib/tauri';
-import { invoke } from '@tauri-apps/api/core';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 
 const MIN_HEIGHT_PX = 160;
 const MAX_HEIGHT_PERCENT = 85;
 const INITIAL_HEIGHT_PX = 320;
-const MODE_STORAGE_KEY = 'kubilitics-shell-engine-mode';
 const SHELL_STATE_SYNC_INTERVAL_MS = 2000;
-const SHELL_STATE_SYNC_BACKOFF_MS = 15000; // when backend unreachable, poll less often to avoid log spam
+const SHELL_STATE_SYNC_BACKOFF_MS = 15000;
 const SHELL_STATE_SYNC_BACKOFF_MAX_MS = 60000;
 
 export interface ClusterShellPanelProps {
@@ -49,7 +44,7 @@ function base64DecodeToUint8Array(b64: string): Uint8Array {
   return bytes;
 }
 
-/** Map a keyboard event to the byte sequence to send to the PTY (so kcli/shell receives it). */
+/** Map a keyboard event to the byte sequence to send to the PTY. */
 function keyEventToStdin(e: React.KeyboardEvent): string | null {
   const key = e.key;
   if (key === 'Enter') return '\r';
@@ -62,10 +57,10 @@ function keyEventToStdin(e: React.KeyboardEvent): string | null {
   if (key === 'ArrowLeft') return '\x1b[D';
   if (e.ctrlKey && key.length === 1) {
     const c = key.toUpperCase().charCodeAt(0);
-    if (c >= 64 && c <= 95) return String.fromCharCode(c - 64); // Ctrl+A -> \x01, etc.
+    if (c >= 64 && c <= 95) return String.fromCharCode(c - 64);
   }
-  if (e.altKey && key.length === 1) return '\x1b' + key; // Alt+key
-  if (key.length === 1 && !e.ctrlKey && !e.metaKey) return key; // printable
+  if (e.altKey && key.length === 1) return '\x1b' + key;
+  if (key.length === 1 && !e.ctrlKey && !e.metaKey) return key;
   return null;
 }
 
@@ -88,40 +83,16 @@ export function ClusterShellPanel({
   const [error, setError] = useState<string | null>(null);
   const [shellStatus, setShellStatus] = useState<ShellStatusResult | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
-  const [engine, setEngine] = useState<'kcli' | 'kubectl'>(() => {
-    const saved = typeof window !== 'undefined' ? localStorage.getItem(MODE_STORAGE_KEY) : null;
-    if (saved === 'kcli' || saved === 'kubectl') return saved;
-    // Start with kubectl to avoid error flash; auto-promote to kcli once availability is confirmed.
-    return 'kubectl';
-  });
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const [kcliSidecarAvailable, setKcliSidecarAvailable] = useState<boolean | null>(null);
   const circuitOpen = useBackendCircuitOpen();
-  // Use a ref so the WS effect can check circuit state without re-running when it toggles.
   const circuitOpenRef = useRef(circuitOpen);
   circuitOpenRef.current = circuitOpen;
 
-  // Track "just connected" to avoid sending redundant namespace commands right after connection
-  // (the backend shell init script already sets the namespace).
+  // Track "just connected" to avoid sending redundant namespace commands
   const justConnectedRef = useRef(false);
 
-  // P2-7: In Tauri, kcli may be bundled as sidecar; backend PATH check can be false. Treat as available if sidecar exists.
-  useEffect(() => {
-    if (!open || !isTauri()) return;
-    let cancelled = false;
-    invoke<boolean>('is_kcli_sidecar_available')
-      .then((ok) => {
-        if (!cancelled) setKcliSidecarAvailable(ok);
-      })
-      .catch(() => {
-        if (!cancelled) setKcliSidecarAvailable(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
-
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -139,15 +110,8 @@ export function ClusterShellPanel({
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const intentionalCloseRef = useRef(false);
-  const autoFallbackDoneRef = useRef(false);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_BASE_DELAY_MS = 1000;
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(MODE_STORAGE_KEY, engine);
-    }
-  }, [engine]);
 
   const flushPendingOutput = useCallback(() => {
     const term = termRef.current;
@@ -233,9 +197,13 @@ export function ClusterShellPanel({
 
     completionPendingRef.current = true;
     try {
-      const result = engine === 'kubectl'
-        ? await getShellComplete(backendBaseUrl, clusterId, line)
-        : await getKCLIComplete(backendBaseUrl, clusterId, line);
+      // Try kcli completion first, fall back to kubectl completion
+      let result;
+      try {
+        result = await getKCLIComplete(backendBaseUrl, clusterId, line);
+      } catch {
+        result = await getShellComplete(backendBaseUrl, clusterId, line);
+      }
       const completions = (result.completions || []).map((c) => c.trim()).filter(Boolean);
       if (completions.length === 0) return false;
 
@@ -253,7 +221,7 @@ export function ClusterShellPanel({
     } finally {
       completionPendingRef.current = false;
     }
-  }, [applyCompletion, backendBaseUrl, clusterId, connected, engine]);
+  }, [applyCompletion, backendBaseUrl, clusterId, connected]);
 
   const trackLocalLineBuffer = useCallback((data: string) => {
     lineBufferRef.current = updateLineBuffer(lineBufferRef.current, data);
@@ -313,7 +281,6 @@ export function ClusterShellPanel({
     focusAndFit();
 
     term.onData((data) => {
-      // Shell mode: intercept Tab for server-side completion
       if (data === '\t') {
         void (async () => {
           const handled = await requestServerCompletionRef.current();
@@ -362,10 +329,10 @@ export function ClusterShellPanel({
     return () => ro.disconnect();
   }, [open, focusAndFit]);
 
-  // WS connection lifecycle.
+  // WS connection lifecycle — always use /shell/stream (supports both kcli and kubectl).
   useEffect(() => {
     if (!open || !clusterId) {
-      intentionalCloseRef.current = true; // Mark as intentional when panel closes
+      intentionalCloseRef.current = true;
       wsSessionRef.current += 1;
       if (wsRef.current) {
         wsRef.current.close();
@@ -374,7 +341,6 @@ export function ClusterShellPanel({
       setConnecting(false);
       setConnected(false);
       setIsReconnecting(false);
-      // Clear reconnect timer if panel is closed
       if (reconnectTimerRef.current != null) {
         window.clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -386,18 +352,16 @@ export function ClusterShellPanel({
     const sessionId = wsSessionRef.current + 1;
     wsSessionRef.current = sessionId;
 
-    // P2-4: Do not open WebSocket when circuit is open; show friendly message instead.
-    // Use the ref so circuit state changes don't cause WS reconnection loops during startup.
     if (circuitOpenRef.current) {
       setConnecting(false);
       setConnected(false);
-      setError('Backend unavailable. Use Retry in the banner when the connection is back.');
+      setError('Backend unavailable. Click reconnect when ready.');
       return;
     }
 
-    const wsUrl = engine === 'kcli'
-      ? getKCLIShellStreamUrl(backendBaseUrl, clusterId, 'shell', activeNamespace ?? undefined)
-      : getKubectlShellStreamUrl(backendBaseUrl, clusterId);
+    // Always use the shell/stream endpoint — it auto-detects kcli and sets up aliases.
+    // Both kcli and kubectl commands work in this shell.
+    const wsUrl = getKubectlShellStreamUrl(backendBaseUrl, clusterId);
 
     setConnecting(true);
     setConnected(false);
@@ -409,8 +373,6 @@ export function ClusterShellPanel({
     ws.onopen = () => {
       if (wsSessionRef.current !== sessionId || wsRef.current !== ws) return;
 
-      // Mark as just connected BEFORE setting connected=true so the namespace effect
-      // (which fires when connected changes) sees the ref and skips the redundant command.
       justConnectedRef.current = true;
       setTimeout(() => { justConnectedRef.current = false; }, 3000);
 
@@ -421,7 +383,6 @@ export function ClusterShellPanel({
       reconnectAttemptRef.current = 0;
       intentionalCloseRef.current = false;
 
-      // Clear any pending reconnect timer
       if (reconnectTimerRef.current != null) {
         window.clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -429,7 +390,6 @@ export function ClusterShellPanel({
 
       const term = termRef.current;
       if (term) {
-        // Only full-reset on first connect; on reconnect, add a separator so user sees new session
         if (reconnectAttemptRef.current > 0 || isReconnecting) {
           term.write('\r\n\x1b[90m--- reconnected ---\x1b[0m\r\n');
         } else {
@@ -462,21 +422,7 @@ export function ClusterShellPanel({
           setConnected(false);
           setConnecting(false);
         } else if (msg.t === 'error' && msg.d) {
-          // Check if this is a kcli binary not found error
-          const errorMsg = msg.d.toLowerCase();
-          if (errorMsg.includes('kcli binary not found') || errorMsg.includes('kcli binary resolution failed')) {
-            setError('kcli binary not found — switching to kubectl mode.');
-            // Auto-fallback to kubectl
-            if (!autoFallbackDoneRef.current) {
-              autoFallbackDoneRef.current = true;
-              setTimeout(() => {
-                setEngine('kubectl');
-                setError(null);
-              }, 1500);
-            }
-          } else {
-            setError(msg.d);
-          }
+          setError(msg.d);
           termRef.current?.write(`\r\n[Error: ${msg.d}]\r\n`);
         }
       } catch {
@@ -491,7 +437,6 @@ export function ClusterShellPanel({
       wsRef.current = null;
       lineBufferRef.current = '';
 
-      // Auto-reconnect logic (similar to useWebSocket.ts)
       if (!intentionalCloseRef.current && open && clusterId) {
         if (reconnectAttemptRef.current < MAX_RECONNECT_ATTEMPTS) {
           const attempt = reconnectAttemptRef.current + 1;
@@ -500,7 +445,7 @@ export function ClusterShellPanel({
             30000
           );
 
-          console.log(`Shell WebSocket disconnected. Attempting to reconnect (${attempt}/${MAX_RECONNECT_ATTEMPTS}) in ${delay}ms...`);
+          console.log(`Shell WebSocket disconnected. Reconnecting (${attempt}/${MAX_RECONNECT_ATTEMPTS}) in ${delay}ms...`);
           setIsReconnecting(true);
           setError(null);
 
@@ -518,9 +463,7 @@ export function ClusterShellPanel({
     };
 
     ws.onerror = () => {
-      // Don't set error here — onclose fires right after and handles reconnection.
-      // Setting error in onerror causes a permanent "connection failed" message that
-      // blocks the reconnect flow and confuses users.
+      // Don't set error here — onclose handles reconnection.
     };
 
     return () => {
@@ -544,10 +487,8 @@ export function ClusterShellPanel({
         // ignore
       }
     };
-  // NOTE: circuitOpen intentionally NOT in deps — we read it via circuitOpenRef to avoid
-  // reconnection storms when the circuit breaker toggles during Tauri startup.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, clusterId, backendBaseUrl, engine, reconnectNonce, focusAndFit, flushPendingOutput]);
+  }, [open, clusterId, backendBaseUrl, reconnectNonce, focusAndFit, flushPendingOutput]);
 
   // Fit on panel layout changes.
   useEffect(() => {
@@ -598,27 +539,15 @@ export function ClusterShellPanel({
     scheduleStateSync(50);
   }, [scheduleStateSync]);
 
+  // Sync namespace changes to shell
   useEffect(() => {
     if (!open || !connected) return;
     if (!activeNamespace || activeNamespace === 'all') return;
     if (shellStatus?.namespace === activeNamespace) return;
-    // Skip during the "just connected" grace period — the backend shell init script
-    // already sets the namespace, so sending it again produces a duplicate prompt.
     if (justConnectedRef.current) return;
-    if (engine === 'kcli') {
-      sendStdin(`kcli ns ${activeNamespace}\r`);
-    } else {
-      sendStdin(`kubectl config set-context --current --namespace=${activeNamespace}\r`);
-    }
+    sendStdin(`kubectl config set-context --current --namespace=${activeNamespace}\r`);
     scheduleStateSync(90);
-  }, [activeNamespace, connected, engine, open, scheduleStateSync, sendStdin, shellStatus?.namespace]);
-
-  const handleCopySelection = useCallback(() => {
-    const sel = termRef.current?.getSelection() ?? '';
-    if (sel.trim()) {
-      navigator.clipboard.writeText(sel);
-    }
-  }, []);
+  }, [activeNamespace, connected, open, scheduleStateSync, sendStdin, shellStatus?.namespace]);
 
   useEffect(() => {
     if (!open || !clusterId) {
@@ -646,56 +575,11 @@ export function ClusterShellPanel({
   }, [clusterId, open, syncShellState]);
 
   const effectiveNamespace = shellStatus?.namespace || 'default';
-  // P2-7: In Tauri, if kcli sidecar is bundled, report as available even when backend PATH check fails.
-  // Only show as available if explicitly true from backend OR sidecar check (not if shellStatus is null/undefined)
-  const effectiveKcliAvailable =
-    shellStatus?.kcliAvailable === true || (isTauri() && kcliSidecarAvailable === true);
 
-  // Show "Missing" if:
-  // 1. shellStatus exists and kcliAvailable is explicitly false
-  // 2. shellStatus exists and kcliAvailable is undefined/null AND not Tauri sidecar
-  // 3. Not Tauri OR (Tauri and sidecar check returned false/null)
-  const kcliStatusKnown = shellStatus !== null || (isTauri() && kcliSidecarAvailable !== null);
-  const showKcliMissing = kcliStatusKnown && !effectiveKcliAvailable;
-
-  // Auto-promote: when kcli becomes available, switch to kcli if user hasn't explicitly chosen kubectl.
-  // This makes kcli the default experience when it's installed, without the flash of "kcli not found"
-  // that happens if we default to kcli before the sidecar check completes.
-  // IMPORTANT: only promote when NOT connected — switching engine mid-session tears down the WS.
-  const autoPromoteDoneRef = useRef(false);
-  useEffect(() => {
-    if (effectiveKcliAvailable && engine === 'kubectl' && !autoPromoteDoneRef.current && !connected) {
-      const saved = typeof window !== 'undefined' ? localStorage.getItem(MODE_STORAGE_KEY) : null;
-      // Only auto-promote if user never explicitly chose (no saved preference)
-      if (!saved) {
-        autoPromoteDoneRef.current = true;
-        setEngine('kcli');
-      }
-    }
-  }, [effectiveKcliAvailable, engine, connected]);
-
-  // Auto-fallback: if kcli binary is missing, gracefully switch to kubectl.
-  // Only fallback when NOT connected — switching engine mid-session tears down the WS.
-  // If we get a "kcli not found" error ON the connection, the ws.onmessage handler does the fallback.
-  useEffect(() => {
-    if (showKcliMissing && engine === 'kcli' && !autoFallbackDoneRef.current && !connected) {
-      autoFallbackDoneRef.current = true;
-      setEngine('kubectl');
-      setError(null);
-    }
-  }, [showKcliMissing, engine, connected]);
-
-  const openResourcePage = useCallback((resourcePath: string) => {
-    const query = effectiveNamespace && effectiveNamespace !== 'all'
-      ? `?namespace=${encodeURIComponent(effectiveNamespace)}`
-      : '';
-    navigate(`/${resourcePath}${query}`);
-  }, [effectiveNamespace, navigate]);
-
-  /** When focus is outside the terminal (e.g. on a header button), forward key to terminal so Enter/j/k work. */
+  /** Forward keystrokes to terminal when focus is on header buttons */
   const handlePanelKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (!open || !connected || !termRef.current || !containerRef.current) return;
-    if (containerRef.current.contains(document.activeElement)) return;
+    if (!open || !connected || !termRef.current || !wrapperRef.current) return;
+    if (wrapperRef.current.contains(document.activeElement)) return;
     const data = keyEventToStdin(e);
     if (data == null) return;
     e.preventDefault();
@@ -758,29 +642,6 @@ export function ClusterShellPanel({
         </div>
 
         <div className="flex items-center gap-0.5 shrink-0">
-          {/* Engine toggle — only show if kcli is available */}
-          {effectiveKcliAvailable && (
-            <div className="mr-1 flex items-center rounded border border-white/10 bg-white/5 p-0.5">
-              <button
-                className={cn(
-                  'rounded px-2 py-0.5 text-[10px] font-semibold transition-colors',
-                  engine === 'kcli' ? 'bg-white/15 text-white' : 'text-white/50 hover:text-white/80'
-                )}
-                onClick={() => setEngine('kcli')}
-              >
-                kcli
-              </button>
-              <button
-                className={cn(
-                  'rounded px-2 py-0.5 text-[10px] font-semibold transition-colors',
-                  engine === 'kubectl' ? 'bg-white/15 text-white' : 'text-white/50 hover:text-white/80'
-                )}
-                onClick={() => setEngine('kubectl')}
-              >
-                kubectl
-              </button>
-            </div>
-          )}
           <button
             className="rounded p-1 text-white/40 hover:bg-white/10 hover:text-white"
             onClick={handleReconnect}
@@ -812,21 +673,25 @@ export function ClusterShellPanel({
         </div>
       </div>
 
+      {/* Terminal area — outer div has padding, inner div is where xterm mounts (no padding)
+          so FitAddon correctly measures available space without clipping the last line */}
       <div className="relative flex-1 min-h-0 bg-[hsl(221_39%_6%)]">
         {!clusterId ? (
           <div className="flex h-full items-center justify-center text-sm font-medium italic text-muted-foreground">
             Select a cluster to activate terminal.
           </div>
         ) : (
-          <div
-            ref={containerRef}
-            className="h-full w-full cursor-text px-2 pt-2 pb-4"
-            onClick={() => termRef.current?.focus()}
-            style={{
-              fontSmooth: 'antialiased',
-              WebkitFontSmoothing: 'antialiased',
-            }}
-          />
+          <div ref={wrapperRef} className="h-full w-full p-2">
+            <div
+              ref={containerRef}
+              className="h-full w-full cursor-text"
+              onClick={() => termRef.current?.focus()}
+              style={{
+                fontSmooth: 'antialiased',
+                WebkitFontSmoothing: 'antialiased',
+              }}
+            />
+          </div>
         )}
       </div>
     </div>
