@@ -522,45 +522,45 @@ export default function ServiceDetail() {
       content: (
         <div className="space-y-6">
           {/* Network Identity — hero row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-[1fr_1fr_2fr] gap-3">
             {/* Cluster IP */}
-            <div className="relative overflow-hidden rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/5 via-transparent to-transparent p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="h-7 w-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                  <Network className="h-3.5 w-3.5 text-blue-500" />
+            <div className="relative overflow-hidden rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/5 via-transparent to-transparent p-3">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="h-6 w-6 rounded-md bg-blue-500/10 flex items-center justify-center">
+                  <Network className="h-3 w-3 text-blue-500" />
                 </div>
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cluster IP</span>
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Cluster IP</span>
               </div>
               {clusterIP !== '—' && clusterIP !== 'None' ? (
-                <div className="flex items-center gap-2">
-                  <code className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">{clusterIP}</code>
-                  <button onClick={() => { navigator.clipboard.writeText(clusterIP); toast.success('IP copied'); }} className="text-muted-foreground/50 hover:text-blue-500 transition-colors" title="Copy IP"><Copy className="h-3.5 w-3.5" /></button>
+                <div className="flex items-center gap-1.5">
+                  <code className="text-sm font-mono font-bold text-blue-600 dark:text-blue-400">{clusterIP}</code>
+                  <button onClick={() => { navigator.clipboard.writeText(clusterIP); toast.success('IP copied'); }} className="text-muted-foreground/50 hover:text-blue-500 transition-colors" title="Copy IP"><Copy className="h-3 w-3" /></button>
                 </div>
               ) : (
-                <p className="text-lg font-mono font-bold text-muted-foreground">{clusterIP}</p>
+                <p className="text-sm font-mono font-bold text-muted-foreground">{clusterIP}</p>
               )}
             </div>
             {/* External IP */}
-            <div className="relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="h-7 w-7 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                  <Globe className="h-3.5 w-3.5 text-emerald-500" />
+            <div className="relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent p-3">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="h-6 w-6 rounded-md bg-emerald-500/10 flex items-center justify-center">
+                  <Globe className="h-3 w-3 text-emerald-500" />
                 </div>
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">External IP</span>
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">External IP</span>
               </div>
-              <p className="text-lg font-mono font-bold text-foreground">{externalIP ?? '—'}</p>
+              <p className="text-sm font-mono font-bold text-foreground">{externalIP ?? '—'}</p>
             </div>
-            {/* DNS */}
-            <div className="relative overflow-hidden rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-500/5 via-transparent to-transparent p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="h-7 w-7 rounded-lg bg-violet-500/10 flex items-center justify-center">
-                  <Globe className="h-3.5 w-3.5 text-violet-500" />
+            {/* DNS — wider column */}
+            <div className="relative overflow-hidden rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-500/5 via-transparent to-transparent p-3">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="h-6 w-6 rounded-md bg-violet-500/10 flex items-center justify-center">
+                  <Globe className="h-3 w-3 text-violet-500" />
                 </div>
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">DNS Name</span>
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">DNS Name</span>
               </div>
-              <div className="flex items-center gap-2">
-                <code className="text-sm font-mono font-semibold text-violet-600 dark:text-violet-400 truncate">{dnsName || '—'}</code>
-                {dnsName && <button onClick={copyDns} className="text-muted-foreground/50 hover:text-violet-500 transition-colors shrink-0" title="Copy DNS"><Copy className="h-3.5 w-3.5" /></button>}
+              <div className="flex items-center gap-1.5 min-w-0">
+                <code className="text-xs font-mono font-semibold text-violet-600 dark:text-violet-400 truncate min-w-0" title={dnsName || '—'}>{dnsName || '—'}</code>
+                {dnsName && <button onClick={copyDns} className="text-muted-foreground/50 hover:text-violet-500 transition-colors shrink-0" title="Copy DNS"><Copy className="h-3 w-3" /></button>}
               </div>
             </div>
           </div>

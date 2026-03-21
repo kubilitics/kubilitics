@@ -40,8 +40,9 @@ func BuildInstallPlan(
 			DependencyDepth: node.Depth,
 			// Carry the Helm chart reference so ExecuteInstall can build
 			// chartRef = HelmRepoURL + "|" + HelmChart without a DB lookup.
-			HelmRepoURL: detail.HelmRepoURL,
-			HelmChart:   detail.HelmChart,
+			HelmRepoURL:      detail.HelmRepoURL,
+			HelmChart:        detail.HelmChart,
+			HelmChartVersion: detail.HelmChartVersion,
 		}
 
 		if existing, isInstalled := installedMap[id]; isInstalled && existing != nil {
