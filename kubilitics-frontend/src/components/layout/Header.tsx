@@ -36,6 +36,7 @@ import { GlobalSearch } from './GlobalSearch';
 import { ClusterShellPanel } from '@/components/shell';
 import { DeploymentWizard, ServiceWizard, ConfigMapWizard, SecretWizard } from '@/components/wizards';
 import { NotificationCenter } from '@/components/notifications/NotificationCenter';
+import { ActivePortForwardsIndicator } from '@/components/resources/ActivePortForwards';
 import { getClusterKubeconfig } from '@/services/backendApiClient';
 import { getEffectiveBackendBaseUrl, useBackendConfigStore } from '@/stores/backendConfigStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -393,6 +394,9 @@ export function Header() {
 
                 {/* Theme Toggle — Light/Dark/System */}
                 <ThemeToggle />
+
+                {/* Active Port Forwards — shows count + expandable list with stop buttons */}
+                <ActivePortForwardsIndicator />
 
                 {/* Notifications */}
                 <NotificationCenter clusterId={currentClusterId} />

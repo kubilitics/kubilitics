@@ -21,6 +21,8 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { startPortForward, stopPortForward } from '@/services/backendApiClient';
+import { usePortForwardStore } from '@/stores/portForwardStore';
+import { useClusterStore } from '@/stores/clusterStore';
 
 export interface PortInfo {
   name?: string;
@@ -131,11 +133,10 @@ export function PortForwardDialog({
         }
       }
     } else {
-      // Dialog closed — stop any active session silently
-      if (sessionIdRef.current && baseUrl && clusterId) {
-        stopPortForward(baseUrl, clusterId, sessionIdRef.current).catch(() => {});
-        sessionIdRef.current = null;
-      }
+      // Dialog closed — keep the port forward running (tracked in global store).
+      // User can stop it from the active forwards panel.
+      sessionIdRef.current = null;
+      setIsForwarding(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -150,6 +151,9 @@ export function PortForwardDialog({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const addForward = usePortForwardStore((s) => s.add);
+  const clusterName = useClusterStore((s) => s.activeCluster?.name ?? 'cluster');
+
   const handleStartForwarding = async () => {
     if (!selectedPort || !localPort) return;
     setIsStarting(true);
@@ -163,9 +167,27 @@ export function PortForwardDialog({
       });
       sessionIdRef.current = resp.sessionId;
       setIsForwarding(true);
+
+      // Track in global store so it persists across navigation
+      addForward({
+        sessionId: resp.sessionId,
+        clusterId: clusterId ?? '',
+        clusterName,
+        resourceType: isServiceMode ? 'service' : 'pod',
+        resourceName: podName,
+        namespace,
+        localPort: Number(localPort),
+        remotePort: selectedPort,
+        baseUrl: baseUrl ?? '',
+        startedAt: Date.now(),
+      });
+
       toast.success('Port forwarding active', {
         description: `Tunnel open at http://localhost:${localPort}`,
       });
+
+      // Auto-open in browser
+      window.open(`http://localhost:${localPort}`, '_blank');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error('Port forward failed', { description: msg });
@@ -174,13 +196,11 @@ export function PortForwardDialog({
     }
   };
 
+  const stopAndRemoveForward = usePortForwardStore((s) => s.stopAndRemove);
+
   const handleStopForwarding = async () => {
-    if (sessionIdRef.current && baseUrl && clusterId) {
-      try {
-        await stopPortForward(baseUrl, clusterId, sessionIdRef.current);
-      } catch {
-        // Best-effort; session may have already ended
-      }
+    if (sessionIdRef.current) {
+      await stopAndRemoveForward(sessionIdRef.current);
       sessionIdRef.current = null;
     }
     setIsForwarding(false);
