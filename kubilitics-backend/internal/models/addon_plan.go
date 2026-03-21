@@ -31,8 +31,9 @@ type InstallStep struct {
 	// plan time. ExecuteInstall uses these directly — no DB or registry lookup
 	// needed at install time. This is the Headlamp pattern: the plan carries
 	// everything needed to execute; the execute phase is DB-free.
-	HelmRepoURL string `json:"helm_repo_url,omitempty"`
-	HelmChart   string `json:"helm_chart,omitempty"`
+	HelmRepoURL      string `json:"helm_repo_url,omitempty"`
+	HelmChart        string `json:"helm_chart,omitempty"`
+	HelmChartVersion string `json:"helm_chart_version,omitempty"`
 }
 
 type InstallPlan struct {

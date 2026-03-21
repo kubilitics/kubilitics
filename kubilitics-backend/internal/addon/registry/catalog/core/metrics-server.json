@@ -5,11 +5,11 @@
     "display_name": "Metrics Server",
     "description": "Scalable, efficient source of container resource metrics for Kubernetes built-in autoscaling pipelines. Required for kubectl top, HPA, and dashboard metrics.",
     "tier": "CORE",
-    "version": "v0.7.2",
+    "version": "v0.8.0",
     "k8s_compat_min": "1.19",
     "helm_repo_url": "https://kubernetes-sigs.github.io/metrics-server/",
     "helm_chart": "metrics-server",
-    "helm_chart_version": "3.12.2",
+    "helm_chart_version": "3.13.0",
     "tags": [
       "observability",
       "metrics",

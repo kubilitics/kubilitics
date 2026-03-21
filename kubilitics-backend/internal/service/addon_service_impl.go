@@ -199,8 +199,9 @@ func (s *AddOnServiceImpl) PlanInstall(ctx context.Context, clusterID, addonID, 
 							EstimatedDurationSec: 120,
 							// Carry Helm chart reference — ExecuteInstall uses these
 							// directly; no DB or registry lookup needed at install time.
-							HelmRepoURL: detail.HelmRepoURL,
-							HelmChart:   detail.HelmChart,
+							HelmRepoURL:      detail.HelmRepoURL,
+							HelmChart:        detail.HelmChart,
+							HelmChartVersion: detail.HelmChartVersion,
 						},
 					},
 				}, nil
@@ -469,11 +470,16 @@ func (s *AddOnServiceImpl) ExecuteInstall(ctx context.Context, clusterID string,
 		})
 
 		chartRef := step.HelmRepoURL + "|" + step.HelmChart
+		// Use HelmChartVersion (e.g. "3.12.2") not ToVersion (app version "v0.7.2")
+		chartVersion := step.HelmChartVersion
+		if chartVersion == "" {
+			chartVersion = step.ToVersion // fallback for plans created before this field existed
+		}
 		hr := helm.InstallRequest{
 			ReleaseName:     releaseName,
 			Namespace:       ns,
 			ChartRef:        chartRef,
-			Version:         step.ToVersion,
+			Version:         chartVersion,
 			Values:          vals,
 			CreateNamespace: req.CreateNamespace && step.AddonID == plan.RequestedAddonID,
 			Wait:            true,
