@@ -44,6 +44,8 @@ import {
 } from '@/lib/k8sTooltips';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { usePortForwardStore } from '@/stores/portForwardStore';
+import { Square } from 'lucide-react';
 
 export interface ContainerInfo {
   name: string;
@@ -73,6 +75,10 @@ export interface ContainerInfo {
 export interface ContainersSectionProps {
   containers: ContainerInfo[];
   className?: string;
+  /** Resource name (pod name) — used to show active port forwards inline. */
+  resourceName?: string;
+  /** Namespace — used to filter active port forwards. */
+  namespace?: string;
   /** Called when user clicks "Forward port" for a container port; PodDetail can open PortForwardDialog. */
   onForwardPort?: (containerName: string, port: number) => void;
   /** Called when user clicks "Shell" on a container — switches to Terminal tab with that container pre-selected. */
@@ -132,7 +138,11 @@ function probeToChips(probe: Record<string, unknown> | undefined): string[] {
   return chips;
 }
 
-export function ContainersSection({ containers, className, onForwardPort, onOpenShell, onOpenLogs }: ContainersSectionProps) {
+export function ContainersSection({ containers, className, resourceName, namespace, onForwardPort, onOpenShell, onOpenLogs }: ContainersSectionProps) {
+  const activeForwards = usePortForwardStore((s) => s.forwards).filter(
+    (f) => f.resourceName === resourceName && f.namespace === namespace
+  );
+  const stopAndRemove = usePortForwardStore((s) => s.stopAndRemove);
   return (
     <div className={cn('space-y-4', className)}>
       {containers.map((container, index) => {
@@ -348,30 +358,65 @@ export function ContainersSection({ containers, className, onForwardPort, onOpen
                         <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 mb-1.5 block">Exposed Ports</span>
                         {container.ports && container.ports.length > 0 ? (
                           <div className="rounded-xl border border-border/40 bg-muted/10 divide-y divide-border/30 overflow-hidden">
-                            {container.ports.map((p, pIdx) => (
-                              <div key={`${p.containerPort}-${pIdx}`} className="flex items-center justify-between px-4 py-3 group hover:bg-muted/30 transition-colors">
-                                <div className="flex items-center gap-3">
-                                  <div className="flex flex-col">
-                                    <span className="text-xs font-bold text-foreground">{p.containerPort}</span>
-                                    <span className="text-[10px] text-muted-foreground uppercase">{p.protocol || 'TCP'}</span>
+                            {container.ports.map((p, pIdx) => {
+                              const activeFwd = activeForwards.find((f) => f.remotePort === p.containerPort);
+                              return (
+                                <div key={`${p.containerPort}-${pIdx}`} className="group hover:bg-muted/30 transition-colors">
+                                  <div className="flex items-center justify-between px-4 py-3">
+                                    <div className="flex items-center gap-3">
+                                      <div className="flex flex-col">
+                                        <span className="text-xs font-bold text-foreground">{p.containerPort}</span>
+                                        <span className="text-[10px] text-muted-foreground uppercase">{p.protocol || 'TCP'}</span>
+                                      </div>
+                                      {p.name && (
+                                        <Badge variant="secondary" className="text-[10px] font-mono px-2 py-0">{p.name}</Badge>
+                                      )}
+                                    </div>
+                                    {onForwardPort && !activeFwd && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 gap-1.5 text-[10px] font-bold uppercase tracking-tight border-primary/20 hover:bg-primary/10 hover:border-primary/40 text-primary"
+                                        onClick={() => onForwardPort(container.name, p.containerPort)}
+                                      >
+                                        <ExternalLink className="h-3 w-3" />
+                                        Forward
+                                      </Button>
+                                    )}
                                   </div>
-                                  {p.name && (
-                                    <Badge variant="secondary" className="text-[10px] font-mono px-2 py-0">{p.name}</Badge>
+                                  {activeFwd && (
+                                    <div className="flex items-center justify-between px-4 py-2 bg-emerald-50/50 dark:bg-emerald-950/20 border-t border-emerald-200/40 dark:border-emerald-800/30">
+                                      <div className="flex items-center gap-2">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                        <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                                          localhost:{activeFwd.localPort} → {activeFwd.remotePort}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 px-2 text-[10px] text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40"
+                                          onClick={() => window.open(`http://localhost:${activeFwd.localPort}`, '_blank')}
+                                        >
+                                          <ExternalLink className="h-3 w-3 mr-1" />
+                                          Open
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 px-2 text-[10px] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40"
+                                          onClick={() => stopAndRemove(activeFwd.sessionId)}
+                                        >
+                                          <Square className="h-3 w-3 mr-1" />
+                                          Stop
+                                        </Button>
+                                      </div>
+                                    </div>
                                   )}
                                 </div>
-                                {onForwardPort && (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 gap-1.5 text-[10px] font-bold uppercase tracking-tight border-primary/20 hover:bg-primary/10 hover:border-primary/40 text-primary"
-                                    onClick={() => onForwardPort(container.name, p.containerPort)}
-                                  >
-                                    <ExternalLink className="h-3 w-3" />
-                                    Forward
-                                  </Button>
-                                )}
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         ) : (
                           <div className="rounded-xl border border-dashed border-border/60 p-6 flex flex-col items-center justify-center gap-2 text-muted-foreground bg-muted/5">
