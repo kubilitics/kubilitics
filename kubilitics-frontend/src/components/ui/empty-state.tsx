@@ -6,7 +6,6 @@ import {
   Boxes,
   BarChart3,
   CalendarClock,
-  Puzzle,
   WifiOff,
   SearchX,
   BrainCircuit,
@@ -273,20 +272,6 @@ export function EmptyNoEvents({ primaryAction, ...rest }: PresetProps) {
   );
 }
 EmptyNoEvents.displayName = "EmptyNoEvents";
-
-/** No add-ons installed */
-export function EmptyNoAddons({ primaryAction, ...rest }: PresetProps) {
-  return (
-    <EmptyState
-      icon={Puzzle}
-      title="No add-ons installed"
-      description="Extend your cluster with monitoring, logging, networking, and security add-ons from the catalog."
-      primaryAction={primaryAction ?? { label: "Browse Add-ons" }}
-      {...rest}
-    />
-  );
-}
-EmptyNoAddons.displayName = "EmptyNoAddons";
 
 /** Cluster disconnected */
 export function EmptyDisconnected({ primaryAction, ...rest }: PresetProps) {

@@ -10,7 +10,6 @@
  * Gracefully degrades when metrics-server is unavailable (shows requested only).
  */
 import { useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   Zap,
@@ -22,7 +21,6 @@ import {
   Lightbulb,
   Info,
   Download,
-  ArrowRight,
 } from "lucide-react";
 import { useK8sResourceList } from "@/hooks/useKubernetes";
 import { useClusterUtilization } from "@/hooks/useClusterUtilization";
@@ -210,7 +208,6 @@ function DualLayerBar({
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export function ClusterResourceIntelligence() {
-  const navigate = useNavigate();
   const { activeCluster } = useClusterStore();
   const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
 
@@ -241,28 +238,28 @@ export function ClusterResourceIntelligence() {
 
     const nodes = nodesList.data?.items ?? [];
     for (const node of nodes) {
-      const allocatable = (node as unknown as Record<string, unknown>)?.status?.allocatable ?? {};
-      totalCpuCapacity += parseCpu((allocatable.cpu as string) || "0");
-      totalMemCapacity += parseMemory((allocatable.memory as string) || "0");
+      const allocatable = (node as any)?.status?.allocatable ?? {};
+      totalCpuCapacity += parseCpu(allocatable.cpu || "0");
+      totalMemCapacity += parseMemory(allocatable.memory || "0");
     }
 
     const pods = podsList.data?.items ?? [];
     for (const pod of pods) {
-      const phase = (pod as unknown as Record<string, unknown>)?.status?.phase;
+      const phase = (pod as any)?.status?.phase;
       if (phase === "Succeeded" || phase === "Failed") continue;
 
-      const containers = (pod as unknown as Record<string, unknown>)?.spec?.containers ?? [];
+      const containers = (pod as any)?.spec?.containers ?? [];
       let podCpu = 0;
       let podMem = 0;
       for (const c of containers) {
-        const requests = (c as Record<string, unknown>).resources?.requests ?? {};
-        podCpu += parseCpu((requests.cpu as string) || "0");
-        podMem += parseMemory((requests.memory as string) || "0");
+        const requests = c.resources?.requests ?? {};
+        podCpu += parseCpu(requests.cpu || "0");
+        podMem += parseMemory(requests.memory || "0");
       }
       totalCpuRequests += podCpu;
       totalMemRequests += podMem;
 
-      const ns = (pod as unknown as Record<string, unknown>)?.metadata?.namespace ?? "default";
+      const ns = (pod as any)?.metadata?.namespace ?? "default";
       if (!nsUsage[ns]) nsUsage[ns] = { cpu: 0, mem: 0 };
       nsUsage[ns].cpu += podCpu;
       nsUsage[ns].mem += podMem;
@@ -393,17 +390,13 @@ export function ClusterResourceIntelligence() {
 
             {!metricsAvailable && (
               <div
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-50/80 dark:bg-amber-500/10 border border-amber-200/60 dark:border-amber-500/20 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-500/15 transition-colors group"
-                onClick={() => navigate('/addons?search=metrics-server')}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => e.key === 'Enter' && navigate('/addons?search=metrics-server')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-50/80 dark:bg-amber-500/10 border border-amber-200/60 dark:border-amber-500/20"
               >
                 <Download className="h-3 w-3 text-amber-600 dark:text-amber-400 shrink-0" strokeWidth={2} />
                 <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300">
-                  Install <span className="font-semibold">metrics-server</span> for actual usage
+                  Install <span className="font-semibold">metrics-server</span> for actual usage:
+                  <code className="ml-1 text-[9px] font-mono">helm install metrics-server metrics-server/metrics-server -n kube-system</code>
                 </span>
-                <ArrowRight className="h-3 w-3 text-amber-500/60 dark:text-amber-400/60 shrink-0 group-hover:translate-x-0.5 transition-transform" strokeWidth={2} />
               </div>
             )}
           </div>

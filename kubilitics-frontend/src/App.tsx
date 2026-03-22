@@ -149,9 +149,6 @@ const LimitRanges = lazy(() => import("./pages/LimitRanges"));
 const LimitRangeDetail = lazy(() => import("./pages/LimitRangeDetail"));
 const PriorityClasses = lazy(() => import("./pages/PriorityClasses"));
 const PriorityClassDetail = lazy(() => import("./pages/PriorityClassDetail"));
-// Add-ons removed from UI — will be re-introduced with proper reliability plan
-// const AddOns = lazy(() => import("./pages/AddOns"));
-// const AddOnDetail = lazy(() => import("./pages/AddOnDetail"));
 
 // Custom Resources & Admission Control
 const CustomResourceDefinitions = lazy(() => import("./pages/CustomResourceDefinitions"));

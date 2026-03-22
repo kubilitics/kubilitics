@@ -2,7 +2,7 @@
  * Notification Center Zustand Store
  *
  * Persisted store that manages in-app notifications for cluster events,
- * AI observations, and add-on status changes. Integrates with the
+ * AI observations, and system status changes. Integrates with the
  * WebSocket live-update system via `subscribeToWebSocket()`.
  *
  * @module notificationStore
@@ -17,7 +17,7 @@ import { safeLocalStorage } from '@/lib/safeStorage';
 export type NotificationSeverity = 'info' | 'warning' | 'error' | 'success';
 
 /** Notification category for filtering. */
-export type NotificationCategory = 'cluster' | 'ai' | 'addon' | 'system';
+export type NotificationCategory = 'cluster' | 'ai' | 'system';
 
 /** A single notification entry. */
 export interface Notification {

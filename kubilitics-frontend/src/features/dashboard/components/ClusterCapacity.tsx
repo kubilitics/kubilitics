@@ -9,7 +9,6 @@
  *   useClusterOverview   → fallback utilization %
  */
 import React, { useMemo } from "react";
-import { Link } from "react-router-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer, Label } from "recharts";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -22,8 +21,6 @@ import { useK8sResourceList } from "@/hooks/useKubernetes";
 import { useConnectionStatus } from "@/hooks/useConnectionStatus";
 import { Loader2, Server, Cpu, MemoryStick, Hexagon, Info, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const METRICS_SERVER_ADDON_URL = `/addons/${encodeURIComponent('kubilitics/metrics-server')}`;
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Helpers
@@ -354,11 +351,11 @@ export const ClusterCapacity = () => {
       <CardContent className="flex-1 flex flex-col pt-2 pb-6 px-6 relative z-10">
         {isLoading ? (
           <div className="flex-1 flex items-center justify-center">
-            <Loader2 className="h-7 w-7 animate-spin text-muted-foreground/70" />
+            <Loader2 className="h-7 w-7 animate-spin text-muted-foreground/40" />
           </div>
         ) : !hasData ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3">
-            <Server className="h-9 w-9 text-muted-foreground/60" />
+            <Server className="h-9 w-9 text-muted-foreground/25" />
             <p className="text-sm text-muted-foreground">No node data available</p>
           </div>
         ) : (
@@ -398,7 +395,7 @@ export const ClusterCapacity = () => {
                     <p><strong>Reserved:</strong> {formatCpu(cap.reservedCpu)} ({cap.reservedCpuPct}%)</p>
                     {cap.hasMetrics
                       ? <p><strong>Used:</strong> {formatCpu(cap.usedCpu)} ({cap.usedCpuPct}%)</p>
-                      : <p className="text-muted-foreground italic">Install <Link to={METRICS_SERVER_ADDON_URL} className="underline text-primary hover:text-primary/80">metrics-server</Link> for real-time usage</p>
+                      : <p className="text-muted-foreground italic">Install metrics-server for real-time usage:<br/><code className="text-[10px]">helm install metrics-server metrics-server/metrics-server -n kube-system</code></p>
                     }
                   </div>
                 }
@@ -419,7 +416,7 @@ export const ClusterCapacity = () => {
                     <p><strong>Reserved:</strong> {formatMemory(cap.reservedMem)} ({cap.reservedMemPct}%)</p>
                     {cap.hasMetrics
                       ? <p><strong>Used:</strong> {formatMemory(cap.usedMem)} ({cap.usedMemPct}%)</p>
-                      : <p className="text-muted-foreground italic">Install <Link to={METRICS_SERVER_ADDON_URL} className="underline text-primary hover:text-primary/80">metrics-server</Link> for real-time usage</p>
+                      : <p className="text-muted-foreground italic">Install metrics-server for real-time usage:<br/><code className="text-[10px]">helm install metrics-server metrics-server/metrics-server -n kube-system</code></p>
                     }
                   </div>
                 }
@@ -513,14 +510,12 @@ export const ClusterCapacity = () => {
               <div className="mt-4 pt-3 border-t border-border/50">
                 <p className="text-xs text-muted-foreground leading-relaxed">
                   Install{" "}
-                  <Link
-                    to={METRICS_SERVER_ADDON_URL}
-                    className="inline-flex items-center gap-1 text-primary hover:text-primary/80 underline underline-offset-2"
-                  >
-                    <code className="bg-muted/60 px-1.5 py-0.5 rounded text-[10px] font-mono">metrics-server</code>
-                  </Link>{" "}
-                  for real-time CPU &amp; memory usage.
+                  <code className="bg-muted/60 px-1.5 py-0.5 rounded text-[10px] font-mono">metrics-server</code>{" "}
+                  for real-time CPU &amp; memory usage:
                 </p>
+                <code className="block mt-1 text-[10px] text-muted-foreground font-mono">
+                  helm install metrics-server metrics-server/metrics-server -n kube-system
+                </code>
               </div>
             )}
           </>

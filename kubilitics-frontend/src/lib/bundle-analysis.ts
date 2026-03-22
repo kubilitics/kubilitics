@@ -17,7 +17,7 @@
  * | monaco-editor          | ~400 kB   | YAML editor (resource edit)      | Dynamic import   |
  * | recharts               | ~80 kB    | Dashboard charts                 | Lazy route       |
  * | d3                     | ~60 kB    | Custom SVG charts                | Dynamic import   |
- * | @codemirror/*          | ~90 kB    | YAML editor (add-on values)      | Dynamic import   |
+ * | @codemirror/*          | ~90 kB    | YAML editor (resource edit)      | Dynamic import   |
  * | elkjs                  | ~35 kB    | ELK layout for topology          | Dynamic import   |
  * | jspdf                  | ~50 kB    | PDF export                       | Dynamic import   |
  *
