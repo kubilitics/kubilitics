@@ -642,47 +642,17 @@ export default function PodDetail() {
           </SectionCard>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Pod Information */}
+            {/* Runtime Configuration */}
             <SectionCard
               icon={Info}
-              title="Pod Information"
-              tooltip={
-                <>
-                  <p className="font-medium">Pod Information</p>
-                  <p className="mt-1 text-muted-foreground text-xs">Basic details about this pod</p>
-                </>
-              }
+              title="Runtime Configuration"
+              tooltip={<p className="text-xs text-muted-foreground">Restart policy, DNS, and termination settings</p>}
             >
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground mb-1">Pod IP</p>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {podIPsList.length > 0 ? (
-                        podIPsList.map((ip) => (
-                          <span key={ip} className="flex items-center gap-1 font-mono">
-                            {ip}
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { navigator.clipboard.writeText(ip); toast.success('Copied'); }}>
-                              <Copy className="h-3 w-3" />
-                            </Button>
-                          </span>
-                        ))
-                      ) : (
-                        <span className="font-mono">-</span>
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground mb-1">Host IP</p>
-                    <p className="font-mono">{pod.status?.hostIP || '-'}</p>
-                  </div>
-                  <DetailRow label="Node" value={pod.spec?.nodeName ? <Button variant="link" className="h-auto p-0 font-mono truncate max-w-[240px]" title={pod.spec?.nodeName} onClick={() => navigate(`/nodes/${pod.spec?.nodeName}`)}>{pod.spec?.nodeName}</Button> : '-'} />
-                  <DetailRow label="QoS Class" value={<Badge variant="outline">{pod.status?.qosClass || '-'}</Badge>} tooltip={pod.status?.qosClass ? TOOLTIP_QOS[pod.status.qosClass] ?? undefined : undefined} />
-                  <DetailRow label="Service Account" value={<span className="font-mono text-xs">{pod.spec?.serviceAccountName || 'default'}</span>} />
-                  <DetailRow label="Restart Policy" value={pod.spec?.restartPolicy || 'Always'} tooltip={TOOLTIP_RESTART_POLICY} />
-                  <DetailRow label="DNS Policy" value={pod.spec?.dnsPolicy || 'ClusterFirst'} tooltip={TOOLTIP_DNS_POLICY} />
-                  <DetailRow label="Termination Grace" value={`${pod.spec?.terminationGracePeriodSeconds ?? 30}s`} tooltip={TOOLTIP_TERMINATION_GRACE} />
-                </div>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <DetailRow label="Restart Policy" value={<Badge variant="outline">{pod.spec?.restartPolicy || 'Always'}</Badge>} tooltip={TOOLTIP_RESTART_POLICY} />
+                <DetailRow label="DNS Policy" value={<Badge variant="outline">{pod.spec?.dnsPolicy || 'ClusterFirst'}</Badge>} tooltip={TOOLTIP_DNS_POLICY} />
+                <DetailRow label="Termination Grace" value={`${pod.spec?.terminationGracePeriodSeconds ?? 30}s`} tooltip={TOOLTIP_TERMINATION_GRACE} />
+                <DetailRow label="QoS Class" value={<Badge variant="outline">{pod.status?.qosClass || '-'}</Badge>} tooltip={pod.status?.qosClass ? TOOLTIP_QOS[pod.status.qosClass] ?? undefined : undefined} />
               </div>
             </SectionCard>
 
