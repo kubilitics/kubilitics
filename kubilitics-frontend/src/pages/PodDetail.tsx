@@ -158,7 +158,7 @@ interface PodResource extends KubernetesResource {
         requests?: { cpu?: string; memory?: string };
         limits?: { cpu?: string; memory?: string };
       };
-      env?: Array<{ name: string; value?: string; valueFrom?: Record<string, unknown> }>;
+      env?: Array<{ name: string; value?: string; valueFrom?: any }>;
       volumeMounts?: Array<{ name: string; mountPath: string; readOnly?: boolean }>;
       livenessProbe?: Record<string, unknown>;
       readinessProbe?: Record<string, unknown>;
@@ -167,14 +167,14 @@ interface PodResource extends KubernetesResource {
       name: string;
       configMap?: { name: string };
       secret?: { secretName: string };
-      emptyDir?: Record<string, unknown>;
+      emptyDir?: {};
       persistentVolumeClaim?: { claimName: string };
       projected?: {
         defaultMode?: number;
-        sources?: Array<{ serviceAccountToken?: { audience?: string }; configMap?: { name: string }; downwardAPI?: Record<string, unknown> }>;
+        sources?: Array<{ serviceAccountToken?: { audience?: string }; configMap?: { name: string }; downwardAPI?: {} }>;
       };
     }>;
-    affinity?: Record<string, unknown>;
+    affinity?: any;
     tolerations?: Array<{ key?: string; operator?: string; value?: string; effect?: string; tolerationSeconds?: number }>;
     nodeSelector?: Record<string, string>;
   };
@@ -263,12 +263,10 @@ export default function PodDetail() {
         status,
       };
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [namespacePodsData?.items, namespace]);
 
   const status = pod.status?.phase as ResourceStatus || 'Unknown';
   const conditions = pod.status?.conditions || [];
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const containerStatuses = pod.status?.containerStatuses || [];
   const readyContainers = containerStatuses.filter(c => c.ready).length;
   const totalRestarts = containerStatuses.reduce((sum, c) => sum + c.restartCount, 0);
@@ -354,8 +352,8 @@ export default function PodDetail() {
       try {
         await deletePod.mutateAsync({ name, namespace });
         toast.success('Pod restarted (deleted for recreation by controller)');
-      } catch (error) {
-        toast.error(`Failed to restart: ${error instanceof Error ? error.message : String(error)}`);
+      } catch (error: any) {
+        toast.error(`Failed to restart: ${error.message}`);
       }
     } else {
       toast.success('Pod restart initiated (demo mode)');
@@ -368,8 +366,8 @@ export default function PodDetail() {
         await updatePod.mutateAsync({ name, yaml: newYaml, namespace });
         toast.success('Pod updated successfully');
         refetch();
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+      } catch (error: any) {
+        const msg = error?.message ?? String(error);
         const isPodImmutable =
           msg.includes('pod updates may not change') ||
           (msg.includes('is invalid') && msg.includes('Pod'));
@@ -855,6 +853,8 @@ export default function PodDetail() {
           )}
           <ContainersSection
             containers={filteredContainers}
+            resourceName={name}
+            namespace={namespace}
             onForwardPort={(containerName, port) => {
               setPortForwardInitial({ containerName, port });
               setShowPortForwardDialog(true);
