@@ -2,7 +2,6 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueries } from '@tanstack/react-query';
 import { Server, Clock, Download, Trash2, Cpu, HardDrive, Box, Shield, Pause, Play, AlertTriangle, Loader2, Info, BarChart2, Activity, MapPin, Tag, FileJson, FileSpreadsheet, Image, Network, GitCompare, RefreshCw } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { NamespaceBadge } from '@/components/list';
 import { Progress } from '@/components/ui/progress';
@@ -96,7 +95,6 @@ export default function NodeDetail() {
     refetchInterval: fastPollInterval,
     staleTime: isFastPolling ? 1000 : 30000,
   });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const runningPodsRaw = (isConnected && podsOnNodeQuery.data?.items) ? (podsOnNodeQuery.data.items as KubernetesResource[]) : [];
   const runningPodsBase = useMemo(() => runningPodsRaw.map((p) => {
     const r = p as KubernetesResource & { name?: string; namespace?: string; status?: string };
@@ -524,7 +522,7 @@ export default function NodeDetail() {
       badge: runningPods.length.toString(),
       content: (
         <SectionCard icon={Box} title={`Pods on this node (${runningPods.length})`} tooltip={<p className="text-xs text-muted-foreground">Pods scheduled on this node (fieldSelector=spec.nodeName). Click a row to open pod detail.</p>}>
-          <DetailPodTable pods={runningPodsRaw as unknown as Array<Record<string, unknown>>} namespace="" />
+          <DetailPodTable pods={runningPodsRaw as any} namespace="" />
         </SectionCard>
       ),
     },
