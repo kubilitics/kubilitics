@@ -56,6 +56,7 @@ import {
   YamlViewer,
   EventsSection,
   LabelList,
+  AnnotationList,
   ActionsSection,
   MetricsDashboard,
   ScaleDialog,
@@ -708,10 +709,12 @@ export default function DeploymentDetail() {
             </div>
           </SectionCard>
 
-          <LabelList
-            labels={deployment.spec?.selector?.matchLabels || {}}
-            title="Selector"
-          />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <LabelList labels={deployment.metadata?.labels || {}} />
+            <LabelList labels={deployment.spec?.selector?.matchLabels || {}} title="Selector" />
+          </div>
+
+          <AnnotationList annotations={deployment.metadata?.annotations || {}} />
         </div>
       ),
     },
