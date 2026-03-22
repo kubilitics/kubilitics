@@ -250,7 +250,6 @@ export default function ClusterOverview() {
     setTimeout(() => setIsSyncing(false), 1500);
   }, [queryClient]);
 
- // eslint-disable-next-line react-hooks/exhaustive-deps
   const resources: ClusterResource[] = data?.resources ?? [];
 
   const filteredResources = useMemo(() => {
@@ -592,12 +591,12 @@ export default function ClusterOverview() {
                         <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                           <Gauge className="w-3 h-3" /> Metrics
                         </span>
-                        <Link
-                          to={`/addons/${encodeURIComponent('kubilitics/metrics-server')}`}
-                          className="text-xs text-primary hover:text-primary/80 underline underline-offset-2"
-                        >
-                          Install metrics-server for live utilization
-                        </Link>
+                        <p className="text-xs text-muted-foreground">
+                          Install metrics-server for live utilization:
+                        </p>
+                        <code className="text-[10px] text-muted-foreground font-mono">
+                          helm install metrics-server metrics-server/metrics-server -n kube-system
+                        </code>
                       </div>
                     </>
                   )}

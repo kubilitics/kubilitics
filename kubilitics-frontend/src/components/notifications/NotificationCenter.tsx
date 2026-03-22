@@ -4,7 +4,7 @@
  * Features:
  * - Bell icon with animated unread count badge
  * - Dropdown panel with recent notifications (newest first)
- * - Category filter tabs: All, Cluster, AI, Add-ons
+ * - Category filter tabs: All, Cluster, AI
  * - Mark as read, dismiss individual, clear all actions
  * - Framer Motion enter/exit animations
  * - WebSocket integration pattern via `useNotificationWebSocket` hook
@@ -22,7 +22,6 @@ import {
   Trash2,
   Server,
   Brain,
-  Package,
   AlertCircle,
   AlertTriangle,
   Info,
@@ -61,7 +60,6 @@ const FILTER_TABS: FilterTab[] = [
   { id: 'all', label: 'All', Icon: Bell },
   { id: 'cluster', label: 'Cluster', Icon: Server },
   { id: 'ai', label: 'AI', Icon: Brain },
-  { id: 'addon', label: 'Add-ons', Icon: Package },
 ];
 
 const SEVERITY_ICONS: Record<NotificationSeverity, React.ElementType> = {
@@ -115,8 +113,6 @@ function useNotificationWebSocket(
       let category: NotificationCategory = 'cluster';
       if (eventType.startsWith('ai.') || eventType.includes('anomaly')) {
         category = 'ai';
-      } else if (eventType.startsWith('addon.') || eventType.includes('install')) {
-        category = 'addon';
       }
 
       // Determine severity from event type
@@ -170,9 +166,6 @@ function formatEventTitle(
     'node.not_ready': name ? `Node ${name} not ready` : 'Node not ready',
     'ai.anomaly': name ? `Anomaly on ${name}` : 'Anomaly detected',
     'ai.observation': 'AI observation',
-    'addon.installed': name ? `${name} installed` : 'Add-on installed',
-    'addon.failed': name ? `${name} install failed` : 'Add-on install failed',
-    'addon.health_changed': name ? `${name} health changed` : 'Add-on health changed',
   };
 
   return eventTitleMap[eventType] ?? humanizeEventType(eventType);
