@@ -23,7 +23,7 @@ const KubeDiagramsBinaryName = "kube-diagrams"
 // Install: pip install KubeDiagrams && brew install graphviz (macOS)
 //
 // Returns ErrKubeDiagramsNotInstalled if kube-diagrams is not on PATH.
-func GraphToArchitecturePNG(ctx context.Context, kubeconfigPath, namespace, kubectlPath string) ([]byte, error) {
+func GraphToArchitectureSVG(ctx context.Context, kubeconfigPath, namespace, kubectlPath string) ([]byte, error) {
 	// Resolve kube-diagrams binary
 	kubeDiagramsPath, err := resolveKubeDiagrams()
 	if err != nil {
@@ -44,20 +44,34 @@ func GraphToArchitecturePNG(ctx context.Context, kubeconfigPath, namespace, kube
 	}
 
 	// Generate unique output path
-	outputPath := filepath.Join(os.TempDir(), fmt.Sprintf("kubilitics-arch-%s.png", uuid.New().String()))
+	outputPath := filepath.Join(os.TempDir(), fmt.Sprintf("kubilitics-arch-%s.svg", uuid.New().String()))
 	defer os.Remove(outputPath)
 
-	// Build kubectl command with ALL resource types (not just "all" which misses ConfigMaps, Secrets, etc.)
-	// This comma-separated list ensures every topology-relevant resource is included.
-	resourceTypes := strings.Join([]string{
-		"pods", "deployments", "replicasets", "statefulsets", "daemonsets",
-		"jobs", "cronjobs", "services", "endpoints", "endpointslices",
-		"configmaps", "secrets", "ingresses", "serviceaccounts",
-		"roles", "rolebindings", "clusterroles", "clusterrolebindings",
-		"persistentvolumeclaims", "persistentvolumes", "storageclasses",
-		"horizontalpodautoscalers", "networkpolicies", "poddisruptionbudgets",
-		"nodes", "namespaces",
-	}, ",")
+	// For namespace-scoped exports: fetch only namespace-scoped resources (keeps diagram compact).
+	// For cluster-wide: include cluster-scoped resources too.
+	var resourceList []string
+	if namespace != "" && namespace != "all" {
+		// Namespace-scoped only — compact, readable diagram
+		resourceList = []string{
+			"pods", "deployments", "replicasets", "statefulsets", "daemonsets",
+			"jobs", "cronjobs", "services", "endpoints",
+			"configmaps", "secrets", "ingresses", "serviceaccounts",
+			"persistentvolumeclaims",
+			"horizontalpodautoscalers", "networkpolicies", "poddisruptionbudgets",
+		}
+	} else {
+		// Cluster-wide — include everything
+		resourceList = []string{
+			"pods", "deployments", "replicasets", "statefulsets", "daemonsets",
+			"jobs", "cronjobs", "services", "endpoints", "endpointslices",
+			"configmaps", "secrets", "ingresses", "serviceaccounts",
+			"roles", "rolebindings", "clusterroles", "clusterrolebindings",
+			"persistentvolumeclaims", "persistentvolumes", "storageclasses",
+			"horizontalpodautoscalers", "networkpolicies", "poddisruptionbudgets",
+			"nodes", "namespaces",
+		}
+	}
+	resourceTypes := strings.Join(resourceList, ",")
 
 	kubectlArgs := []string{"get", resourceTypes}
 	if nsFlag == "-A" {
