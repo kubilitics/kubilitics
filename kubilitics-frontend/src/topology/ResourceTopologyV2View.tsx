@@ -316,6 +316,8 @@ export function ResourceTopologyV2View({
             onSelectNode={setSelectedNodeId}
             exportRef={exportCanvasRef}
             fitViewRef={fitViewRef}
+            clusterName={activeClusterName ?? undefined}
+            namespace={namespace ?? undefined}
           />
 
           {/* Resource Count Badge */}

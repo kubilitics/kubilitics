@@ -21,6 +21,7 @@ import { useElkLayout } from "./hooks/useElkLayout";
 import { captureFullTopologyPNG, captureFullTopologySVG, type ExportBounds } from "./export/exportTopology";
 import { ZOOM_THRESHOLDS, CANVAS, EDGE_COLORS, fitViewMinZoom, minimapNodeColor } from "./constants/designTokens";
 import { useTopologyStore } from "./store/topologyStore";
+import { ExportFrame } from "./export/ExportFrame";
 import type { TopologyResponse, ViewMode } from "./types/topology";
 
 export type ExportFormat = "png" | "svg";
@@ -34,6 +35,10 @@ export interface TopologyCanvasProps {
   fitViewRef?: React.MutableRefObject<(() => void) | null>;
   /** Ref that parent sets to trigger an export. Call with (format, filename). */
   exportRef?: React.MutableRefObject<((format: ExportFormat, filename: string) => void) | null>;
+  /** Cluster name for export title */
+  clusterName?: string;
+  /** Namespace for export title */
+  namespace?: string;
 }
 
 /** Semantic zoom — uses centralized thresholds from designTokens */
@@ -52,6 +57,8 @@ function TopologyCanvasInner({
   onSelectNode,
   fitViewRef,
   exportRef,
+  clusterName,
+  namespace,
 }: TopologyCanvasProps) {
   const [currentZoom, setCurrentZoom] = useState(0.5);
 
@@ -200,6 +207,10 @@ function TopologyCanvasInner({
     return () => { cancelled = true; };
   }, [isExporting, reactFlow]);
 
+  // Export preferences
+  const exportIncludeTitle = useTopologyStore((s) => s.exportIncludeTitle);
+  const exportIncludeLegend = useTopologyStore((s) => s.exportIncludeLegend);
+
   // Focus dimming — dims unconnected nodes when a node is selected.
   // Uses the selectedNodeId PROP (not store) so it works in both
   // TopologyPage (store-driven) and ResourceTopologyV2View (local state).
@@ -340,6 +351,19 @@ function TopologyCanvasInner({
           className="!bg-white dark:!bg-slate-800 !border !border-gray-200 dark:!border-slate-700 !rounded-lg !shadow-md [&>button]:dark:!bg-slate-800 [&>button]:dark:!border-slate-700 [&>button]:dark:!fill-gray-300 [&>button:hover]:dark:!bg-slate-700"
           aria-label="Zoom and fit controls"
         />
+        {/* Export frame — rendered only during capture, captured as part of viewport */}
+        {isExporting && (exportIncludeTitle || exportIncludeLegend) && (
+          <div className="react-flow__panel" style={{ position: "absolute", inset: 0, zIndex: 100, pointerEvents: "none" }}>
+            <ExportFrame
+              title={[clusterName, namespace].filter(Boolean).join(" / ") || "Kubernetes Topology"}
+              subtitle={viewMode ? `${viewMode.charAt(0).toUpperCase() + viewMode.slice(1)} View` : undefined}
+              nodeCount={topology?.nodes?.length ?? 0}
+              edgeCount={topology?.edges?.length ?? 0}
+              includeTitle={exportIncludeTitle}
+              includeLegend={exportIncludeLegend}
+            />
+          </div>
+        )}
       </ReactFlow>
 
       {/* Live region for export status */}
