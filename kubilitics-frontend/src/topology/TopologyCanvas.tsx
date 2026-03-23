@@ -21,7 +21,6 @@ import { useElkLayout } from "./hooks/useElkLayout";
 import { captureFullTopologyPNG, captureFullTopologySVG, type ExportBounds } from "./export/exportTopology";
 import { ZOOM_THRESHOLDS, CANVAS, EDGE_COLORS, fitViewMinZoom, minimapNodeColor } from "./constants/designTokens";
 import { useTopologyStore } from "./store/topologyStore";
-import { ExportFrame } from "./export/ExportFrame";
 import type { TopologyResponse, ViewMode } from "./types/topology";
 
 export type ExportFormat = "png" | "svg";
@@ -207,10 +206,6 @@ function TopologyCanvasInner({
     return () => { cancelled = true; };
   }, [isExporting, reactFlow]);
 
-  // Export preferences
-  const exportIncludeTitle = useTopologyStore((s) => s.exportIncludeTitle);
-  const exportIncludeLegend = useTopologyStore((s) => s.exportIncludeLegend);
-
   // Health chain — nodes connected to error nodes via ownership edges get a warning tint.
   // This propagates visibility: "this Deployment is unhealthy → its RS and Pods are in the error chain"
   const errorChainNodeIds = useMemo(() => {
@@ -338,8 +333,8 @@ function TopologyCanvasInner({
         proOptions={{ hideAttribution: true }}
         className="!bg-[#f8f9fb] dark:!bg-slate-950"
       >
-        {/* SVG marker definitions for edge arrowheads */}
-        <svg style={{ position: "absolute", width: 0, height: 0 }}>
+        {/* SVG marker definitions for edge arrowheads — must be in DOM for url(#id) references */}
+        <svg style={{ position: "absolute", width: 0, height: 0, overflow: "visible" }}>
           <defs>
             {Object.entries(EDGE_COLORS).map(([category, color]) => (
               <g key={category}>
@@ -377,19 +372,6 @@ function TopologyCanvasInner({
           className="!bg-white dark:!bg-slate-800 !border !border-gray-200 dark:!border-slate-700 !rounded-lg !shadow-md [&>button]:dark:!bg-slate-800 [&>button]:dark:!border-slate-700 [&>button]:dark:!fill-gray-300 [&>button:hover]:dark:!bg-slate-700"
           aria-label="Zoom and fit controls"
         />
-        {/* Export frame — rendered only during capture, captured as part of viewport */}
-        {isExporting && (exportIncludeTitle || exportIncludeLegend) && (
-          <div className="react-flow__panel" style={{ position: "absolute", inset: 0, zIndex: 100, pointerEvents: "none" }}>
-            <ExportFrame
-              title={[clusterName, namespace].filter(Boolean).join(" / ") || "Kubernetes Topology"}
-              subtitle={viewMode ? `${viewMode.charAt(0).toUpperCase() + viewMode.slice(1)} View` : undefined}
-              nodeCount={topology?.nodes?.length ?? 0}
-              edgeCount={topology?.edges?.length ?? 0}
-              includeTitle={exportIncludeTitle}
-              includeLegend={exportIncludeLegend}
-            />
-          </div>
-        )}
       </ReactFlow>
 
       {/* Live region for export status */}
