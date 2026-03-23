@@ -2,7 +2,8 @@ import { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import type { BaseNodeData } from "./BaseNode";
-import { categoryIcon, formatBytes, formatCPU } from "./nodeUtils";
+import { formatBytes, formatCPU } from "./nodeUtils";
+import { K8sIcon } from "../icons/K8sIcon";
 import {
   categoryBorderClass,
   categoryHeaderClass,
@@ -31,7 +32,6 @@ export type ExpandedNodeData = BaseNodeData & {
  * Rich card with metrics grid, labels, and detailed status.
  */
 function ExpandedNodeInner({ data }: NodeProps<ExpandedNodeData>) {
-  const icon = categoryIcon(data.category);
   const headerBg = categoryHeaderClass(data.category);
   const borderColor = categoryBorderClass(data.category);
   const badge = getStatusBadge(data.status);
@@ -49,7 +49,7 @@ function ExpandedNodeInner({ data }: NodeProps<ExpandedNodeData>) {
 
       {/* Header */}
       <div className={`flex items-center gap-2.5 ${headerBg} px-4 py-2`}>
-        <span className="text-base" aria-hidden="true">{icon}</span>
+        <K8sIcon kind={data.kind} size={18} />
         <div className="flex-1 min-w-0">
           <span className="text-[11px] font-semibold text-white tracking-wide uppercase">{data.kind}</span>
         </div>

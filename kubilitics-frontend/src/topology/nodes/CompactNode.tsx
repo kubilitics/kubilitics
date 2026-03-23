@@ -2,15 +2,14 @@ import { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import type { BaseNodeData } from "./BaseNode";
-import { categoryIcon } from "./nodeUtils";
 import { getCategoryColor, statusDotClass, A11Y } from "../constants/designTokens";
+import { K8sIcon } from "../icons/K8sIcon";
 
 /**
  * CompactNode: Displayed at zoom level 0.08x-0.30x.
  * Card with colored left accent, kind icon, name, kind badge, and status dot.
  */
 function CompactNodeInner({ data }: NodeProps<BaseNodeData>) {
-  const icon = categoryIcon(data.category);
   const color = statusDotClass(data.status);
   const accent = getCategoryColor(data.category).accent;
 
@@ -24,7 +23,7 @@ function CompactNodeInner({ data }: NodeProps<BaseNodeData>) {
       tabIndex={0}
     >
       <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-gray-400 dark:!bg-gray-500 !border-white dark:!border-slate-800 !border-2" />
-      <span className="text-lg shrink-0" aria-hidden="true">{icon}</span>
+      <K8sIcon kind={data.kind} size={22} className="shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 leading-tight break-all">{data.name}</div>
         <div className="text-[10px] text-gray-600 dark:text-gray-400 font-medium mt-0.5">{data.kind}</div>
