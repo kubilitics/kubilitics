@@ -55,10 +55,6 @@ export interface TopologyState {
   presentationMode: boolean;
   focusDimming: boolean;
 
-  // Export preferences
-  exportIncludeTitle: boolean;
-  exportIncludeLegend: boolean;
-
   // WebSocket
   wsConnected: boolean;
   lastUpdateTime: string | null;
@@ -81,8 +77,6 @@ export interface TopologyState {
   toggleOverlay: (name: "health") => void;
   togglePresentationMode: () => void;
   toggleFocusDimming: () => void;
-  toggleExportTitle: () => void;
-  toggleExportLegend: () => void;
   setZoom: (zoom: number) => void;
   setPosition: (pos: { x: number; y: number }) => void;
   setLoading: (loading: boolean) => void;
@@ -151,8 +145,6 @@ export const useTopologyStore = create<TopologyState>()(
       warnings: [],
       presentationMode: false,
       focusDimming: true,
-      exportIncludeTitle: true,
-      exportIncludeLegend: true,
       wsConnected: false,
       lastUpdateTime: null,
 
@@ -258,8 +250,6 @@ export const useTopologyStore = create<TopologyState>()(
 
       togglePresentationMode: () => set((s) => ({ presentationMode: !s.presentationMode })),
       toggleFocusDimming: () => set((s) => ({ focusDimming: !s.focusDimming })),
-      toggleExportTitle: () => set((s) => ({ exportIncludeTitle: !s.exportIncludeTitle })),
-      toggleExportLegend: () => set((s) => ({ exportIncludeLegend: !s.exportIncludeLegend })),
 
       setZoom: (zoom) => set({ zoom }),
       setPosition: (position) => set({ position }),
@@ -275,8 +265,6 @@ export const useTopologyStore = create<TopologyState>()(
         viewMode: state.viewMode,
         healthOverlay: state.healthOverlay,
         focusDimming: state.focusDimming,
-        exportIncludeTitle: state.exportIncludeTitle,
-        exportIncludeLegend: state.exportIncludeLegend,
       }),
     }
   )
