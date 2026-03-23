@@ -2,7 +2,8 @@ import { useMemo, useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Copy, Check, ChevronRight, X } from "lucide-react";
 import type { TopologyResponse, TopologyNode, TopologyEdge, NodeMetrics } from "./types/topology";
-import { categoryIcon, formatBytes, formatCPU } from "./nodes/nodeUtils";
+import { formatBytes, formatCPU } from "./nodes/nodeUtils";
+import { K8sIcon } from "./icons/K8sIcon";
 import { getStatusBadge, getCategoryColor, getEdgeColor, A11Y } from "./constants/designTokens";
 
 export interface TopologyDetailPanelProps {
@@ -83,7 +84,6 @@ export function TopologyDetailPanel({
     return null;
   }
 
-  const icon = categoryIcon(node.category);
   const badge = getStatusBadge(node.status);
   const accent = getCategoryColor(node.category).accent;
 
@@ -96,7 +96,7 @@ export function TopologyDetailPanel({
       {/* Header */}
       <div className="sticky top-0 border-b bg-background p-3 z-10">
         <div className="flex items-center gap-2">
-          <span className="text-lg" aria-hidden="true">{icon}</span>
+          <K8sIcon kind={node.kind} size={22} />
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{node.name}</div>
             <div className="text-[11px] text-muted-foreground">{node.kind}</div>
@@ -286,7 +286,6 @@ function ConnectionRow({
   const peerId = direction === "outgoing" ? edge.target : edge.source;
   const peerName = peer?.name ?? peerId.split("/").pop() ?? peerId;
   const peerKind = peer?.kind ?? peerId.split("/")[0] ?? "";
-  const icon = peer ? categoryIcon(peer.category) : "";
   const edgeColor = getEdgeColor((edge as unknown as Record<string, unknown>).relationshipCategory as string);
 
   return (
@@ -303,7 +302,7 @@ function ConnectionRow({
         style={{ backgroundColor: edgeColor }}
         aria-hidden="true"
       />
-      <span className="text-sm flex-shrink-0" aria-hidden="true">{icon}</span>
+      {peer && <K8sIcon kind={peer.kind} size={16} className="flex-shrink-0" />}
       <div className="min-w-0 flex-1">
         <div className="truncate text-[11px] font-medium text-gray-900">{peerName}</div>
         <div className="flex items-center gap-1.5 mt-0.5">

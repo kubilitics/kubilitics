@@ -1,7 +1,8 @@
 import { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
-import { categoryIcon, formatCPU, formatBytes } from "./nodeUtils";
+import { formatCPU, formatBytes } from "./nodeUtils";
+import { K8sIcon } from "../icons/K8sIcon";
 import {
   categoryBorderClass,
   categoryHeaderClass,
@@ -36,7 +37,6 @@ export type BaseNodeData = {
  * Card with category header, name, namespace, status badge, and optional metrics.
  */
 function BaseNodeInner({ data }: NodeProps<BaseNodeData>) {
-  const icon = categoryIcon(data.category);
   const headerBg = categoryHeaderClass(data.category);
   const borderColor = categoryBorderClass(data.category);
   const badge = getStatusBadge(data.status);
@@ -53,7 +53,7 @@ function BaseNodeInner({ data }: NodeProps<BaseNodeData>) {
 
       {/* Header with category color */}
       <div className={`flex items-center gap-2 ${headerBg} px-3 py-1.5`}>
-        <span className="text-sm" aria-hidden="true">{icon}</span>
+        <K8sIcon kind={data.kind} size={16} />
         <span className="flex-1 text-[11px] font-semibold text-white tracking-wide uppercase">{data.kind}</span>
         <div className={`h-2 w-2 rounded-full ${badge.dotClass} ring-1 ring-white/40`} aria-hidden="true" />
       </div>

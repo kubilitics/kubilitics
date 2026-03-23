@@ -1,5 +1,5 @@
 import { BackendApiError } from '@/services/backendApiClient';
-import { toast } from '@/components/ui/sonner';
+import { toast } from 'sonner';
 
 export type NotificationAction =
   | 'create'

@@ -44,7 +44,7 @@ import { DeleteConfirmDialog, PortForwardDialog, UsageBar, parseCpu, parseMemory
 import { ResourceCommandBar, ResourceExportDropdown, ListViewSegmentedControl, NamespaceFilter } from '@/components/list';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
 import { useQuery, useQueries } from '@tanstack/react-query';
-import { toast } from '@/components/ui/sonner';
+import { toast } from 'sonner';
 import { objectsToYaml, downloadBlob, downloadResourceJson } from '@/lib/exportUtils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Progress } from '@/components/ui/progress';
