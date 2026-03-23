@@ -51,7 +51,7 @@ function LabeledEdgeInner(props: EdgeProps<LabeledEdgeData>) {
       {!hideLabel && (
         <EdgeLabelRenderer>
           <div
-            className="pointer-events-auto absolute -translate-x-1/2 cursor-default rounded-md border bg-white dark:bg-slate-800 px-2 py-0.5 text-[11px] font-semibold leading-tight text-gray-900 dark:text-gray-100 shadow-md backdrop-blur-sm transition-all"
+            className="pointer-events-auto absolute -translate-x-1/2 cursor-default rounded-md border bg-white dark:bg-slate-800 px-2.5 py-1 text-[11px] font-semibold leading-tight text-gray-900 dark:text-gray-100 shadow-md backdrop-blur-sm transition-all whitespace-nowrap"
             style={{
               left: labelX,
               top: labelY - 12,
