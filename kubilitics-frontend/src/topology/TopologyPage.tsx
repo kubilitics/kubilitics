@@ -286,6 +286,8 @@ export function TopologyPage() {
         onSelectNode={setSelectedNodeId}
         exportRef={exportRef}
         fitViewRef={fitViewRef}
+        clusterName={clusterName ?? undefined}
+        namespace={activeNamespace}
       />
     );
   };
