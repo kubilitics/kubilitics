@@ -911,7 +911,7 @@ export function MetricsDashboard({ resourceType, resourceName, namespace, podRes
             </div>
             {/* Quick Stats below overview charts */}
             {(cpuStats || memStats) && (
-              <div className="grid grid-cols-2 gap-6 mt-4">
+              <div className="grid grid-cols-3 gap-6 mt-4">
                 {cpuStats && (
                   <div className="flex items-center gap-4 text-xs text-muted-foreground">
                     <Cpu className="h-3.5 w-3.5 text-blue-500 shrink-0" />
@@ -926,6 +926,14 @@ export function MetricsDashboard({ resourceType, resourceName, namespace, podRes
                     <span>Min <strong className="text-foreground">{memStats.min.toFixed(3)}Mi</strong></span>
                     <span>Max <strong className="text-foreground">{memStats.max.toFixed(3)}Mi</strong></span>
                     <span>Avg <strong className="text-foreground">{memStats.avg.toFixed(3)}Mi</strong></span>
+                  </div>
+                )}
+                {metrics.network.length > 0 && (
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <Network className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                    <span>Rx <strong className="text-foreground">↓{cumulativeRxFormatted}</strong></span>
+                    <span>Tx <strong className="text-foreground">↑{cumulativeTxFormatted}</strong></span>
+                    <span>Avg <strong className="text-foreground">{(avgRateIn + avgRateOut).toFixed(1)} KB/s</strong></span>
                   </div>
                 )}
               </div>
