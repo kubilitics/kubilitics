@@ -20,7 +20,7 @@ import { edgeTypes } from "./edges/edgeTypes";
 import { useElkLayout } from "./hooks/useElkLayout";
 import { captureFullTopologyPNG, captureFullTopologySVG, type ExportBounds } from "./export/exportTopology";
 import { ZOOM_THRESHOLDS, CANVAS, EDGE_COLORS, fitViewMinZoom, minimapNodeColor } from "./constants/designTokens";
-import { useTopologyStore, selectDimmedNodeIds } from "./store/topologyStore";
+import { useTopologyStore } from "./store/topologyStore";
 import type { TopologyResponse, ViewMode } from "./types/topology";
 
 export type ExportFormat = "png" | "svg";
@@ -202,16 +202,29 @@ function TopologyCanvasInner({
 
   // Focus dimming — dims unconnected nodes when a node is selected
   const focusDimming = useTopologyStore((s) => s.focusDimming);
-  const dimmedNodeIds = useTopologyStore(selectDimmedNodeIds);
+  const storeEdges = useTopologyStore((s) => s.edges);
+  const storeSelectedNodeId = useTopologyStore((s) => s.selectedNodeId);
+
+  // Compute dimmed node IDs with useMemo to avoid creating new Set on every render
+  const dimmedNodeIds = useMemo(() => {
+    if (!focusDimming || !storeSelectedNodeId) return null;
+    const connectedIds = new Set<string>();
+    connectedIds.add(storeSelectedNodeId);
+    for (const edge of storeEdges) {
+      if (edge.source === storeSelectedNodeId) connectedIds.add(edge.target);
+      if (edge.target === storeSelectedNodeId) connectedIds.add(edge.source);
+    }
+    return connectedIds;
+  }, [focusDimming, storeSelectedNodeId, storeEdges]);
 
   // Selection/highlight/dimming styling
   const styledNodes = useMemo(() => {
-    const hasDimming = focusDimming && selectedNodeId && dimmedNodeIds.size > 0;
+    const hasDimming = dimmedNodeIds != null;
     if (!selectedNodeId && highlightNodeIds.length === 0 && !hasDimming) return nodes;
     return nodes.map((n) => {
       const isHighlighted = highlightNodeIds.includes(n.id);
       const isSelected = n.id === selectedNodeId;
-      const isDimmed = hasDimming && dimmedNodeIds.has(n.id);
+      const isDimmed = hasDimming && !dimmedNodeIds.has(n.id);
       if (!isHighlighted && !isSelected && !isDimmed) return n;
       return {
         ...n,
@@ -225,7 +238,7 @@ function TopologyCanvasInner({
         },
       };
     });
-  }, [nodes, selectedNodeId, highlightNodeIds, focusDimming, dimmedNodeIds]);
+  }, [nodes, selectedNodeId, highlightNodeIds, dimmedNodeIds]);
 
   // Edge styling — ALWAYS show edges, just hide labels at low zoom
   const styledEdges = useMemo(() => {
