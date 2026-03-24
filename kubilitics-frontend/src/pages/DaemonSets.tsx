@@ -338,10 +338,22 @@ spec:
 
  const toggleSelection = (item: DaemonSet) => { const key = `${item.namespace}/${item.name}`; const newSel = new Set(selectedItems); if (newSel.has(key)) newSel.delete(key); else newSel.add(key); setSelectedItems(newSel); };
  const toggleAll = () => { if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set()); else setSelectedItems(new Set(itemsOnPage.map(i => `${i.namespace}/${i.name}`))); };
- const handleBulkRestart = () => {
+ const handleBulkRestart = async () => {
  if (!isConnected) { toast.error('Connect cluster to restart daemonsets'); return; }
- toast.info('Bulk restart: trigger rollout restart for each selected DaemonSet when backend supports it.');
+ const restartPatch = { spec: { template: { metadata: { annotations: { 'kubectl.kubernetes.io/restartedAt': new Date().toISOString() } } } } };
+ let succeeded = 0;
+ for (const key of selectedItems) {
+   const [ns, n] = key.split('/');
+   try {
+     await patchDaemonSet.mutateAsync({ name: n, namespace: ns, patch: restartPatch });
+     succeeded++;
+   } catch {
+     toast.error(`Failed to restart daemonset ${n}`);
+   }
+ }
+ if (succeeded > 0) toast.success(`Restarted ${succeeded} daemonset(s)`);
  setSelectedItems(new Set());
+ refetch();
  };
 
  const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
@@ -371,7 +383,10 @@ spec:
  onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
  />
  {selectedItems.size > 0 && (
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}><Trash2 className="h-4 w-4" />Delete</Button>
+ <>
+   <Button variant="outline" size="sm" className="gap-2" onClick={handleBulkRestart}><RotateCcw className="h-4 w-4" />Restart ({selectedItems.size})</Button>
+   <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}><Trash2 className="h-4 w-4" />Delete ({selectedItems.size})</Button>
+ </>
  )}
  </>
  }

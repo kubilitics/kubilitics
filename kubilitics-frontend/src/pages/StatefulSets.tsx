@@ -155,6 +155,7 @@ export default function StatefulSets() {
  const [listView, setListView] = useState<ListView>('flat');
  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const [bulkScaleDialog, setBulkScaleDialog] = useState<{ open: boolean }>({ open: false });
  const [showTableFilters, setShowTableFilters] = useState(false);
  const [pageSize, setPageSize] = useState(10);
  const [pageIndex, setPageIndex] = useState(0);
@@ -417,10 +418,40 @@ spec:
 
  const toggleSelection = (item: StatefulSet) => { const key = `${item.namespace}/${item.name}`; const newSel = new Set(selectedItems); if (newSel.has(key)) newSel.delete(key); else newSel.add(key); setSelectedItems(newSel); };
  const toggleAll = () => { if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set()); else setSelectedItems(new Set(itemsOnPage.map(i => `${i.namespace}/${i.name}`))); };
- const handleBulkRestart = () => {
+ const handleBulkRestart = async () => {
  if (!isConnected) { toast.error('Connect cluster to restart statefulsets'); return; }
- toast.info('Bulk restart: trigger rollout restart for each selected StatefulSet when backend supports it.');
+ const restartPatch = { spec: { template: { metadata: { annotations: { 'kubectl.kubernetes.io/restartedAt': new Date().toISOString() } } } } };
+ let succeeded = 0;
+ for (const key of selectedItems) {
+   const [ns, n] = key.split('/');
+   try {
+     await patchStatefulSet.mutateAsync({ name: n, namespace: ns, patch: restartPatch });
+     succeeded++;
+   } catch {
+     toast.error(`Failed to restart statefulset ${n}`);
+   }
+ }
+ if (succeeded > 0) toast.success(`Restarted ${succeeded} statefulset(s)`);
  setSelectedItems(new Set());
+ refetch();
+ };
+
+ const handleBulkScale = async (replicas: number) => {
+ if (!isConnected) { toast.error('Connect cluster to scale statefulsets'); return; }
+ let succeeded = 0;
+ for (const key of selectedItems) {
+   const [ns, n] = key.split('/');
+   try {
+     await patchStatefulSet.mutateAsync({ name: n, namespace: ns, patch: { spec: { replicas } } });
+     succeeded++;
+   } catch {
+     toast.error(`Failed to scale statefulset ${n}`);
+   }
+ }
+ if (succeeded > 0) toast.success(`Scaled ${succeeded} statefulset(s) to ${replicas} replicas`);
+ setBulkScaleDialog({ open: false });
+ setSelectedItems(new Set());
+ refetch();
  };
 
  const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
@@ -450,7 +481,11 @@ spec:
  onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
  />
  {selectedItems.size > 0 && (
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}><Trash2 className="h-4 w-4" />Delete</Button>
+ <>
+   <Button variant="outline" size="sm" className="gap-2" onClick={handleBulkRestart}><RotateCcw className="h-4 w-4" />Restart ({selectedItems.size})</Button>
+   <Button variant="outline" size="sm" className="gap-2" onClick={() => setBulkScaleDialog({ open: true })}><Scale className="h-4 w-4" />Scale ({selectedItems.size})</Button>
+   <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}><Trash2 className="h-4 w-4" />Delete ({selectedItems.size})</Button>
+ </>
  )}
  </>
  }
@@ -871,6 +906,14 @@ spec:
  />
  )}
  <DeleteConfirmDialog open={deleteDialog.open} onOpenChange={(open) => setDeleteDialog({ open, item: open ? deleteDialog.item : null })} resourceType="StatefulSet" resourceName={deleteDialog.bulk ? `${selectedItems.size} statefulsets` : (deleteDialog.item?.name || '')} namespace={deleteDialog.bulk ? undefined : deleteDialog.item?.namespace} onConfirm={handleDelete} />
+ <ScaleDialog
+ open={bulkScaleDialog.open}
+ onOpenChange={(open) => setBulkScaleDialog({ open })}
+ resourceType="StatefulSet"
+ resourceName={`${selectedItems.size} statefulsets`}
+ currentReplicas={1}
+ onScale={handleBulkScale}
+ />
  {scaleDialog.item && (
  <ScaleDialog
  open={scaleDialog.open}

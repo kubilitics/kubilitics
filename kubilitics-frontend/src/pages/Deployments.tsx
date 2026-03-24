@@ -218,6 +218,7 @@ export default function Deployments() {
  const [listView, setListView] = useState<ListView>('flat');
  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const [bulkScaleDialog, setBulkScaleDialog] = useState<{ open: boolean }>({ open: false });
  const [showTableFilters, setShowTableFilters] = useState(false);
 
  const [pageSize, setPageSize] = useState(10);
@@ -435,13 +436,43 @@ export default function Deployments() {
  else setSelectedItems(new Set(itemsOnPage.map(i => `${i.namespace}/${i.name}`)));
  };
 
- const handleBulkRestart = () => {
+ const handleBulkRestart = async () => {
  if (!isConnected) {
  toast.error('Connect cluster to restart deployments');
  return;
  }
- toast.info(`Restarting ${selectedItems.size} deployments…`);
+ const restartPatch = { spec: { template: { metadata: { annotations: { 'kubectl.kubernetes.io/restartedAt': new Date().toISOString() } } } } };
+ let succeeded = 0;
+ for (const key of selectedItems) {
+   const [ns, n] = key.split('/');
+   try {
+     await patchDeployment.mutateAsync({ name: n, namespace: ns, patch: restartPatch });
+     succeeded++;
+   } catch {
+     toast.error(`Failed to restart deployment ${n}`);
+   }
+ }
+ if (succeeded > 0) toast.success(`Restarted ${succeeded} deployment(s)`);
  setSelectedItems(new Set());
+ refetch();
+ };
+
+ const handleBulkScale = async (replicas: number) => {
+ if (!isConnected) { toast.error('Connect cluster to scale deployments'); return; }
+ let succeeded = 0;
+ for (const key of selectedItems) {
+   const [ns, n] = key.split('/');
+   try {
+     await patchDeployment.mutateAsync({ name: n, namespace: ns, patch: { spec: { replicas } } });
+     succeeded++;
+   } catch {
+     toast.error(`Failed to scale deployment ${n}`);
+   }
+ }
+ if (succeeded > 0) toast.success(`Scaled ${succeeded} deployment(s) to ${replicas} replicas`);
+ setBulkScaleDialog({ open: false });
+ setSelectedItems(new Set());
+ refetch();
  };
 
  const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
@@ -554,7 +585,11 @@ spec:
  onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
  />
  {selectedItems.size > 0 && (
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}><Trash2 className="h-4 w-4" />Delete</Button>
+ <>
+   <Button variant="outline" size="sm" className="gap-2" onClick={handleBulkRestart}><RotateCcw className="h-4 w-4" />Restart ({selectedItems.size})</Button>
+   <Button variant="outline" size="sm" className="gap-2" onClick={() => setBulkScaleDialog({ open: true })}><Scale className="h-4 w-4" />Scale ({selectedItems.size})</Button>
+   <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}><Trash2 className="h-4 w-4" />Delete ({selectedItems.size})</Button>
+ </>
  )}
  </>
  }
@@ -1140,6 +1175,14 @@ spec:
  }}
  />
  )}
+ <ScaleDialog
+ open={bulkScaleDialog.open}
+ onOpenChange={(open) => setBulkScaleDialog({ open })}
+ resourceType="Deployment"
+ resourceName={`${selectedItems.size} deployments`}
+ currentReplicas={1}
+ onScale={handleBulkScale}
+ />
  {rolloutDialog.item && (
  <RolloutActionsDialog
  open={rolloutDialog.open}
