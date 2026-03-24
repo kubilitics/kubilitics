@@ -1,5 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Edit3, AlertCircle, CheckCircle2, Loader2, Copy, Download, RotateCcw } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  Edit3, AlertCircle, CheckCircle2, Loader2, Copy, Download, RotateCcw,
+  ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, Minus, Plus, GitCompare,
+} from 'lucide-react';
+import type * as monacoType from 'monaco-editor';
 import {
   Dialog,
   DialogContent,
@@ -61,6 +65,29 @@ function validateYaml(yaml: string): YamlValidationError[] {
   return errors;
 }
 
+/** Strip metadata.managedFields from a YAML string. Returns the original if parsing fails. */
+function stripManagedFields(rawYaml: string): string {
+  try {
+    const doc = yamlParser.load(rawYaml) as Record<string, unknown>;
+    if (!doc || typeof doc !== 'object') return rawYaml;
+    const meta = doc.metadata as Record<string, unknown> | undefined;
+    if (meta && 'managedFields' in meta) {
+      const stripped = { ...doc, metadata: { ...meta } };
+      delete (stripped.metadata as Record<string, unknown>)['managedFields'];
+      return yamlParser.dump(stripped, { lineWidth: -1, noRefs: true });
+    }
+    return rawYaml;
+  } catch {
+    return rawYaml;
+  }
+}
+
+const FONT_SIZE_OPTIONS: Array<{ label: string; value: 'small' | 'medium' | 'large' }> = [
+  { label: 'S', value: 'small' },
+  { label: 'M', value: 'medium' },
+  { label: 'L', value: 'large' },
+];
+
 export function YamlEditorDialog({
   open,
   onOpenChange,
@@ -74,12 +101,21 @@ export function YamlEditorDialog({
   const [errors, setErrors] = useState<YamlValidationError[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [showManagedFields, setShowManagedFields] = useState(false);
+  const [fontSize, setFontSize] = useState<'small' | 'medium' | 'large'>('small');
+  const [showDiff, setShowDiff] = useState(false);
+
+  const editorRef = useRef<monacoType.editor.IStandaloneCodeEditor | null>(null);
+
+  // The "canonical" YAML displayed in the editor respects the managed-fields toggle.
+  const displayYaml = showManagedFields ? yaml : stripManagedFields(yaml);
 
   useEffect(() => {
     if (open) {
       setYaml(initialYaml);
       setErrors([]);
       setHasChanges(false);
+      setShowDiff(false);
     }
   }, [open, initialYaml]);
 
@@ -99,8 +135,9 @@ export function YamlEditorDialog({
       onOpenChange(false);
       toast.success('Changes applied successfully');
     } catch (error) {
+      // Keep dialog open on failure so user does not lose their work.
       console.error('Save failed:', error);
-      toast.error('Failed to apply changes');
+      toast.error(error instanceof Error ? error.message : 'Failed to apply changes');
     } finally {
       setIsSaving(false);
     }
@@ -130,6 +167,14 @@ export function YamlEditorDialog({
     setHasChanges(false);
   };
 
+  const handleFoldAll = () => {
+    editorRef.current?.trigger('fold', 'editor.foldAll', null);
+  };
+
+  const handleUnfoldAll = () => {
+    editorRef.current?.trigger('unfold', 'editor.unfoldAll', null);
+  };
+
   const isValid = errors.length === 0;
 
   return (
@@ -155,7 +200,7 @@ export function YamlEditorDialog({
 
         <div className="flex-1 flex flex-col gap-4 min-h-0">
           {/* Toolbar */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
               {isValid ? (
                 <Badge variant="outline" className="gap-1.5 text-primary border-primary/30 bg-primary/5">
@@ -174,7 +219,73 @@ export function YamlEditorDialog({
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* Fold / Unfold all */}
+              <Button variant="ghost" size="sm" onClick={handleFoldAll} className="gap-1.5 h-8 px-2" title="Fold all sections">
+                <ChevronsDownUp className="h-3.5 w-3.5" />
+                <span className="text-xs hidden sm:inline">Fold all</span>
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleUnfoldAll} className="gap-1.5 h-8 px-2" title="Unfold all sections">
+                <ChevronsUpDown className="h-3.5 w-3.5" />
+                <span className="text-xs hidden sm:inline">Unfold all</span>
+              </Button>
+              {/* Managed fields toggle */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowManagedFields((v) => !v)}
+                className="gap-1.5 h-8 px-2"
+                title={showManagedFields ? 'Hide managed fields' : 'Show managed fields'}
+              >
+                {showManagedFields ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                <span className="text-xs hidden sm:inline">Managed fields</span>
+              </Button>
+              {/* Diff toggle */}
+              <Button
+                variant={showDiff ? 'secondary' : 'ghost'}
+                size="sm"
+                onClick={() => setShowDiff((v) => !v)}
+                className="gap-1.5 h-8 px-2"
+                title="Show diff view"
+                disabled={!hasChanges}
+              >
+                <GitCompare className="h-3.5 w-3.5" />
+                <span className="text-xs hidden sm:inline">Diff</span>
+              </Button>
+              <div className="w-px h-5 bg-border mx-0.5" />
+              {/* Font size */}
+              <div className="flex items-center gap-0.5 border border-border rounded-md overflow-hidden">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 rounded-none border-0"
+                  onClick={() => {
+                    if (fontSize === 'large') setFontSize('medium');
+                    else if (fontSize === 'medium') setFontSize('small');
+                  }}
+                  disabled={fontSize === 'small'}
+                  title="Decrease font size"
+                >
+                  <Minus className="h-3 w-3" />
+                </Button>
+                <span className="text-xs px-1.5 font-mono font-medium tabular-nums w-5 text-center select-none">
+                  {FONT_SIZE_OPTIONS.find((o) => o.value === fontSize)?.label}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 rounded-none border-0"
+                  onClick={() => {
+                    if (fontSize === 'small') setFontSize('medium');
+                    else if (fontSize === 'medium') setFontSize('large');
+                  }}
+                  disabled={fontSize === 'large'}
+                  title="Increase font size"
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
+              </div>
+              <div className="w-px h-5 bg-border mx-0.5" />
               <Button variant="ghost" size="sm" onClick={handleCopy} className="gap-1.5">
                 <Copy className="h-3.5 w-3.5" />
                 Copy
@@ -193,12 +304,18 @@ export function YamlEditorDialog({
           {/* Editor */}
           <div className="flex-1 flex gap-4 min-h-0">
             <div className="flex-1 min-h-0">
-              <CodeEditor
-                value={yaml}
-                onChange={handleYamlChange}
-                minHeight="100%"
-                className="h-full rounded-lg"
-              />
+              {showDiff ? (
+                <YamlDiffPanel original={initialYaml} modified={displayYaml} fontSize={fontSize} />
+              ) : (
+                <CodeEditor
+                  value={displayYaml}
+                  onChange={handleYamlChange}
+                  minHeight="100%"
+                  className="h-full rounded-lg"
+                  fontSize={fontSize}
+                  onEditorReady={(editor) => { editorRef.current = editor; }}
+                />
+              )}
             </div>
 
             {/* Validation Panel */}
@@ -250,5 +367,60 @@ export function YamlEditorDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Inline diff panel ─────────────────────────────────────────────────────────
+
+interface YamlDiffPanelProps {
+  original: string;
+  modified: string;
+  fontSize: 'small' | 'medium' | 'large';
+}
+
+function YamlDiffPanel({ original, modified, fontSize }: YamlDiffPanelProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const diffEditorRef = useRef<monacoType.editor.IStandaloneDiffEditor | null>(null);
+  const fontSizeMap = { small: 13, medium: 15, large: 17 };
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    // Lazily import monaco to avoid loading it in every component.
+    import('monaco-editor').then((monaco) => {
+      if (!containerRef.current) return;
+      if (diffEditorRef.current) {
+        diffEditorRef.current.dispose();
+      }
+      const editor = monaco.editor.createDiffEditor(containerRef.current, {
+        readOnly: true,
+        automaticLayout: true,
+        fontSize: fontSizeMap[fontSize],
+        fontFamily: '"JetBrains Mono", "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        lineHeight: 22,
+        wordWrap: 'on',
+        minimap: { enabled: false },
+        scrollBeyondLastLine: false,
+        renderSideBySide: true,
+      });
+      editor.setModel({
+        original: monaco.editor.createModel(original, 'yaml'),
+        modified: monaco.editor.createModel(modified, 'yaml'),
+      });
+      diffEditorRef.current = editor;
+    });
+
+    return () => {
+      diffEditorRef.current?.dispose();
+      diffEditorRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [original, modified, fontSize]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="h-full rounded-xl border border-border overflow-hidden shadow-sm bg-[#FAFCFF]"
+    />
   );
 }
