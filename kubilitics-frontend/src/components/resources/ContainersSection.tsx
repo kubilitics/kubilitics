@@ -6,8 +6,6 @@ import {
   Cpu,
   MemoryStick,
   Clock,
-  Terminal,
-  FileText,
   Copy,
   ExternalLink,
   Box,
@@ -138,7 +136,7 @@ function probeToChips(probe: Record<string, unknown> | undefined): string[] {
   return chips;
 }
 
-export function ContainersSection({ containers, className, resourceName, namespace, onForwardPort, onOpenShell, onOpenLogs }: ContainersSectionProps) {
+export function ContainersSection({ containers, className, resourceName, namespace, onForwardPort }: ContainersSectionProps) {
   const activeForwards = usePortForwardStore((s) => s.forwards).filter(
     (f) => f.resourceName === resourceName && f.namespace === namespace
   );
@@ -174,24 +172,6 @@ export function ContainersSection({ containers, className, resourceName, namespa
                       {state.label}
                       {container.stateReason && ` (${container.stateReason})`}
                     </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1.5"
-                      onClick={() => onOpenShell?.(container.name)}
-                    >
-                      <Terminal className="h-3.5 w-3.5" />
-                      Shell
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1.5"
-                      onClick={() => onOpenLogs?.(container.name)}
-                    >
-                      <FileText className="h-3.5 w-3.5" />
-                      Logs
-                    </Button>
                   </div>
                 </div>
               </CardHeader>
@@ -285,7 +265,14 @@ export function ContainersSection({ containers, className, resourceName, namespa
                         {(container.currentUsage?.cpu ?? -1) >= 0 ? (
                           <>
                             <Progress value={container.currentUsage?.cpu ?? 0} className="h-2.5 rounded-full bg-muted/60" />
-                            <p className="text-[11px] text-foreground/50">{(container.currentUsage?.cpu ?? 0).toFixed(1)}% of limit</p>
+                            <p className="text-[12px] text-foreground/70">
+                              {(container.currentUsage?.cpu ?? 0).toFixed(1)}% of limit
+                              {container.currentUsage?.cpuRaw != null && container.resources?.limits?.cpu && (
+                                <span className="font-semibold text-foreground ml-1">
+                                  ({container.currentUsage.cpuRaw < 1000 ? `${Math.round(container.currentUsage.cpuRaw)}m` : `${(container.currentUsage.cpuRaw / 1000).toFixed(2)}`} / {container.resources.limits.cpu})
+                                </span>
+                              )}
+                            </p>
                           </>
                         ) : (
                           <Tooltip>
@@ -318,7 +305,14 @@ export function ContainersSection({ containers, className, resourceName, namespa
                         {(container.currentUsage?.memory ?? -1) >= 0 ? (
                           <>
                             <Progress value={container.currentUsage?.memory ?? 0} className="h-2.5 rounded-full bg-muted/60" />
-                            <p className="text-[11px] text-foreground/50">{(container.currentUsage?.memory ?? 0).toFixed(1)}% of limit</p>
+                            <p className="text-[12px] text-foreground/70">
+                              {(container.currentUsage?.memory ?? 0).toFixed(1)}% of limit
+                              {container.currentUsage?.memoryRaw != null && container.resources?.limits?.memory && (
+                                <span className="font-semibold text-foreground ml-1">
+                                  ({(container.currentUsage.memoryRaw / (1024 * 1024)).toFixed(1)}Mi / {container.resources.limits.memory})
+                                </span>
+                              )}
+                            </p>
                           </>
                         ) : (
                           <Tooltip>
@@ -331,12 +325,15 @@ export function ContainersSection({ containers, className, resourceName, namespa
                           </Tooltip>
                         )}
                       </div>
-                      <div className="pt-2 border-t border-border/40 space-y-1.5">
-                        <DetailRow label="CPU Request" value={container.resources?.requests?.cpu ?? '-'} tooltip={container.resources?.requests?.cpu ? TOOLTIP_CPU_M : undefined} />
-                        <DetailRow label="CPU Limit" value={container.resources?.limits?.cpu ?? '-'} tooltip={container.resources?.limits?.cpu ? TOOLTIP_CPU_M : undefined} />
-                        <DetailRow label="Memory Request" value={container.resources?.requests?.memory ?? '-'} tooltip={container.resources?.requests?.memory ? TOOLTIP_MEMORY_MIB : undefined} />
-                        <DetailRow label="Memory Limit" value={container.resources?.limits?.memory ?? '-'} tooltip={container.resources?.limits?.memory ? TOOLTIP_MEMORY_MIB : undefined} />
-                      </div>
+                      {/* Only show resource request/limit rows that have actual values */}
+                      {(container.resources?.requests?.cpu || container.resources?.limits?.cpu || container.resources?.requests?.memory || container.resources?.limits?.memory) && (
+                        <div className="pt-2 border-t border-border/40 space-y-1.5">
+                          {container.resources?.requests?.cpu && <DetailRow label="CPU Request" value={container.resources.requests.cpu} tooltip={TOOLTIP_CPU_M} />}
+                          {container.resources?.limits?.cpu && <DetailRow label="CPU Limit" value={container.resources.limits.cpu} tooltip={TOOLTIP_CPU_M} />}
+                          {container.resources?.requests?.memory && <DetailRow label="Memory Request" value={container.resources.requests.memory} tooltip={TOOLTIP_MEMORY_MIB} />}
+                          {container.resources?.limits?.memory && <DetailRow label="Memory Limit" value={container.resources.limits.memory} tooltip={TOOLTIP_MEMORY_MIB} />}
+                        </div>
+                      )}
                     </div>
                   </SectionCard>
                 </div>
