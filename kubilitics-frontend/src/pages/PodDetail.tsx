@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Box,
+  Bug,
   Clock,
   Server,
   RotateCcw,
@@ -54,6 +55,7 @@ import {
   LogViewer,
   DeleteConfirmDialog,
   PortForwardDialog,
+  DebugContainerDialog,
   MetricsDashboard,
   ResourceTopologyView,
   ResourceComparisonView,
@@ -208,6 +210,7 @@ export default function PodDetail() {
   const [selectedTerminalContainer, setSelectedTerminalContainer] = useState<string | undefined>(undefined);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showPortForwardDialog, setShowPortForwardDialog] = useState(false);
+  const [showDebugContainerDialog, setShowDebugContainerDialog] = useState(false);
   const [portForwardInitial, setPortForwardInitial] = useState<{ containerName: string; port: number } | null>(null);
 
   const { isConnected } = useConnectionStatus();
@@ -918,6 +921,12 @@ export default function PodDetail() {
             onClick: () => setShowPortForwardDialog(true),
           },
           {
+            icon: Bug,
+            label: 'Debug Container',
+            description: 'Attach an ephemeral debug container',
+            onClick: () => setShowDebugContainerDialog(true),
+          },
+          {
             icon: RotateCcw,
             label: 'Restart Pod',
             description: 'Delete and recreate the pod',
@@ -1019,6 +1028,18 @@ export default function PodDetail() {
         }))}
         initialContainer={portForwardInitial?.containerName}
         initialPort={portForwardInitial?.port}
+      />
+
+      {/* Debug Container Dialog */}
+      <DebugContainerDialog
+        open={showDebugContainerDialog}
+        onOpenChange={setShowDebugContainerDialog}
+        podName={pod.metadata?.name || ''}
+        namespace={pod.metadata?.namespace || ''}
+        baseUrl={backendBaseUrl ?? ''}
+        clusterId={clusterId ?? ''}
+        containers={(pod.spec?.containers || []).map(c => c.name)}
+        onCreated={() => setActiveTab('terminal')}
       />
     </>
   );
