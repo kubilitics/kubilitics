@@ -226,8 +226,13 @@ export function LogViewer({
     }
   );
 
+  // Update local logs whenever raw data changes. Use length check to detect
+  // when clear happened (localLogs empty but rawLogs has content).
   useEffect(() => {
-    if (rawLogs) setLocalLogs(parseRawLogs(rawLogs));
+    if (rawLogs) {
+      const parsed = parseRawLogs(rawLogs);
+      setLocalLogs(parsed);
+    }
   }, [rawLogs]);
 
   const isLive = isConnected && !!podName && !!namespace;
@@ -269,7 +274,12 @@ export function LogViewer({
     setTimeout(() => URL.revokeObjectURL(url), 30_000);
   }, [displayLogs, podName, selectedContainer]);
 
-  const handleClear = useCallback(() => setLocalLogs([]), []);
+  const handleClear = useCallback(() => {
+    setLocalLogs([]);
+    // Force fresh fetch after clear — without this, the useEffect won't
+    // fire because rawLogs reference hasn't changed in the cache.
+    setTimeout(() => refetch(), 500);
+  }, [refetch]);
 
   const handleCopyLine = useCallback((log: LogEntry) => {
     navigator.clipboard.writeText(
