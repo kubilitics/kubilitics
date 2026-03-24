@@ -52,7 +52,6 @@ import {
   EventsSection,
   ActionsSection,
   LogViewer,
-  TerminalViewer,
   DeleteConfirmDialog,
   PortForwardDialog,
   MetricsDashboard,
@@ -64,6 +63,7 @@ import {
   type ResourceStatus,
   type ContainerInfo,
 } from '@/components/resources';
+import { PodTerminal } from '@/components/resources/PodTerminal';
 import { Breadcrumbs, useDetailBreadcrumbs } from '@/components/layout/Breadcrumbs';
 import { useClusterStore } from '@/stores/clusterStore';
 import {
@@ -861,7 +861,7 @@ export default function PodDetail() {
       label: 'Terminal',
       icon: Terminal,
       content: (
-        <TerminalViewer
+        <PodTerminal
           podName={name}
           namespace={namespace}
           containerName={selectedTerminalContainer || containers[0]?.name}
