@@ -498,46 +498,49 @@ export default function PodDetail() {
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
                 {ownerRef && ownerPath && (
-                  <div className="min-w-0 overflow-hidden">
-                    <DetailRow
-                      label="Controlled by"
-                      value={
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="link"
-                              className="h-auto p-0 font-mono text-left min-w-0 max-w-full"
-                              onClick={() => navigate(`/${ownerPath}/${ownerRef.name}${namespace ? `?namespace=${namespace}` : ''}`)}
-                            >
-                              <span className="flex items-baseline gap-1 min-w-0">
-                                <span className="text-muted-foreground font-normal shrink-0">{ownerRef.kind}:</span>
-                                <span className="truncate min-w-0">{ownerRef.name}</span>
-                              </span>
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="font-mono text-xs max-w-sm break-all">
-                            {ownerRef.kind}: {ownerRef.name}
-                          </TooltipContent>
-                        </Tooltip>
-                      }
-                    />
-                  </div>
+                  <DetailRow
+                    label="Controlled by"
+                    value={
+                      <span className="flex items-center gap-1.5">
+                        <Button
+                          variant="link"
+                          className="h-auto p-0 font-mono text-left"
+                          onClick={() => navigate(`/${ownerPath}/${ownerRef.name}${namespace ? `?namespace=${namespace}` : ''}`)}
+                        >
+                          {ownerRef.kind}: {ownerRef.name}
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(ownerRef.name); toast.success('Copied'); }}>
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </span>
+                    }
+                  />
                 )}
                 <DetailRow
                   label="Node"
                   value={
                     pod.spec?.nodeName ? (
-                      <Button variant="link" className="h-auto p-0 font-mono" onClick={() => navigate(`/nodes/${pod.spec.nodeName}`)}>
-                        {pod.spec.nodeName}
-                      </Button>
-                    ) : (
-                      '-'
-                    )
+                      <span className="flex items-center gap-1.5">
+                        <Button variant="link" className="h-auto p-0 font-mono" onClick={() => navigate(`/nodes/${pod.spec.nodeName}`)}>
+                          {pod.spec.nodeName}
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(pod.spec.nodeName); toast.success('Copied'); }}>
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </span>
+                    ) : '-'
                   }
                 />
                 <DetailRow
                   label="Service Account"
-                  value={<span className="font-mono text-xs">{pod.spec?.serviceAccountName || 'default'}</span>}
+                  value={
+                    <span className="flex items-center gap-1.5 font-mono">
+                      {pod.spec?.serviceAccountName || 'default'}
+                      <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(pod.spec?.serviceAccountName || 'default'); toast.success('Copied'); }}>
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </span>
+                  }
                 />
                 <div className="space-y-1">
                   <DetailRow
