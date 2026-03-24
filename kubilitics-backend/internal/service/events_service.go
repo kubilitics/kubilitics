@@ -119,6 +119,23 @@ func k8sEventToModel(event *corev1.Event) *models.Event {
 	if event.Source.Component != "" {
 		sourceComponent = event.Source.Component
 	}
+	// Kubernetes events have multiple timestamp fields:
+	// - FirstTimestamp/LastTimestamp: legacy (v1 events), populated by most controllers
+	// - EventTime: newer (events.k8s.io/v1), used by scheduler and some controllers
+	// - CreationTimestamp: always set by API server
+	// Use the first non-zero timestamp found.
+	firstTS := event.FirstTimestamp.Time
+	lastTS := event.LastTimestamp.Time
+	if firstTS.IsZero() && !event.EventTime.IsZero() {
+		firstTS = event.EventTime.Time
+	}
+	if firstTS.IsZero() && !event.CreationTimestamp.IsZero() {
+		firstTS = event.CreationTimestamp.Time
+	}
+	if lastTS.IsZero() {
+		lastTS = firstTS
+	}
+
 	return &models.Event{
 		ID:               string(event.UID),
 		Name:             event.Name,
@@ -129,8 +146,8 @@ func k8sEventToModel(event *corev1.Event) *models.Event {
 		ResourceKind:     event.InvolvedObject.Kind,
 		ResourceName:     event.InvolvedObject.Name,
 		Namespace:        event.InvolvedObject.Namespace,
-		FirstTimestamp:   event.FirstTimestamp.Time,
-		LastTimestamp:    event.LastTimestamp.Time,
+		FirstTimestamp:   firstTS,
+		LastTimestamp:    lastTS,
 		Count:            event.Count,
 		SourceComponent:  sourceComponent,
 	}
