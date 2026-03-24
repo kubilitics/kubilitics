@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, memo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -214,10 +214,9 @@ export function LogViewer({
   const [tailLines, setTailLines] = useState(initialTailLines);
   const [showTimestamps, setShowTimestamps] = useState(true);
   const [wrapLines, setWrapLines] = useState(false);
-  const [localLogs, setLocalLogs] = useState<LogEntry[]>([]);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
-  const { data: rawLogs, isLoading, error, refetch } = useK8sPodLogs(
+  const { data: rawLogs, isLoading, error, refetch, dataUpdatedAt } = useK8sPodLogs(
     namespace || '',
     podName || '',
     selectedContainer,
@@ -228,17 +227,16 @@ export function LogViewer({
     }
   );
 
-  // Update local logs whenever raw data changes. Use length check to detect
-  // when clear happened (localLogs empty but rawLogs has content).
-  useEffect(() => {
-    if (rawLogs) {
-      const parsed = parseRawLogs(rawLogs);
-      setLocalLogs(parsed);
-    }
-  }, [rawLogs]);
+  // Parse logs directly from rawLogs — no intermediate state that can get stale
+  const parsedLogs = useMemo(() => {
+    if (!rawLogs) return EMPTY_LOGS;
+    return parseRawLogs(rawLogs);
+  // dataUpdatedAt ensures re-parse even when rawLogs string is identical
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawLogs, dataUpdatedAt]);
 
   const isLive = isConnected && !!podName && !!namespace;
-  const displayLogs = isLive ? localLogs : (propLogs ?? EMPTY_LOGS);
+  const displayLogs = isLive ? parsedLogs : (propLogs ?? EMPTY_LOGS);
 
   const filteredLogs = displayLogs.filter(log => {
     if (searchQuery && !log.message.toLowerCase().includes(searchQuery.toLowerCase())) return false;
@@ -277,8 +275,8 @@ export function LogViewer({
   }, [displayLogs, podName, selectedContainer]);
 
   const handleClear = useCallback(() => {
-    setLocalLogs([]);
-    // Invalidate cache + refetch — ensures fresh data even if rawLogs string is identical
+    // Remove cached data entirely then refetch — guarantees fresh logs
+    queryClient.removeQueries({ queryKey: ['k8s', 'pods', namespace, podName, 'logs'] });
     queryClient.invalidateQueries({ queryKey: ['k8s', 'pods', namespace, podName, 'logs'] });
   }, [queryClient, namespace, podName]);
 
