@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from 'react';
-import { useQueries } from '@tanstack/react-query';
+import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import {
     X,
     GitCompare,
@@ -12,7 +12,11 @@ import {
     Minus,
     Copy,
     Equal,
+    History,
+    Upload,
+    FileUp,
 } from 'lucide-react';
+import yaml from 'js-yaml';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +34,65 @@ import { computeDiff, YamlLineContent, getIntraLineDiff, DiffLine } from './Yaml
 import { useK8sResourceList, type KubernetesResource, type ResourceType } from '@/hooks/useKubernetes';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useThemeStore } from '@/stores/themeStore';
+
+const LazyDiffEditor = lazy(() => import('@monaco-editor/react').then(m => ({ default: m.DiffEditor })));
+
+/** Monaco DiffEditor wrapper with labels and diff stats */
+function MonacoDiffView({ original, modified, originalLabel, modifiedLabel }: {
+  original: string; modified: string; originalLabel: string; modifiedLabel: string;
+}) {
+  const { theme, resolvedTheme } = useThemeStore();
+  const isDark = (theme === 'system' ? resolvedTheme : theme) === 'dark';
+
+  // Compute diff stats
+  const stats = useMemo(() => {
+    const origLines = original.split('\n');
+    const modLines = modified.split('\n');
+    const origSet = new Set(origLines);
+    const modSet = new Set(modLines);
+    const added = modLines.filter(l => !origSet.has(l)).length;
+    const removed = origLines.filter(l => !modSet.has(l)).length;
+    return { added, removed };
+  }, [original, modified]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold text-foreground">{originalLabel}</span>
+          <span className="text-muted-foreground">→</span>
+          <span className="text-sm font-semibold text-foreground">{modifiedLabel}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {stats.added > 0 && <Badge variant="outline" className="text-emerald-600 border-emerald-300 text-xs">+{stats.added} added</Badge>}
+          {stats.removed > 0 && <Badge variant="outline" className="text-red-600 border-red-300 text-xs">-{stats.removed} removed</Badge>}
+          {stats.added === 0 && stats.removed === 0 && <Badge variant="outline" className="text-xs">Identical</Badge>}
+        </div>
+      </div>
+      <div className="border rounded-lg overflow-hidden">
+        <LazyDiffEditor
+          original={original}
+          modified={modified}
+          language="yaml"
+          theme={isDark ? 'vs-dark' : 'light'}
+          height="65vh"
+          options={{
+            readOnly: true,
+            renderSideBySide: true,
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false,
+            fontSize: 12,
+            fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, Monaco, monospace",
+            lineNumbers: 'on',
+            folding: true,
+            wordWrap: 'off',
+          }}
+        />
+      </div>
+    </div>
+  );
+}
 
 interface ResourceForComparison {
     name: string;
@@ -244,6 +307,9 @@ export function ResourceComparisonView({
 }: ResourceComparisonViewProps) {
     const [selectedResources, setSelectedResources] = useState<string[]>(() => initialSelectedResources ?? []);
     const [activeTab, setActiveTab] = useState('yaml');
+    const [compareMode, setCompareMode] = useState<'resources' | 'lastApplied' | 'customYaml'>('resources');
+    const [customYaml, setCustomYaml] = useState<string>('');
+    const fileInputRef = useState<HTMLInputElement | null>(null);
 
     const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
 
@@ -399,23 +465,41 @@ export function ResourceComparisonView({
                 </div>
 
                 <TabsContent value="yaml" className="flex-1 overflow-hidden">
+                    {/* Compare mode selector */}
+                    <div className="px-6 py-3 border-b flex items-center gap-2">
+                      <span className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider">Mode:</span>
+                      <div className="inline-flex items-center rounded-lg bg-muted/40 p-0.5 gap-0.5">
+                        <button onClick={() => setCompareMode('resources')} className={cn('px-3 py-1 rounded-md text-xs font-medium transition-all', compareMode === 'resources' ? 'bg-white dark:bg-slate-700 shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                          <GitCompare className="h-3 w-3 inline mr-1" /> Resources
+                        </button>
+                        <button onClick={() => setCompareMode('lastApplied')} className={cn('px-3 py-1 rounded-md text-xs font-medium transition-all', compareMode === 'lastApplied' ? 'bg-white dark:bg-slate-700 shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                          <History className="h-3 w-3 inline mr-1" /> Live vs Last Applied
+                        </button>
+                        <button onClick={() => setCompareMode('customYaml')} className={cn('px-3 py-1 rounded-md text-xs font-medium transition-all', compareMode === 'customYaml' ? 'bg-white dark:bg-slate-700 shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                          <Upload className="h-3 w-3 inline mr-1" /> Custom YAML
+                        </button>
+                      </div>
+                    </div>
+
                     <ScrollArea className="h-full px-6 py-4">
-                        {resourcesData.length < 2 ? (
+                      {/* Mode: Resources (existing behavior) */}
+                      {compareMode === 'resources' && (
+                        <>
+                          {resourcesData.length < 2 ? (
                             <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
                                 <GitCompare className="h-12 w-12 mb-4 opacity-50" />
                                 <p>Select at least 2 resources to compare</p>
                             </div>
-                        ) : resourcesData.length === 2 ? (
-                            <YamlDiffView
-                                leftName={resourcesData[0].name}
-                                rightName={resourcesData[1].name}
-                                leftYaml={resourcesData[0].yaml}
-                                rightYaml={resourcesData[1].yaml}
-                                leftLoading={resourcesData[0].yamlLoading}
-                                rightLoading={resourcesData[1].yamlLoading}
-                                embedded={embedded}
-                            />
-                        ) : (
+                          ) : resourcesData.length === 2 ? (
+                            <Suspense fallback={<Loader2 className="h-6 w-6 animate-spin mx-auto mt-8" />}>
+                              <MonacoDiffView
+                                originalLabel={resourcesData[0].name}
+                                modifiedLabel={resourcesData[1].name}
+                                original={resourcesData[0].yaml}
+                                modified={resourcesData[1].yaml}
+                              />
+                            </Suspense>
+                          ) : (
                             <div className={cn("grid gap-4", resourcesData.length === 3 ? "grid-cols-3" : "grid-cols-4")}>
                                 {resourcesData.map(res => (
                                     <Card key={res.name}>
@@ -428,7 +512,139 @@ export function ResourceComparisonView({
                                     </Card>
                                 ))}
                             </div>
-                        )}
+                          )}
+                        </>
+                      )}
+
+                      {/* Mode: Live vs Last Applied */}
+                      {compareMode === 'lastApplied' && (() => {
+                        const firstResource = resourcesData[0];
+                        if (!firstResource) return (
+                          <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+                            <History className="h-12 w-12 mb-4 opacity-50" />
+                            <p>Select a resource above to compare live vs last-applied</p>
+                          </div>
+                        );
+                        // Extract last-applied-configuration annotation from raw resource
+                        // Parse the YAML to extract the last-applied-configuration annotation
+                        let lastAppliedJson: string | undefined;
+                        try {
+                          const parsed = yaml.load(firstResource.yaml) as Record<string, unknown>;
+                          const meta = parsed?.metadata as Record<string, unknown>;
+                          const ann = meta?.annotations as Record<string, string>;
+                          lastAppliedJson = ann?.['kubectl.kubernetes.io/last-applied-configuration'];
+                        } catch { /* parse failed */ }
+                        if (!lastAppliedJson) return (
+                          <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+                            <History className="h-12 w-12 mb-4 opacity-50" />
+                            <p className="font-medium">No last-applied configuration</p>
+                            <p className="text-xs mt-2 max-w-md text-center">This resource wasn't applied via <code className="bg-muted px-1 rounded">kubectl apply</code>. The last-applied annotation is only set when using declarative management.</p>
+                          </div>
+                        );
+                        let lastAppliedYaml = '';
+                        try {
+                          const parsed = JSON.parse(lastAppliedJson);
+                          lastAppliedYaml = resourceToYaml(parsed);
+                        } catch { lastAppliedYaml = '# Failed to parse last-applied-configuration'; }
+                        // Clean live YAML: strip managedFields and status for cleaner diff
+                        let liveYaml = firstResource.yaml;
+                        try {
+                          const liveObj = yaml.load(liveYaml) as Record<string, unknown>;
+                          if (liveObj?.metadata) {
+                            const meta = liveObj.metadata as Record<string, unknown>;
+                            delete meta.managedFields;
+                            delete meta.resourceVersion;
+                            delete meta.uid;
+                            delete meta.creationTimestamp;
+                            delete meta.generation;
+                            if (meta.annotations) {
+                              const ann = { ...(meta.annotations as Record<string, string>) };
+                              delete ann['kubectl.kubernetes.io/last-applied-configuration'];
+                              meta.annotations = Object.keys(ann).length > 0 ? ann : undefined;
+                            }
+                          }
+                          delete liveObj.status;
+                          liveYaml = yaml.dump(liveObj, { indent: 2, noRefs: true, lineWidth: -1 });
+                        } catch { /* use raw */ }
+                        return (
+                          <Suspense fallback={<Loader2 className="h-6 w-6 animate-spin mx-auto mt-8" />}>
+                            <MonacoDiffView
+                              originalLabel="Last Applied (kubectl apply)"
+                              modifiedLabel="Live Cluster State"
+                              original={lastAppliedYaml}
+                              modified={liveYaml}
+                            />
+                          </Suspense>
+                        );
+                      })()}
+
+                      {/* Mode: Custom YAML */}
+                      {compareMode === 'customYaml' && (() => {
+                        const firstResource = resourcesData[0];
+                        const clusterYaml = firstResource?.yaml || '';
+                        return (
+                          <div className="space-y-4">
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-medium text-foreground/70">Paste or upload your YAML to compare against <strong>{firstResource?.name || 'selected resource'}</strong></span>
+                              <label className="cursor-pointer">
+                                <input
+                                  type="file"
+                                  accept=".yaml,.yml,.json"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      const reader = new FileReader();
+                                      reader.onload = (ev) => {
+                                        const text = ev.target?.result as string;
+                                        try {
+                                          // Normalize: parse then dump to ensure consistent formatting
+                                          const parsed = yaml.load(text);
+                                          setCustomYaml(yaml.dump(parsed, { indent: 2, noRefs: true, lineWidth: -1 }));
+                                          toast.success(`Loaded ${file.name}`);
+                                        } catch {
+                                          setCustomYaml(text);
+                                          toast.warning('File loaded but YAML parsing failed — showing raw content');
+                                        }
+                                      };
+                                      reader.readAsText(file);
+                                    }
+                                    e.target.value = '';
+                                  }}
+                                />
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer">
+                                  <FileUp className="h-3.5 w-3.5" /> Upload YAML
+                                </span>
+                              </label>
+                            </div>
+                            {!customYaml ? (
+                              <div className="border-2 border-dashed border-border/50 rounded-xl p-8">
+                                <textarea
+                                  className="w-full h-64 font-mono text-xs bg-transparent border-none outline-none resize-none text-foreground placeholder:text-muted-foreground/50"
+                                  placeholder="Paste your YAML here..."
+                                  value={customYaml}
+                                  onChange={(e) => setCustomYaml(e.target.value)}
+                                />
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-2 mb-2">
+                                  <Badge variant="outline" className="text-xs">Custom YAML loaded</Badge>
+                                  <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setCustomYaml('')}>Clear</Button>
+                                </div>
+                                <Suspense fallback={<Loader2 className="h-6 w-6 animate-spin mx-auto mt-8" />}>
+                                  <MonacoDiffView
+                                    originalLabel={firstResource?.name || 'Cluster Resource'}
+                                    modifiedLabel="Custom YAML"
+                                    original={clusterYaml}
+                                    modified={customYaml}
+                                  />
+                                </Suspense>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </ScrollArea>
                 </TabsContent>
 
