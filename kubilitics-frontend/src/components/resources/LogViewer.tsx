@@ -45,7 +45,7 @@ const LEVEL_PILLS: Array<{ key: string | null; label: string }> = [
   { key: 'debug', label: 'Debug' },
 ];
 
-const TAIL_OPTIONS = [100, 250, 500, 1000, 2000];
+const TAIL_OPTIONS = [50, 100, 250, 500, 1000, 2000];
 
 const EMPTY_LOGS: LogEntry[] = [];
 
@@ -201,7 +201,7 @@ export function LogViewer({
   containers = [],
   onContainerChange,
   className,
-  tailLines: initialTailLines = 500,
+  tailLines: initialTailLines = 50,
 }: LogViewerProps) {
   const { isConnected } = useConnectionStatus();
 
