@@ -31,7 +31,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import type { TopologyNode, TopologyEdge, ResourceType } from './D3TopologyCanvas';
+import type { TopologyNode, TopologyEdge, ResourceType } from './d3Types';
 
 export interface HierarchicalNode {
   id: string;
@@ -44,7 +44,7 @@ export interface HierarchicalNode {
 }
 
 // Re-export for convenience
-export type { TopologyNode, TopologyEdge, ResourceType } from './D3TopologyCanvas';
+export type { TopologyNode, TopologyEdge, ResourceType } from './d3Types';
 
 /** Max nodes for tree layout; above this we show a message to avoid renderer crash / freeze */
 const MAX_TREE_NODES = 200;

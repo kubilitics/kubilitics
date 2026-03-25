@@ -3,7 +3,7 @@
  * Builds tree structure for hierarchical/tree layout visualization
  */
 import type { TopologyGraph, TopologyNode as EngineNode, TopologyEdge as EngineEdge } from '../types/topology.types';
-import type { TopologyNode as D3Node, TopologyEdge as D3Edge, ResourceType } from '../renderer/D3TopologyCanvas';
+import type { TopologyNode as D3Node, TopologyEdge as D3Edge, ResourceType } from '../renderer/d3Types';
 import { RELATIONSHIP_CONFIG } from './edgeHelpers';
 
 /**

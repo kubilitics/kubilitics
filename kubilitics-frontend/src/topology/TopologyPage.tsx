@@ -93,6 +93,11 @@ export function TopologyPage() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
+  // Kind filter — empty set means "all kinds visible"
+  const [selectedKinds, setSelectedKinds] = useState<Set<string>>(new Set());
+  // Edge category filter — hidden categories (empty = all visible)
+  const [hiddenEdgeCategories, setHiddenEdgeCategories] = useState<Set<string>>(new Set());
+
   const [resource, setResource] = useState<string>("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
@@ -118,10 +123,12 @@ export function TopologyPage() {
   }), [viewMode, selectedNamespaces, clusterName]);
 
   // Data fetching — pass selected namespaces for filtering
-  const { topology, allNamespaces, isLoading, isFetching, isError, error, refetch, truncated, truncatedTotal } = useTopologyData({
+  const { topology, allNamespaces, allKinds, allEdgeCategories, isLoading, isFetching, isError, error, refetch, truncated, truncatedTotal } = useTopologyData({
     clusterId,
     viewMode,
     selectedNamespaces,
+    selectedKinds,
+    hiddenEdgeCategories,
     resource: viewMode === "resource" ? resource : undefined,
     enabled: !!clusterId,
   });
@@ -149,9 +156,11 @@ export function TopologyPage() {
     }
   }, [allNamespaces, hasAutoSelectedNs, searchParams, setSelectedNamespaces]);
 
-  // Reset namespace selection when cluster changes
+  // Reset filters when cluster changes
   useEffect(() => {
     setSelectedNamespaces(new Set(["default"]));
+    setSelectedKinds(new Set());
+    setHiddenEdgeCategories(new Set());
     setHasAutoSelectedNs(false);
   }, [clusterId, setSelectedNamespaces]);
 
@@ -300,6 +309,10 @@ export function TopologyPage() {
         clusterName={clusterName ?? undefined}
         selectedNamespaces={selectedNamespaces}
         availableNamespaces={allNamespaces}
+        selectedKinds={selectedKinds}
+        availableKinds={allKinds}
+        hiddenEdgeCategories={hiddenEdgeCategories}
+        availableEdgeCategories={allEdgeCategories}
         topology={topology}
         exportRef={exportRef}
         getExportCtx={getExportCtx}
@@ -307,6 +320,8 @@ export function TopologyPage() {
         searchResults={searchResults}
         onViewModeChange={handleViewModeChange}
         onNamespaceSelectionChange={handleNamespaceSelectionChange}
+        onKindSelectionChange={setSelectedKinds}
+        onEdgeCategoryToggle={setHiddenEdgeCategories}
         onSearchChange={setSearchQuery}
         onSearchSelect={handleSearchSelect}
         onFitView={handleFitView}

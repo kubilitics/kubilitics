@@ -14,6 +14,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { nodeTypes } from "./nodes/nodeTypes";
 import { edgeTypes } from "./edges/edgeTypes";
@@ -373,6 +374,20 @@ function TopologyCanvasInner({
           aria-label="Zoom and fit controls"
         />
       </ReactFlow>
+
+      {/* Layout progress overlay */}
+      {isLayouting && (
+        <div
+          className="absolute inset-0 flex items-center justify-center bg-background/60 backdrop-blur-sm z-10"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-center gap-2 rounded-lg bg-white/95 dark:bg-slate-900/95 px-5 py-3 shadow-lg border border-gray-200 dark:border-slate-700">
+            <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Laying out topology...</span>
+          </div>
+        </div>
+      )}
 
       {/* Live region for export status */}
       {isExporting && (
