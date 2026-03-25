@@ -128,9 +128,12 @@ func (h *Handler) PostPortForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build: kubectl port-forward <target> <local>:<remote> -n <ns>
+	// Build: kubectl port-forward <target> <local>:<remote> -n <ns> --context <ctx>
 	portMap := fmt.Sprintf("%d:%d", req.LocalPort, req.RemotePort)
 	args := []string{"port-forward", target, portMap, "-n", req.Namespace}
+	if cluster.Context != "" {
+		args = append(args, "--context", cluster.Context)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
