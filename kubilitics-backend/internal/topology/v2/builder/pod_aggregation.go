@@ -39,6 +39,12 @@ func AggregatePods(nodes []v2.TopologyNode, edges []v2.TopologyEdge) ([]v2.Topol
 		"Job":         true,
 	}
 
+	// Index all nodes by ID once to avoid O(N*M) inner-loop scans.
+	nodeByID := make(map[string]*v2.TopologyNode, len(nodes))
+	for i := range nodes {
+		nodeByID[nodes[i].ID] = &nodes[i]
+	}
+
 	type ownerKey struct {
 		ownerID   string
 		namespace string
@@ -49,13 +55,10 @@ func AggregatePods(nodes []v2.TopologyNode, edges []v2.TopologyEdge) ([]v2.Topol
 		if _, isPod := podNodeIDs[e.Target]; !isPod {
 			continue
 		}
-		// Check if source is an owner kind by looking up the source node.
-		for _, n := range nodes {
-			if n.ID == e.Source && ownerKinds[n.Kind] {
-				key := ownerKey{ownerID: e.Source, namespace: n.Namespace}
-				ownerToPods[key] = append(ownerToPods[key], e.Target)
-				break
-			}
+		// Check if source is an owner kind using the pre-built index.
+		if srcNode, ok := nodeByID[e.Source]; ok && ownerKinds[srcNode.Kind] {
+			key := ownerKey{ownerID: e.Source, namespace: srcNode.Namespace}
+			ownerToPods[key] = append(ownerToPods[key], e.Target)
 		}
 	}
 

@@ -30,6 +30,15 @@ var propagationKinds = map[string]bool{
 // StatefulSets, DaemonSets, CronJobs). It uses only the graph edges of type
 // "ownerRef" so it does not require the original ResourceBundle.
 //
+// Vocabulary note: PropagateHealth outputs "healthy"/"progressing"/"degraded"/"unknown".
+// HealthEnricher (which runs later in the handler pipeline when a ResourceBundle
+// is available) outputs "healthy"/"warning"/"error"/"unknown". The enricher
+// overwrites statuses for Pods, Nodes, Deployments, StatefulSets, and DaemonSets,
+// so in practice PropagateHealth's values only survive for CronJobs, Jobs, and
+// ReplicaSets that HealthEnricher does not cover. To avoid clobbering a status
+// already set by the graph builder (e.g. from live conditions), PropagateHealth
+// skips nodes that already carry a non-empty, non-generic status.
+//
 // The returned slice is a copy of nodes with updated Status fields; the
 // original slice is not mutated.
 func PropagateHealth(nodes []v2.TopologyNode, edges []v2.TopologyEdge) []v2.TopologyNode {
@@ -103,10 +112,16 @@ func PropagateHealth(nodes []v2.TopologyNode, edges []v2.TopologyEdge) []v2.Topo
 		}
 	}
 
-	// Write computed statuses back to result nodes.
+	// Write computed statuses back to result nodes. Skip nodes that already
+	// carry a non-empty, non-generic status (e.g. set by the graph builder
+	// from live K8s conditions) to avoid overwriting more specific information
+	// that HealthEnricher will later refine.
 	for i := range result {
 		n := &result[i]
 		if s, ok := computed[n.ID]; ok {
+			if hasSpecificStatus(n.Status) {
+				continue
+			}
 			n.Status = s
 			n.StatusReason = reasonForStatus(s)
 		}
@@ -177,6 +192,22 @@ func normaliseControllerStatus(raw string) string {
 		return statusDegraded
 	default:
 		return statusUnknown
+	}
+}
+
+// hasSpecificStatus returns true when a node already carries a non-empty status
+// that is not one of the generic placeholder values. This prevents PropagateHealth
+// from overwriting statuses that were set from live K8s resource conditions by
+// the graph builder.
+func hasSpecificStatus(status string) bool {
+	if status == "" {
+		return false
+	}
+	switch strings.ToLower(status) {
+	case "unknown", "":
+		return false
+	default:
+		return true
 	}
 }
 

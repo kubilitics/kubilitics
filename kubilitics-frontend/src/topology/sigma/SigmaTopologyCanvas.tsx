@@ -61,6 +61,16 @@ interface EdgeDisplayAttrs extends Attributes {
 }
 
 // ---------------------------------------------------------------------------
+// Cached Sigma import — avoids re-fetching the module every effect run
+// ---------------------------------------------------------------------------
+
+let sigmaPromise: Promise<typeof import("sigma")> | null = null;
+function loadSigma() {
+  if (!sigmaPromise) sigmaPromise = import("sigma");
+  return sigmaPromise;
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -120,20 +130,22 @@ export function SigmaTopologyCanvas({
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
   // ------- Prepare graph display attributes --------------------------------
-  // We clone + mutate node/edge attrs for Sigma display. We do this outside
-  // the effect so the graph reference itself can be used as the dep key.
+  // Deep-copy the incoming graph so we never mutate the caller's data,
+  // then decorate the copy with Sigma display attributes.
   const prepareGraph = useCallback(
-    (g: Graph) => {
+    (g: Graph): Graph => {
+      const localGraph = g.copy();
+
       // Find max degree for sizing
       let maxDegree = 1;
-      g.forEachNode((node) => {
-        const deg = g.degree(node);
+      localGraph.forEachNode((node) => {
+        const deg = localGraph.degree(node);
         if (deg > maxDegree) maxDegree = deg;
       });
 
-      g.forEachNode((node, attrs) => {
-        const degree = g.degree(node);
-        g.mergeNodeAttributes(node, {
+      localGraph.forEachNode((node, attrs) => {
+        const degree = localGraph.degree(node);
+        localGraph.mergeNodeAttributes(node, {
           size: sizeFromDegree(degree, maxDegree),
           color: colorForKind(attrs.category as string | undefined, attrs.status as string | undefined),
           label: (attrs.name as string) || (attrs.label as string) || node,
@@ -141,14 +153,16 @@ export function SigmaTopologyCanvas({
         } satisfies Partial<NodeDisplayAttrs>);
       });
 
-      g.forEachEdge((_edge, attrs) => {
+      localGraph.forEachEdge((_edge, attrs) => {
         const relCat = attrs.relationshipCategory as string | undefined;
-        g.mergeEdgeAttributes(_edge, {
+        localGraph.mergeEdgeAttributes(_edge, {
           size: 1,
           color: colorForEdge(relCat),
           type: "line",
         } satisfies Partial<EdgeDisplayAttrs>);
       });
+
+      return localGraph;
     },
     [],
   );
@@ -161,15 +175,15 @@ export function SigmaTopologyCanvas({
     let renderer: InstanceType<typeof import("sigma").Sigma> | null = null;
     let cancelled = false;
 
-    // Dynamic import avoids SSR/Node issues with WebGL
+    // Dynamic import avoids SSR/Node issues with WebGL (cached to avoid re-fetching)
     (async () => {
-      const { Sigma } = await import("sigma");
+      const { Sigma } = await loadSigma();
       if (cancelled) return;
 
-      // Prepare display attributes on the graph
-      prepareGraph(graph);
+      // Deep-copy and prepare display attributes — never mutate the original graph
+      const localGraph = prepareGraph(graph);
 
-      renderer = new Sigma(graph, container, {
+      renderer = new Sigma(localGraph, container, {
         // Performance
         renderEdgeLabels: false,
         labelRenderedSizeThreshold: 8,
@@ -222,8 +236,8 @@ export function SigmaTopologyCanvas({
           const res = { ...data };
           const active = hoveredNodeRef.current ?? selectedNodeRef.current;
           if (active) {
-            const src = graph.source(edge);
-            const tgt = graph.target(edge);
+            const src = localGraph.source(edge);
+            const tgt = localGraph.target(edge);
             if (src === active || tgt === active) {
               res.hidden = false;
               res.zIndex = 1;

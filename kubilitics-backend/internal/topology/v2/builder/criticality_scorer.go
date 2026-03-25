@@ -1,6 +1,8 @@
 package builder
 
 import (
+	"math"
+
 	"github.com/kubilitics/kubilitics-backend/internal/topology/v2"
 )
 
@@ -20,7 +22,7 @@ type CriticalityScore struct {
 // ScoreNodes computes a CriticalityScore for every node in the topology.
 //
 // Scoring formula:
-//   - Base = (inDegree * 3 + outDegree * 2)
+//   - Base = log2(inDegree+1)*15 + log2(outDegree+1)*10  (log-scaled to prevent saturation)
 //   - BlastRadius bonus = blastRadius * 2
 //   - SPOF multiplier = 1.5 if only one path exists to downstream services
 //   - Depth bonus = maxDependencyDepth * 1.5
@@ -76,8 +78,10 @@ func ScoreNodes(nodes []v2.TopologyNode, edges []v2.TopologyEdge) []CriticalityS
 		// the only provider).
 		spof := isSinglePointOfFailure(id, forward, inDegree)
 
-		// Scoring formula
-		score := float64(in*3 + out*2)    // base
+		// Scoring formula — log-scaled base to compress dynamic range and
+		// prevent common resources (Namespaces with many children) from
+		// auto-saturating at 100.
+		score := math.Log2(float64(in+1))*15 + math.Log2(float64(out+1))*10 // base
 		score += float64(blastRadius) * 2  // blast radius bonus
 		score += float64(depthVal) * 1.5   // depth bonus
 
