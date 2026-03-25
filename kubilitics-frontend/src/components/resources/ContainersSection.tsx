@@ -43,6 +43,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/sonner';
 import { usePortForwardStore } from '@/stores/portForwardStore';
+import { openExternal } from '@/lib/tauri';
 import { Square } from 'lucide-react';
 
 export interface ContainerInfo {
@@ -428,7 +429,7 @@ export function ContainersSection({ containers, className, resourceName, namespa
                                           variant="ghost"
                                           size="sm"
                                           className="h-6 px-2 text-[10px] text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40"
-                                          onClick={() => window.open(`http://localhost:${activeFwd.localPort}`, '_blank')}
+                                          onClick={() => openExternal(`http://localhost:${activeFwd.localPort}`)}
                                         >
                                           <ExternalLink className="h-3 w-3 mr-1" />
                                           Open

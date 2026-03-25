@@ -23,6 +23,7 @@ import { toast } from '@/components/ui/sonner';
 import { startPortForward, stopPortForward } from '@/services/backendApiClient';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 import { useClusterStore } from '@/stores/clusterStore';
+import { openExternal } from '@/lib/tauri';
 
 export interface PortInfo {
   name?: string;
@@ -186,8 +187,8 @@ export function PortForwardDialog({
         description: `Tunnel open at http://localhost:${localPort}`,
       });
 
-      // Auto-open in browser
-      window.open(`http://localhost:${localPort}`, '_blank');
+      // Auto-open in system browser (Tauri-aware)
+      openExternal(`http://localhost:${localPort}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error('Port forward failed', { description: msg });
@@ -348,14 +349,13 @@ export function PortForwardDialog({
                 </div>
                 <p className="text-sm mt-1 text-muted-foreground">
                   Access your service at{' '}
-                  <a
-                    href={`http://localhost:${localPort}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
+                    onClick={() => openExternal(`http://localhost:${localPort}`)}
                     className="text-primary hover:underline font-mono"
                   >
                     http://localhost:{localPort}
-                  </a>
+                  </button>
                 </p>
               </CardContent>
             </Card>
