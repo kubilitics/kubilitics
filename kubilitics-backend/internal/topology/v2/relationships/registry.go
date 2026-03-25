@@ -49,6 +49,10 @@ func NewDefaultRegistry() *Registry {
 	r.Register(&StorageMatcher{})
 	r.Register(&WebhookMatcher{})
 	r.Register(&NamespaceMatcher{})
+	r.Register(&AffinityMatcher{})
+	r.Register(&WorkloadRBACMatcher{})
+	r.Register(&ProjectedVolumeMatcher{})
+	r.Register(&NetworkPolicyRuleMatcher{})
 	return r
 }
 

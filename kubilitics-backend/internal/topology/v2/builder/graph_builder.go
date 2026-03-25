@@ -2,6 +2,7 @@ package builder
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -56,18 +57,81 @@ func NodesFromBundle(b *v2.ResourceBundle) []v2.TopologyNode {
 		if p.Status.Phase != "" {
 			status = string(p.Status.Phase)
 		}
+		extra := make(map[string]interface{})
+		// Conditions
+		if len(p.Status.Conditions) > 0 {
+			conds := make([]map[string]string, 0, len(p.Status.Conditions))
+			for _, c := range p.Status.Conditions {
+				conds = append(conds, map[string]string{
+					"type":   string(c.Type),
+					"status": string(c.Status),
+					"reason": c.Reason,
+				})
+			}
+			extra["conditions"] = conds
+		}
+		// ContainerStatuses
+		if len(p.Status.ContainerStatuses) > 0 {
+			cs := make([]map[string]interface{}, 0, len(p.Status.ContainerStatuses))
+			for _, c := range p.Status.ContainerStatuses {
+				state := "unknown"
+				if c.State.Running != nil {
+					state = "running"
+				} else if c.State.Waiting != nil {
+					state = fmt.Sprintf("waiting:%s", c.State.Waiting.Reason)
+				} else if c.State.Terminated != nil {
+					state = fmt.Sprintf("terminated:%s", c.State.Terminated.Reason)
+				}
+				cs = append(cs, map[string]interface{}{
+					"name":         c.Name,
+					"ready":        c.Ready,
+					"restartCount": c.RestartCount,
+					"state":        state,
+				})
+			}
+			extra["containerStatuses"] = cs
+		}
+		// QoS class
+		if p.Status.QOSClass != "" {
+			extra["qosClass"] = string(p.Status.QOSClass)
+		}
+		// Resource requests/limits from first container
+		if len(p.Spec.Containers) > 0 {
+			c0 := p.Spec.Containers[0]
+			if len(c0.Resources.Requests) > 0 {
+				reqs := make(map[string]string)
+				for k, v := range c0.Resources.Requests {
+					reqs[string(k)] = v.String()
+				}
+				extra["resourceRequests"] = reqs
+			}
+			if len(c0.Resources.Limits) > 0 {
+				lims := make(map[string]string)
+				for k, v := range c0.Resources.Limits {
+					lims[string(k)] = v.String()
+				}
+				extra["resourceLimits"] = lims
+			}
+		}
 		out = append(out, v2.TopologyNode{
 			ID: v2.NodeID("Pod", p.Namespace, p.Name), Kind: "Pod", Name: p.Name, Namespace: p.Namespace, APIVersion: "v1",
 			Category: "workload", Label: p.Name, Status: status, Layer: 4, Group: groupIDForNamespace(p.Namespace),
 			Labels: p.Labels, Annotations: p.Annotations, CreatedAt: formatTime(p.CreationTimestamp),
 			PodIP: p.Status.PodIP, NodeName: p.Spec.NodeName, Containers: len(p.Spec.Containers),
+			Extra: extra,
 		})
 	}
 	for i := range b.Deployments {
 		d := &b.Deployments[i]
+		status := "healthy"
+		if d.Status.UnavailableReplicas > 0 {
+			status = "degraded"
+		} else if d.Spec.Replicas != nil && d.Status.AvailableReplicas != *d.Spec.Replicas {
+			status = "progressing"
+		}
 		out = append(out, v2.TopologyNode{
 			ID: v2.NodeID("Deployment", d.Namespace, d.Name), Kind: "Deployment", Name: d.Name, Namespace: d.Namespace, APIVersion: "apps/v1",
-			Category: "workload", Label: d.Name, Status: "healthy", Layer: 2, Group: groupIDForNamespace(d.Namespace),
+			Category: "workload", Label: d.Name, Status: status, Layer: 2, Group: groupIDForNamespace(d.Namespace),
 			Labels: d.Labels, Annotations: d.Annotations, CreatedAt: formatTime(d.CreationTimestamp),
 		})
 	}
@@ -81,11 +145,25 @@ func NodesFromBundle(b *v2.ResourceBundle) []v2.TopologyNode {
 	}
 	for i := range b.StatefulSets {
 		s := &b.StatefulSets[i]
-		out = append(out, v2.TopologyNode{ID: v2.NodeID("StatefulSet", s.Namespace, s.Name), Kind: "StatefulSet", Name: s.Name, Namespace: s.Namespace, APIVersion: "apps/v1", Category: "workload", Label: s.Name, Status: "healthy", Layer: 2, Group: groupIDForNamespace(s.Namespace), Labels: s.Labels, Annotations: s.Annotations, CreatedAt: formatTime(s.CreationTimestamp)})
+		status := "healthy"
+		if s.Spec.Replicas != nil && s.Status.ReadyReplicas != *s.Spec.Replicas {
+			status = "progressing"
+		}
+		if s.Spec.Replicas != nil && s.Status.ReadyReplicas == 0 && *s.Spec.Replicas > 0 {
+			status = "degraded"
+		}
+		out = append(out, v2.TopologyNode{ID: v2.NodeID("StatefulSet", s.Namespace, s.Name), Kind: "StatefulSet", Name: s.Name, Namespace: s.Namespace, APIVersion: "apps/v1", Category: "workload", Label: s.Name, Status: status, Layer: 2, Group: groupIDForNamespace(s.Namespace), Labels: s.Labels, Annotations: s.Annotations, CreatedAt: formatTime(s.CreationTimestamp)})
 	}
 	for i := range b.DaemonSets {
 		ds := &b.DaemonSets[i]
-		out = append(out, v2.TopologyNode{ID: v2.NodeID("DaemonSet", ds.Namespace, ds.Name), Kind: "DaemonSet", Name: ds.Name, Namespace: ds.Namespace, APIVersion: "apps/v1", Category: "workload", Label: ds.Name, Status: "healthy", Layer: 2, Group: groupIDForNamespace(ds.Namespace), Labels: ds.Labels, Annotations: ds.Annotations, CreatedAt: formatTime(ds.CreationTimestamp)})
+		status := "healthy"
+		if ds.Status.NumberReady != ds.Status.DesiredNumberScheduled {
+			status = "progressing"
+		}
+		if ds.Status.DesiredNumberScheduled > 0 && ds.Status.NumberReady == 0 {
+			status = "degraded"
+		}
+		out = append(out, v2.TopologyNode{ID: v2.NodeID("DaemonSet", ds.Namespace, ds.Name), Kind: "DaemonSet", Name: ds.Name, Namespace: ds.Namespace, APIVersion: "apps/v1", Category: "workload", Label: ds.Name, Status: status, Layer: 2, Group: groupIDForNamespace(ds.Namespace), Labels: ds.Labels, Annotations: ds.Annotations, CreatedAt: formatTime(ds.CreationTimestamp)})
 	}
 	for i := range b.Jobs {
 		j := &b.Jobs[i]
@@ -97,7 +175,22 @@ func NodesFromBundle(b *v2.ResourceBundle) []v2.TopologyNode {
 	}
 	for i := range b.Services {
 		s := &b.Services[i]
-		out = append(out, v2.TopologyNode{ID: v2.NodeID("Service", s.Namespace, s.Name), Kind: "Service", Name: s.Name, Namespace: s.Namespace, APIVersion: "v1", Category: "networking", Label: s.Name, Status: "healthy", Layer: 1, Group: groupIDForNamespace(s.Namespace), Labels: s.Labels, Annotations: s.Annotations, CreatedAt: formatTime(s.CreationTimestamp), ClusterIP: s.Spec.ClusterIP, ServiceType: string(s.Spec.Type)})
+		extra := make(map[string]interface{})
+		if len(s.Spec.Ports) > 0 {
+			ports := make([]map[string]interface{}, 0, len(s.Spec.Ports))
+			for _, p := range s.Spec.Ports {
+				ports = append(ports, map[string]interface{}{
+					"port":       p.Port,
+					"targetPort": p.TargetPort.String(),
+					"protocol":   string(p.Protocol),
+				})
+			}
+			extra["ports"] = ports
+		}
+		if s.Spec.SessionAffinity != "" {
+			extra["sessionAffinity"] = string(s.Spec.SessionAffinity)
+		}
+		out = append(out, v2.TopologyNode{ID: v2.NodeID("Service", s.Namespace, s.Name), Kind: "Service", Name: s.Name, Namespace: s.Namespace, APIVersion: "v1", Category: "networking", Label: s.Name, Status: "healthy", Layer: 1, Group: groupIDForNamespace(s.Namespace), Labels: s.Labels, Annotations: s.Annotations, CreatedAt: formatTime(s.CreationTimestamp), ClusterIP: s.Spec.ClusterIP, ServiceType: string(s.Spec.Type), Extra: extra})
 	}
 	for i := range b.Endpoints {
 		e := &b.Endpoints[i]
@@ -145,7 +238,35 @@ func NodesFromBundle(b *v2.ResourceBundle) []v2.TopologyNode {
 			}
 		}
 		internalIP, externalIP := nodeAddresses(n)
-		out = append(out, v2.TopologyNode{ID: v2.NodeID("Node", "", n.Name), Kind: "Node", Name: n.Name, Namespace: "", APIVersion: "v1", Category: "cluster", Label: n.Name, Status: status, Layer: 5, Labels: n.Labels, Annotations: n.Annotations, CreatedAt: formatTime(n.CreationTimestamp), InternalIP: internalIP, ExternalIP: externalIP})
+		extra := make(map[string]interface{})
+		// All node conditions
+		if len(n.Status.Conditions) > 0 {
+			conds := make([]map[string]string, 0, len(n.Status.Conditions))
+			for _, c := range n.Status.Conditions {
+				conds = append(conds, map[string]string{
+					"type":   string(c.Type),
+					"status": string(c.Status),
+					"reason": c.Reason,
+				})
+			}
+			extra["conditions"] = conds
+		}
+		// Allocatable resources
+		alloc := make(map[string]string)
+		if cpu := n.Status.Allocatable.Cpu(); cpu != nil {
+			alloc["cpu"] = cpu.String()
+		}
+		if mem := n.Status.Allocatable.Memory(); mem != nil {
+			alloc["memory"] = mem.String()
+		}
+		if len(alloc) > 0 {
+			extra["allocatable"] = alloc
+		}
+		// Kubelet version
+		if n.Status.NodeInfo.KubeletVersion != "" {
+			extra["kubeletVersion"] = n.Status.NodeInfo.KubeletVersion
+		}
+		out = append(out, v2.TopologyNode{ID: v2.NodeID("Node", "", n.Name), Kind: "Node", Name: n.Name, Namespace: "", APIVersion: "v1", Category: "cluster", Label: n.Name, Status: status, Layer: 5, Labels: n.Labels, Annotations: n.Annotations, CreatedAt: formatTime(n.CreationTimestamp), InternalIP: internalIP, ExternalIP: externalIP, Extra: extra})
 	}
 	for i := range b.Namespaces {
 		ns := &b.Namespaces[i]
