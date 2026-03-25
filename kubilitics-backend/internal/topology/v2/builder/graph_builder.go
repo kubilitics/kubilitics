@@ -26,6 +26,13 @@ func BuildGraph(ctx context.Context, opts v2.Options, bundle *v2.ResourceBundle)
 		return nil, err
 	}
 	groups := groupsFromBundle(bundle)
+
+	// Propagate health from Pods up the ownership chain so controllers
+	// (ReplicaSet, Deployment, StatefulSet, DaemonSet, Job, CronJob) get
+	// accurate status BEFORE the response reaches the frontend or any
+	// post-render enricher.
+	nodes = PropagateHealth(nodes, edges)
+
 	buildMs := time.Since(start).Milliseconds()
 	clusterName := opts.ClusterName
 	if clusterName == "" {

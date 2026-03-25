@@ -84,6 +84,9 @@ func (h *TopologyHandler) HandleGetTopology(w http.ResponseWriter, r *http.Reque
 		enricher.EnrichNodes(resp.Nodes, bundle)
 	}
 
+	// Aggregate pods into summary nodes when a single owner has >3 pods
+	resp.Nodes, resp.Edges = builder.AggregatePods(resp.Nodes, resp.Edges)
+
 	// Update metadata counts after filtering
 	resp.Metadata.ResourceCount = len(resp.Nodes)
 	resp.Metadata.EdgeCount = len(resp.Edges)
@@ -149,10 +152,72 @@ func (h *TopologyHandler) HandleGetResource(w http.ResponseWriter, r *http.Reque
 		metricsEnricher.EnrichNodes(resp.Nodes, bundle)
 	}
 
+	// Aggregate pods into summary nodes when a single owner has >3 pods
+	resp.Nodes, resp.Edges = builder.AggregatePods(resp.Nodes, resp.Edges)
+
 	resp.Metadata.ResourceCount = len(resp.Nodes)
 	resp.Metadata.EdgeCount = len(resp.Edges)
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// HandleGetImpact handles GET /api/v1/clusters/{id}/topology/v2/impact/{kind}/{ns}/{name}
+// It returns all resources that transitively depend on the specified resource,
+// enabling "what breaks if I delete this?" analysis.
+// Query param: depth (default 3, max 10)
+func (h *TopologyHandler) HandleGetImpact(w http.ResponseWriter, r *http.Request) {
+	clusterID := extractPathParam(r, "id")
+	kind := extractPathParam(r, "kind")
+	ns := extractPathParam(r, "ns")
+	name := extractPathParam(r, "name")
+
+	if clusterID == "" || kind == "" || name == "" {
+		writeError(w, http.StatusBadRequest, "missing required path parameters")
+		return
+	}
+
+	depth := 3
+	if d, err := strconv.Atoi(r.URL.Query().Get("depth")); err == nil && d > 0 {
+		if d > 10 {
+			d = 10
+		}
+		depth = d
+	}
+
+	resourceID := v2.NodeID(kind, ns, name)
+
+	ctx := r.Context()
+	var bundle *v2.ResourceBundle
+	if h.collector != nil {
+		var err error
+		bundle, err = h.collector.Collect(ctx, clusterID, "")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to collect resources: "+err.Error())
+			return
+		}
+	}
+
+	// Build the full graph to get all edges
+	opts := v2.Options{
+		ClusterID: clusterID,
+		Mode:      v2.ViewModeCluster,
+	}
+	resp, err := builder.BuildGraph(ctx, opts, bundle)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build topology: "+err.Error())
+		return
+	}
+
+	// Build reverse index and compute impact
+	ri := builder.BuildReverseIndex(resp.Edges)
+	impacted := ri.GetImpactDetailed(resourceID, depth)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"resourceId": resourceID,
+		"depth":      depth,
+		"impacted":   impacted,
+		"count":      len(impacted),
+	})
 }
 
 // HandleExport handles GET /api/v1/clusters/{id}/topology/v2/export/{format}
