@@ -1354,14 +1354,40 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 			}
 			return id
 		}
-		// Dynamic hub: a node with many connections is likely shared infra.
-		// Static hubKinds catch known types. Dynamic check catches shared
-		// ConfigMaps (kube-root-ca.crt), Secrets, etc.
-		// Threshold: >8 dependents = too many things depend on this resource.
+		// Kinds that are NEVER dynamic hubs — they're meant to have many connections.
+		// A Service routing to 10 pods is important, not noise.
+		neverHubKinds := map[string]bool{
+			"Deployment":  true,
+			"StatefulSet": true,
+			"DaemonSet":   true,
+			"ReplicaSet":  true,
+			"CronJob":     true,
+			"Job":         true,
+			"Pod":         true,
+			"Service":     true,
+			"Endpoints":   true,
+			"EndpointSlice": true,
+			"PersistentVolumeClaim": true,
+			"PersistentVolume": true,
+			"HorizontalPodAutoscaler": true,
+			"PodDisruptionBudget": true,
+			"Role":        true,
+			"ClusterRole": true,
+			"RoleBinding": true,
+			"ClusterRoleBinding": true,
+		}
+		// Dynamic hub: only applies to config/infra kinds (ConfigMap, Secret, etc.)
+		// that are passively shared by many resources. Workload/networking kinds
+		// are never hubs — they're meant to have many connections.
 		isHub := func(id string) bool {
-			if hubKinds[nodeKind(id)] {
+			k := nodeKind(id)
+			if hubKinds[k] {
 				return true
 			}
+			if neverHubKinds[k] {
+				return false
+			}
+			// For config/infra kinds: >5 dependents = likely shared (e.g., kube-root-ca.crt)
 			return len(ri.GetDependents(id)) > 5
 		}
 

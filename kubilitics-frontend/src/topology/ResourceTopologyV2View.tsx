@@ -478,7 +478,7 @@ export function ResourceTopologyV2View({
                     <FileImage className="h-3.5 w-3.5" /> Export <ChevronDown className="h-3 w-3" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" className="z-[300]">
                   <DropdownMenuItem onClick={() => {
                     const filename = buildExportFilename("png", exportCtx);
                     fullDialogExportRef.current?.("png", filename);
