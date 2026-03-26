@@ -25,5 +25,9 @@ type TopologyMetadata struct {
 	Depth      int      `json:"depth"`                // current depth level (0-3)
 	TotalNodes int      `json:"totalNodes"`            // total nodes before depth filtering
 	Expandable []string `json:"expandable,omitempty"`  // node IDs that have hidden children
+
+	// Truncation fields (set when node count exceeds MaxTopologyNodes)
+	Truncated      bool   `json:"truncated,omitempty"`
+	TruncateReason string `json:"truncateReason,omitempty"`
 }
 

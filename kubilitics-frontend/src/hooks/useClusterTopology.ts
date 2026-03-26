@@ -56,9 +56,22 @@ export function useClusterTopology({
       if (!clusterId) {
         throw new Error('Cluster not selected');
       }
-      const result = await getTopology(effectiveBaseUrl, clusterId, {
-        namespace: namespaceParam,
+
+      // 8-second timeout — prevents infinite loading spinners
+      const FETCH_TIMEOUT_MS = 8_000;
+      const timeout = new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error('Request timed out — the backend took too long to respond')),
+          FETCH_TIMEOUT_MS,
+        );
       });
+
+      const result = await Promise.race([
+        getTopology(effectiveBaseUrl, clusterId, {
+          namespace: namespaceParam,
+        }),
+        timeout,
+      ]);
 
       if (!result) {
         throw new Error('Empty response from topology API');
@@ -75,7 +88,8 @@ export function useClusterTopology({
     enabled: queryEnabled,
     // Removed refetchInterval - rely on global defaults (refetchOnWindowFocus/reconnect)
     staleTime: 60_000,       // Increased from 10s to 60s - allow stale data
-    // Retry uses global defaults (3 retries with exponential backoff)
+    retry: 1,                // Only retry once — fail fast, show error state
+    retryDelay: 2_000,       // 2s before retry
   });
 
   const queryKey = ['topology', clusterId, namespaceParam];

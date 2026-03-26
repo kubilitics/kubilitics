@@ -8,14 +8,14 @@ import { TopologyCanvas } from "./TopologyCanvas";
 import { TopologyDetailPanel } from "./TopologyDetailPanel";
 import { TopologyBreadcrumbs } from "./TopologyBreadcrumbs";
 import { TopologyLoadingSkeleton } from "./TopologyLoadingSkeleton";
-import { TopologyErrorState, TopologyPartialErrorBanner, TopologyWsDisconnectBanner } from "./TopologyErrorState";
+import { TopologyErrorState, TopologyPartialErrorBanner, TopologyWsDisconnectBanner, TopologySimplifiedBanner } from "./TopologyErrorState";
 import { TopologyEmptyState } from "./TopologyEmptyState";
 import { HealthLegend } from "./overlays/HealthOverlay";
 import {
   useTopologyKeyboard,
   TopologyShortcutsOverlay,
 } from "./hooks/useTopologyKeyboard";
-import { useTopologyData, MAX_VISIBLE_NODES, type DepthLevel } from "./hooks/useTopologyData";
+import { useTopologyData, DEPTH_LABELS, MAX_VISIBLE_NODES, type DepthLevel } from "./hooks/useTopologyData";
 import { useTopologySearch } from "./hooks/useTopologySearch";
 import { useTopologyWebSocket } from "./hooks/useTopologyWebSocket";
 import { useTopologyStore } from "./store/topologyStore";
@@ -105,6 +105,7 @@ export function TopologyPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [simplifiedBannerDismissed, setSimplifiedBannerDismissed] = useState(false);
   const fitViewRef = useRef<(() => void) | null>(null);
   const exportRef = useRef<((format: ExportFormat, filename: string) => void) | null>(null);
 
@@ -167,7 +168,13 @@ export function TopologyPage() {
     setSelectedKinds(new Set());
     setHiddenEdgeCategories(new Set());
     setHasAutoSelectedNs(false);
+    setSimplifiedBannerDismissed(false);
   }, [clusterId, setSelectedNamespaces]);
+
+  // Reset simplified banner when depth changes
+  useEffect(() => {
+    setSimplifiedBannerDismissed(false);
+  }, [depth]);
 
   // Sync to store when data arrives
   useEffect(() => {
@@ -247,6 +254,11 @@ export function TopologyPage() {
     setDepth((prev) => Math.min(prev + 1, 3) as DepthLevel);
   }, []);
 
+  // "Try simpler view" / "Try Overview mode" — reset depth to 0
+  const handleRequestSimplify = useCallback(() => {
+    setDepth(0);
+  }, []);
+
   // Highlight node IDs from search
   const highlightNodeIds = useMemo(
     () => searchResults.map((r) => r.node.id),
@@ -265,6 +277,7 @@ export function TopologyPage() {
         <TopologyErrorState
           error={error?.message ?? "Failed to load topology"}
           onRetry={() => refetch()}
+          onTryOverview={depth > 0 ? handleRequestSimplify : undefined}
         />
       );
     }
@@ -304,6 +317,7 @@ export function TopologyPage() {
         viewMode={viewMode}
         onSelectNode={setSelectedNodeId}
         onNodeExpand={handleNodeExpand}
+        onRequestSimplify={handleRequestSimplify}
         exportRef={exportRef}
         fitViewRef={fitViewRef}
         clusterName={clusterName ?? undefined}
@@ -380,6 +394,16 @@ export function TopologyPage() {
             Reset to default
           </button>
         </div>
+      )}
+
+      {/* Simplified view info banner — shown when depth < 3 and we have data */}
+      {!simplifiedBannerDismissed && !truncated && depth < 3 && topology && totalUnfiltered > 0 && topology.nodes.length < totalUnfiltered && (
+        <TopologySimplifiedBanner
+          visibleCount={topology.nodes.length}
+          totalCount={totalUnfiltered}
+          depthLabel={DEPTH_LABELS[depth].label.toLowerCase()}
+          onDismiss={() => setSimplifiedBannerDismissed(true)}
+        />
       )}
 
       {/* Main content */}

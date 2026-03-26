@@ -41,6 +41,8 @@ export interface TopologyCanvasProps {
   clusterName?: string;
   /** Namespace for export title */
   namespace?: string;
+  /** Called when user clicks "Try simpler view" after layout timeout */
+  onRequestSimplify?: () => void;
 }
 
 /** Semantic zoom — uses centralized thresholds from designTokens */
@@ -62,6 +64,7 @@ function TopologyCanvasInner({
   exportRef,
   clusterName,
   namespace,
+  onRequestSimplify,
 }: TopologyCanvasProps) {
   const [currentZoom, setCurrentZoom] = useState(0.5);
 
@@ -76,6 +79,17 @@ function TopologyCanvasInner({
 
   const { nodes: elkNodes, edges: elkEdges, isLayouting } =
     useElkLayout(topology, viewMode, nodeType);
+
+  // Layout timeout — 5 seconds max, then show "taking too long" state
+  const [layoutTimedOut, setLayoutTimedOut] = useState(false);
+  useEffect(() => {
+    if (!isLayouting) {
+      setLayoutTimedOut(false);
+      return;
+    }
+    const t = setTimeout(() => setLayoutTimedOut(true), 5_000);
+    return () => clearTimeout(t);
+  }, [isLayouting]);
   const [nodes, setNodes, onNodesChange] = useNodesState(elkNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(elkEdges);
   const reactFlow = useReactFlow();
@@ -411,9 +425,22 @@ function TopologyCanvasInner({
           role="status"
           aria-live="polite"
         >
-          <div className="flex items-center gap-2 rounded-lg bg-white/95 dark:bg-slate-900/95 px-5 py-3 shadow-lg border border-gray-200 dark:border-slate-700">
-            <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Laying out topology...</span>
+          <div className="flex flex-col items-center gap-3 rounded-lg bg-white/95 dark:bg-slate-900/95 px-6 py-4 shadow-lg border border-gray-200 dark:border-slate-700">
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {layoutTimedOut ? "Layout taking too long..." : "Laying out topology..."}
+              </span>
+            </div>
+            {layoutTimedOut && onRequestSimplify && (
+              <button
+                type="button"
+                className="rounded-md bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                onClick={onRequestSimplify}
+              >
+                Try simpler view
+              </button>
+            )}
           </div>
         </div>
       )}
