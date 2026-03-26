@@ -1257,8 +1257,7 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 	v2Opts := topologyv2.Options{
 		ClusterID:   clusterID,
 		ClusterName: clusterName,
-		Mode:        topologyv2.ViewModeResource,
-		Resource:    kind + "/" + namespace + "/" + name,
+		Mode:        topologyv2.ViewModeCluster, // Use cluster mode to get ALL nodes; handler does its own BFS filtering
 	}
 	// Parse hop depth from query (default 1 = direct connections only).
 	// Accept both "depth" (frontend convention) and "hops" (backend legacy) — "depth" takes precedence.
