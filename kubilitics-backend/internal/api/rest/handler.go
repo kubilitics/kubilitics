@@ -820,6 +820,14 @@ func (h *Handler) GetTopology(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("namespace")
 	filters := models.TopologyFilters{Namespace: namespace}
 
+	// Parse depth parameter for progressive disclosure (0-3, default 3 = all)
+	depth := 3
+	if d := r.URL.Query().Get("depth"); d != "" {
+		if parsed, err := strconv.Atoi(d); err == nil && parsed >= 0 && parsed <= 3 {
+			depth = parsed
+		}
+	}
+
 	// BE-SCALE-002: Support force_refresh query param to bypass cache
 	forceRefresh := r.URL.Query().Get("force_refresh") == "true"
 
@@ -849,7 +857,53 @@ func (h *Handler) GetTopology(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Apply progressive disclosure depth filtering (same kind-set as V2 depth_filter.go)
+	if depth < 3 && topology != nil {
+		topology.Nodes, topology.Edges = filterTopologyByDepth(topology.Nodes, topology.Edges, depth)
+	}
+
 	respondJSON(w, http.StatusOK, topology)
+}
+
+// filterTopologyByDepth applies progressive disclosure to V1 TopologyGraph.
+// Uses the same depth-kind mapping as the V2 builder's FilterByDepth.
+func filterTopologyByDepth(nodes []models.TopologyNode, edges []models.TopologyEdge, depth int) ([]models.TopologyNode, []models.TopologyEdge) {
+	// Cumulative kind sets per depth level (same as v2/builder/depth_filter.go)
+	depthKinds := []map[string]bool{
+		// depth 0: executive view
+		{"Deployment": true, "StatefulSet": true, "DaemonSet": true, "CronJob": true, "Service": true, "Ingress": true, "Node": true, "Namespace": true},
+		// depth 1: + intermediary controllers
+		{"ReplicaSet": true, "Job": true, "Endpoints": true, "EndpointSlice": true, "HorizontalPodAutoscaler": true, "PodDisruptionBudget": true},
+		// depth 2: + workload units, configuration, storage
+		{"Pod": true, "ConfigMap": true, "Secret": true, "PersistentVolumeClaim": true, "PersistentVolume": true, "StorageClass": true, "ServiceAccount": true},
+	}
+	allowed := make(map[string]bool)
+	for level := 0; level <= depth && level < len(depthKinds); level++ {
+		for k := range depthKinds[level] {
+			allowed[k] = true
+		}
+	}
+	if depth >= 3 {
+		return nodes, edges
+	}
+
+	var filteredNodes []models.TopologyNode
+	visibleIDs := make(map[string]bool)
+	for _, n := range nodes {
+		if allowed[n.Kind] {
+			filteredNodes = append(filteredNodes, n)
+			visibleIDs[n.ID] = true
+		}
+	}
+
+	var filteredEdges []models.TopologyEdge
+	for _, e := range edges {
+		if visibleIDs[e.Source] && visibleIDs[e.Target] {
+			filteredEdges = append(filteredEdges, e)
+		}
+	}
+
+	return filteredNodes, filteredEdges
 }
 
 // GetTopologyV2 handles GET /clusters/{clusterId}/topology/v2. Builds topology from live cluster data.

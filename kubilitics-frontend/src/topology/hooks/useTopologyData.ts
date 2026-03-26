@@ -30,34 +30,6 @@ export const DEPTH_LABELS: Record<DepthLevel, { label: string; description: stri
   3: { label: "Full Graph", description: "All resources" },
 };
 
-/** Kinds visible at each depth level (cumulative — L1 includes L0, etc.) */
-const DEPTH_KINDS: Record<DepthLevel, string[] | null> = {
-  0: [
-    "Namespace", "Node",
-    "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob",
-    "Service", "Ingress", "IngressClass",
-  ],
-  1: [
-    "Namespace", "Node",
-    "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob",
-    "Service", "Ingress", "IngressClass",
-    "ReplicaSet", "Endpoints", "EndpointSlice",
-    "PersistentVolumeClaim", "ServiceAccount",
-  ],
-  2: [
-    "Namespace", "Node",
-    "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob",
-    "Service", "Ingress", "IngressClass",
-    "ReplicaSet", "Endpoints", "EndpointSlice",
-    "PersistentVolumeClaim", "ServiceAccount",
-    "ConfigMap", "Secret",
-    "PersistentVolume", "StorageClass",
-    "Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding",
-    "ResourceQuota", "LimitRange",
-  ],
-  3: null, // Show everything
-};
-
 /**
  * Maximum nodes rendered on the canvas before truncation kicks in.
  * Backend pod aggregation (>3 pods collapse to 1 node) keeps real node counts
@@ -105,28 +77,6 @@ const VIEW_MODE_CATEGORIES: Record<ViewMode, string[] | null> = {
   traffic: ["networking"],
   resource: null,
 };
-
-/**
- * Progressive disclosure — filter by depth level.
- * L3 = everything, L0-L2 = only kinds in the cumulative set.
- * Edges are pruned to only connect kept nodes.
- */
-function filterByDepth(
-  nodes: TopologyNode[],
-  edges: TopologyEdge[],
-  depth: DepthLevel
-): { nodes: TopologyNode[]; edges: TopologyEdge[] } {
-  const allowedKinds = DEPTH_KINDS[depth];
-  if (!allowedKinds) return { nodes, edges }; // L3 = no filter
-
-  const allowedSet = new Set(allowedKinds);
-  const filteredNodes = nodes.filter((n) => allowedSet.has(n.kind));
-  const nodeIds = new Set(filteredNodes.map((n) => n.id));
-  const filteredEdges = edges.filter(
-    (e) => nodeIds.has(e.source) && nodeIds.has(e.target)
-  );
-  return { nodes: filteredNodes, edges: filteredEdges };
-}
 
 function filterByViewMode(
   nodes: TopologyNode[],
@@ -217,6 +167,7 @@ export function useTopologyData({
 }: UseTopologyDataParams) {
   const { graph, isLoading, isFetching, error, refetch } = useClusterTopology({
     clusterId,
+    depth,
     enabled: enabled && !!clusterId,
   });
 
@@ -266,11 +217,11 @@ export function useTopologyData({
     const response = transformGraph(graph, clusterId ?? undefined);
     const totalUnfiltered = response.nodes.length;
 
-    // Layer 0: Progressive disclosure — depth-based filtering
-    const afterDepth = filterByDepth(response.nodes, response.edges, depth);
+    // Layer 0: Progressive disclosure — depth filtering is now handled by the backend.
+    // The backend returns only the nodes/edges for the requested depth level.
 
     // Layer 1: View mode filtering
-    const afterViewMode = filterByViewMode(afterDepth.nodes, afterDepth.edges, viewMode);
+    const afterViewMode = filterByViewMode(response.nodes, response.edges, viewMode);
 
     // Layer 2: Namespace filtering — only for namespace-aware views
     const effectiveNs = NS_FILTERABLE_VIEWS.has(viewMode) ? selectedNamespaces : new Set<string>();

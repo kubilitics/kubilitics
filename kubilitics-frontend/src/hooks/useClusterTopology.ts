@@ -10,6 +10,7 @@ import type { TopologyGraph } from '@/topology-engine';
 export interface UseClusterTopologyOptions {
   clusterId?: string | null;
   namespace?: string | null;
+  depth?: number;
   enabled?: boolean;
 }
 
@@ -28,6 +29,7 @@ export interface UseClusterTopologyResult {
 export function useClusterTopology({
   clusterId,
   namespace,
+  depth,
   enabled = true,
 }: UseClusterTopologyOptions): UseClusterTopologyResult {
   const queryClient = useQueryClient();
@@ -50,8 +52,8 @@ export function useClusterTopology({
     error,
     refetch,
   } = useQuery<TopologyGraph, Error>({
-    // Task 8.1: queryKey per PRD Section 12.3
-    queryKey: ['topology', clusterId, namespaceParam],
+    // Task 8.1: queryKey per PRD Section 12.3 — depth included so each level is cached separately
+    queryKey: ['topology', clusterId, namespaceParam, depth ?? 0],
     queryFn: async () => {
       if (!clusterId) {
         throw new Error('Cluster not selected');
@@ -69,6 +71,7 @@ export function useClusterTopology({
       const result = await Promise.race([
         getTopology(effectiveBaseUrl, clusterId, {
           namespace: namespaceParam,
+          depth,
         }),
         timeout,
       ]);
@@ -92,7 +95,7 @@ export function useClusterTopology({
     retryDelay: 2_000,       // 2s before retry
   });
 
-  const queryKey = ['topology', clusterId, namespaceParam];
+  const queryKey = ['topology', clusterId, namespaceParam, depth ?? 0];
 
   return {
     graph,
