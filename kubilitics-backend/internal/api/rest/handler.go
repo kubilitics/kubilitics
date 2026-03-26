@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -220,6 +221,7 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 	router.Handle("/clusters/{clusterId}/topology", h.wrapWithRBAC(h.GetTopology, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/topology/v2", h.wrapWithRBAC(h.GetTopologyV2, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/topology/v2/traffic", h.wrapWithRBAC(h.GetTopologyV2Traffic, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/topology/v2/impact/{kind}/{namespace}/{name}", h.wrapWithRBAC(h.GetTopologyV2Impact, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/topology/resource/{kind}/{namespace}/{name}", h.wrapWithRBAC(h.GetResourceTopology, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/topology/export", h.wrapWithRBAC(h.ExportTopology, auth.RoleOperator)).Methods("POST")
 	router.Handle("/clusters/{clusterId}/topology/export/drawio", h.wrapWithRBAC(h.GetTopologyExportDrawio, auth.RoleViewer)).Methods("GET")
@@ -889,6 +891,76 @@ func (h *Handler) GetTopologyV2Traffic(w http.ResponseWriter, r *http.Request) {
 		"criticality": criticalityScores,
 		"nodeCount":   len(resp.Nodes),
 		"edgeCount":   len(resp.Edges),
+	})
+}
+
+// GetTopologyV2Impact handles GET /clusters/{clusterId}/topology/v2/impact/{kind}/{namespace}/{name}.
+// Returns blast radius: all resources transitively impacted if the given resource fails.
+func (h *Handler) GetTopologyV2Impact(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	clusterID := vars["clusterId"]
+	kind := strings.TrimSpace(vars["kind"])
+	namespace := strings.TrimSpace(vars["namespace"])
+	name := strings.TrimSpace(vars["name"])
+	if !validate.ClusterID(clusterID) {
+		respondError(w, http.StatusBadRequest, "Invalid clusterId")
+		return
+	}
+	if kind == "" || name == "" {
+		respondError(w, http.StatusBadRequest, "kind and name are required")
+		return
+	}
+	// Cluster-scoped resources use "-" or "_" for namespace
+	if namespace == "-" || namespace == "_" {
+		namespace = ""
+	}
+	depth := 3
+	if d := r.URL.Query().Get("depth"); d != "" {
+		if v, err := strconv.Atoi(d); err == nil && v > 0 && v <= 10 {
+			depth = v
+		}
+	}
+
+	clusterName := clusterID
+	if c, err := h.clusterService.GetCluster(r.Context(), clusterID); err == nil && c != nil && c.Name != "" {
+		clusterName = c.Name
+	}
+	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
+	if err != nil {
+		respondError(w, http.StatusServiceUnavailable, "Cluster not connected")
+		return
+	}
+	opts := topologyv2.Options{
+		ClusterID:   clusterID,
+		ClusterName: clusterName,
+		Mode:        topologyv2.ViewModeCluster,
+	}
+	resp, err := topologyv2builder.BuildTopology(r.Context(), opts, client)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Build resource ID in the format used by topology nodes
+	var resourceID string
+	if namespace == "" {
+		resourceID = kind + "/" + name
+	} else {
+		resourceID = kind + "/" + namespace + "/" + name
+	}
+
+	// Build reverse index and compute impact
+	ri := topologyv2builder.BuildReverseIndex(resp.Edges)
+	impacted := ri.GetImpactDetailed(resourceID, depth)
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"resourceId": resourceID,
+		"kind":       kind,
+		"namespace":  namespace,
+		"name":       name,
+		"depth":      depth,
+		"impacted":   impacted,
+		"count":      len(impacted),
 	})
 }
 
