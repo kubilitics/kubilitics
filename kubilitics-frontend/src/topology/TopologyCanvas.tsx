@@ -395,7 +395,7 @@ function TopologyCanvasInner({
         };
       });
     }
-    if (currentZoom < 0.25 && !isExporting) {
+    if (currentZoom < 0.15 && !isExporting) {
       return edges.map((e) => ({
         ...e,
         data: { ...e.data, hideLabel: true },

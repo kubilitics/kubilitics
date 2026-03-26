@@ -180,33 +180,55 @@ export function TopologyDetailPanel({
           </Section>
         )}
 
-        {/* Connections */}
-        <Section title={(() => {
-          const up = connections.filter(e => e.target === selectedNodeId).length;
-          const down = connections.filter(e => e.source === selectedNodeId).length;
-          return `Connections (${connections.length}) — ${up} upstream · ${down} downstream`;
-        })()}>
-          {connections.length === 0 ? (
-            <p className="text-muted-foreground italic">No connections</p>
-          ) : (
-            <div className="space-y-1.5" role="list" aria-label="Connected resources">
-              {connections.map((edge) => {
-                const peerId = edge.source === selectedNodeId ? edge.target : edge.source;
-                const peer = connectedNodes.get(peerId);
-                const direction = edge.source === selectedNodeId ? "outgoing" : "incoming";
-                return (
-                  <ConnectionRow
-                    key={edge.id}
-                    edge={edge}
-                    peer={peer}
-                    direction={direction}
-                    onNavigate={handleNavigate}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </Section>
+        {/* Connections — grouped into UPSTREAM / DOWNSTREAM */}
+        {(() => {
+          const upstream = connections.filter(e => e.target === selectedNodeId);
+          const downstream = connections.filter(e => e.source === selectedNodeId);
+          return (
+            <Section title={`Connections (${connections.length})`}>
+              {connections.length === 0 ? (
+                <p className="text-muted-foreground italic">No connections</p>
+              ) : (
+                <div className="space-y-2">
+                  {upstream.length > 0 && (
+                    <CollapsibleGroup label={`UPSTREAM (${upstream.length})`} defaultOpen>
+                      {upstream.map((edge) => {
+                        const peerId = edge.source;
+                        const peer = connectedNodes.get(peerId);
+                        return (
+                          <ConnectionRow
+                            key={edge.id}
+                            edge={edge}
+                            peer={peer}
+                            direction="incoming"
+                            onNavigate={handleNavigate}
+                          />
+                        );
+                      })}
+                    </CollapsibleGroup>
+                  )}
+                  {downstream.length > 0 && (
+                    <CollapsibleGroup label={`DOWNSTREAM (${downstream.length})`} defaultOpen>
+                      {downstream.map((edge) => {
+                        const peerId = edge.target;
+                        const peer = connectedNodes.get(peerId);
+                        return (
+                          <ConnectionRow
+                            key={edge.id}
+                            edge={edge}
+                            peer={peer}
+                            direction="outgoing"
+                            onNavigate={handleNavigate}
+                          />
+                        );
+                      })}
+                    </CollapsibleGroup>
+                  )}
+                </div>
+              )}
+            </Section>
+          );
+        })()}
 
         {/* Traffic */}
         {clusterId && trafficEdges.length > 0 && (
@@ -248,8 +270,25 @@ export function TopologyDetailPanel({
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div role="group" aria-label={title}>
-      <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
       {children}
+    </div>
+  );
+}
+
+function CollapsibleGroup({ label, defaultOpen = false, children }: { label: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 w-full text-left text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors py-1"
+      >
+        <ChevronRight className={`h-3 w-3 transition-transform ${open ? "rotate-90" : ""}`} />
+        {label}
+      </button>
+      {open && <div className="space-y-1 pl-4 pt-1">{children}</div>}
     </div>
   );
 }
