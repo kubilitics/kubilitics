@@ -1080,6 +1080,14 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 		Mode:        topologyv2.ViewModeResource,
 		Resource:    kind + "/" + namespace + "/" + name,
 	}
+	// Parse hop depth from query (default 1 = direct connections only)
+	hops := 1
+	if d := r.URL.Query().Get("hops"); d != "" {
+		if v, err := strconv.Atoi(d); err == nil && v >= 1 && v <= 5 {
+			hops = v
+		}
+	}
+
 	v2Resp, buildErr := topologyv2builder.BuildTopology(ctx, v2Opts, client)
 	if buildErr == nil && v2Resp != nil && len(v2Resp.Nodes) > 0 {
 		// v2 succeeded — filter to connected subgraph around the target resource
@@ -1090,28 +1098,41 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 			targetID = kind + "/" + namespace + "/" + name
 		}
 		ri := topologyv2builder.BuildReverseIndex(v2Resp.Edges)
+
+		// BFS from target to N hops
 		connected := make(map[string]bool)
 		connected[targetID] = true
-		// Include direct dependencies and dependents (depth 2)
-		for _, dep := range ri.GetDependencies(targetID) {
-			connected[dep] = true
-		}
-		for _, dep := range ri.GetDependents(targetID) {
-			connected[dep] = true
-		}
-		// Second hop
-		for id := range connected {
-			for _, dep := range ri.GetDependencies(id) {
-				connected[dep] = true
+		frontier := []string{targetID}
+		for hop := 0; hop < hops; hop++ {
+			var nextFrontier []string
+			for _, id := range frontier {
+				for _, dep := range ri.GetDependencies(id) {
+					if !connected[dep] {
+						connected[dep] = true
+						nextFrontier = append(nextFrontier, dep)
+					}
+				}
+				for _, dep := range ri.GetDependents(id) {
+					if !connected[dep] {
+						connected[dep] = true
+						nextFrontier = append(nextFrontier, dep)
+					}
+				}
 			}
-			for _, dep := range ri.GetDependents(id) {
-				connected[dep] = true
-			}
+			frontier = nextFrontier
 		}
+
 		// Filter nodes and edges to connected set
 		var filteredNodes []topologyv2.TopologyNode
 		for _, n := range v2Resp.Nodes {
 			if connected[n.ID] {
+				// Mark the central node
+				if n.ID == targetID {
+					if n.Extra == nil {
+						n.Extra = make(map[string]interface{})
+					}
+					n.Extra["isCentral"] = true
+				}
 				filteredNodes = append(filteredNodes, n)
 			}
 		}
@@ -1123,6 +1144,10 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 		}
 		v2Resp.Nodes = filteredNodes
 		v2Resp.Edges = filteredEdges
+		v2Resp.Metadata.ResourceCount = len(filteredNodes)
+		v2Resp.Metadata.EdgeCount = len(filteredEdges)
+		v2Resp.Metadata.TotalNodes = len(v2Resp.Nodes)
+		v2Resp.Metadata.FocusResource = targetID
 		respondJSON(w, http.StatusOK, v2Resp)
 		return
 	}
