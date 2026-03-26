@@ -65,7 +65,7 @@ export function ResourceTopologyV2View({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [viewMode] = useState<ViewMode>("resource");
   const [presentationMode, setPresentationMode] = useState(false);
-  const [depth, setDepth] = useState(3);
+  const [depth, setDepth] = useState(1);
 
   const backendConfigured = isBackendConfigured();
   const hasClusterId = !!clusterId;
@@ -300,7 +300,7 @@ export function ResourceTopologyV2View({
             <input
               type="range"
               min={1}
-              max={5}
+              max={3}
               value={depth}
               onChange={(e) => setDepth(Number(e.target.value))}
               className="w-16 h-1 accent-blue-600"

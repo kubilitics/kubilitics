@@ -1351,10 +1351,41 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 		result.Metadata.TotalNodes = len(v2Resp.Nodes)
 		result.Metadata.FocusResource = targetID
 
-		// Truncation guard
-		if len(filteredNodes) > MaxTopologyNodes {
+		// Resource topology safety: if BFS returned too many nodes, redo with fewer hops
+		if len(filteredNodes) > 50 && hops > 1 {
+			// Too many nodes — redo BFS with hops=1
+			connected = make(map[string]bool)
+			connected[targetID] = true
+			for _, dep := range ri.GetDependencies(targetID) {
+				connected[dep] = true
+			}
+			for _, dep := range ri.GetDependents(targetID) {
+				connected[dep] = true
+			}
+			filteredNodes = nil
+			for _, n := range v2Resp.Nodes {
+				if connected[n.ID] {
+					if n.ID == targetID {
+						if n.Extra == nil {
+							n.Extra = make(map[string]interface{})
+						}
+						n.Extra["isCentral"] = true
+					}
+					filteredNodes = append(filteredNodes, n)
+				}
+			}
+			filteredEdges = nil
+			for _, e := range v2Resp.Edges {
+				if connected[e.Source] && connected[e.Target] {
+					filteredEdges = append(filteredEdges, e)
+				}
+			}
+			result.Nodes = filteredNodes
+			result.Edges = filteredEdges
+			result.Metadata.ResourceCount = len(filteredNodes)
+			result.Metadata.EdgeCount = len(filteredEdges)
 			result.Metadata.Truncated = true
-			result.Metadata.TruncateReason = fmt.Sprintf("response exceeded %d nodes; reduce hops parameter", MaxTopologyNodes)
+			result.Metadata.TruncateReason = "auto-reduced to 1 hop (too many nodes at requested depth)"
 		}
 
 		respondJSON(w, http.StatusOK, result)
