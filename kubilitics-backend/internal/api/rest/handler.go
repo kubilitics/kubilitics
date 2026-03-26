@@ -1002,7 +1002,65 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	// getClientFromRequest returns client (from kubeconfig or stored cluster); use it for resource topology
+	// Use v2 topology engine (24 matchers) for resource-scoped graph
+	clusterName := clusterID
+	if c, err := h.clusterService.GetCluster(ctx, clusterID); err == nil && c != nil && c.Name != "" {
+		clusterName = c.Name
+	}
+	v2Opts := topologyv2.Options{
+		ClusterID:   clusterID,
+		ClusterName: clusterName,
+		Mode:        topologyv2.ViewModeResource,
+		Resource:    kind + "/" + namespace + "/" + name,
+	}
+	v2Resp, buildErr := topologyv2builder.BuildTopology(ctx, v2Opts, client)
+	if buildErr == nil && v2Resp != nil && len(v2Resp.Nodes) > 0 {
+		// v2 succeeded — filter to connected subgraph around the target resource
+		var targetID string
+		if namespace == "" {
+			targetID = kind + "/" + name
+		} else {
+			targetID = kind + "/" + namespace + "/" + name
+		}
+		ri := topologyv2builder.BuildReverseIndex(v2Resp.Edges)
+		connected := make(map[string]bool)
+		connected[targetID] = true
+		// Include direct dependencies and dependents (depth 2)
+		for _, dep := range ri.GetDependencies(targetID) {
+			connected[dep] = true
+		}
+		for _, dep := range ri.GetDependents(targetID) {
+			connected[dep] = true
+		}
+		// Second hop
+		for id := range connected {
+			for _, dep := range ri.GetDependencies(id) {
+				connected[dep] = true
+			}
+			for _, dep := range ri.GetDependents(id) {
+				connected[dep] = true
+			}
+		}
+		// Filter nodes and edges to connected set
+		var filteredNodes []topologyv2.TopologyNode
+		for _, n := range v2Resp.Nodes {
+			if connected[n.ID] {
+				filteredNodes = append(filteredNodes, n)
+			}
+		}
+		var filteredEdges []topologyv2.TopologyEdge
+		for _, e := range v2Resp.Edges {
+			if connected[e.Source] && connected[e.Target] {
+				filteredEdges = append(filteredEdges, e)
+			}
+		}
+		v2Resp.Nodes = filteredNodes
+		v2Resp.Edges = filteredEdges
+		respondJSON(w, http.StatusOK, v2Resp)
+		return
+	}
+
+	// Fallback to v1 if v2 fails
 	graph, err := h.topologyService.GetResourceTopologyWithClient(ctx, client, clusterID, kind, namespace, name)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
