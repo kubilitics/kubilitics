@@ -6,17 +6,28 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/topology/v2"
 )
 
+// EdgeNeighbor pairs a neighbor node ID with the relationship category of
+// the edge that connects them. This enables edge-type-aware traversal.
+type EdgeNeighbor struct {
+	ID       string
+	Category string
+}
+
 // ReverseIndex provides bidirectional dependency lookups over topology edges.
 // Given a resource ID it can answer both "what does this resource depend on?"
 // (forward / dependencies) and "what depends on this resource?" (reverse / dependents).
+//
+// Edge-type awareness: each neighbor is tagged with the edge's relationship
+// category so callers can filter traversal by edge type (e.g. expand through
+// ownership/networking but not through containment/scheduling).
 type ReverseIndex struct {
-	// dependents maps a resourceID to the list of resources that depend on it.
-	// If edge A→B exists, then dependents[B] contains A.
-	dependents map[string][]string
+	// dependents maps a resourceID to neighbors that depend on it.
+	// If edge A→B exists, then dependents[B] contains {A, category}.
+	dependents map[string][]EdgeNeighbor
 
-	// dependencies maps a resourceID to the list of resources it depends on.
-	// If edge A→B exists, then dependencies[A] contains B.
-	dependencies map[string][]string
+	// dependencies maps a resourceID to its upstream dependencies.
+	// If edge A→B exists, then dependencies[A] contains {B, category}.
+	dependencies map[string][]EdgeNeighbor
 }
 
 // BuildReverseIndex constructs a ReverseIndex from a slice of TopologyEdge.
@@ -24,35 +35,58 @@ type ReverseIndex struct {
 // Therefore: dependents[Target] includes Source, dependencies[Source] includes Target.
 func BuildReverseIndex(edges []v2.TopologyEdge) *ReverseIndex {
 	ri := &ReverseIndex{
-		dependents:   make(map[string][]string),
-		dependencies: make(map[string][]string),
+		dependents:   make(map[string][]EdgeNeighbor),
+		dependencies: make(map[string][]EdgeNeighbor),
 	}
 
 	for i := range edges {
 		src := edges[i].Source
 		tgt := edges[i].Target
+		cat := edges[i].RelationshipCategory
 
-		ri.dependencies[src] = append(ri.dependencies[src], tgt)
-		ri.dependents[tgt] = append(ri.dependents[tgt], src)
+		ri.dependencies[src] = append(ri.dependencies[src], EdgeNeighbor{ID: tgt, Category: cat})
+		ri.dependents[tgt] = append(ri.dependents[tgt], EdgeNeighbor{ID: src, Category: cat})
 	}
 
 	return ri
 }
 
-// GetDependents returns the direct dependents of the given resource — i.e. all
-// resources that have an edge pointing TO resourceID. These are the consumers
-// that would be affected if resourceID were deleted.
+// GetDependents returns the IDs of direct dependents of the given resource.
 func (ri *ReverseIndex) GetDependents(resourceID string) []string {
+	if ri == nil {
+		return nil
+	}
+	neighbors := ri.dependents[resourceID]
+	ids := make([]string, len(neighbors))
+	for i, n := range neighbors {
+		ids[i] = n.ID
+	}
+	return ids
+}
+
+// GetDependencies returns the IDs of direct dependencies of the given resource.
+func (ri *ReverseIndex) GetDependencies(resourceID string) []string {
+	if ri == nil {
+		return nil
+	}
+	neighbors := ri.dependencies[resourceID]
+	ids := make([]string, len(neighbors))
+	for i, n := range neighbors {
+		ids[i] = n.ID
+	}
+	return ids
+}
+
+// GetDependentsEdgeAware returns dependents with their edge categories.
+func (ri *ReverseIndex) GetDependentsEdgeAware(resourceID string) []EdgeNeighbor {
 	if ri == nil {
 		return nil
 	}
 	return ri.dependents[resourceID]
 }
 
-// GetDependencies returns the direct dependencies of the given resource — i.e.
-// all resources that resourceID has an edge pointing TO. These are the upstream
-// resources that resourceID consumes.
-func (ri *ReverseIndex) GetDependencies(resourceID string) []string {
+// GetDependenciesEdgeAware returns dependencies with their edge categories.
+func (ri *ReverseIndex) GetDependenciesEdgeAware(resourceID string) []EdgeNeighbor {
 	if ri == nil {
 		return nil
 	}
@@ -90,12 +124,12 @@ func (ri *ReverseIndex) GetImpact(resourceID string, maxDepth int) []string {
 		}
 
 		for _, dep := range ri.dependents[item.id] {
-			if visited[dep] {
+			if visited[dep.ID] {
 				continue
 			}
-			visited[dep] = true
-			result = append(result, dep)
-			queue = append(queue, queueItem{id: dep, depth: item.depth + 1})
+			visited[dep.ID] = true
+			result = append(result, dep.ID)
+			queue = append(queue, queueItem{id: dep.ID, depth: item.depth + 1})
 		}
 	}
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -76,6 +77,30 @@ func topologyCacheSet(key string, data *topologyv2.TopologyResponse) {
 		data:      data,
 		expiresAt: time.Now().Add(topologyCacheTTL),
 	})
+}
+
+// expandableCategories defines edge categories that represent meaningful
+// resource relationships. Direct/Extended modes ONLY expand through these.
+var expandableCategories = map[string]bool{
+	"ownership":     true,
+	"networking":    true,
+	"configuration": true,
+	"storage":       true,
+	"rbac":          true,
+	"policy":        true,
+	"scaling":       true,
+	// "cluster" (Events) intentionally excluded — operational telemetry, not infrastructure
+}
+
+// hubKinds are shared infrastructure nodes that fan out to many unrelated
+// resources. They are included as leaf nodes but never expanded through.
+var hubKinds = map[string]bool{
+	"Namespace":     true,
+	"Node":          true,
+	"LimitRange":    true,
+	"ResourceQuota": true,
+	"PriorityClass": true,
+	"RuntimeClass":  true,
 }
 
 // Handler manages HTTP request handlers
@@ -1296,15 +1321,40 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 		}
 		ri := topologyv2builder.BuildReverseIndex(v2Resp.Edges)
 
+		// ── Edge-type-aware traversal ────────────────────────────────
+		//
+		// expandableCategories and hubKinds are defined at package level.
+		// Infra categories — included as leaf context but NOT traversed through.
+		// containment = Namespace edges, scheduling = Node/Affinity/Taint edges.
+		// These fan out to every resource in the namespace or node.
+		//   Pod → Namespace ✅ (show)    Namespace → other Pods ❌ (block)
+		//   Pod → Node ✅ (show)         Node → other Pods ❌ (block)
+		isExpandableEdge := func(category string) bool {
+			return expandableCategories[category]
+		}
+
+		// Hub kinds — additional safety net. Even if a hub node is reached
+		// via an expandable edge, we never expand THROUGH it because hubs
+		// connect to too many unrelated resources.
+		nodeKind := func(id string) string {
+			if idx := strings.IndexByte(id, '/'); idx > 0 {
+				return id[:idx]
+			}
+			return id
+		}
+		isHub := func(id string) bool { return hubKinds[nodeKind(id)] }
+
 		// Resource-focused traversal:
-		// Direct (depth=1): only what THIS resource depends on (outgoing edges)
-		// Extended (depth=2): expand Direct nodes' dependencies (one more level)
-		// Full (depth=3): full reachable graph from this resource (both directions)
+		// Direct   (depth=1): target + immediate meaningful connections (hubs as leaves)
+		// Extended (depth=2): expand non-hub Direct nodes via meaningful edges
+		// Full     (depth=3): unrestricted BFS — entire reachable graph
 		connected := make(map[string]bool)
 		connected[targetID] = true
 
 		if hops >= 3 {
-			// Full mode: BFS both directions — show entire reachable graph
+			// ── Full mode ────────────────────────────────────────────
+			// Unrestricted BFS — traverse ALL edge types, ALL directions.
+			// No hub filtering, no edge-type filtering.
 			frontier := []string{targetID}
 			visited := make(map[string]bool)
 			visited[targetID] = true
@@ -1329,34 +1379,76 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 				frontier = next
 			}
 		} else {
-			// Direct/Extended: only follow outgoing dependencies (focused, no siblings)
-			// Hop 1: THIS resource's direct dependencies
-			for _, dep := range ri.GetDependencies(targetID) {
-				connected[dep] = true
+			// ── Direct / Extended ────────────────────────────────────
+			//
+			// Hop 1: ALL direct connections of the target.
+			//   - Meaningful edges (ownership, networking, etc.): include neighbor
+			//   - Infra edges (containment, scheduling): include neighbor as LEAF
+			//   Both types are added to `connected`, but only non-hub,
+			//   expandable-edge neighbors are eligible for hop-2 expansion.
+			expandableHop1 := make([]string, 0) // nodes eligible for hop-2 expansion
+			for _, en := range ri.GetDependenciesEdgeAware(targetID) {
+				connected[en.ID] = true
+				if isExpandableEdge(en.Category) && !isHub(en.ID) {
+					expandableHop1 = append(expandableHop1, en.ID)
+				}
 			}
-			// Also include resources that directly select/target this resource
-			// (e.g., Service that selects this Pod) but NOT their other targets
-			for _, dep := range ri.GetDependents(targetID) {
-				connected[dep] = true
+			for _, en := range ri.GetDependentsEdgeAware(targetID) {
+				connected[en.ID] = true
+				if isExpandableEdge(en.Category) && !isHub(en.ID) {
+					expandableHop1 = append(expandableHop1, en.ID)
+				}
 			}
 
 			if hops >= 2 {
-				// Hop 2: expand each Direct node's connections (both directions)
-				// This captures: RS → Pod (dependency) AND Pod ← Service (dependent)
-				// For Deployment: RS's pods AND services that select those pods
-				directNodes := make([]string, 0)
-				for id := range connected {
-					if id != targetID {
-						directNodes = append(directNodes, id)
+				// Hop 2: expand ONLY non-hub hop-1 nodes that were reached
+				// via meaningful edges. For each, follow ONLY expandable edges.
+				// Hub neighbors discovered at hop 2 are included as leaves.
+				//
+				// This produces meaningful chains:
+				//   Deployment → RS → Pods (ownership)
+				//   Pods → Service → Endpoints → Ingress (networking)
+				//   Pods → PVC → PV (storage)
+				//   Pods → SA → RoleBinding → Role (rbac)
+				// Without cross-service leakage:
+				//   Pod → Namespace → other Pods ❌ (containment blocked)
+				//   Pod → Node → other Pods ❌ (scheduling blocked)
+				for _, id := range expandableHop1 {
+					for _, en := range ri.GetDependenciesEdgeAware(id) {
+						if isExpandableEdge(en.Category) {
+							connected[en.ID] = true
+						}
+					}
+					for _, en := range ri.GetDependentsEdgeAware(id) {
+						if isExpandableEdge(en.Category) {
+							connected[en.ID] = true
+						}
 					}
 				}
-				for _, id := range directNodes {
-					for _, dep := range ri.GetDependencies(id) {
-						connected[dep] = true
-					}
-					for _, dep := range ri.GetDependents(id) {
-						connected[dep] = true
-					}
+			}
+		}
+
+		// ── Orphan node detection ────────────────────────────────────
+		// The BFS produces a connected component by definition (everything
+		// reachable from targetID). If a node has no edges within the
+		// connected set, that indicates a missing edge in a relationship
+		// matcher — log it for debugging rather than silently removing it.
+		if len(connected) > 1 {
+			hasEdge := make(map[string]bool)
+			for _, e := range v2Resp.Edges {
+				if connected[e.Source] && connected[e.Target] {
+					hasEdge[e.Source] = true
+					hasEdge[e.Target] = true
+				}
+			}
+			for id := range connected {
+				if id != targetID && !hasEdge[id] {
+					slog.Warn("topology orphan node detected — likely missing edge in relationship matcher",
+						"orphanNode", id,
+						"focusResource", targetID,
+						"hops", hops,
+						"clusterID", clusterID,
+					)
 				}
 			}
 		}
@@ -1395,14 +1487,14 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 
 		// Resource topology safety: if BFS returned too many nodes, redo with fewer hops
 		if len(filteredNodes) > 50 && hops > 1 {
-			// Too many nodes — redo BFS with hops=1
+			// Too many nodes — redo BFS with hops=1 (hubs included as leaves)
 			connected = make(map[string]bool)
 			connected[targetID] = true
-			for _, dep := range ri.GetDependencies(targetID) {
-				connected[dep] = true
+			for _, en := range ri.GetDependenciesEdgeAware(targetID) {
+				connected[en.ID] = true
 			}
-			for _, dep := range ri.GetDependents(targetID) {
-				connected[dep] = true
+			for _, en := range ri.GetDependentsEdgeAware(targetID) {
+				connected[en.ID] = true
 			}
 			filteredNodes = nil
 			for _, n := range v2Resp.Nodes {

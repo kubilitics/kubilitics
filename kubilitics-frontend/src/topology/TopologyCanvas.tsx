@@ -37,6 +37,8 @@ export interface TopologyCanvasProps {
   fitViewRef?: React.MutableRefObject<(() => void) | null>;
   /** Ref that parent sets to trigger an export. Call with (format, filename). */
   exportRef?: React.MutableRefObject<((format: ExportFormat, filename: string) => void) | null>;
+  /** Ref that parent sets to center on a specific node by id */
+  centerOnNodeRef?: React.MutableRefObject<((nodeId: string) => void) | null>;
   /** Cluster name for export title */
   clusterName?: string;
   /** Namespace for export title */
@@ -62,6 +64,7 @@ function TopologyCanvasInner({
   onNodeExpand,
   fitViewRef,
   exportRef,
+  centerOnNodeRef,
   clusterName,
   namespace,
   onRequestSimplify,
@@ -102,20 +105,37 @@ function TopologyCanvasInner({
     setEdges(elkEdges);
   }, [elkNodes, elkEdges, setNodes, setEdges]);
 
-  // Auto-fit after layout — with smart zoom floor so nodes are readable
+  // Auto-fit after layout — first fit all, then center on focus node if one exists
   useEffect(() => {
     if (!isLayouting && elkNodes.length > 0) {
       const t = setTimeout(() => {
+        // First fit everything so the graph is visible
         reactFlow.fitView({
           padding: 0.06,
           duration: 350,
           maxZoom: 1.0,
           minZoom: fitViewMinZoom(nodeCount),
         });
+        // Then center on the focus/highlighted node if present
+        if (highlightNodeIds.length > 0) {
+          const focusId = highlightNodeIds[0];
+          setTimeout(() => {
+            const node = reactFlow.getNode(focusId);
+            if (node) {
+              const w = node.measured?.width ?? node.width ?? 260;
+              const h = node.measured?.height ?? node.height ?? 110;
+              reactFlow.setCenter(
+                node.position.x + w / 2,
+                node.position.y + h / 2,
+                { zoom: Math.max(0.5, reactFlow.getViewport().zoom), duration: 400 }
+              );
+            }
+          }, 400);
+        }
       }, 100);
       return () => clearTimeout(t);
     }
-  }, [isLayouting, elkNodes.length, reactFlow, nodeCount]);
+  }, [isLayouting, elkNodes.length, reactFlow, nodeCount, highlightNodeIds]);
 
   // Expose fitView to parent toolbar "Fit" button
   useEffect(() => {
@@ -124,6 +144,21 @@ function TopologyCanvasInner({
         reactFlow.fitView({ padding: 0.08, duration: 400, minZoom: fitViewMinZoom(nodeCount) });
     }
   }, [reactFlow, fitViewRef]);
+
+  // Expose centerOnNode to parent — zooms + pans to center a specific node
+  useEffect(() => {
+    if (centerOnNodeRef) {
+      centerOnNodeRef.current = (nodeId: string) => {
+        const node = reactFlow.getNode(nodeId);
+        if (!node) return;
+        const w = node.measured?.width ?? node.width ?? 260;
+        const h = node.measured?.height ?? node.height ?? 110;
+        const x = node.position.x + w / 2;
+        const y = node.position.y + h / 2;
+        reactFlow.setCenter(x, y, { zoom: 0.8, duration: 500 });
+      };
+    }
+  }, [reactFlow, centerOnNodeRef]);
 
   // ── Export flow ─────────────────────────────────────────────────────────────
   // Step 1: Parent calls exportRef → sets isExporting=true (renders ALL nodes)
@@ -278,11 +313,16 @@ function TopologyCanvasInner({
         ...n,
         className: [
           isSelected ? "ring-2 ring-blue-500 ring-offset-2 rounded-lg" : "",
-          isHighlighted ? "ring-2 ring-amber-400 ring-offset-1 rounded-lg" : "",
+          // Central/focus node: prominent ring + scale so it's always visible
+          isHighlighted && !isSelected
+            ? "ring-[3px] ring-blue-500 ring-offset-2 rounded-lg shadow-[0_0_16px_rgba(59,130,246,0.5)] scale-[1.03]"
+            : "",
           isInErrorChain ? "ring-1 ring-red-400/60 rounded-lg" : "",
         ].filter(Boolean).join(" "),
         style: {
           ...n.style,
+          // Central node gets a z-index boost so it sits on top
+          ...(isHighlighted && !isSelected ? { zIndex: 100 } : {}),
           ...(isDimmed ? { opacity: 0.2, filter: "saturate(0.3)", transition: "opacity 0.15s, filter 0.15s" } : { transition: "opacity 0.15s, filter 0.15s" }),
         },
       };

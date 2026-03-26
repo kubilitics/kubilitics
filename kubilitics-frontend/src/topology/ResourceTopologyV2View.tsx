@@ -6,19 +6,14 @@
  * and renders with the v2 React Flow canvas + detail panel.
  */
 import { useState, useMemo, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
-  Network, Loader2, AlertCircle, RefreshCw, ZoomIn, ZoomOut, Maximize,
+  Network, Loader2, AlertCircle, RefreshCw, Maximize, Crosshair,
   FileJson, FileImage, Layers, ExternalLink, ChevronDown, Map as MapIcon, Monitor, X, GitBranch,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -67,12 +62,12 @@ export function ResourceTopologyV2View({
   const activeClusterName = useClusterStore((s) => s.activeCluster?.name);
   const fitViewRef = useRef<(() => void) | null>(null);
   const exportCanvasRef = useRef<((format: ExportFormat, filename: string) => void) | null>(null);
+  const centerOnNodeRef = useRef<((nodeId: string) => void) | null>(null);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [viewMode] = useState<ViewMode>("resource");
   const [presentationMode, setPresentationMode] = useState(false);
   const [viewLevel, setViewLevel] = useState<'direct' | 'extended' | 'full'>('direct');
-  const depth = viewLevel === 'direct' ? 1 : viewLevel === 'extended' ? 2 : 3;
   const fullDialogFitViewRef = useRef<(() => void) | null>(null);
   const fullDialogExportRef = useRef<((format: ExportFormat, filename: string) => void) | null>(null);
 
@@ -86,13 +81,27 @@ export function ResourceTopologyV2View({
     resourceTopologyKinds?.length ? resourceTopologyKinds : RESOURCE_TOPOLOGY_SUPPORTED_KINDS
   ).join(", ");
 
-  // Fetch resource-scoped topology (same hook as old component)
+  const canFetch = backendConfigured && hasClusterId && hasKind && hasName && topologySupported;
+
+  // Main view: Direct or Extended
   const { graph, isLoading, isFetching, error, refetch } = useResourceTopology({
     kind,
     namespace,
     name,
-    enabled: backendConfigured && hasClusterId && hasKind && hasName && topologySupported,
-    depth,
+    enabled: canFetch,
+    depth: viewLevel === 'extended' ? 2 : 1,
+  });
+
+  // Full overlay: separate fetch with depth=3, only when Full mode is active
+  const {
+    graph: fullGraph,
+    isLoading: fullIsLoading,
+  } = useResourceTopology({
+    kind,
+    namespace,
+    name,
+    enabled: canFetch && viewLevel === 'full',
+    depth: 3,
   });
 
   // Transform engine graph to v2 format
@@ -101,9 +110,29 @@ export function ResourceTopologyV2View({
     const response = transformGraph(graph, clusterId ?? undefined);
     response.metadata.mode = "resource";
     if (namespace) response.metadata.namespace = namespace;
+    // Set focusResource for ELK layout anchoring
+    const focusId = response.nodes.find(
+      (n) => n.kind === kind && n.name === name && (!namespace || n.namespace === namespace)
+    )?.id;
+    if (focusId) response.metadata.focusResource = focusId;
     return response;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, namespace]);
+  }, [graph, namespace, kind, name]);
+
+  // Full mode topology — separate from main view
+  const fullTopology = useMemo<TopologyResponse | null>(() => {
+    if (!fullGraph) return null;
+    const response = transformGraph(fullGraph, clusterId ?? undefined);
+    response.metadata.mode = "resource";
+    if (namespace) response.metadata.namespace = namespace;
+    // Set focusResource for ELK layout anchoring
+    const focusId = response.nodes.find(
+      (n) => n.kind === kind && n.name === name && (!namespace || n.namespace === namespace)
+    )?.id;
+    if (focusId) response.metadata.focusResource = focusId;
+    return response;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullGraph, namespace, kind, name]);
 
   // Highlight the focused resource node
   const highlightNodeIds = useMemo(() => {
@@ -123,6 +152,12 @@ export function ResourceTopologyV2View({
   const handleFitView = useCallback(() => {
     fitViewRef.current?.();
   }, []);
+
+  // Center on the focus resource node
+  const handleCenterOnFocus = useCallback(() => {
+    if (!highlightNodeIds.length) return;
+    centerOnNodeRef.current?.(highlightNodeIds[0]);
+  }, [highlightNodeIds]);
 
   // Exports
   const exportCtx: ExportContext = useMemo(() => ({
@@ -293,6 +328,18 @@ export function ResourceTopologyV2View({
             Fit
           </Button>
 
+          {/* Center on Focus Resource */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCenterOnFocus}
+            className="h-8 px-3 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+            title={`Center on ${name}`}
+          >
+            <Crosshair className="h-3.5 w-3.5 mr-1.5" />
+            Center
+          </Button>
+
           {/* Refresh */}
           <Button
             variant="ghost"
@@ -356,6 +403,7 @@ export function ResourceTopologyV2View({
             onNodeExpand={handleNodeExpand}
             exportRef={exportCanvasRef}
             fitViewRef={fitViewRef}
+            centerOnNodeRef={centerOnNodeRef}
             clusterName={activeClusterName ?? undefined}
             namespace={namespace ?? undefined}
           />
@@ -391,57 +439,67 @@ export function ResourceTopologyV2View({
         )}
       </div>
 
-      {/* Full Topology Dialog */}
-      {viewLevel === 'full' && (
-        <Dialog open onOpenChange={() => setViewLevel('extended')}>
-          <DialogContent className="max-w-[95vw] h-[90vh] p-0" hideCloseButton>
-            <DialogHeader className="px-4 pt-4 pb-2 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <DialogTitle className="flex items-center gap-2 text-sm">
-                  <Layers className="h-4 w-4 text-blue-600" />
-                  Full Topology — {name} ({kind})
-                </DialogTitle>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => fullDialogFitViewRef.current?.()}
-                    className="h-7 px-2 text-xs"
-                  >
-                    <Maximize className="h-3.5 w-3.5 mr-1" />
-                    Fit
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setViewLevel('extended')}
-                    className="h-7 px-2 text-xs"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
-            </DialogHeader>
-            <div className="h-[calc(90vh-4rem)] relative">
-              <TopologyCanvas
-                topology={topology}
-                selectedNodeId={selectedNodeId}
-                highlightNodeIds={highlightNodeIds}
-                viewMode={viewMode}
-                onSelectNode={setSelectedNodeId}
-                fitViewRef={fullDialogFitViewRef}
-                exportRef={fullDialogExportRef}
-                clusterName={activeClusterName ?? undefined}
-                namespace={namespace ?? undefined}
-              />
-              <div className="absolute bottom-4 right-4 z-50 bg-gray-100 border border-gray-200 rounded-md px-2.5 py-1">
-                <span className="text-xs font-medium text-gray-700">
-                  {topology.nodes.length} Resources &middot; {topology.edges.length} Connections
-                </span>
-              </div>
+      {/* Full Topology — portal to body so it escapes any parent overflow/stacking.
+           Sits below the app header (h-20 = 5rem), covers sidebar + content. */}
+      {viewLevel === 'full' && createPortal(
+        <div className="fixed inset-0 pt-20 z-[200] flex flex-col bg-white dark:bg-slate-950">
+          {/* Header bar */}
+          <div className="flex items-center justify-between px-5 py-2.5 border-b border-gray-200 bg-white dark:bg-slate-900 shrink-0">
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+              <Layers className="h-4 w-4 text-blue-600" />
+              Full Topology — {name} ({kind})
             </div>
-          </DialogContent>
-        </Dialog>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => fullDialogFitViewRef.current?.()}
+                className="h-7 px-2 text-xs"
+              >
+                <Maximize className="h-3.5 w-3.5 mr-1" />
+                Fit
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setViewLevel('extended')}
+                className="h-7 px-2 text-xs"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+          {/* Canvas fills remaining space */}
+          <div className="flex-1 relative min-h-0">
+            {fullIsLoading || !fullTopology ? (
+              <div className="flex flex-col items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-4" />
+                <p className="text-sm text-muted-foreground">Loading full topology...</p>
+              </div>
+            ) : (
+              <>
+                <TopologyCanvas
+                  topology={fullTopology}
+                  selectedNodeId={selectedNodeId}
+                  highlightNodeIds={highlightNodeIds}
+                  viewMode={viewMode}
+                  onSelectNode={setSelectedNodeId}
+                  fitViewRef={fullDialogFitViewRef}
+                  exportRef={fullDialogExportRef}
+                  centerOnNodeRef={centerOnNodeRef}
+                  clusterName={activeClusterName ?? undefined}
+                  namespace={namespace ?? undefined}
+                />
+                <div className="absolute bottom-4 right-4 z-50 bg-gray-100 border border-gray-200 rounded-md px-2.5 py-1">
+                  <span className="text-xs font-medium text-gray-700">
+                    {fullTopology.nodes.length} Resources &middot; {fullTopology.edges.length} Connections
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
