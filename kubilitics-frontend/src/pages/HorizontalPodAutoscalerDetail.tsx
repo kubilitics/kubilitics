@@ -1,35 +1,23 @@
-import { useState, useCallback, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Scale, Clock, Download, Trash2, TrendingUp, TrendingDown, Server, Cpu, Network, GitCompare, Target, Activity, Zap } from 'lucide-react';
+import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Scale, Clock, TrendingUp, TrendingDown, Server, Cpu, Target, Activity, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/sonner';
-import { downloadResourceJson } from '@/lib/exportUtils';
 import {
-  ResourceDetailLayout,
+  GenericResourceDetail,
   SectionCard,
   DetailRow,
-  YamlViewer,
-  EventsSection,
-  ActionsSection,
-  DeleteConfirmDialog,
   LabelList,
   AnnotationList,
-  ResourceTopologyView,
-  ResourceComparisonView,
-  type ResourceStatus,
-  type YamlVersion,
+  type CustomTab,
+  type ResourceContext,
 } from '@/components/resources';
-import { useResourceDetail, useResourceEvents, type EventInfo } from '@/hooks/useK8sResourceDetail';
-import { useDeleteK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
-import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
-import { normalizeKindForTopology, getDetailPath } from '@/utils/resourceKindMapper';
-import { useConnectionStatus } from '@/hooks/useConnectionStatus';
-import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
-import { useActiveClusterId } from '@/hooks/useActiveClusterId';
+import { useResourceEvents, type EventInfo } from '@/hooks/useK8sResourceDetail';
+import { type KubernetesResource } from '@/hooks/useKubernetes';
+import { getDetailPath } from '@/utils/resourceKindMapper';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
 
 interface HPAResource extends KubernetesResource {
   spec?: {
@@ -52,7 +40,7 @@ interface HPAResource extends KubernetesResource {
   };
 }
 
-/** Parse scaling-related events into direction, old→new, timestamp. */
+/** Parse scaling-related events into direction, old to new, timestamp. */
 function parseScalingEvents(events: EventInfo[]): Array<{ direction: 'up' | 'down'; from: number | null; to: number; time: string; reason: string; message: string }> {
   const scaling: Array<{ direction: 'up' | 'down'; from: number | null; to: number; time: string; reason: string; message: string }> = [];
   const scaleRe = /scale|replica|size|rescale/i;
@@ -67,54 +55,25 @@ function parseScalingEvents(events: EventInfo[]): Array<{ direction: 'up' | 'dow
     if (fromTo) {
       const from = parseInt(fromTo[1], 10);
       const to = parseInt(fromTo[2], 10);
-      scaling.push({
-        direction: to >= from ? 'up' : 'down',
-        from,
-        to,
-        time: e.time,
-        reason: e.reason,
-        message: e.message,
-      });
+      scaling.push({ direction: to >= from ? 'up' : 'down', from, to, time: e.time, reason: e.reason, message: e.message });
     } else if (newSize) {
       const to = parseInt(newSize[1], 10);
-      scaling.push({
-        direction: isUp ? 'up' : 'down',
-        from: null,
-        to,
-        time: e.time,
-        reason: e.reason,
-        message: e.message,
-      });
+      scaling.push({ direction: isUp ? 'up' : 'down', from: null, to, time: e.time, reason: e.reason, message: e.message });
     }
   }
   return scaling;
 }
 
-export default function HorizontalPodAutoscalerDetail() {
-  const { namespace, name } = useParams<{ namespace: string; name: string }>();
+// ---------------------------------------------------------------------------
+// Custom tab components
+// ---------------------------------------------------------------------------
+
+function OverviewTab({ resource }: ResourceContext<HPAResource>) {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview');
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const { isConnected } = useConnectionStatus();
-  const clusterId = useActiveClusterId();
-  const backendBaseUrl = useBackendConfigStore((s) => s.backendBaseUrl);
-  const baseUrl = getEffectiveBackendBaseUrl(backendBaseUrl);
-  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
-
-  const { resource, isLoading, error: resourceError, age, yaml, refetch } = useResourceDetail<HPAResource>(
-    'horizontalpodautoscalers',
-    name ?? undefined,
-    namespace ?? undefined,
-    undefined as unknown as HPAResource
-  );
-  const { events, refetch: refetchEvents } = useResourceEvents('HorizontalPodAutoscaler', namespace ?? undefined, name ?? undefined);
-  const deleteResource = useDeleteK8sResource('horizontalpodautoscalers');
-
-  const hpaName = resource?.metadata?.name ?? name ?? '';
-  const hpaNamespace = resource?.metadata?.namespace ?? namespace ?? '';
   const ref = resource?.spec?.scaleTargetRef;
   const targetKind = ref?.kind ?? '–';
   const targetName = ref?.name ?? '–';
+  const hpaNamespace = resource?.metadata?.namespace ?? '';
   const minReplicas = resource?.spec?.minReplicas ?? 1;
   const maxReplicas = resource?.spec?.maxReplicas ?? 1;
   const currentReplicas = resource?.status?.currentReplicas ?? 0;
@@ -125,11 +84,6 @@ export default function HorizontalPodAutoscalerDetail() {
   const labels = resource?.metadata?.labels ?? {};
   const annotations = resource?.metadata?.annotations ?? {};
 
-  const cpuTarget = metrics.find((m) => m.resource?.name === 'cpu')?.resource?.target?.averageUtilization;
-  const cpuCurrent = currentMetrics.find((m) => m.resource?.name === 'cpu')?.resource?.current?.averageUtilization;
-
-  const scalingEvents = useMemo(() => parseScalingEvents(events), [events]);
-
   const currentMetricsWithTarget = useMemo(() => {
     return currentMetrics.map((cm) => {
       const name = cm.resource?.name ?? 'resource';
@@ -139,284 +93,188 @@ export default function HorizontalPodAutoscalerDetail() {
     });
   }, [currentMetrics, metrics]);
 
-  const handleDownloadYaml = useCallback(() => {
-    if (!yaml) return;
-    const blob = new Blob([yaml], { type: 'application/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${hpaName || 'hpa'}.yaml`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  }, [yaml, hpaName]);
-
-  const handleDownloadJson = useCallback(() => {
-    if (!resource) return;
-    downloadResourceJson(resource, `${hpaName || 'hpa'}.json`);
-    toast.success('JSON downloaded');
-  }, [resource, hpaName]);
-
-  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
-
-  const statusCards = [
-    { label: 'Current / Desired', value: `${currentReplicas} / ${desiredReplicas}`, icon: Server, iconColor: 'primary' as const },
-    { label: 'Min / Max', value: `${minReplicas} / ${maxReplicas}`, icon: Scale, iconColor: 'muted' as const },
-    { label: 'CPU', value: cpuCurrent != null && cpuTarget != null ? `${cpuCurrent}% / ${cpuTarget}%` : '–', icon: Cpu, iconColor: 'info' as const },
-    { label: 'Age', value: age, icon: Clock, iconColor: 'muted' as const },
-  ];
-
   const targetLink = () => getDetailPath(targetKind, targetName, hpaNamespace) ?? '#';
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-20 w-full" />
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-24" />
-          ))}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    );
-  }
-
-  if (isConnected && (resourceError || !resource?.metadata?.name)) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-        <Scale className="h-12 w-12 text-muted-foreground" />
-        <p className="text-lg font-medium">HPA not found</p>
-        <p className="text-sm text-muted-foreground">
-          {namespace && name ? `No HPA "${name}" in namespace "${namespace}".` : 'Missing namespace or name.'}
-        </p>
-        <Button variant="outline" onClick={() => navigate('/horizontalpodautoscalers')}>Back to HPAs</Button>
-      </div>
-    );
-  }
-
-  const tabs = [
-    {
-      id: 'overview',
-      label: 'Overview',
-      content: (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <SectionCard icon={Target} title="Scale Target">
-              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                <DetailRow label="Reference" value={
-                  targetName !== '–' ? (
-                    <Button variant="link" className="p-0 h-auto font-mono text-primary" onClick={() => navigate(targetLink())}>{targetKind}/{targetName}</Button>
-                  ) : '–'
-                } />
-                <DetailRow label="Min Replicas" value={<span className="font-mono">{minReplicas}</span>} />
-                <DetailRow label="Max Replicas" value={<span className="font-mono">{maxReplicas}</span>} />
-                <DetailRow label="Desired Replicas" value={<span className="font-mono">{desiredReplicas}</span>} />
-              </div>
-              <div className="mt-4 space-y-3">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="font-mono">Min {minReplicas}</span>
-                  <span className="font-mono font-medium text-foreground">Current {currentReplicas}</span>
-                  <span className="font-mono">Max {maxReplicas}</span>
-                </div>
-                <div className="relative h-8 rounded-full bg-muted overflow-visible" role="slider" aria-valuemin={minReplicas} aria-valuemax={maxReplicas} aria-valuenow={currentReplicas}>
-                  <div
-                    className="absolute top-1/2 h-10 w-1 rounded-full bg-primary shadow-md border-2 border-background"
-                    style={{
-                      left: maxReplicas > minReplicas
-                        ? `${Math.min(100, Math.max(0, ((currentReplicas - minReplicas) / (maxReplicas - minReplicas)) * 100))}%`
-                        : '50%',
-                      transform: 'translateY(-50%) translateX(-50%)',
-                    }}
-                  />
-                </div>
-              </div>
-          </SectionCard>
-          <SectionCard icon={Cpu} title="Current Metrics">
-              {currentMetricsWithTarget.length === 0 ? (
-                <p className="text-muted-foreground text-sm">No current metrics reported yet.</p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40">
-                      <TableHead className="font-medium">Metric</TableHead>
-                      <TableHead className="font-medium">Current</TableHead>
-                      <TableHead className="font-medium">Target</TableHead>
-                      <TableHead className="font-medium min-w-[120px]">Usage</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {currentMetricsWithTarget.map((row, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="font-medium capitalize">{row.name}</TableCell>
-                        <TableCell className="font-mono">{row.current != null ? `${row.current}%` : '–'}</TableCell>
-                        <TableCell className="font-mono">{row.target != null ? `${row.target}%` : '–'}</TableCell>
-                        <TableCell>
-                          {row.target != null && row.current != null ? (
-                            <Progress value={Math.min(Math.round((row.current / row.target) * 100), 100)} className="h-2" />
-                          ) : (
-                            <span className="text-muted-foreground text-sm">–</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-          </SectionCard>
-          <SectionCard icon={Activity} title="Conditions" className="lg:col-span-2">
-              {conditions.length === 0 ? (
-                <p className="text-muted-foreground text-sm">No conditions.</p>
-              ) : (
-                <div className="space-y-2">
-                  {conditions.map((c, i) => (
-                    <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                      <span className="font-medium">{c.type}</span>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={c.status === 'True' ? 'default' : 'secondary'}>{c.status}</Badge>
-                        {c.reason && <span className="text-sm text-muted-foreground">{c.reason}</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-          </SectionCard>
-          <div className="lg:col-span-2">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <LabelList labels={labels} />
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <SectionCard icon={Target} title="Scale Target">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+            <DetailRow label="Reference" value={
+              targetName !== '–' ? (
+                <Button variant="link" className="p-0 h-auto font-mono text-primary" onClick={() => navigate(targetLink())}>{targetKind}/{targetName}</Button>
+              ) : '–'
+            } />
+            <DetailRow label="Min Replicas" value={<span className="font-mono">{minReplicas}</span>} />
+            <DetailRow label="Max Replicas" value={<span className="font-mono">{maxReplicas}</span>} />
+            <DetailRow label="Desired Replicas" value={<span className="font-mono">{desiredReplicas}</span>} />
+          </div>
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="font-mono">Min {minReplicas}</span>
+              <span className="font-mono font-medium text-foreground">Current {currentReplicas}</span>
+              <span className="font-mono">Max {maxReplicas}</span>
+            </div>
+            <div className="relative h-8 rounded-full bg-muted overflow-visible" role="slider" aria-valuemin={minReplicas} aria-valuemax={maxReplicas} aria-valuenow={currentReplicas}>
+              <div
+                className="absolute top-1/2 h-10 w-1 rounded-full bg-primary shadow-md border-2 border-background"
+                style={{
+                  left: maxReplicas > minReplicas
+                    ? `${Math.min(100, Math.max(0, ((currentReplicas - minReplicas) / (maxReplicas - minReplicas)) * 100))}%`
+                    : '50%',
+                  transform: 'translateY(-50%) translateX(-50%)',
+                }}
+              />
             </div>
           </div>
-          <div className="lg:col-span-2">
-            <AnnotationList annotations={annotations} />
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'events',
-      label: 'Events',
-      content: (
-        <div className="space-y-6">
-          {scalingEvents.length > 0 && (
-            <SectionCard icon={TrendingUp} title="Scaling Events">
-                <div className="space-y-3">
-                  {scalingEvents.map((ev, i) => (
-                    <div key={i} className="flex items-center gap-4 p-3 rounded-lg bg-muted/50">
-                      {ev.direction === 'up' ? (
-                        <TrendingUp className="h-5 w-5 text-emerald-600 shrink-0" aria-hidden />
+      </SectionCard>
+      <SectionCard icon={Cpu} title="Current Metrics">
+          {currentMetricsWithTarget.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No current metrics reported yet.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/40">
+                  <TableHead className="font-medium">Metric</TableHead>
+                  <TableHead className="font-medium">Current</TableHead>
+                  <TableHead className="font-medium">Target</TableHead>
+                  <TableHead className="font-medium min-w-[120px]">Usage</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {currentMetricsWithTarget.map((row, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="font-medium capitalize">{row.name}</TableCell>
+                    <TableCell className="font-mono">{row.current != null ? `${row.current}%` : '–'}</TableCell>
+                    <TableCell className="font-mono">{row.target != null ? `${row.target}%` : '–'}</TableCell>
+                    <TableCell>
+                      {row.target != null && row.current != null ? (
+                        <Progress value={Math.min(Math.round((row.current / row.target) * 100), 100)} className="h-2" />
                       ) : (
-                        <TrendingDown className="h-5 w-5 text-amber-600 shrink-0" aria-hidden />
+                        <span className="text-muted-foreground text-sm">–</span>
                       )}
-                      <div className="flex-1 min-w-0">
-                        <span className="font-mono text-sm font-medium">
-                          {ev.from != null ? `${ev.from} → ${ev.to}` : `→ ${ev.to}`}
-                        </span>
-                        <span className="text-muted-foreground text-sm ml-2">{ev.time}</span>
-                        {ev.reason && <Badge variant="secondary" className="ml-2 text-xs">{ev.reason}</Badge>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-            </SectionCard>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
-          <EventsSection events={events} />
+      </SectionCard>
+      <SectionCard icon={Activity} title="Conditions" className="lg:col-span-2">
+          {conditions.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No conditions.</p>
+          ) : (
+            <div className="space-y-2">
+              {conditions.map((c, i) => (
+                <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                  <span className="font-medium">{c.type}</span>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={c.status === 'True' ? 'default' : 'secondary'}>{c.status}</Badge>
+                    {c.reason && <span className="text-sm text-muted-foreground">{c.reason}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+      </SectionCard>
+      <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <LabelList labels={labels} />
         </div>
-      ),
-    },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={hpaName} /> },
-    {
-      id: 'compare',
-      label: 'Compare',
-      icon: GitCompare,
-      content: (
-        <ResourceComparisonView
-          resourceType="horizontalpodautoscalers"
-          resourceKind="HorizontalPodAutoscaler"
-          namespace={namespace}
-          initialSelectedResources={namespace && name ? [`${namespace}/${name}`] : [name || '']}
-          clusterId={clusterId ?? undefined}
-          backendBaseUrl={baseUrl ?? ''}
-          isConnected={isConnected}
-          embedded
-        />
-      ),
-    },
-    {
-      id: 'topology',
-      label: 'Topology',
-      icon: Network,
-      content: (
-        <ResourceTopologyView
-          kind={normalizeKindForTopology('HorizontalPodAutoscaler')}
-          namespace={namespace ?? ''}
-          name={name ?? ''}
-          sourceResourceType="HorizontalPodAutoscaler"
-          sourceResourceName={resource?.metadata?.name ?? name ?? ''}
-        />
-      ),
-    },
-    {
-      id: 'blast-radius',
-      label: 'Blast Radius',
-      icon: Zap,
-      content: (
-        <BlastRadiusTab
-          kind={normalizeKindForTopology('HorizontalPodAutoscaler')}
-          namespace={namespace || resource?.metadata?.namespace || ''}
-          name={name || resource?.metadata?.name || ''}
-        />
-      ),
-    },
-    {
-      id: 'actions',
-      label: 'Actions',
-      content: (
-        <ActionsSection
-          actions={[
-            { icon: TrendingUp, label: 'Edit Scaling', description: 'Modify min/max replicas and metrics', onClick: () => toast.info('Edit not implemented') },
-            { icon: Download, label: 'Download YAML', description: 'Export HPA definition', onClick: handleDownloadYaml },
-            { icon: Download, label: 'Export as JSON', description: 'Export HPA as JSON', onClick: handleDownloadJson },
-            { icon: Trash2, label: 'Delete HPA', description: 'Remove this autoscaler', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
-          ]}
-        />
-      ),
-    },
-  ];
+      </div>
+      <div className="lg:col-span-2">
+        <AnnotationList annotations={annotations} />
+      </div>
+    </div>
+  );
+}
 
-  const status: ResourceStatus = currentReplicas === desiredReplicas ? 'Healthy' : 'Warning';
+function ScalingHistoryTab({ resource, namespace }: ResourceContext<HPAResource>) {
+  const hpaName = resource?.metadata?.name ?? '';
+  const ns = resource?.metadata?.namespace ?? namespace;
+  const { events } = useResourceEvents('HorizontalPodAutoscaler', ns ?? undefined, hpaName ?? undefined);
+  const scalingEvents = useMemo(() => parseScalingEvents(events), [events]);
+
+  if (scalingEvents.length === 0) {
+    return <p className="text-muted-foreground text-sm">No scaling events recorded.</p>;
+  }
 
   return (
-    <>
-      <ResourceDetailLayout
-        resourceType="HorizontalPodAutoscaler"
-        resourceIcon={Scale}
-        name={hpaName}
-        namespace={hpaNamespace}
-        status={status}
-        backLink="/horizontalpodautoscalers"
-        backLabel="HPAs"
-        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {age}</span>}
-        actions={[
-          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
-          { label: 'Export as JSON', icon: Download, variant: 'outline', onClick: handleDownloadJson },
-          { label: 'Edit', icon: TrendingUp, variant: 'outline', onClick: () => toast.info('Edit not implemented') },
-          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
-        ]}
-        statusCards={statusCards}
-        tabs={tabs}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-      />
-      <DeleteConfirmDialog
-        open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
-        resourceType="HorizontalPodAutoscaler"
-        resourceName={hpaName}
-        namespace={hpaNamespace}
-        onConfirm={async () => {
-          await deleteResource.mutateAsync({ name: hpaName, namespace: hpaNamespace });
-          navigate('/horizontalpodautoscalers');
-        }}
-        requireNameConfirmation
-      />
-    </>
+    <SectionCard icon={TrendingUp} title="Scaling Events">
+        <div className="space-y-3">
+          {scalingEvents.map((ev, i) => (
+            <div key={i} className="flex items-center gap-4 p-3 rounded-lg bg-muted/50">
+              {ev.direction === 'up' ? (
+                <TrendingUp className="h-5 w-5 text-emerald-600 shrink-0" aria-hidden />
+              ) : (
+                <TrendingDown className="h-5 w-5 text-amber-600 shrink-0" aria-hidden />
+              )}
+              <div className="flex-1 min-w-0">
+                <span className="font-mono text-sm font-medium">
+                  {ev.from != null ? `${ev.from} → ${ev.to}` : `→ ${ev.to}`}
+                </span>
+                <span className="text-muted-foreground text-sm ml-2">{ev.time}</span>
+                {ev.reason && <Badge variant="secondary" className="ml-2 text-xs">{ev.reason}</Badge>}
+              </div>
+            </div>
+          ))}
+        </div>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+export default function HorizontalPodAutoscalerDetail() {
+  const customTabs: CustomTab[] = [
+    { id: 'overview', label: 'Overview', render: (ctx) => <OverviewTab {...ctx} /> },
+    { id: 'scaling-events', label: 'Scaling History', render: (ctx) => <ScalingHistoryTab {...ctx} /> },
+  ];
+
+  return (
+    <GenericResourceDetail<HPAResource>
+      resourceType="horizontalpodautoscalers"
+      kind="HorizontalPodAutoscaler"
+      pluralLabel="HPAs"
+      listPath="/horizontalpodautoscalers"
+      resourceIcon={Scale}
+      loadingCardCount={4}
+      customTabs={customTabs}
+      deriveStatus={(resource) => {
+        const currentReplicas = resource?.status?.currentReplicas ?? 0;
+        const desiredReplicas = resource?.status?.desiredReplicas ?? currentReplicas;
+        return currentReplicas === desiredReplicas ? 'Healthy' : 'Warning';
+      }}
+      headerMetadata={(ctx) => (
+        <span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground">
+          <Clock className="h-3.5 w-3.5" />Created {ctx.age}
+        </span>
+      )}
+      extraHeaderActions={(ctx) => [
+        { label: 'Edit', icon: TrendingUp, variant: 'outline', onClick: () => toast.info('Edit not implemented') },
+      ]}
+      extraActionItems={() => [
+        { icon: TrendingUp, label: 'Edit Scaling', description: 'Modify min/max replicas and metrics', onClick: () => toast.info('Edit not implemented') },
+      ]}
+      buildStatusCards={(ctx) => {
+        const resource = ctx.resource;
+        const minReplicas = resource?.spec?.minReplicas ?? 1;
+        const maxReplicas = resource?.spec?.maxReplicas ?? 1;
+        const currentReplicas = resource?.status?.currentReplicas ?? 0;
+        const desiredReplicas = resource?.status?.desiredReplicas ?? currentReplicas;
+        const metrics = resource?.spec?.metrics ?? [];
+        const currentMetrics = resource?.status?.currentMetrics ?? [];
+        const cpuTarget = metrics.find((m) => m.resource?.name === 'cpu')?.resource?.target?.averageUtilization;
+        const cpuCurrent = currentMetrics.find((m) => m.resource?.name === 'cpu')?.resource?.current?.averageUtilization;
+
+        return [
+          { label: 'Current / Desired', value: `${currentReplicas} / ${desiredReplicas}`, icon: Server, iconColor: 'primary' as const },
+          { label: 'Min / Max', value: `${minReplicas} / ${maxReplicas}`, icon: Scale, iconColor: 'muted' as const },
+          { label: 'CPU', value: cpuCurrent != null && cpuTarget != null ? `${cpuCurrent}% / ${cpuTarget}%` : '–', icon: Cpu, iconColor: 'info' as const },
+          { label: 'Age', value: ctx.age, icon: Clock, iconColor: 'muted' as const },
+        ];
+      }}
+    />
   );
 }

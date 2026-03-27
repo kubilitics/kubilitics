@@ -9,6 +9,7 @@ export { RolloutActionsDialog, type RolloutRevision, type RolloutActionsDialogPr
 export { YamlEditorDialog, type YamlEditorDialogProps } from './YamlEditorDialog';
 export { MetricsDashboard, type PodResourceForMetrics } from './MetricsDashboard';
 export { ResourceDetailLayout, type ResourceDetailLayoutProps } from './ResourceDetailLayout';
+export { GenericResourceDetail, type GenericResourceDetailProps, type CustomTab, type ResourceContext, type ActionItemConfig } from './GenericResourceDetail';
 export { ResourceHeader, type ResourceHeaderProps, type ResourceAction, type ResourceStatus } from './ResourceHeader';
 export { ContainersSection, type ContainerInfo, type ContainersSectionProps } from './ContainersSection';
 export { ResourceList, type Column, type ResourceListProps, type ResourceListPagination } from './ResourceList';

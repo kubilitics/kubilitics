@@ -1,40 +1,27 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueries } from '@tanstack/react-query';
-import { Server, Clock, Download, Trash2, Cpu, HardDrive, Box, Shield, Pause, Play, AlertTriangle, Loader2, Info, BarChart2, Activity, MapPin, Tag, FileJson, FileSpreadsheet, Image, Network, GitCompare, RefreshCw, Zap } from 'lucide-react';
+import { Server, Clock, Cpu, HardDrive, Box, Shield, Pause, Play, AlertTriangle, Info, BarChart2, Activity, MapPin, Tag, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { NamespaceBadge } from '@/components/list';
 import { Progress } from '@/components/ui/progress';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { downloadResourceJson } from '@/lib/exportUtils';
 import {
-  ResourceDetailLayout,
+  GenericResourceDetail,
   SectionCard,
   DetailRow,
-  YamlViewer,
-  EventsSection,
-  ActionsSection,
   MetricsDashboard,
-  DeleteConfirmDialog,
-  ResourceTopologyView,
-  ResourceComparisonView,
   LabelList,
   AnnotationList,
   TaintsList,
-  type ResourceStatus,
-  type YamlVersion,
+  type CustomTab,
+  type ResourceContext,
 } from '@/components/resources';
 import { DetailPodTable } from '@/components/resources/DetailPodTable';
-import { useResourceDetail, useK8sEvents } from '@/hooks/useK8sResourceDetail';
-import { useDeleteK8sResource, useUpdateK8sResource, useK8sResourceList, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
-import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
-import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
+import { useK8sResourceList, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useMutationPolling } from '@/hooks/useMutationPolling';
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
-import { useClusterStore } from '@/stores/clusterStore';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { getNodeMetrics, getPodMetrics, getResource, postNodeCordon, postNodeDrain } from '@/services/backendApiClient';
 import {
@@ -45,7 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { AgeCell, StatusPill, ListPagination, PAGE_SIZE_OPTIONS, type StatusPillVariant } from '@/components/list';
+import { StatusPill, type StatusPillVariant } from '@/components/list';
 
 interface NodeResource extends KubernetesResource {
   spec?: {
@@ -69,10 +56,220 @@ interface NodeResource extends KubernetesResource {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Custom tab components
+// ---------------------------------------------------------------------------
+
+function OverviewTab({ resource: n, age, isCordoned, handleCordon, runningPods, cpuUsagePercent, memoryUsagePercent, podUsagePercent }: ResourceContext<NodeResource> & {
+  isCordoned: boolean;
+  handleCordon: () => void;
+  runningPods: Array<{ name: string; namespace: string; status: string; cpu: string; memory: string; age: string }>;
+  cpuUsagePercent: number | null;
+  memoryUsagePercent: number | null;
+  podUsagePercent: number;
+}) {
+  const labels = n?.metadata?.labels || {};
+  const nodeInfo = n?.status?.nodeInfo;
+  const conditions = n?.status?.conditions || [];
+  const capacity = n?.status?.capacity || {};
+  const allocatable = n?.status?.allocatable || {};
+  const taints = n?.spec?.taints || [];
+  const addresses = n?.status?.addresses || [];
+  const podCIDR = n?.spec?.podCIDR || '-';
+  const roles = Object.keys(labels)
+    .filter(k => k.startsWith('node-role.kubernetes.io/'))
+    .map(k => k.replace('node-role.kubernetes.io/', ''));
+
+  return (
+    <div className="space-y-6">
+      {/* Cordoned Warning */}
+      {isCordoned && (
+        <div className="p-4 rounded-lg border border-warning/50 bg-warning/10 flex items-center gap-3">
+          <AlertTriangle className="h-5 w-5 text-warning" />
+          <div>
+            <p className="font-medium text-warning">Node is Cordoned</p>
+            <p className="text-sm text-warning/80">This node is marked as unschedulable. No new pods will be scheduled on this node.</p>
+          </div>
+          <Button variant="outline" size="sm" className="ml-auto" onClick={handleCordon}>
+            <Play className="h-4 w-4 mr-1" />
+            Uncordon
+          </Button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Node Info */}
+        <SectionCard icon={Info} title="Node Info" tooltip={<p className="text-xs text-muted-foreground">OS, kernel, runtime, and network info</p>}>
+          <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+            <DetailRow label="OS Image" value={nodeInfo?.osImage || '-'} />
+            <DetailRow label="Architecture" value={nodeInfo?.architecture || '-'} />
+            <DetailRow label="Kernel" value={<span className="font-mono text-xs">{nodeInfo?.kernelVersion || '-'}</span>} />
+            <DetailRow label="Container Runtime" value={<span className="font-mono text-xs">{nodeInfo?.containerRuntimeVersion || '-'}</span>} />
+            <DetailRow label="Kubelet" value={<Badge variant="secondary">{nodeInfo?.kubeletVersion || '-'}</Badge>} />
+            <DetailRow label="Pod CIDR" value={<span className="font-mono text-xs">{podCIDR}</span>} />
+          </div>
+        </SectionCard>
+
+        {/* Resource Usage */}
+        <SectionCard icon={BarChart2} title="Resource Usage" tooltip={<p className="text-xs text-muted-foreground">CPU, memory, and pod capacity usage</p>}>
+          <div className="space-y-4">
+            <div>
+              <div className="flex justify-between text-sm mb-2">
+                <span>CPU</span>
+                <span className="font-mono">{cpuUsagePercent != null ? `${cpuUsagePercent}% used of ${capacity.cpu || '-'}` : (capacity.cpu || allocatable.cpu || '–')}</span>
+              </div>
+              <Progress value={cpuUsagePercent ?? 0} className="h-2" />
+              <p className="text-xs text-muted-foreground mt-1">{allocatable.cpu || '-'} allocatable</p>
+            </div>
+            <div>
+              <div className="flex justify-between text-sm mb-2">
+                <span>Memory</span>
+                <span className="font-mono">{memoryUsagePercent != null ? `${memoryUsagePercent}% used of ${capacity.memory || '-'}` : (capacity.memory || allocatable.memory || '–')}</span>
+              </div>
+              <Progress value={memoryUsagePercent ?? 0} className="h-2" />
+              <p className="text-xs text-muted-foreground mt-1">{allocatable.memory || '-'} allocatable</p>
+            </div>
+            <div>
+              <div className="flex justify-between text-sm mb-2">
+                <span>Pods</span>
+                <span className="font-mono">{runningPods.length}/{capacity.pods || '110'}</span>
+              </div>
+              <Progress value={podUsagePercent} className="h-2" />
+            </div>
+          </div>
+        </SectionCard>
+
+        {/* Conditions */}
+        <SectionCard icon={Activity} title="Conditions" tooltip={<p className="text-xs text-muted-foreground">Node condition status</p>}>
+          <div className="space-y-2">
+            {conditions.map((c) => (
+              <div key={c.type} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <Badge
+                    variant={
+                      c.type === 'Ready'
+                        ? (c.status === 'True' ? 'default' : 'destructive')
+                        : (c.status === 'False' ? 'secondary' : 'destructive')
+                    }
+                  >
+                    {c.type}
+                  </Badge>
+                  <span className="text-sm">{c.status}</span>
+                </div>
+                <span className="text-xs text-muted-foreground">{c.reason}</span>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+
+        {/* Addresses */}
+        <SectionCard icon={MapPin} title="Addresses" tooltip={<p className="text-xs text-muted-foreground">Node network addresses</p>}>
+          <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+            {addresses.map((addr) => (
+              <DetailRow key={addr.type} label={addr.type} value={<span className="font-mono">{addr.address}</span>} />
+            ))}
+          </div>
+        </SectionCard>
+
+        {/* Taints */}
+        <TaintsList taints={taints} />
+
+        {/* Roles & Labels */}
+        <div className="lg:col-span-2">
+          <SectionCard icon={Tag} title="Roles & Labels" tooltip={<p className="text-xs text-muted-foreground">Node roles and Kubernetes labels</p>}>
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm text-muted-foreground mb-2">Roles</p>
+                <div className="flex flex-wrap gap-2">
+                  {roles.length > 0 ? roles.map((role) => (
+                    <Badge key={role} variant="outline">{role || 'control-plane'}</Badge>
+                  )) : <span className="text-muted-foreground text-sm">worker</span>}
+                </div>
+              </div>
+              <LabelList labels={labels} showCard={false} title={`Labels (${Object.keys(labels).length})`} />
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* Annotations */}
+        <div className="lg:col-span-2">
+          <AnnotationList annotations={n?.metadata?.annotations ?? {}} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PodsTab({ runningPodsRaw, runningPods }: { runningPodsRaw: KubernetesResource[]; runningPods: Array<{ name: string; namespace: string; status: string; cpu: string; memory: string; age: string }> }) {
+  return (
+    <SectionCard icon={Box} title={`Pods on this node (${runningPods.length})`} tooltip={<p className="text-xs text-muted-foreground">Pods scheduled on this node (fieldSelector=spec.nodeName). Click a row to open pod detail.</p>}>
+      <DetailPodTable pods={runningPodsRaw as any} namespace="" />
+    </SectionCard>
+  );
+}
+
+function ConditionsTab({ resource: n }: ResourceContext<NodeResource>) {
+  const conditions = n?.status?.conditions || [];
+
+  return (
+    <SectionCard icon={Activity} title="Node conditions" tooltip={<p className="text-xs text-muted-foreground">Kubernetes node conditions: Ready (green when True), pressure conditions (red when True)</p>}>
+      {conditions.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-4">No conditions reported.</p>
+      ) : (
+        <div className="rounded-lg border border-border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40 hover:bg-muted/40 border-b border-border">
+                <TableHead className="font-semibold">Type</TableHead>
+                <TableHead className="font-semibold">Status</TableHead>
+                <TableHead className="font-semibold">Reason</TableHead>
+                <TableHead className="font-semibold">Message</TableHead>
+                <TableHead className="font-semibold">Last transition</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {conditions.map((c) => {
+                const isReady = c.type === 'Ready';
+                const isTrue = c.status === 'True';
+                const isGood = isReady && isTrue;
+                const isBad = !isReady && isTrue;
+                const variant: StatusPillVariant = isGood ? 'success' : isBad ? 'error' : 'neutral';
+                return (
+                  <TableRow key={c.type} className="border-b border-border/60 last:border-0">
+                    <TableCell>
+                      <Badge
+                        variant={isGood ? 'default' : isBad ? 'destructive' : 'secondary'}
+                        className={isGood ? 'bg-emerald-600 hover:bg-emerald-600' : isBad ? 'bg-rose-600 hover:bg-rose-600' : ''}
+                      >
+                        {c.type}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <StatusPill label={c.status} variant={variant} />
+                    </TableCell>
+                    <TableCell className="font-mono text-sm">{c.reason ?? '–'}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground max-w-[280px] truncate" title={c.message ?? ''}>{c.message ?? '–'}</TableCell>
+                    <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
+                      {c.lastTransitionTime ? calculateAge(c.lastTransitionTime) : '–'}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
 export default function NodeDetail() {
   const { name } = useParams();
   const clusterId = useActiveClusterId();
-  const activeCluster = useClusterStore((s) => s.activeCluster);
   const navigate = useNavigate();
   const { isConnected } = useConnectionStatus();
   const { refetchInterval: fastPollInterval, isFastPolling, triggerFastPolling } = useMutationPolling({
@@ -80,16 +277,13 @@ export default function NodeDetail() {
     fastDuration: 30000,
     normalInterval: 60000,
   });
-  const [activeTab, setActiveTab] = useState('overview');
   const [isCordoned, setIsCordoned] = useState(false);
 
-  const { resource: n, isLoading, error: resourceError, age, yaml, isConnected: resourceConnected, refetch } = useResourceDetail<NodeResource>(
-    'nodes',
-    name ?? undefined,
-    undefined,
-    {} as NodeResource,
-    { refetchInterval: fastPollInterval, staleTime: isFastPolling ? 1000 : 5000 }
-  );
+  const storedUrl = useBackendConfigStore((s) => s.backendBaseUrl);
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
+  const backendBaseUrl = getEffectiveBackendBaseUrl(storedUrl);
+
+  // Pods on this node
   const podsOnNodeQuery = useK8sResourceList<KubernetesResource>('pods', undefined, {
     fieldSelector: name ? `spec.nodeName=${name}` : '',
     enabled: !!name && isConnected,
@@ -108,9 +302,7 @@ export default function NodeDetail() {
     return { name: podName, namespace, status, cpu: '-', memory: '-', creationTimestamp, age };
   }), [runningPodsRaw]);
 
-  const storedUrl = useBackendConfigStore((s) => s.backendBaseUrl);
-  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
-  const backendBaseUrl = getEffectiveBackendBaseUrl(storedUrl);
+  // Node metrics
   const nodeMetricsQuery = useQuery({
     queryKey: ['node-metrics', clusterId, name],
     queryFn: () => getNodeMetrics(backendBaseUrl, clusterId!, name!),
@@ -118,6 +310,7 @@ export default function NodeDetail() {
     staleTime: 15_000,
   });
 
+  // Pod metrics for pods on this node
   const podMetricsQueries = useQueries({
     queries: runningPodsBase.slice(0, 50).map((pod) => ({
       queryKey: ['pod-metrics-node', clusterId, pod.namespace, pod.name],
@@ -140,48 +333,7 @@ export default function NodeDetail() {
     });
   }, [runningPodsBase, podMetricsQueries]);
 
-  // Local pagination for "Pods on this node"
-  const [podsPageSize, setPodsPageSize] = useState(10);
-  const [podsPageIndex, setPodsPageIndex] = useState(0);
-
-  const totalRunningPods = runningPods.length;
-  const podsTotalPages = Math.max(1, Math.ceil(totalRunningPods / podsPageSize));
-  const safePodsPageIndex = Math.min(podsPageIndex, podsTotalPages - 1);
-  const podsStart = safePodsPageIndex * podsPageSize;
-  const runningPodsPage = useMemo(
-    () => runningPods.slice(podsStart, podsStart + podsPageSize),
-    [runningPods, podsStart, podsPageSize]
-  );
-
-  useEffect(() => {
-    if (safePodsPageIndex !== podsPageIndex) setPodsPageIndex(safePodsPageIndex);
-  }, [safePodsPageIndex, podsPageIndex]);
-
-  const handlePodsPageSizeChange = (size: number) => {
-    setPodsPageSize(size);
-    setPodsPageIndex(0);
-  };
-
-  const podsPagination = {
-    rangeLabel:
-      totalRunningPods > 0
-        ? `Showing ${podsStart + 1}–${Math.min(podsStart + podsPageSize, totalRunningPods)} of ${totalRunningPods}`
-        : 'No pods',
-    hasPrev: safePodsPageIndex > 0,
-    hasNext: podsStart + podsPageSize < totalRunningPods,
-    onPrev: () => setPodsPageIndex((i) => Math.max(0, i - 1)),
-    onNext: () => setPodsPageIndex((i) => Math.min(podsTotalPages - 1, i + 1)),
-    currentPage: safePodsPageIndex + 1,
-    totalPages: Math.max(1, podsTotalPages),
-    onPageChange: (p: number) => setPodsPageIndex(Math.max(0, Math.min(p - 1, podsTotalPages - 1))),
-  };
-
-  const { events } = useK8sEvents();
-  const deleteNode = useDeleteK8sResource('nodes');
-  const updateNode = useUpdateK8sResource('nodes');
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-
-  // Unique PVCs referenced by pods (for fetching volumeName -> PV).
+  // PVC + ReplicaSet owner resolution (needed by DetailPodTable implicitly through raw pods)
   const pvcKeys = useMemo(() => {
     const set = new Set<string>();
     (runningPodsRaw as Array<{ metadata?: { namespace?: string }; spec?: { volumes?: Array<{ persistentVolumeClaim?: { claimName?: string } }> } }>).forEach((pod) => {
@@ -213,7 +365,6 @@ export default function NodeDetail() {
     return m;
   }, [pvcQueries, pvcKeys]);
 
-  // Unique ReplicaSets that own pods on this node (to resolve Deployment owners).
   const replicasetKeys = useMemo(() => {
     const set = new Set<string>();
     (runningPodsRaw as Array<{
@@ -257,38 +408,8 @@ export default function NodeDetail() {
     return m;
   }, [replicasetQueries, replicasetKeys]);
 
-
-  const nodeName = n?.metadata?.name ?? name ?? '';
-  const handleDownloadYaml = useCallback(() => {
-    const blob = new Blob([yaml], { type: 'application/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${nodeName || 'node'}.yaml`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  }, [yaml, nodeName]);
-
-  const handleDownloadJson = useCallback(() => {
-    downloadResourceJson(n, `${nodeName || 'node'}.json`);
-    toast.success('JSON downloaded');
-  }, [n, nodeName]);
-
-  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
-
-  const handleSaveYaml = async (newYaml: string) => {
-    if (!nodeName) return;
-    try {
-      await updateNode.mutateAsync({ name: nodeName, yaml: newYaml });
-      toast.success('Node updated successfully');
-      refetch();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to update Node');
-      throw e;
-    }
-  };
-
-  const handleCordon = async () => {
+  // Cordon / Drain handlers
+  const handleCordon = useCallback(async () => {
     if (!isConnected || !backendBaseUrl || !clusterId || !name) {
       toast.error('Connect to a cluster to cordon/uncordon nodes');
       return;
@@ -299,13 +420,12 @@ export default function NodeDetail() {
       setIsCordoned(newUnschedulable);
       toast.success(newUnschedulable ? `Node ${name} cordoned — no new pods will be scheduled` : `Node ${name} uncordoned`);
       triggerFastPolling();
-      refetch();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to cordon/uncordon node');
     }
-  };
+  }, [isConnected, backendBaseUrl, clusterId, name, isCordoned, triggerFastPolling]);
 
-  const handleDrain = async () => {
+  const handleDrain = useCallback(async () => {
     if (!isConnected || !backendBaseUrl || !clusterId || !name) {
       toast.error('Connect to a cluster to drain nodes');
       return;
@@ -321,44 +441,12 @@ export default function NodeDetail() {
         toast.success(`Drain complete: ${evicted} pod(s) evicted, ${result.skipped.length} skipped`);
       }
       triggerFastPolling();
-      refetch();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to drain node');
     }
-  };
+  }, [isConnected, backendBaseUrl, clusterId, name, triggerFastPolling]);
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-20 w-full" />
-        <div className="grid grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24" />)}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    );
-  }
-
-  if (isConnected && (resourceError || !n?.metadata?.name)) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-        <Server className="h-12 w-12 text-muted-foreground" />
-        <p className="text-lg font-medium">Node not found</p>
-        <p className="text-sm text-muted-foreground">{name ? `No node named "${name}" in this cluster.` : 'Missing node name.'}</p>
-        <Button variant="outline" onClick={() => navigate('/nodes')}>Back to Nodes</Button>
-      </div>
-    );
-  }
-
-  const labels = n?.metadata?.labels || {};
-  const nodeInfo = n?.status?.nodeInfo;
-  const conditions = n?.status?.conditions || [];
-  const capacity = n?.status?.capacity || {};
-  const allocatable = n?.status?.allocatable || {};
-  const taints = n?.spec?.taints || [];
-  const addresses = n?.status?.addresses || [];
-  const podCIDR = n?.spec?.podCIDR || '-';
-
+  // Metric calculations
   function parseCpuToMilli(s: string): number | null {
     if (!s || s === '-') return null;
     const t = String(s).trim();
@@ -388,316 +476,75 @@ export default function NodeDetail() {
     return Number.isFinite(n) ? n : null;
   }
 
-  const nodeMetrics = nodeMetricsQuery.data as { CPU?: string; Memory?: string } | undefined;
-  const cpuCapMilli = parseCpuToMilli(allocatable.cpu || capacity.cpu || '');
-  const memCapMi = parseMemoryToMi(allocatable.memory || capacity.memory || '');
-  const cpuUsageMilli = nodeMetrics?.CPU ? parseCpuToMilli(nodeMetrics.CPU) : null;
-  const memUsageMi = nodeMetrics?.Memory ? parseMemoryToMi(nodeMetrics.Memory) : null;
-  const cpuUsagePercent =
-    cpuCapMilli != null && cpuCapMilli > 0 && cpuUsageMilli != null
-      ? Math.min(100, Math.round((cpuUsageMilli / cpuCapMilli) * 100))
-      : null;
-  const memoryUsagePercent =
-    memCapMi != null && memCapMi > 0 && memUsageMi != null
-      ? Math.min(100, Math.round((memUsageMi / memCapMi) * 100))
-      : null;
-
-  const roles = Object.keys(labels)
-    .filter(k => k.startsWith('node-role.kubernetes.io/'))
-    .map(k => k.replace('node-role.kubernetes.io/', ''));
-  const isReady = conditions.some(c => c.type === 'Ready' && c.status === 'True');
-  const status: ResourceStatus = isCordoned ? 'Warning' : isReady ? 'Running' : 'Failed';
-
-  // Usage: CPU/memory from node metrics; pods from running count.
-  const capacityPods = parseInt(capacity.pods || '0', 10) || 110;
-  const podUsagePercent = capacityPods > 0 ? Math.round((runningPods.length / capacityPods) * 100) : 0;
-
-  const statusCards = [
-    { label: 'Status', value: isReady ? 'Ready' : 'Not Ready', icon: Server, iconColor: (isReady ? 'success' : 'error') as "success" | "error" },
-    { label: 'Role', value: roles.length ? roles.join(', ') || 'worker' : 'worker', icon: Activity, iconColor: 'muted' as const },
-    { label: 'CPU', value: cpuUsagePercent != null ? `${cpuUsagePercent}%` : '–', icon: Cpu, iconColor: 'primary' as const },
-    { label: 'Memory', value: memoryUsagePercent != null ? `${memoryUsagePercent}%` : '–', icon: HardDrive, iconColor: 'info' as const },
-    { label: 'Pods', value: `${runningPods.length}/${capacity.pods || '–'}`, icon: Box, iconColor: 'success' as const },
-    { label: 'Disk', value: '–', icon: HardDrive, iconColor: 'muted' as const },
-    { label: 'Version', value: nodeInfo?.kubeletVersion || '–', icon: Info, iconColor: 'muted' as const },
-    { label: 'Uptime', value: age, icon: Clock, iconColor: 'muted' as const },
-  ];
-
-  const tabs = [
+  const customTabs: CustomTab[] = [
     {
       id: 'overview',
       label: 'Overview',
-      content: (
-        <div className="space-y-6">
-          {/* Cordoned Warning */}
-          {isCordoned && (
-            <div className="p-4 rounded-lg border border-warning/50 bg-warning/10 flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5 text-warning" />
-              <div>
-                <p className="font-medium text-warning">Node is Cordoned</p>
-                <p className="text-sm text-warning/80">This node is marked as unschedulable. No new pods will be scheduled on this node.</p>
-              </div>
-              <Button variant="outline" size="sm" className="ml-auto" onClick={handleCordon}>
-                <Play className="h-4 w-4 mr-1" />
-                Uncordon
-              </Button>
-            </div>
-          )}
+      render: (ctx) => {
+        const n = ctx.resource;
+        const capacity = n?.status?.capacity || {};
+        const allocatable = n?.status?.allocatable || {};
+        const nodeMetrics = nodeMetricsQuery.data as { CPU?: string; Memory?: string } | undefined;
+        const cpuCapMilli = parseCpuToMilli(allocatable.cpu || capacity.cpu || '');
+        const memCapMi = parseMemoryToMi(allocatable.memory || capacity.memory || '');
+        const cpuUsageMilli = nodeMetrics?.CPU ? parseCpuToMilli(nodeMetrics.CPU) : null;
+        const memUsageMi = nodeMetrics?.Memory ? parseMemoryToMi(nodeMetrics.Memory) : null;
+        const cpuUsagePercent = cpuCapMilli != null && cpuCapMilli > 0 && cpuUsageMilli != null
+          ? Math.min(100, Math.round((cpuUsageMilli / cpuCapMilli) * 100)) : null;
+        const memoryUsagePercent = memCapMi != null && memCapMi > 0 && memUsageMi != null
+          ? Math.min(100, Math.round((memUsageMi / memCapMi) * 100)) : null;
+        const capacityPods = parseInt(capacity.pods || '0', 10) || 110;
+        const podUsagePercent = capacityPods > 0 ? Math.round((runningPods.length / capacityPods) * 100) : 0;
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Node Info */}
-            <SectionCard icon={Info} title="Node Info" tooltip={<p className="text-xs text-muted-foreground">OS, kernel, runtime, and network info</p>}>
-              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                <DetailRow label="OS Image" value={nodeInfo?.osImage || '-'} />
-                <DetailRow label="Architecture" value={nodeInfo?.architecture || '-'} />
-                <DetailRow label="Kernel" value={<span className="font-mono text-xs">{nodeInfo?.kernelVersion || '-'}</span>} />
-                <DetailRow label="Container Runtime" value={<span className="font-mono text-xs">{nodeInfo?.containerRuntimeVersion || '-'}</span>} />
-                <DetailRow label="Kubelet" value={<Badge variant="secondary">{nodeInfo?.kubeletVersion || '-'}</Badge>} />
-                <DetailRow label="Pod CIDR" value={<span className="font-mono text-xs">{podCIDR}</span>} />
-              </div>
-            </SectionCard>
-
-            {/* Resource Usage */}
-            <SectionCard icon={BarChart2} title="Resource Usage" tooltip={<p className="text-xs text-muted-foreground">CPU, memory, and pod capacity usage</p>}>
-              <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span>CPU</span>
-                    <span className="font-mono">{cpuUsagePercent != null ? `${cpuUsagePercent}% used of ${capacity.cpu || '-'}` : (capacity.cpu || allocatable.cpu || '–')}</span>
-                  </div>
-                  <Progress value={cpuUsagePercent ?? 0} className="h-2" />
-                  <p className="text-xs text-muted-foreground mt-1">{allocatable.cpu || '-'} allocatable</p>
-                </div>
-                <div>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span>Memory</span>
-                    <span className="font-mono">{memoryUsagePercent != null ? `${memoryUsagePercent}% used of ${capacity.memory || '-'}` : (capacity.memory || allocatable.memory || '–')}</span>
-                  </div>
-                  <Progress value={memoryUsagePercent ?? 0} className="h-2" />
-                  <p className="text-xs text-muted-foreground mt-1">{allocatable.memory || '-'} allocatable</p>
-                </div>
-                <div>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span>Pods</span>
-                    <span className="font-mono">{runningPods.length}/{capacity.pods || '110'}</span>
-                  </div>
-                  <Progress value={podUsagePercent} className="h-2" />
-                </div>
-              </div>
-            </SectionCard>
-
-            {/* Conditions */}
-            <SectionCard icon={Activity} title="Conditions" tooltip={<p className="text-xs text-muted-foreground">Node condition status</p>}>
-              <div className="space-y-2">
-                {conditions.map((c) => (
-                  <div key={c.type} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                    <div className="flex items-center gap-3">
-                      <Badge
-                        variant={
-                          c.type === 'Ready'
-                            ? (c.status === 'True' ? 'default' : 'destructive')
-                            : (c.status === 'False' ? 'secondary' : 'destructive')
-                        }
-                      >
-                        {c.type}
-                      </Badge>
-                      <span className="text-sm">{c.status}</span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{c.reason}</span>
-                  </div>
-                ))}
-              </div>
-            </SectionCard>
-
-            {/* Addresses */}
-            <SectionCard icon={MapPin} title="Addresses" tooltip={<p className="text-xs text-muted-foreground">Node network addresses</p>}>
-              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                {addresses.map((addr) => (
-                  <DetailRow key={addr.type} label={addr.type} value={<span className="font-mono">{addr.address}</span>} />
-                ))}
-              </div>
-            </SectionCard>
-
-            {/* Taints */}
-            <TaintsList taints={taints} />
-
-            {/* Roles & Labels */}
-            <div className="lg:col-span-2">
-              <SectionCard icon={Tag} title="Roles & Labels" tooltip={<p className="text-xs text-muted-foreground">Node roles and Kubernetes labels</p>}>
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-2">Roles</p>
-                    <div className="flex flex-wrap gap-2">
-                      {roles.length > 0 ? roles.map((role) => (
-                        <Badge key={role} variant="outline">{role || 'control-plane'}</Badge>
-                      )) : <span className="text-muted-foreground text-sm">worker</span>}
-                    </div>
-                  </div>
-                  <LabelList labels={labels} showCard={false} title={`Labels (${Object.keys(labels).length})`} />
-                </div>
-              </SectionCard>
-            </div>
-
-            {/* Annotations */}
-            <div className="lg:col-span-2">
-              <AnnotationList annotations={n?.metadata?.annotations ?? {}} />
-            </div>
-          </div>
-        </div>
-      ),
+        return <OverviewTab {...ctx} isCordoned={isCordoned} handleCordon={handleCordon} runningPods={runningPods} cpuUsagePercent={cpuUsagePercent} memoryUsagePercent={memoryUsagePercent} podUsagePercent={podUsagePercent} />;
+      },
     },
     {
       id: 'pods',
       label: 'Pods',
       icon: Box,
       badge: runningPods.length.toString(),
-      content: (
-        <SectionCard icon={Box} title={`Pods on this node (${runningPods.length})`} tooltip={<p className="text-xs text-muted-foreground">Pods scheduled on this node (fieldSelector=spec.nodeName). Click a row to open pod detail.</p>}>
-          <DetailPodTable pods={runningPodsRaw as any} namespace="" />
-        </SectionCard>
-      ),
+      render: () => <PodsTab runningPodsRaw={runningPodsRaw} runningPods={runningPods} />,
     },
     {
       id: 'conditions',
       label: 'Conditions',
-      content: (
-        <SectionCard icon={Activity} title="Node conditions" tooltip={<p className="text-xs text-muted-foreground">Kubernetes node conditions: Ready (green when True), pressure conditions (red when True)</p>}>
-          {conditions.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4">No conditions reported.</p>
-          ) : (
-            <div className="rounded-lg border border-border overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/40 hover:bg-muted/40 border-b border-border">
-                    <TableHead className="font-semibold">Type</TableHead>
-                    <TableHead className="font-semibold">Status</TableHead>
-                    <TableHead className="font-semibold">Reason</TableHead>
-                    <TableHead className="font-semibold">Message</TableHead>
-                    <TableHead className="font-semibold">Last transition</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {conditions.map((c) => {
-                    const isReady = c.type === 'Ready';
-                    const isTrue = c.status === 'True';
-                    const isGood = isReady && isTrue;
-                    const isBad = !isReady && isTrue;
-                    const variant: StatusPillVariant = isGood ? 'success' : isBad ? 'error' : 'neutral';
-                    return (
-                      <TableRow key={c.type} className="border-b border-border/60 last:border-0">
-                        <TableCell>
-                          <Badge
-                            variant={isGood ? 'default' : isBad ? 'destructive' : 'secondary'}
-                            className={isGood ? 'bg-emerald-600 hover:bg-emerald-600' : isBad ? 'bg-rose-600 hover:bg-rose-600' : ''}
-                          >
-                            {c.type}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <StatusPill label={c.status} variant={variant} />
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">{c.reason ?? '–'}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground max-w-[280px] truncate" title={c.message ?? ''}>{c.message ?? '–'}</TableCell>
-                        <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
-                          {c.lastTransitionTime ? calculateAge(c.lastTransitionTime) : '–'}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </SectionCard>
-      ),
-    },
-    { id: 'events', label: 'Events', content: <EventsSection events={events} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={nodeName} editable onSave={handleSaveYaml} /> },
-    {
-      id: 'compare',
-      label: 'Compare',
-      icon: GitCompare,
-      content: (
-        <ResourceComparisonView
-          resourceType="nodes"
-          resourceKind="Node"
-          initialSelectedResources={[nodeName]}
-          clusterId={clusterId ?? undefined}
-          backendBaseUrl={backendBaseUrl ?? ''}
-          isConnected={isConnected}
-          embedded
-        />
-      ),
-    },
-    {
-      id: 'topology',
-      label: 'Topology',
-      icon: Network,
-      content: (
-        <ResourceTopologyView
-          kind={normalizeKindForTopology('Node')}
-          namespace={''}
-          name={name ?? ''}
-          sourceResourceType="Node"
-          sourceResourceName={n?.metadata?.name ?? name ?? ''}
-        />
-      ),
-    },
-    {
-      id: 'blast-radius',
-      label: 'Blast Radius',
-      icon: Zap,
-      content: (
-        <BlastRadiusTab
-          kind={normalizeKindForTopology('Node')}
-          namespace={''}
-          name={name || n?.metadata?.name || ''}
-        />
-      ),
+      render: (ctx) => <ConditionsTab {...ctx} />,
     },
     {
       id: 'performance',
       label: 'Performance',
-      content: <MetricsDashboard resourceType="node" resourceName={nodeName} clusterId={clusterId} />,
-    },
-    {
-      id: 'actions',
-      label: 'Actions',
-      content: (
-        <ActionsSection actions={[
-          {
-            icon: isCordoned ? Play : Pause,
-            label: isCordoned ? 'Uncordon Node' : 'Cordon Node',
-            description: isCordoned ? 'Allow pods to be scheduled on this node' : 'Mark node as unschedulable',
-            onClick: handleCordon,
-          },
-          { icon: Shield, label: 'Drain Node', description: 'Safely evict all pods from node', onClick: handleDrain },
-          { icon: Download, label: 'Download YAML', description: 'Export Node definition', onClick: handleDownloadYaml },
-          { icon: Download, label: 'Export as JSON', description: 'Export Node as JSON', onClick: handleDownloadJson },
-          { icon: Trash2, label: 'Delete Node', description: 'Remove node from cluster', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
-        ]} />
-      ),
+      render: (ctx) => <MetricsDashboard resourceType="node" resourceName={ctx.name} clusterId={clusterId} />,
     },
   ];
 
   return (
-    <>
-      <ResourceDetailLayout
-        resourceType="Node"
-        resourceIcon={Server}
-        role="main"
-        aria-label="Node Detail"
-        name={nodeName}
-        status={status}
-        backLink="/nodes"
-        backLabel="Nodes"
-        headerMetadata={
+    <GenericResourceDetail<NodeResource>
+      resourceType="nodes"
+      kind="Node"
+      pluralLabel="Nodes"
+      listPath="/nodes"
+      resourceIcon={Server}
+      loadingCardCount={4}
+      customTabs={customTabs}
+      detailOptions={{ refetchInterval: fastPollInterval, staleTime: isFastPolling ? 1000 : 5000 }}
+      deriveStatus={(n) => {
+        const conditions = n?.status?.conditions || [];
+        const isReady = conditions.some(c => c.type === 'Ready' && c.status === 'True');
+        return isCordoned ? 'Warning' : isReady ? 'Running' : 'Failed';
+      }}
+      headerMetadata={(ctx) => {
+        const labels = ctx.resource?.metadata?.labels || {};
+        const roles = Object.keys(labels)
+          .filter(k => k.startsWith('node-role.kubernetes.io/'))
+          .map(k => k.replace('node-role.kubernetes.io/', ''));
+        return (
           <span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground">
-            <Clock className="h-3.5 w-3.5" />Created {age}
+            <Clock className="h-3.5 w-3.5" />Created {ctx.age}
             <span className="mx-2">•</span>
             {roles.map((role) => <Badge key={role} variant="outline" className="text-xs ml-1">{role || 'control-plane'}</Badge>)}
             {isCordoned && <Badge variant="destructive" className="ml-2 text-xs">Cordoned</Badge>}
-            {isConnected && <Badge variant="outline" className="ml-2 text-xs">Live</Badge>}
+            {ctx.isConnected && <Badge variant="outline" className="ml-2 text-xs">Live</Badge>}
             {isFastPolling && (
               <Badge className="ml-2 text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-500/30 animate-pulse gap-1">
                 <RefreshCw className="h-3 w-3 animate-spin" />
@@ -705,35 +552,54 @@ export default function NodeDetail() {
               </Badge>
             )}
           </span>
-        }
-        actions={[
-          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml, className: 'press-effect' },
-          { label: 'Export as JSON', icon: Download, variant: 'outline', onClick: handleDownloadJson, className: 'press-effect' },
-          { label: isCordoned ? 'Uncordon' : 'Cordon', icon: isCordoned ? Play : Pause, variant: 'outline', onClick: handleCordon, className: 'press-effect' },
-          { label: 'Drain', icon: Shield, variant: 'outline', onClick: handleDrain, className: 'press-effect' },
-          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true), className: 'press-effect' },
-        ]}
-        statusCards={statusCards}
-        tabs={tabs}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-      />
-      <DeleteConfirmDialog
-        open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
-        resourceType="Node"
-        resourceName={nodeName}
-        onConfirm={async () => {
-          if (isConnected && name) {
-            await deleteNode.mutateAsync({ name: name!, namespace: '' });
-            navigate('/nodes');
-          } else {
-            toast.success(`Node ${nodeName} deleted (demo mode)`);
-            navigate('/nodes');
-          }
-        }}
-        requireNameConfirmation
-      />
-    </>
+        );
+      }}
+      extraHeaderActions={() => [
+        { label: isCordoned ? 'Uncordon' : 'Cordon', icon: isCordoned ? Play : Pause, variant: 'outline', onClick: handleCordon, className: 'press-effect' },
+        { label: 'Drain', icon: Shield, variant: 'outline', onClick: handleDrain, className: 'press-effect' },
+      ]}
+      extraActionItems={() => [
+        {
+          icon: isCordoned ? Play : Pause,
+          label: isCordoned ? 'Uncordon Node' : 'Cordon Node',
+          description: isCordoned ? 'Allow pods to be scheduled on this node' : 'Mark node as unschedulable',
+          onClick: handleCordon,
+        },
+        { icon: Shield, label: 'Drain Node', description: 'Safely evict all pods from node', onClick: handleDrain },
+      ]}
+      buildStatusCards={(ctx) => {
+        const n = ctx.resource;
+        const labels = n?.metadata?.labels || {};
+        const nodeInfo = n?.status?.nodeInfo;
+        const conditions = n?.status?.conditions || [];
+        const capacity = n?.status?.capacity || {};
+        const allocatable = n?.status?.allocatable || {};
+        const isReady = conditions.some(c => c.type === 'Ready' && c.status === 'True');
+        const roles = Object.keys(labels)
+          .filter(k => k.startsWith('node-role.kubernetes.io/'))
+          .map(k => k.replace('node-role.kubernetes.io/', ''));
+
+        const nodeMetrics = nodeMetricsQuery.data as { CPU?: string; Memory?: string } | undefined;
+        const cpuCapMilli = parseCpuToMilli(allocatable.cpu || capacity.cpu || '');
+        const memCapMi = parseMemoryToMi(allocatable.memory || capacity.memory || '');
+        const cpuUsageMilli = nodeMetrics?.CPU ? parseCpuToMilli(nodeMetrics.CPU) : null;
+        const memUsageMi = nodeMetrics?.Memory ? parseMemoryToMi(nodeMetrics.Memory) : null;
+        const cpuUsagePercent = cpuCapMilli != null && cpuCapMilli > 0 && cpuUsageMilli != null
+          ? Math.min(100, Math.round((cpuUsageMilli / cpuCapMilli) * 100)) : null;
+        const memoryUsagePercent = memCapMi != null && memCapMi > 0 && memUsageMi != null
+          ? Math.min(100, Math.round((memUsageMi / memCapMi) * 100)) : null;
+
+        return [
+          { label: 'Status', value: isReady ? 'Ready' : 'Not Ready', icon: Server, iconColor: (isReady ? 'success' : 'error') as "success" | "error" },
+          { label: 'Role', value: roles.length ? roles.join(', ') || 'worker' : 'worker', icon: Activity, iconColor: 'muted' as const },
+          { label: 'CPU', value: cpuUsagePercent != null ? `${cpuUsagePercent}%` : '–', icon: Cpu, iconColor: 'primary' as const },
+          { label: 'Memory', value: memoryUsagePercent != null ? `${memoryUsagePercent}%` : '–', icon: HardDrive, iconColor: 'info' as const },
+          { label: 'Pods', value: `${runningPods.length}/${capacity.pods || '–'}`, icon: Box, iconColor: 'success' as const },
+          { label: 'Disk', value: '–', icon: HardDrive, iconColor: 'muted' as const },
+          { label: 'Version', value: nodeInfo?.kubeletVersion || '–', icon: Info, iconColor: 'muted' as const },
+          { label: 'Uptime', value: ctx.age, icon: Clock, iconColor: 'muted' as const },
+        ];
+      }}
+    />
   );
 }

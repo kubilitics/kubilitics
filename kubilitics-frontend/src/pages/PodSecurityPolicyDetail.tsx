@@ -1,262 +1,147 @@
-import { useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Shield, Clock, Lock, Download, Trash2, AlertTriangle, Network, GitCompare, Zap, Info, UserCircle } from 'lucide-react';
+import { Shield, Clock, Lock, AlertTriangle, Info, UserCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { toast } from '@/components/ui/sonner';
-import { downloadResourceJson } from '@/lib/exportUtils';
-import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
-import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
 import {
-  ResourceDetailLayout,
+  GenericResourceDetail,
   SectionCard,
   DetailRow,
   LabelList,
   AnnotationList,
-  YamlViewer,
-  EventsSection,
-  ActionsSection,
-  DeleteConfirmDialog,
-  ResourceTopologyView,
-  ResourceComparisonView,
-  type ResourceStatus,
-  type EventInfo,
+  type CustomTab,
+  type ResourceContext,
 } from '@/components/resources';
+import { type KubernetesResource } from '@/hooks/useKubernetes';
 
-const mockPSP = {
-  name: 'restricted',
-  status: 'Active' as ResourceStatus,
-  age: '180d',
-  privileged: false,
-  allowPrivilegeEscalation: false,
-  requiredDropCapabilities: ['ALL'],
-  volumes: ['configMap', 'secret', 'emptyDir', 'persistentVolumeClaim'],
-  hostNetwork: false,
-  hostPID: false,
-  hostIPC: false,
-  runAsUser: { rule: 'MustRunAsNonRoot' },
-  seLinux: { rule: 'RunAsAny' },
-  fsGroup: { rule: 'RunAsAny' },
-  supplementalGroups: { rule: 'RunAsAny' },
-};
+interface PodSecurityPolicyResource extends KubernetesResource {
+  spec?: {
+    privileged?: boolean;
+    allowPrivilegeEscalation?: boolean;
+    requiredDropCapabilities?: string[];
+    volumes?: string[];
+    hostNetwork?: boolean;
+    hostPID?: boolean;
+    hostIPC?: boolean;
+    runAsUser?: { rule?: string };
+    seLinux?: { rule?: string };
+    fsGroup?: { rule?: string };
+    supplementalGroups?: { rule?: string };
+  };
+}
 
-const mockEvents: EventInfo[] = [];
+function OverviewTab({ resource: psp }: ResourceContext<PodSecurityPolicyResource>) {
+  const spec = psp?.spec ?? {};
+  const privileged = spec.privileged ?? false;
+  const allowPrivilegeEscalation = spec.allowPrivilegeEscalation ?? false;
+  const hostNetwork = spec.hostNetwork ?? false;
+  const hostPID = spec.hostPID ?? false;
+  const volumes = spec.volumes ?? [];
+  const requiredDropCapabilities = spec.requiredDropCapabilities ?? [];
+  const runAsUserRule = spec.runAsUser?.rule ?? 'RunAsAny';
+  const seLinuxRule = spec.seLinux?.rule ?? 'RunAsAny';
+  const fsGroupRule = spec.fsGroup?.rule ?? 'RunAsAny';
+  const supplementalGroupsRule = spec.supplementalGroups?.rule ?? 'RunAsAny';
 
-const yaml = `apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: restricted
-spec:
-  privileged: false
-  allowPrivilegeEscalation: false
-  requiredDropCapabilities:
-  - ALL
-  volumes:
-  - 'configMap'
-  - 'secret'
-  - 'emptyDir'
-  - 'persistentVolumeClaim'
-  hostNetwork: false
-  hostPID: false
-  hostIPC: false
-  runAsUser:
-    rule: MustRunAsNonRoot
-  seLinux:
-    rule: RunAsAny
-  fsGroup:
-    rule: RunAsAny
-  supplementalGroups:
-    rule: RunAsAny`;
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <SectionCard icon={Lock} title="Security Settings">
+        <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+          <DetailRow
+            label="Privileged"
+            value={
+              <Badge variant={privileged ? 'destructive' : 'default'}>
+                {privileged ? 'Allowed' : 'Denied'}
+              </Badge>
+            }
+          />
+          <DetailRow
+            label="Privilege Escalation"
+            value={
+              <Badge variant={allowPrivilegeEscalation ? 'destructive' : 'default'}>
+                {allowPrivilegeEscalation ? 'Allowed' : 'Denied'}
+              </Badge>
+            }
+          />
+          <DetailRow
+            label="Host Network"
+            value={
+              <Badge variant={hostNetwork ? 'destructive' : 'secondary'}>
+                {hostNetwork ? 'Allowed' : 'Denied'}
+              </Badge>
+            }
+          />
+          <DetailRow
+            label="Host PID"
+            value={
+              <Badge variant={hostPID ? 'destructive' : 'secondary'}>
+                {hostPID ? 'Allowed' : 'Denied'}
+              </Badge>
+            }
+          />
+        </div>
+      </SectionCard>
+      <SectionCard icon={UserCircle} title="Run As User">
+        <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+          <DetailRow label="Run As User Rule" value={<Badge variant="outline">{runAsUserRule}</Badge>} />
+          <DetailRow label="SELinux Rule" value={<Badge variant="outline">{seLinuxRule}</Badge>} />
+          <DetailRow label="FS Group Rule" value={<Badge variant="outline">{fsGroupRule}</Badge>} />
+          <DetailRow label="Supplemental Groups" value={<Badge variant="outline">{supplementalGroupsRule}</Badge>} />
+        </div>
+      </SectionCard>
+      <SectionCard icon={Info} title="Allowed Volumes">
+        <div className="flex flex-wrap gap-2">
+          {volumes.map((vol) => (
+            <Badge key={vol} variant="secondary">{vol}</Badge>
+          ))}
+          {volumes.length === 0 && <p className="text-sm text-muted-foreground">No volumes specified</p>}
+        </div>
+      </SectionCard>
+      <SectionCard icon={AlertTriangle} title="Required Drop Capabilities">
+        <div className="flex flex-wrap gap-2">
+          {requiredDropCapabilities.map((cap) => (
+            <Badge key={cap} variant="destructive">{cap}</Badge>
+          ))}
+          {requiredDropCapabilities.length === 0 && <p className="text-sm text-muted-foreground">None</p>}
+        </div>
+      </SectionCard>
+      <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <LabelList labels={psp?.metadata?.labels ?? {}} />
+        </div>
+      </div>
+      <div className="lg:col-span-2">
+        <AnnotationList annotations={psp?.metadata?.annotations ?? {}} />
+      </div>
+    </div>
+  );
+}
 
 export default function PodSecurityPolicyDetail() {
-  const { name } = useParams();
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview');
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const psp = mockPSP;
-
-  const handleDownloadYaml = useCallback(() => {
-    const blob = new Blob([yaml], { type: 'application/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${psp.name || 'psp'}.yaml`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  }, [psp.name]);
-
-  const handleDownloadJson = useCallback(() => {
-    downloadResourceJson(psp, `${psp.name || 'psp'}.json`);
-    toast.success('JSON downloaded');
-  }, [psp]);
-
-  const statusCards = [
-    { label: 'Privileged', value: psp.privileged ? 'Yes' : 'No', icon: Lock, iconColor: psp.privileged ? 'error' as const : 'success' as const },
-    { label: 'Host Network', value: psp.hostNetwork ? 'Yes' : 'No', icon: Shield, iconColor: 'info' as const },
-    { label: 'Volumes', value: psp.volumes.length, icon: AlertTriangle, iconColor: 'warning' as const },
-    { label: 'Age', value: psp.age, icon: Clock, iconColor: 'muted' as const },
-  ];
-
-  const tabs = [
-    {
-      id: 'overview',
-      label: 'Overview',
-      content: (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <SectionCard icon={Lock} title="Security Settings">
-            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-              <DetailRow
-                label="Privileged"
-                value={
-                  <Badge variant={psp.privileged ? 'destructive' : 'default'}>
-                    {psp.privileged ? 'Allowed' : 'Denied'}
-                  </Badge>
-                }
-              />
-              <DetailRow
-                label="Privilege Escalation"
-                value={
-                  <Badge variant={psp.allowPrivilegeEscalation ? 'destructive' : 'default'}>
-                    {psp.allowPrivilegeEscalation ? 'Allowed' : 'Denied'}
-                  </Badge>
-                }
-              />
-              <DetailRow
-                label="Host Network"
-                value={
-                  <Badge variant={psp.hostNetwork ? 'destructive' : 'secondary'}>
-                    {psp.hostNetwork ? 'Allowed' : 'Denied'}
-                  </Badge>
-                }
-              />
-              <DetailRow
-                label="Host PID"
-                value={
-                  <Badge variant={psp.hostPID ? 'destructive' : 'secondary'}>
-                    {psp.hostPID ? 'Allowed' : 'Denied'}
-                  </Badge>
-                }
-              />
-            </div>
-          </SectionCard>
-          <SectionCard icon={UserCircle} title="Run As User">
-            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-              <DetailRow label="Run As User Rule" value={<Badge variant="outline">{psp.runAsUser.rule}</Badge>} />
-              <DetailRow label="SELinux Rule" value={<Badge variant="outline">{psp.seLinux.rule}</Badge>} />
-              <DetailRow label="FS Group Rule" value={<Badge variant="outline">{psp.fsGroup.rule}</Badge>} />
-              <DetailRow label="Supplemental Groups" value={<Badge variant="outline">{psp.supplementalGroups.rule}</Badge>} />
-            </div>
-          </SectionCard>
-          <SectionCard icon={Info} title="Allowed Volumes">
-            <div className="flex flex-wrap gap-2">
-              {psp.volumes.map((vol) => (
-                <Badge key={vol} variant="secondary">{vol}</Badge>
-              ))}
-            </div>
-          </SectionCard>
-          <SectionCard icon={AlertTriangle} title="Required Drop Capabilities">
-            <div className="flex flex-wrap gap-2">
-              {psp.requiredDropCapabilities.map((cap) => (
-                <Badge key={cap} variant="destructive">{cap}</Badge>
-              ))}
-            </div>
-          </SectionCard>
-          <div className="lg:col-span-2">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <LabelList labels={{}} />
-            </div>
-          </div>
-          <div className="lg:col-span-2">
-            <AnnotationList annotations={{}} />
-          </div>
-        </div>
-      ),
-    },
-    { id: 'events', label: 'Events', content: <EventsSection events={mockEvents} /> },
-    { id: 'yaml', label: 'YAML', icon: Shield, content: <YamlViewer yaml={yaml} resourceName={psp.name} /> },
-    {
-      id: 'compare',
-      label: 'Compare',
-      icon: GitCompare,
-      content: (
-        <ResourceComparisonView
-          resourceType="podsecuritypolicies"
-          resourceKind="PodSecurityPolicy"
-          initialSelectedResources={[psp.name]}
-          isConnected={false} // PSP is mock here
-          embedded
-        />
-      ),
-    },
-    {
-      id: 'topology',
-      label: 'Topology',
-      icon: Network,
-      content: (
-        <ResourceTopologyView
-          kind={normalizeKindForTopology('PodSecurityPolicy')}
-          namespace={''}
-          name={name ?? ''}
-          sourceResourceType="PodSecurityPolicy"
-          sourceResourceName={psp.name ?? name ?? ''}
-        />
-      ),
-    },
-    {
-      id: 'blast-radius',
-      label: 'Blast Radius',
-      icon: Zap,
-      content: (
-        <BlastRadiusTab
-          kind={normalizeKindForTopology('PodSecurityPolicy')}
-          namespace={''}
-          name={name || psp.name || ''}
-        />
-      ),
-    },
-    {
-      id: 'actions',
-      label: 'Actions',
-      content: (
-        <ActionsSection actions={[
-          { icon: Download, label: 'Download YAML', description: 'Export PSP definition', onClick: handleDownloadYaml },
-          { icon: Download, label: 'Export as JSON', description: 'Export PSP as JSON', onClick: handleDownloadJson },
-          { icon: Trash2, label: 'Delete PSP', description: 'Remove this pod security policy', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
-        ]} />
-      ),
-    },
+  const customTabs: CustomTab[] = [
+    { id: 'overview', label: 'Overview', render: (ctx) => <OverviewTab {...ctx} /> },
   ];
 
   return (
-    <>
-      <ResourceDetailLayout
-        resourceType="PodSecurityPolicy"
-        resourceIcon={Shield}
-        name={psp.name}
-        status={psp.status}
-        backLink="/podsecuritypolicies"
-        backLabel="Pod Security Policies"
-        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {psp.age}</span>}
-        actions={[
-          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
-          { label: 'Export as JSON', icon: Download, variant: 'outline', onClick: handleDownloadJson },
-          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
-        ]}
-        statusCards={statusCards}
-        tabs={tabs}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-      />
-      <DeleteConfirmDialog
-        open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
-        resourceType="PodSecurityPolicy"
-        resourceName={psp.name}
-        onConfirm={() => {
-          toast.success(`PodSecurityPolicy ${psp.name} deleted (demo mode)`);
-          navigate('/podsecuritypolicies');
-        }}
-        requireNameConfirmation
-      />
-    </>
+    <GenericResourceDetail<PodSecurityPolicyResource>
+      resourceType="podsecuritypolicies"
+      kind="PodSecurityPolicy"
+      pluralLabel="Pod Security Policies"
+      listPath="/podsecuritypolicies"
+      resourceIcon={Shield}
+      customTabs={customTabs}
+      deriveStatus={() => 'Healthy'}
+      buildStatusCards={(ctx) => {
+        const psp = ctx.resource;
+        const spec = psp?.spec ?? {};
+        const privileged = spec.privileged ?? false;
+        const hostNetwork = spec.hostNetwork ?? false;
+        const volumes = spec.volumes ?? [];
+
+        return [
+          { label: 'Privileged', value: privileged ? 'Yes' : 'No', icon: Lock, iconColor: privileged ? 'error' as const : 'success' as const },
+          { label: 'Host Network', value: hostNetwork ? 'Yes' : 'No', icon: Shield, iconColor: 'info' as const },
+          { label: 'Volumes', value: volumes.length, icon: AlertTriangle, iconColor: 'warning' as const },
+          { label: 'Age', value: ctx.age, icon: Clock, iconColor: 'muted' as const },
+        ];
+      }}
+    />
   );
 }

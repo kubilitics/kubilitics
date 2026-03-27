@@ -1,33 +1,15 @@
-import { useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Shield, Clock, Download, Trash2, Server, AlertTriangle, Network, GitCompare, Settings, Activity, Target, Zap } from 'lucide-react';
+import { Shield, Clock, Server, AlertTriangle, Settings, Activity, Target } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import { toast } from '@/components/ui/sonner';
-import { downloadResourceJson } from '@/lib/exportUtils';
 import {
-  ResourceDetailLayout,
+  GenericResourceDetail,
   SectionCard,
   DetailRow,
-  YamlViewer,
   LabelList,
   AnnotationList,
-  EventsSection,
-  ActionsSection,
-  DeleteConfirmDialog,
-  ResourceTopologyView,
-  ResourceComparisonView,
-  type ResourceStatus,
-  type YamlVersion,
+  type CustomTab,
+  type ResourceContext,
 } from '@/components/resources';
-import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
-import { useDeleteK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
-import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
-import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
-import { useConnectionStatus } from '@/hooks/useConnectionStatus';
-import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
-import { useActiveClusterId } from '@/hooks/useActiveClusterId';
+import { type KubernetesResource } from '@/hooks/useKubernetes';
 
 interface PDBResource extends KubernetesResource {
   spec?: {
@@ -44,28 +26,11 @@ interface PDBResource extends KubernetesResource {
   };
 }
 
-export default function PodDisruptionBudgetDetail() {
-  const { namespace, name } = useParams<{ namespace: string; name: string }>();
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview');
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const { isConnected } = useConnectionStatus();
-  const clusterId = useActiveClusterId();
-  const backendBaseUrl = useBackendConfigStore((s) => s.backendBaseUrl);
-  const baseUrl = getEffectiveBackendBaseUrl(backendBaseUrl);
-  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
+// ---------------------------------------------------------------------------
+// Custom tab components
+// ---------------------------------------------------------------------------
 
-  const { resource, isLoading, error: resourceError, age, yaml, refetch } = useResourceDetail<PDBResource>(
-    'poddisruptionbudgets',
-    name ?? undefined,
-    namespace ?? undefined,
-    undefined as unknown as PDBResource
-  );
-  const { events, refetch: refetchEvents } = useResourceEvents('PodDisruptionBudget', namespace ?? undefined, name ?? undefined);
-  const deleteResource = useDeleteK8sResource('poddisruptionbudgets');
-
-  const pdbName = resource?.metadata?.name ?? name ?? '';
-  const pdbNamespace = resource?.metadata?.namespace ?? namespace ?? '';
+function OverviewTab({ resource }: ResourceContext<PDBResource>) {
   const minAvailable = resource?.spec?.minAvailable;
   const maxUnavailable = resource?.spec?.maxUnavailable;
   const selector = resource?.spec?.selector?.matchLabels ?? {};
@@ -77,212 +42,100 @@ export default function PodDisruptionBudgetDetail() {
   const labels = resource?.metadata?.labels ?? {};
   const annotations = resource?.metadata?.annotations ?? {};
 
-  const handleDownloadYaml = useCallback(() => {
-    if (!yaml) return;
-    const blob = new Blob([yaml], { type: 'application/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${pdbName || 'pdb'}.yaml`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  }, [yaml, pdbName]);
-
-  const handleDownloadJson = useCallback(() => {
-    if (!resource) return;
-    downloadResourceJson(resource, `${pdbName || 'pdb'}.json`);
-    toast.success('JSON downloaded');
-  }, [resource, pdbName]);
-
-  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
-
-  const statusCards = [
-    { label: 'Min Available', value: minAvailable != null && minAvailable !== '' ? String(minAvailable) : '–', icon: Server, iconColor: 'primary' as const },
-    { label: 'Healthy Pods', value: `${currentHealthy}/${expectedPods > 0 ? expectedPods : desiredHealthy}`, icon: Server, iconColor: 'success' as const },
-    { label: 'Disruptions Allowed', value: disruptionsAllowed, icon: AlertTriangle, iconColor: disruptionsAllowed > 0 ? 'info' as const : 'warning' as const },
-    { label: 'Age', value: age, icon: Clock, iconColor: 'muted' as const },
-  ];
-
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-20 w-full" />
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-24" />
-          ))}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    );
-  }
-
-  if (isConnected && (resourceError || !resource?.metadata?.name)) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-        <Shield className="h-12 w-12 text-muted-foreground" />
-        <p className="text-lg font-medium">PDB not found</p>
-        <p className="text-sm text-muted-foreground">
-          {namespace && name ? `No PDB "${name}" in namespace "${namespace}".` : 'Missing namespace or name.'}
-        </p>
-        <Button variant="outline" onClick={() => navigate('/poddisruptionbudgets')}>Back to PDBs</Button>
-      </div>
-    );
-  }
-
-  const tabs = [
-    {
-      id: 'overview',
-      label: 'Overview',
-      content: (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <SectionCard icon={Settings} title="Budget Configuration">
-              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                <DetailRow label="Min Available" value={minAvailable != null && minAvailable !== '' ? String(minAvailable) : '–'} />
-                <DetailRow label="Max Unavailable" value={maxUnavailable != null && maxUnavailable !== '' ? String(maxUnavailable) : '–'} />
-              </div>
-          </SectionCard>
-          <SectionCard icon={Activity} title="Current Status">
-              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                <DetailRow label="Expected / Desired" value={<span className="font-semibold">{expectedPods > 0 ? expectedPods : desiredHealthy}</span>} />
-                <DetailRow label="Healthy" value={<span className="font-semibold text-[hsl(var(--success))]">{currentHealthy}</span>} />
-                <DetailRow label="Disruptions Allowed" value={<span className="font-semibold text-primary">{disruptionsAllowed}</span>} />
-              </div>
-          </SectionCard>
-          <SectionCard icon={Target} title="Pod Selector">
-              {Object.keys(selector).length === 0 ? (
-                <p className="text-muted-foreground text-sm">No selector.</p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries(selector).map(([k, v]) => (
-                    <Badge key={k} variant="outline" className="font-mono text-xs">{k}={v}</Badge>
-                  ))}
-                </div>
-              )}
-          </SectionCard>
-          <SectionCard icon={AlertTriangle} title="Conditions">
-              {conditions.length === 0 ? (
-                <p className="text-muted-foreground text-sm">No conditions.</p>
-              ) : (
-                <div className="space-y-2">
-                  {conditions.map((c, i) => (
-                    <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                      <span className="font-medium">{c.type}</span>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={c.status === 'True' ? 'default' : 'secondary'}>{c.status}</Badge>
-                        {c.reason && <span className="text-sm text-muted-foreground">{c.reason}</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-          </SectionCard>
-          <div className="lg:col-span-2">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <LabelList labels={labels} />
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <SectionCard icon={Settings} title="Budget Configuration">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+            <DetailRow label="Min Available" value={minAvailable != null && minAvailable !== '' ? String(minAvailable) : '–'} />
+            <DetailRow label="Max Unavailable" value={maxUnavailable != null && maxUnavailable !== '' ? String(maxUnavailable) : '–'} />
+          </div>
+      </SectionCard>
+      <SectionCard icon={Activity} title="Current Status">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+            <DetailRow label="Expected / Desired" value={<span className="font-semibold">{expectedPods > 0 ? expectedPods : desiredHealthy}</span>} />
+            <DetailRow label="Healthy" value={<span className="font-semibold text-[hsl(var(--success))]">{currentHealthy}</span>} />
+            <DetailRow label="Disruptions Allowed" value={<span className="font-semibold text-primary">{disruptionsAllowed}</span>} />
+          </div>
+      </SectionCard>
+      <SectionCard icon={Target} title="Pod Selector">
+          {Object.keys(selector).length === 0 ? (
+            <p className="text-muted-foreground text-sm">No selector.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(selector).map(([k, v]) => (
+                <Badge key={k} variant="outline" className="font-mono text-xs">{k}={v}</Badge>
+              ))}
             </div>
-          </div>
-          <div className="lg:col-span-2">
-            <AnnotationList annotations={annotations} />
-          </div>
+          )}
+      </SectionCard>
+      <SectionCard icon={AlertTriangle} title="Conditions">
+          {conditions.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No conditions.</p>
+          ) : (
+            <div className="space-y-2">
+              {conditions.map((c, i) => (
+                <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                  <span className="font-medium">{c.type}</span>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={c.status === 'True' ? 'default' : 'secondary'}>{c.status}</Badge>
+                    {c.reason && <span className="text-sm text-muted-foreground">{c.reason}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+      </SectionCard>
+      <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <LabelList labels={labels} />
         </div>
-      ),
-    },
-    { id: 'events', label: 'Events', content: <EventsSection events={events} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={pdbName} /> },
-    {
-      id: 'compare',
-      label: 'Compare',
-      icon: GitCompare,
-      content: (
-        <ResourceComparisonView
-          resourceType="poddisruptionbudgets"
-          resourceKind="PodDisruptionBudget"
-          namespace={namespace}
-          initialSelectedResources={namespace && name ? [`${namespace}/${name}`] : [name || '']}
-          clusterId={clusterId ?? undefined}
-          backendBaseUrl={baseUrl ?? ''}
-          isConnected={isConnected}
-          embedded
-        />
-      ),
-    },
-    {
-      id: 'topology',
-      label: 'Topology',
-      icon: Network,
-      content: (
-        <ResourceTopologyView
-          kind={normalizeKindForTopology('PodDisruptionBudget')}
-          namespace={namespace ?? ''}
-          name={name ?? ''}
-          sourceResourceType="PodDisruptionBudget"
-          sourceResourceName={resource?.metadata?.name ?? name ?? ''}
-        />
-      ),
-    },
-    {
-      id: 'blast-radius',
-      label: 'Blast Radius',
-      icon: Zap,
-      content: (
-        <BlastRadiusTab
-          kind={normalizeKindForTopology('PodDisruptionBudget')}
-          namespace={namespace || resource?.metadata?.namespace || ''}
-          name={name || resource?.metadata?.name || ''}
-        />
-      ),
-    },
-    {
-      id: 'actions',
-      label: 'Actions',
-      content: (
-        <ActionsSection
-          actions={[
-            { icon: Download, label: 'Download YAML', description: 'Export PDB definition', onClick: handleDownloadYaml },
-            { icon: Download, label: 'Export as JSON', description: 'Export PDB as JSON', onClick: handleDownloadJson },
-            { icon: Trash2, label: 'Delete PDB', description: 'Remove this disruption budget', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
-          ]}
-        />
-      ),
-    },
-  ];
+      </div>
+      <div className="lg:col-span-2">
+        <AnnotationList annotations={annotations} />
+      </div>
+    </div>
+  );
+}
 
-  const status: ResourceStatus = disruptionsAllowed > 0 || currentHealthy >= desiredHealthy ? 'Healthy' : 'Warning';
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+export default function PodDisruptionBudgetDetail() {
+  const customTabs: CustomTab[] = [
+    { id: 'overview', label: 'Overview', render: (ctx) => <OverviewTab {...ctx} /> },
+  ];
 
   return (
-    <>
-      <ResourceDetailLayout
-        resourceType="PodDisruptionBudget"
-        resourceIcon={Shield}
-        name={pdbName}
-        namespace={pdbNamespace}
-        status={status}
-        backLink="/poddisruptionbudgets"
-        backLabel="PDBs"
-        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {age}</span>}
-        actions={[
-          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
-          { label: 'Export as JSON', icon: Download, variant: 'outline', onClick: handleDownloadJson },
-          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
-        ]}
-        statusCards={statusCards}
-        tabs={tabs}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-      />
-      <DeleteConfirmDialog
-        open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
-        resourceType="PodDisruptionBudget"
-        resourceName={pdbName}
-        namespace={pdbNamespace}
-        onConfirm={async () => {
-          await deleteResource.mutateAsync({ name: pdbName, namespace: pdbNamespace });
-          navigate('/poddisruptionbudgets');
-        }}
-        requireNameConfirmation
-      />
-    </>
+    <GenericResourceDetail<PDBResource>
+      resourceType="poddisruptionbudgets"
+      kind="PodDisruptionBudget"
+      pluralLabel="PDBs"
+      listPath="/poddisruptionbudgets"
+      resourceIcon={Shield}
+      loadingCardCount={4}
+      customTabs={customTabs}
+      deriveStatus={(resource) => {
+        const disruptionsAllowed = resource?.status?.disruptionsAllowed ?? 0;
+        const currentHealthy = resource?.status?.currentHealthy ?? 0;
+        const desiredHealthy = resource?.status?.desiredHealthy ?? 0;
+        return disruptionsAllowed > 0 || currentHealthy >= desiredHealthy ? 'Healthy' : 'Warning';
+      }}
+      buildStatusCards={(ctx) => {
+        const resource = ctx.resource;
+        const minAvailable = resource?.spec?.minAvailable;
+        const currentHealthy = resource?.status?.currentHealthy ?? 0;
+        const desiredHealthy = resource?.status?.desiredHealthy ?? 0;
+        const disruptionsAllowed = resource?.status?.disruptionsAllowed ?? 0;
+        const expectedPods = resource?.status?.expectedPods ?? 0;
+
+        return [
+          { label: 'Min Available', value: minAvailable != null && minAvailable !== '' ? String(minAvailable) : '–', icon: Server, iconColor: 'primary' as const },
+          { label: 'Healthy Pods', value: `${currentHealthy}/${expectedPods > 0 ? expectedPods : desiredHealthy}`, icon: Server, iconColor: 'success' as const },
+          { label: 'Disruptions Allowed', value: disruptionsAllowed, icon: AlertTriangle, iconColor: disruptionsAllowed > 0 ? 'info' as const : 'warning' as const },
+          { label: 'Age', value: ctx.age, icon: Clock, iconColor: 'muted' as const },
+        ];
+      }}
+    />
   );
 }

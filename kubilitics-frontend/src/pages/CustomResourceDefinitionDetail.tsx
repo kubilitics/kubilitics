@@ -1,32 +1,15 @@
-import { useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { FileCode, Clock, Layers, Download, Trash2, Package, GitCompare, Network, Info, Activity, Zap } from 'lucide-react';
+import { FileCode, Clock, Layers, Package, Info, Activity } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Button } from '@/components/ui/button';
 import {
-  ResourceDetailLayout,
+  GenericResourceDetail,
   SectionCard,
   DetailRow,
   LabelList,
   AnnotationList,
-  YamlViewer,
-  ResourceComparisonView,
-  EventsSection,
-  ActionsSection,
-  DeleteConfirmDialog,
-  ResourceTopologyView,
-  type ResourceStatus,
+  type CustomTab,
+  type ResourceContext,
 } from '@/components/resources';
-import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
-import { useDeleteK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
-import { useConnectionStatus } from '@/hooks/useConnectionStatus';
-import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
-import { useActiveClusterId } from '@/hooks/useActiveClusterId';
-import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
-import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
-import { toast } from '@/components/ui/sonner';
-import { downloadResourceJson } from '@/lib/exportUtils';
+import { type KubernetesResource } from '@/hooks/useKubernetes';
 
 interface CRDResource extends KubernetesResource {
   spec?: {
@@ -40,26 +23,7 @@ interface CRDResource extends KubernetesResource {
   };
 }
 
-export default function CustomResourceDefinitionDetail() {
-  const { name } = useParams<{ name: string }>();
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview');
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const { isConnected } = useConnectionStatus();
-  const clusterId = useActiveClusterId();
-  const backendBaseUrl = useBackendConfigStore((s) => s.backendBaseUrl);
-  const baseUrl = getEffectiveBackendBaseUrl(backendBaseUrl);
-
-  const { resource: crd, isLoading, error: resourceError, age, yaml, refetch } = useResourceDetail<CRDResource>(
-    'customresourcedefinitions',
-    name ?? undefined,
-    undefined,
-    undefined as unknown as CRDResource
-  );
-  const { events, refetch: refetchEvents } = useResourceEvents('CustomResourceDefinition', undefined, name ?? undefined);
-  const deleteResource = useDeleteK8sResource('customresourcedefinitions');
-
-  const crdName = crd?.metadata?.name ?? name ?? '';
+function OverviewTab({ resource: crd, age }: ResourceContext<CRDResource>) {
   const spec = crd?.spec;
   const status = crd?.status;
   const group = spec?.group ?? '-';
@@ -71,209 +35,92 @@ export default function CustomResourceDefinitionDetail() {
   const versions = spec?.versions ?? [];
   const conditions = status?.conditions ?? [];
 
-  const handleDownloadYaml = useCallback(() => {
-    if (!yaml) return;
-    const blob = new Blob([yaml], { type: 'application/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${crdName || 'crd'}.yaml`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  }, [yaml, crdName]);
-
-  const handleDownloadJson = useCallback(() => {
-    if (!crd) return;
-    downloadResourceJson(crd, `${crdName || 'crd'}.json`);
-    toast.success('JSON downloaded');
-  }, [crd, crdName]);
-
-  const statusCards = [
-    { label: 'Group', value: group, icon: Package, iconColor: 'primary' as const },
-    { label: 'Versions', value: versions.length, icon: Layers, iconColor: 'info' as const },
-    { label: 'Scope', value: scope, icon: FileCode, iconColor: 'success' as const },
-    { label: 'Age', value: age || '-', icon: Clock, iconColor: 'muted' as const },
-  ];
-
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-20 w-full" />
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-24" />
-          ))}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    );
-  }
-
-  if (isConnected && (resourceError || !crd?.metadata?.name)) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-        <FileCode className="h-12 w-12 text-muted-foreground" />
-        <p className="text-lg font-medium">CRD not found</p>
-        <p className="text-sm text-muted-foreground">{name ? `No CRD "${name}".` : 'Missing name.'}</p>
-        <Button variant="outline" onClick={() => navigate('/customresourcedefinitions')}>Back to CRDs</Button>
-      </div>
-    );
-  }
-
-  const tabs = [
-    {
-      id: 'overview',
-      label: 'Overview',
-      content: (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <SectionCard icon={Info} title="CRD Info">
-              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                <DetailRow label="Group" value={<span className="font-mono">{group}</span>} />
-                <DetailRow label="Kind" value={<Badge variant="default">{kind}</Badge>} />
-                <DetailRow label="Plural" value={<span className="font-mono">{plural}</span>} />
-                <DetailRow label="Singular" value={<span className="font-mono">{singular}</span>} />
-                <DetailRow label="Scope" value={<Badge variant="outline">{scope}</Badge>} />
-                <DetailRow label="Short Names" value={
-                  shortNames.length > 0 ? (
-                    <div className="flex gap-1 flex-wrap">
-                      {shortNames.map((sn) => (
-                        <Badge key={sn} variant="secondary" className="font-mono text-xs">{sn}</Badge>
-                      ))}
-                    </div>
-                  ) : '–'
-                } />
-                <DetailRow label="Age" value={age} />
-              </div>
-          </SectionCard>
-          <SectionCard icon={Layers} title="Versions">
-              <div className="space-y-2">
-                {versions.map((ver) => (
-                  <div key={ver.name} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                    <div className="flex items-center gap-2">
-                      <Badge variant={ver.storage ? 'default' : 'secondary'}>{ver.name}</Badge>
-                      {ver.storage && <Badge variant="outline" className="text-xs">Storage</Badge>}
-                    </div>
-                    <Badge variant={ver.served ? 'default' : 'secondary'}>
-                      {ver.served ? 'Served' : 'Not Served'}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-          </SectionCard>
-          <SectionCard icon={Activity} title="Conditions">
-              <div className="space-y-2">
-                {conditions.map((condition) => (
-                  <div key={condition.type} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                    <Badge variant={condition.status === 'True' ? 'default' : 'secondary'}>
-                      {condition.type}
-                    </Badge>
-                    <span className="text-sm text-muted-foreground">{condition.reason}</span>
-                  </div>
-                ))}
-                {conditions.length === 0 && <p className="text-sm text-muted-foreground">No conditions</p>}
-              </div>
-          </SectionCard>
-          <div className="lg:col-span-2">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <LabelList labels={crd?.metadata?.labels ?? {}} />
-            </div>
-          </div>
-          <div className="lg:col-span-2">
-            <AnnotationList annotations={crd?.metadata?.annotations ?? {}} />
-          </div>
-        </div>
-      ),
-    },
-    { id: 'events', label: 'Events', content: <EventsSection events={events} /> },
-    { id: 'yaml', label: 'YAML', content: <YamlViewer yaml={yaml} resourceName={crdName} /> },
-    {
-      id: 'compare',
-      label: 'Compare',
-      icon: GitCompare,
-      content: (
-        <ResourceComparisonView
-          resourceType="customresourcedefinitions"
-          resourceKind="CustomResourceDefinition"
-          initialSelectedResources={[crdName]}
-          clusterId={clusterId ?? undefined}
-          backendBaseUrl={baseUrl ?? ''}
-          isConnected={isConnected}
-          embedded
-        />
-      ),
-    },
-    {
-      id: 'topology',
-      label: 'Topology',
-      icon: Network,
-      content: (
-        <ResourceTopologyView
-          kind={normalizeKindForTopology('CustomResourceDefinition')}
-          namespace={''}
-          name={name ?? ''}
-          sourceResourceType="CustomResourceDefinition"
-          sourceResourceName={crdName}
-        />
-      ),
-    },
-    {
-      id: 'blast-radius',
-      label: 'Blast Radius',
-      icon: Zap,
-      content: (
-        <BlastRadiusTab
-          kind={normalizeKindForTopology('CustomResourceDefinition')}
-          namespace={''}
-          name={name || crd?.metadata?.name || ''}
-        />
-      ),
-    },
-    {
-      id: 'actions',
-      label: 'Actions',
-      content: (
-        <ActionsSection actions={[
-          { icon: Download, label: 'Download YAML', description: 'Export CRD definition', onClick: handleDownloadYaml },
-          { icon: Download, label: 'Export as JSON', description: 'Export CRD as JSON', onClick: handleDownloadJson },
-          { icon: Trash2, label: 'Delete CRD', description: 'Remove this custom resource definition', variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
-        ]} />
-      ),
-    },
-  ];
-
-  const statusLabel: ResourceStatus = 'Healthy';
-
   return (
-    <>
-      <ResourceDetailLayout
-        resourceType="CustomResourceDefinition"
-        resourceIcon={FileCode}
-        name={crdName}
-        status={statusLabel}
-        backLink="/customresourcedefinitions"
-        backLabel="Custom Resource Definitions"
-        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {age}</span>}
-        actions={[
-          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml },
-          { label: 'Export as JSON', icon: Download, variant: 'outline', onClick: handleDownloadJson },
-          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true) },
-        ]}
-        statusCards={statusCards}
-        tabs={tabs}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-      />
-      <DeleteConfirmDialog
-        open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
-        resourceType="CustomResourceDefinition"
-        resourceName={crdName}
-        onConfirm={async () => {
-          await deleteResource.mutateAsync({ name: crdName });
-          navigate('/customresourcedefinitions');
-        }}
-        requireNameConfirmation
-      />
-    </>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <SectionCard icon={Info} title="CRD Info">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+            <DetailRow label="Group" value={<span className="font-mono">{group}</span>} />
+            <DetailRow label="Kind" value={<Badge variant="default">{kind}</Badge>} />
+            <DetailRow label="Plural" value={<span className="font-mono">{plural}</span>} />
+            <DetailRow label="Singular" value={<span className="font-mono">{singular}</span>} />
+            <DetailRow label="Scope" value={<Badge variant="outline">{scope}</Badge>} />
+            <DetailRow label="Short Names" value={
+              shortNames.length > 0 ? (
+                <div className="flex gap-1 flex-wrap">
+                  {shortNames.map((sn) => (
+                    <Badge key={sn} variant="secondary" className="font-mono text-xs">{sn}</Badge>
+                  ))}
+                </div>
+              ) : '–'
+            } />
+            <DetailRow label="Age" value={age} />
+          </div>
+      </SectionCard>
+      <SectionCard icon={Layers} title="Versions">
+          <div className="space-y-2">
+            {versions.map((ver) => (
+              <div key={ver.name} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                <div className="flex items-center gap-2">
+                  <Badge variant={ver.storage ? 'default' : 'secondary'}>{ver.name}</Badge>
+                  {ver.storage && <Badge variant="outline" className="text-xs">Storage</Badge>}
+                </div>
+                <Badge variant={ver.served ? 'default' : 'secondary'}>
+                  {ver.served ? 'Served' : 'Not Served'}
+                </Badge>
+              </div>
+            ))}
+          </div>
+      </SectionCard>
+      <SectionCard icon={Activity} title="Conditions">
+          <div className="space-y-2">
+            {conditions.map((condition) => (
+              <div key={condition.type} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                <Badge variant={condition.status === 'True' ? 'default' : 'secondary'}>
+                  {condition.type}
+                </Badge>
+                <span className="text-sm text-muted-foreground">{condition.reason}</span>
+              </div>
+            ))}
+            {conditions.length === 0 && <p className="text-sm text-muted-foreground">No conditions</p>}
+          </div>
+      </SectionCard>
+      <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <LabelList labels={crd?.metadata?.labels ?? {}} />
+        </div>
+      </div>
+      <div className="lg:col-span-2">
+        <AnnotationList annotations={crd?.metadata?.annotations ?? {}} />
+      </div>
+    </div>
+  );
+}
+
+const customTabs: CustomTab[] = [
+  { id: 'overview', label: 'Overview', icon: Info, render: (ctx) => <OverviewTab {...ctx} /> },
+];
+
+export default function CustomResourceDefinitionDetail() {
+  return (
+    <GenericResourceDetail<CRDResource>
+      resourceType="customresourcedefinitions"
+      kind="CustomResourceDefinition"
+      pluralLabel="Custom Resource Definitions"
+      listPath="/customresourcedefinitions"
+      resourceIcon={FileCode}
+      customTabs={customTabs}
+      buildStatusCards={(ctx) => {
+        const spec = ctx.resource?.spec;
+        const group = spec?.group ?? '-';
+        const scope = spec?.scope ?? '-';
+        const versions = spec?.versions ?? [];
+        return [
+          { label: 'Group', value: group, icon: Package, iconColor: 'primary' as const },
+          { label: 'Versions', value: versions.length, icon: Layers, iconColor: 'info' as const },
+          { label: 'Scope', value: scope, icon: FileCode, iconColor: 'success' as const },
+          { label: 'Age', value: ctx.age || '-', icon: Clock, iconColor: 'muted' as const },
+        ];
+      }}
+    />
   );
 }

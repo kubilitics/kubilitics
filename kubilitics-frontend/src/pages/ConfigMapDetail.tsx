@@ -1,39 +1,26 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { FileJson, Clock, Download, Trash2, Copy, Edit, Info, Network, Loader2, FileCode, GitCompare, Maximize2, Zap } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { FileJson, Clock, Download, Copy, Info, Maximize2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-  ResourceDetailLayout,
+  GenericResourceDetail,
   SectionCard,
   DetailRow,
   LabelList,
   AnnotationList,
-  YamlViewer,
-  EventsSection,
-  ActionsSection,
-  DeleteConfirmDialog,
-  ResourceTopologyView,
-  ResourceComparisonView,
-  type ResourceStatus,
-  type YamlVersion,
+  type CustomTab,
+  type ResourceContext,
 } from '@/components/resources';
-import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
-import { useDeleteK8sResource, useUpdateK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
-import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
-import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
+import { type KubernetesResource } from '@/hooks/useKubernetes';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
-import { useClusterStore } from '@/stores/clusterStore';
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
-import { getConfigMapConsumers, BackendApiError } from '@/services/backendApiClient';
-import { Breadcrumbs, useDetailBreadcrumbs } from '@/components/layout/Breadcrumbs';
-import { downloadResourceJson } from '@/lib/exportUtils';
+import { useQuery } from '@tanstack/react-query';
+import { getConfigMapConsumers } from '@/services/backendApiClient';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/sonner';
-import { normalizeError, notifyError, notifySuccess } from '@/lib/notificationFormatter';
+import { useNavigate, useParams } from 'react-router-dom';
 
 interface ConfigMapResource extends KubernetesResource {
   data?: Record<string, string>;
@@ -61,36 +48,16 @@ function getFileExtension(key: string, format: string): string {
   return '.txt';
 }
 
-export default function ConfigMapDetail() {
-  const { namespace, name } = useParams();
+// ---------------------------------------------------------------------------
+// "Used By" section — needs backend query so it lives outside the tabs
+// ---------------------------------------------------------------------------
+function UsedByContent({ namespace, name }: { namespace?: string; name?: string }) {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = searchParams.get('tab') || 'overview';
-  const [activeTab, setActiveTab] = useState(initialTab);
-  const { activeCluster } = useClusterStore();
-  const breadcrumbSegments = useDetailBreadcrumbs('ConfigMap', name ?? undefined, namespace ?? undefined, activeCluster?.name);
   const clusterId = useActiveClusterId();
   const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
-
-  useEffect(() => {
-    setActiveTab(initialTab);
-  }, [initialTab]);
-
-  const { resource: cm, isLoading, error: resourceError, age, yaml, isConnected, refetch } = useResourceDetail<ConfigMapResource>(
-    'configmaps',
-    name,
-    namespace,
-    undefined as unknown as ConfigMapResource
-  );
-  const { events, refetch: refetchEvents } = useResourceEvents('ConfigMap', namespace, name ?? undefined);
-  const deleteConfigMap = useDeleteK8sResource('configmaps');
-  const updateConfigMap = useUpdateK8sResource('configmaps');
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [expandKey, setExpandKey] = useState<string | null>(null);
-  const [expandValue, setExpandValue] = useState<string>('');
-
   const backendBaseUrl = useBackendConfigStore((s) => s.backendBaseUrl);
   const baseUrl = getEffectiveBackendBaseUrl(backendBaseUrl);
+
   const consumersQuery = useQuery({
     queryKey: ['configmap-consumers', clusterId, namespace, name],
     queryFn: () => getConfigMapConsumers(baseUrl!, clusterId!, namespace ?? '', name!),
@@ -99,8 +66,6 @@ export default function ConfigMapDetail() {
   });
   const consumers = consumersQuery.data;
 
-  // ⚠ Must be above ALL early returns — calling a hook after a conditional early return
-  // violates React's Rules of Hooks ("Rendered more hooks than during the previous render").
   const usedByRows = useMemo(() => {
     if (!consumers) return [];
     const rows: { type: string; namespace: string; name: string; path: string }[] = [];
@@ -116,156 +81,14 @@ export default function ConfigMapDetail() {
     return rows;
   }, [consumers]);
 
-  const data = cm.data || {};
-  const dataKeysCount = Object.keys(data).length + (cm.binaryData ? Object.keys(cm.binaryData).length : 0);
-  const totalSizeBytes = useMemo(() => {
-    let n = 0;
-    if (cm.data) for (const v of Object.values(cm.data)) n += (v ?? '').length;
-    if (cm.binaryData) for (const v of Object.values(cm.binaryData)) n += (typeof v === 'string' ? v.length : 0);
-    return n;
-  }, [cm.data, cm.binaryData]);
+  if (!namespace || !name) return <p className="text-muted-foreground text-sm">No resource selected.</p>;
+  if (!isBackendConfigured() || !clusterId) return <p className="text-muted-foreground text-sm">Connect to Kubilitics backend to see which Pods and workloads use this ConfigMap.</p>;
+  if (consumersQuery.isLoading) return <Skeleton className="h-32 w-full" />;
+  if (consumers == null) return <p className="text-muted-foreground text-sm">Could not load consumers.</p>;
 
-  const status: ResourceStatus = 'Healthy';
-  const labels = cm.metadata?.labels || {};
-  const cmName = cm.metadata?.name || '';
-  const cmNamespace = cm.metadata?.namespace || '';
-
-  const handleDownloadYaml = useCallback(() => {
-    const blob = new Blob([yaml], { type: 'application/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${cmName || 'configmap'}.yaml`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  }, [yaml, cmName]);
-
-  const handleDownloadJson = useCallback(() => {
-    downloadResourceJson(cm, `${cmName || 'configmap'}.json`);
-    toast.success('JSON downloaded');
-  }, [cm, cmName]);
-
-  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
-
-  const handleSaveYaml = async (newYaml: string) => {
-    if (!namespace || !name) return;
-    try {
-      await updateConfigMap.mutateAsync({ name, namespace, yaml: newYaml });
-      notifySuccess({
-        action: 'update',
-        resourceType: 'configmaps',
-        resourceName: name,
-        namespace,
-      });
-      refetch();
-    } catch (e) {
-      notifyError(e, {
-        action: 'update',
-        resourceType: 'configmaps',
-        resourceName: name,
-        namespace,
-      });
-      throw e;
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-20 w-full" />
-        <div className="grid grid-cols-2 gap-4">
-          {[1, 2].map(i => <Skeleton key={i} className="h-24" />)}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    );
-  }
-
-  if (resourceError) {
-    const isBackend404 = resourceError instanceof BackendApiError && resourceError.status === 404;
-    const normalized = normalizeError(resourceError, {
-      action: 'load',
-      resourceType: 'configmaps',
-      resourceName: name,
-      namespace,
-    });
-    return (
-      <div className="space-y-4 p-6">
-        <Breadcrumbs segments={breadcrumbSegments} className="mb-2" />
-        <Card>
-          <CardContent className="pt-6 space-y-3">
-            <p className="text-muted-foreground font-medium">Could not load ConfigMap.</p>
-            <p className="text-sm text-muted-foreground">
-              {isBackend404
-                ? 'The backend returned 404. Ensure the Kubilitics backend is running (e.g. port 8190) and the cluster is registered in Settings.'
-                : normalized.description}
-            </p>
-            {normalized.details && !isBackend404 && (
-              <button
-                type="button"
-                className="text-xs text-muted-foreground underline"
-                onClick={() => {
-                  try {
-                    void navigator.clipboard.writeText(normalized.details!);
-                  } catch {
-                    // ignore
-                  }
-                }}
-              >
-                Copy technical details
-              </button>
-            )}
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => refetch()} className="press-effect">Retry</Button>
-              <Button variant="outline" onClick={() => navigate('/configmaps')} className="press-effect">Back to ConfigMaps</Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (isConnected && name && !cm?.metadata?.name) {
-    return (
-      <div className="space-y-4 p-6">
-        <Breadcrumbs segments={breadcrumbSegments} className="mb-2" />
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-muted-foreground">ConfigMap not found.</p>
-            <Button variant="outline" className="mt-4 press-effect" onClick={() => navigate('/configmaps')}>
-              Back to ConfigMaps
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const totalSizeHuman = totalSizeBytes >= 1024 * 1024
-    ? `${(totalSizeBytes / (1024 * 1024)).toFixed(1)} MiB`
-    : totalSizeBytes >= 1024
-      ? `${(totalSizeBytes / 1024).toFixed(1)} KiB`
-      : `${totalSizeBytes} B`;
-  const usedByCount = consumers
-    ? (consumers.pods?.length ?? 0) + (consumers.deployments?.length ?? 0) + (consumers.statefulSets?.length ?? 0) + (consumers.daemonSets?.length ?? 0) + (consumers.jobs?.length ?? 0) + (consumers.cronJobs?.length ?? 0)
-    : 0;
-  const statusCards = [
-    { label: 'Keys', value: dataKeysCount, icon: FileJson, iconColor: 'primary' as const },
-    { label: 'Total Size', value: totalSizeHuman, icon: FileJson, iconColor: 'muted' as const },
-    { label: 'Used By', value: usedByCount, icon: FileJson, iconColor: 'primary' as const },
-    { label: 'Immutable', value: cm.immutable ? 'Yes' : 'No', icon: FileJson, iconColor: 'muted' as const },
-  ];
-
-
-  const usedByContent = !namespace || !name ? (
-    <p className="text-muted-foreground text-sm">No resource selected.</p>
-  ) : !isBackendConfigured() || !clusterId ? (
-    <p className="text-muted-foreground text-sm">Connect to Kubilitics backend to see which Pods and workloads use this ConfigMap.</p>
-  ) : consumersQuery.isLoading ? (
-    <Skeleton className="h-32 w-full" />
-  ) : consumers != null ? (
+  return (
     <div className="space-y-4">
-      {usedByRows.length > 0 && (
+      {usedByRows.length > 0 ? (
         <>
           <p className="text-muted-foreground text-sm">Resources that reference this ConfigMap (volume, env, or envFrom).</p>
           <div className="rounded-md border overflow-x-auto">
@@ -292,266 +115,188 @@ export default function ConfigMapDetail() {
             </p>
           )}
         </>
-      )}
-      {usedByRows.length === 0 && (
+      ) : (
         <p className="text-muted-foreground text-sm">No consumers found.</p>
       )}
     </div>
-  ) : (
-    <p className="text-muted-foreground text-sm">Could not load consumers.</p>
   );
+}
 
-  const tabs = [
-    {
-      id: 'overview',
-      label: 'Overview',
-      icon: Info,
-      content: (
-        <div className="space-y-6">
-          <SectionCard
-            icon={Info}
-            title="ConfigMap information"
-            tooltip={<p className="text-xs text-muted-foreground">Identity and metadata for this ConfigMap</p>}
-          >
-            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-              <DetailRow label="Name" value={cmName} />
-              <DetailRow label="Namespace" value={cmNamespace} />
-              <DetailRow label="Age" value={age} />
-              <DetailRow label="Data Keys" value={String(dataKeysCount)} />
-              <DetailRow label="Immutable" value={<Badge variant="outline">{cm.immutable ? 'Yes' : 'No'}</Badge>} />
-            </div>
-          </SectionCard>
-          <SectionCard
-            icon={FileJson}
-            title="Data keys"
-            tooltip={<p className="text-xs text-muted-foreground">Keys defined in this ConfigMap (see Data tab for values)</p>}
-          >
-            <div className="flex flex-wrap gap-2">
-              {Object.keys(data).map((key) => (
-                <Badge key={key} variant="secondary" className="font-mono">{key}</Badge>
-              ))}
-              {cm.binaryData && Object.keys(cm.binaryData).map((key) => (
-                <Badge key={`binary-${key}`} variant="secondary" className="font-mono">{key} (binary)</Badge>
-              ))}
-              {dataKeysCount === 0 && <p className="text-muted-foreground text-sm">No keys</p>}
-            </div>
-          </SectionCard>
-          <div className="lg:col-span-2">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <LabelList labels={labels} />
-            </div>
-          </div>
-          <div className="lg:col-span-2">
-            <AnnotationList annotations={cm?.metadata?.annotations || {}} />
-          </div>
+// ---------------------------------------------------------------------------
+// Custom tabs
+// ---------------------------------------------------------------------------
+
+function OverviewTab({ resource: cm, age }: ResourceContext<ConfigMapResource>) {
+  const data = cm.data || {};
+  const dataKeysCount = Object.keys(data).length + (cm.binaryData ? Object.keys(cm.binaryData).length : 0);
+  const labels = cm.metadata?.labels || {};
+
+  return (
+    <div className="space-y-6">
+      <SectionCard
+        icon={Info}
+        title="ConfigMap information"
+        tooltip={<p className="text-xs text-muted-foreground">Identity and metadata for this ConfigMap</p>}
+      >
+        <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+          <DetailRow label="Name" value={cm.metadata?.name || ''} />
+          <DetailRow label="Namespace" value={cm.metadata?.namespace || ''} />
+          <DetailRow label="Age" value={age} />
+          <DetailRow label="Data Keys" value={String(dataKeysCount)} />
+          <DetailRow label="Immutable" value={<Badge variant="outline">{cm.immutable ? 'Yes' : 'No'}</Badge>} />
         </div>
-      ),
-    },
-    {
-      id: 'data',
-      label: 'Data',
-      icon: FileJson,
-      content: (
-        <div className="space-y-6">
-          {Object.entries(data).length > 0 && (
-            <SectionCard title="Data keys" icon={FileJson} tooltip={<p className="text-xs text-muted-foreground">Per-key value preview, copy, and download</p>}>
-              <div className="space-y-4">
-                {Object.entries(data).map(([key, value]) => {
-                  const size = (value ?? '').length;
-                  const preview = (value ?? '').length <= PREVIEW_LEN ? (value ?? '') : (value ?? '').slice(0, PREVIEW_LEN) + '…';
-                  const format = detectValueFormat(value ?? '');
-                  const ext = getFileExtension(key, format);
-                  return (
-                    <Card key={key}>
-                      <CardHeader className="flex flex-row items-center justify-between py-3 gap-2">
-                        <CardTitle className="text-sm font-mono truncate">{key}</CardTitle>
-                        <span className="text-xs text-muted-foreground shrink-0">{size} B</span>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <pre className="p-3 rounded-lg bg-muted/80 text-sm font-mono overflow-auto max-h-40 whitespace-pre-wrap break-words">{preview}</pre>
-                        <div className="flex flex-wrap gap-2">
-                          <Button variant="outline" size="sm" className="gap-1.5 press-effect" onClick={() => { setExpandKey(key); setExpandValue(value ?? ''); }} aria-label={`Expand ${key}`}>
-                            <Maximize2 className="h-3.5 w-3.5" /> Expand
-                          </Button>
-                          <Button variant="outline" size="sm" className="gap-1.5 press-effect" onClick={() => { navigator.clipboard.writeText(value ?? ''); toast.success('Value copied'); }} aria-label={`Copy value of ${key}`}>
-                            <Copy className="h-3.5 w-3.5" /> Copy Value
-                          </Button>
-                          <Button variant="outline" size="sm" className="gap-1.5 press-effect" onClick={() => { const blob = new Blob([value ?? ''], { type: 'text/plain' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${key}${ext}`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30_000); toast.success('Downloaded'); }} aria-label={`Download ${key} as file`}>
-                            <Download className="h-3.5 w-3.5" /> Download as File
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            </SectionCard>
-          )}
-          {cm.binaryData && Object.keys(cm.binaryData).length > 0 && (
-            <SectionCard title="Binary data" icon={FileJson} tooltip={<p className="text-xs text-muted-foreground">Base64-encoded keys with hex preview</p>}>
-              <div className="space-y-3">
-                {Object.entries(cm.binaryData).map(([key, b64]) => {
-                  let decodedLength = 0;
-                  let hexPreview = '—';
-                  try {
-                    const bin = atob(b64 ?? '');
-                    decodedLength = bin.length;
-                    const bytes = new Uint8Array(bin.length);
-                    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-                    hexPreview = Array.from(bytes.slice(0, HEX_PREVIEW_BYTES)).map((b) => b.toString(16).padStart(2, '0')).join(' ') + (bytes.length > HEX_PREVIEW_BYTES ? '…' : '');
-                  } catch { /* ignore */ }
-                  return (
-                    <div key={key} className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg border bg-muted/30">
-                      <span className="font-mono text-sm">{key}</span>
-                      <span className="text-xs text-muted-foreground">{decodedLength} B</span>
-                      <code className="text-xs font-mono text-muted-foreground break-all w-full">{hexPreview}</code>
-                      <Button variant="outline" size="sm" className="gap-1.5 press-effect" onClick={() => { try { const bin = atob(b64 ?? ''); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); const blob = new Blob([bytes]); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = key; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30_000); toast.success('Downloaded'); } catch { toast.error('Failed to decode'); } }} aria-label={`Download binary ${key}`}>
-                        <Download className="h-3.5 w-3.5" /> Download
+      </SectionCard>
+      <SectionCard
+        icon={FileJson}
+        title="Data keys"
+        tooltip={<p className="text-xs text-muted-foreground">Keys defined in this ConfigMap (see Data tab for values)</p>}
+      >
+        <div className="flex flex-wrap gap-2">
+          {Object.keys(data).map((key) => (
+            <Badge key={key} variant="secondary" className="font-mono">{key}</Badge>
+          ))}
+          {cm.binaryData && Object.keys(cm.binaryData).map((key) => (
+            <Badge key={`binary-${key}`} variant="secondary" className="font-mono">{key} (binary)</Badge>
+          ))}
+          {dataKeysCount === 0 && <p className="text-muted-foreground text-sm">No keys</p>}
+        </div>
+      </SectionCard>
+      <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <LabelList labels={labels} />
+        </div>
+      </div>
+      <div className="lg:col-span-2">
+        <AnnotationList annotations={cm?.metadata?.annotations || {}} />
+      </div>
+    </div>
+  );
+}
+
+function DataTab({ resource: cm }: ResourceContext<ConfigMapResource>) {
+  const [expandKey, setExpandKey] = useState<string | null>(null);
+  const [expandValue, setExpandValue] = useState<string>('');
+  const data = cm.data || {};
+
+  return (
+    <div className="space-y-6">
+      {Object.entries(data).length > 0 && (
+        <SectionCard title="Data keys" icon={FileJson} tooltip={<p className="text-xs text-muted-foreground">Per-key value preview, copy, and download</p>}>
+          <div className="space-y-4">
+            {Object.entries(data).map(([key, value]) => {
+              const size = (value ?? '').length;
+              const preview = (value ?? '').length <= PREVIEW_LEN ? (value ?? '') : (value ?? '').slice(0, PREVIEW_LEN) + '\u2026';
+              const format = detectValueFormat(value ?? '');
+              const ext = getFileExtension(key, format);
+              return (
+                <Card key={key}>
+                  <CardHeader className="flex flex-row items-center justify-between py-3 gap-2">
+                    <CardTitle className="text-sm font-mono truncate">{key}</CardTitle>
+                    <span className="text-xs text-muted-foreground shrink-0">{size} B</span>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <pre className="p-3 rounded-lg bg-muted/80 text-sm font-mono overflow-auto max-h-40 whitespace-pre-wrap break-words">{preview}</pre>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" className="gap-1.5 press-effect" onClick={() => { setExpandKey(key); setExpandValue(value ?? ''); }} aria-label={`Expand ${key}`}>
+                        <Maximize2 className="h-3.5 w-3.5" /> Expand
+                      </Button>
+                      <Button variant="outline" size="sm" className="gap-1.5 press-effect" onClick={() => { navigator.clipboard.writeText(value ?? ''); toast.success('Value copied'); }} aria-label={`Copy value of ${key}`}>
+                        <Copy className="h-3.5 w-3.5" /> Copy Value
+                      </Button>
+                      <Button variant="outline" size="sm" className="gap-1.5 press-effect" onClick={() => { const blob = new Blob([value ?? ''], { type: 'text/plain' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${key}${ext}`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30_000); toast.success('Downloaded'); }} aria-label={`Download ${key} as file`}>
+                        <Download className="h-3.5 w-3.5" /> Download as File
                       </Button>
                     </div>
-                  );
-                })}
-              </div>
-            </SectionCard>
-          )}
-          {Object.keys(data).length === 0 && !(cm.binaryData && Object.keys(cm.binaryData).length > 0) && (
-            <p className="text-muted-foreground text-sm">No data keys.</p>
-          )}
-          <Dialog open={!!expandKey} onOpenChange={(open) => { if (!open) setExpandKey(null); }}>
-            <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-              <DialogHeader>
-                <DialogTitle className="font-mono text-sm">{expandKey ?? ''}</DialogTitle>
-              </DialogHeader>
-              <pre className="p-4 rounded-lg bg-muted text-sm font-mono overflow-auto flex-1 min-h-0 whitespace-pre-wrap break-words">{expandValue}</pre>
-            </DialogContent>
-          </Dialog>
-        </div>
-      ),
-    },
-    { id: 'used-by', label: 'Used By', icon: FileJson, content: usedByContent },
-    { id: 'events', label: 'Events', icon: Clock, content: <EventsSection events={events} /> },
-    { id: 'yaml', label: 'YAML', icon: FileCode, content: <YamlViewer yaml={yaml} resourceName={cmName} editable onSave={handleSaveYaml} /> },
-    {
-      id: 'compare',
-      label: 'Compare',
-      icon: GitCompare,
-      content: (
-        <ResourceComparisonView
-          resourceType="configmaps"
-          resourceKind="ConfigMap"
-          namespace={namespace}
-          initialSelectedResources={namespace && name ? [`${namespace}/${name}`] : [name || '']}
-          clusterId={clusterId ?? undefined}
-          backendBaseUrl={baseUrl ?? ''}
-          isConnected={isConnected}
-          embedded
-        />
-      ),
-    },
-    {
-      id: 'topology',
-      label: 'Topology',
-      icon: Network,
-      content: (
-        <ResourceTopologyView
-          kind={normalizeKindForTopology('ConfigMap')}
-          namespace={namespace ?? ''}
-          name={name ?? ''}
-          sourceResourceType="ConfigMap"
-          sourceResourceName={cm?.metadata?.name ?? name ?? ''}
-        />
-      ),
-    },
-    {
-      id: 'blast-radius',
-      label: 'Blast Radius',
-      icon: Zap,
-      content: (
-        <BlastRadiusTab
-          kind={normalizeKindForTopology('ConfigMap')}
-          namespace={namespace ?? ''}
-          name={name ?? ''}
-        />
-      ),
-    },
-    {
-      id: 'actions',
-      label: 'Actions',
-      icon: Edit,
-      content: (
-        <ActionsSection actions={[
-          { icon: Edit, label: 'Edit ConfigMap', description: 'Modify configuration data', className: 'press-effect' },
-          { icon: Copy, label: 'Duplicate', description: 'Create a copy of this ConfigMap', className: 'press-effect' },
-          { icon: Download, label: 'Download YAML', description: 'Export ConfigMap definition', onClick: handleDownloadYaml, className: 'press-effect' },
-          { icon: Download, label: 'Export as JSON', description: 'Export ConfigMap as JSON', onClick: handleDownloadJson, className: 'press-effect' },
-          { icon: Trash2, label: 'Delete ConfigMap', description: 'Remove this ConfigMap', variant: 'destructive', onClick: () => setShowDeleteDialog(true), className: 'press-effect' },
-        ]} />
-      ),
-    },
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </SectionCard>
+      )}
+      {cm.binaryData && Object.keys(cm.binaryData).length > 0 && (
+        <SectionCard title="Binary data" icon={FileJson} tooltip={<p className="text-xs text-muted-foreground">Base64-encoded keys with hex preview</p>}>
+          <div className="space-y-3">
+            {Object.entries(cm.binaryData).map(([key, b64]) => {
+              let decodedLength = 0;
+              let hexPreview = '\u2014';
+              try {
+                const bin = atob(b64 ?? '');
+                decodedLength = bin.length;
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                hexPreview = Array.from(bytes.slice(0, HEX_PREVIEW_BYTES)).map((b) => b.toString(16).padStart(2, '0')).join(' ') + (bytes.length > HEX_PREVIEW_BYTES ? '\u2026' : '');
+              } catch { /* ignore */ }
+              return (
+                <div key={key} className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg border bg-muted/30">
+                  <span className="font-mono text-sm">{key}</span>
+                  <span className="text-xs text-muted-foreground">{decodedLength} B</span>
+                  <code className="text-xs font-mono text-muted-foreground break-all w-full">{hexPreview}</code>
+                  <Button variant="outline" size="sm" className="gap-1.5 press-effect" onClick={() => { try { const bin = atob(b64 ?? ''); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); const blob = new Blob([bytes]); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = key; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30_000); toast.success('Downloaded'); } catch { toast.error('Failed to decode'); } }} aria-label={`Download binary ${key}`}>
+                    <Download className="h-3.5 w-3.5" /> Download
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+      )}
+      {Object.keys(data).length === 0 && !(cm.binaryData && Object.keys(cm.binaryData).length > 0) && (
+        <p className="text-muted-foreground text-sm">No data keys.</p>
+      )}
+      <Dialog open={!!expandKey} onOpenChange={(open) => { if (!open) setExpandKey(null); }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="font-mono text-sm">{expandKey ?? ''}</DialogTitle>
+          </DialogHeader>
+          <pre className="p-4 rounded-lg bg-muted text-sm font-mono overflow-auto flex-1 min-h-0 whitespace-pre-wrap break-words">{expandValue}</pre>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+export default function ConfigMapDetail() {
+  const { namespace, name } = useParams();
+
+  const customTabs: CustomTab[] = [
+    { id: 'overview', label: 'Overview', icon: Info, render: (ctx) => <OverviewTab {...ctx} /> },
+    { id: 'data', label: 'Data', icon: FileJson, render: (ctx) => <DataTab {...ctx} /> },
+    { id: 'used-by', label: 'Used By', icon: FileJson, render: () => <UsedByContent namespace={namespace} name={name} /> },
   ];
 
   return (
-    <>
-      <ResourceDetailLayout
-        role="main"
-        aria-label="ConfigMap Detail"
-        resourceType="ConfigMap"
-        resourceIcon={FileJson}
-        name={cmName}
-        namespace={cmNamespace}
-        status={status}
-        backLink="/configmaps"
-        backLabel="ConfigMaps"
-        headerMetadata={<span className="flex items-center gap-1.5 ml-2 text-sm text-muted-foreground"><Clock className="h-3.5 w-3.5" />Created {age}{isConnected && <Badge variant="outline" className="ml-2 text-xs">Live</Badge>}</span>}
-        actions={[
-          { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml, className: 'press-effect' },
-          { label: 'Edit', icon: Edit, variant: 'outline', onClick: () => { setActiveTab('yaml'); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'yaml'); return n; }, { replace: true }); }, className: 'press-effect' },
-          { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true), className: 'press-effect' },
-        ]}
-        statusCards={statusCards}
-        tabs={tabs}
-        activeTab={activeTab}
-        onTabChange={(tabId) => {
-          setActiveTab(tabId);
-          setSearchParams((prev) => {
-            const next = new URLSearchParams(prev);
-            if (tabId === 'overview') next.delete('tab');
-            else next.set('tab', tabId);
-            return next;
-          }, { replace: true });
-        }}
-      >
-        {breadcrumbSegments.length > 0 && (
-          <Breadcrumbs segments={breadcrumbSegments} className="mb-2" />
-        )}
-      </ResourceDetailLayout>
-      <DeleteConfirmDialog
-        open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
-        resourceType="ConfigMap"
-        resourceName={cmName}
-        namespace={cmNamespace}
-        onConfirm={async () => {
-          if (isConnected && name && cmNamespace) {
-            await deleteConfigMap.mutateAsync({ name, namespace: cmNamespace });
-            navigate('/configmaps');
-          } else {
-            notifySuccess(
-              {
-                action: 'delete',
-                resourceType: 'configmaps',
-                resourceName: cmName,
-                namespace: cmNamespace,
-              },
-              {
-                description: 'Demo mode – no changes were made to your cluster.',
-              }
-            );
-            navigate('/configmaps');
-          }
-        }}
-        requireNameConfirmation
-      />
-    </>
+    <GenericResourceDetail<ConfigMapResource>
+      resourceType="configmaps"
+      kind="ConfigMap"
+      pluralLabel="ConfigMaps"
+      listPath="/configmaps"
+      resourceIcon={FileJson}
+      loadingCardCount={2}
+      customTabs={customTabs}
+      buildStatusCards={(ctx) => {
+        const cm = ctx.resource;
+        const data = cm.data || {};
+        const dataKeysCount = Object.keys(data).length + (cm.binaryData ? Object.keys(cm.binaryData).length : 0);
+        let totalSizeBytes = 0;
+        if (cm.data) for (const v of Object.values(cm.data)) totalSizeBytes += (v ?? '').length;
+        if (cm.binaryData) for (const v of Object.values(cm.binaryData)) totalSizeBytes += (typeof v === 'string' ? v.length : 0);
+        const totalSizeHuman = totalSizeBytes >= 1024 * 1024
+          ? `${(totalSizeBytes / (1024 * 1024)).toFixed(1)} MiB`
+          : totalSizeBytes >= 1024
+            ? `${(totalSizeBytes / 1024).toFixed(1)} KiB`
+            : `${totalSizeBytes} B`;
+
+        return [
+          { label: 'Keys', value: dataKeysCount, icon: FileJson, iconColor: 'primary' as const },
+          { label: 'Total Size', value: totalSizeHuman, icon: FileJson, iconColor: 'muted' as const },
+          { label: 'Immutable', value: cm.immutable ? 'Yes' : 'No', icon: FileJson, iconColor: 'muted' as const },
+        ];
+      }}
+    />
   );
 }

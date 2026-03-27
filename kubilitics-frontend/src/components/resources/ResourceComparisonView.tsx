@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import {
     X,
@@ -670,6 +670,8 @@ export function ResourceComparisonView({
     const [activeTab, setActiveTab] = useState('yaml');
     const [compareMode, setCompareMode] = useState<CompareMode>('resources');
     const [customYaml, setCustomYaml] = useState<string>('');
+    // Cross-namespace support: browse namespace defaults to current, user can switch
+    const [browseNamespace, setBrowseNamespace] = useState<string>(namespace || '');
 
     // Reset all state when navigating to a different resource
     useEffect(() => {
@@ -677,23 +679,49 @@ export function ResourceComparisonView({
       setActiveTab('yaml');
       setCompareMode('resources');
       setCustomYaml('');
+      setBrowseNamespace(namespace || '');
     }, [initialKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
-    const canList = Boolean(clusterId && isBackendConfigured() && backendBaseUrl);
-    const canFetch = Boolean(isConnected && clusterId && isBackendConfigured());
+    // List available resources: works via backend OR direct K8s connection
+    const canList = Boolean(isConnected || (clusterId && isBackendConfigured() && backendBaseUrl));
+    const canFetch = Boolean(isConnected || (clusterId && isBackendConfigured()));
 
-    const { data: listData } = useK8sResourceList<KubernetesResource>(resourceType, namespace, {
+    // Fetch namespaces for the namespace selector
+    const { data: nsListData } = useK8sResourceList<KubernetesResource>('namespaces', undefined, {
+        limit: 500,
+        enabled: canList,
+    });
+    const allNamespaces = useMemo(() => {
+        return (nsListData?.items ?? []).map(ns => ns.metadata.name).sort();
+    }, [nsListData]);
+
+    // Fetch resources from the currently browsed namespace (cross-namespace support)
+    const { data: listData } = useK8sResourceList<KubernetesResource>(resourceType, browseNamespace || undefined, {
         limit: 500,
         enabled: canList,
     });
 
     const availableResources = useMemo(() => {
-        return (listData?.items ?? []).map(item => ({
+        const items = (listData?.items ?? []).map(item => ({
             name: item.metadata.name,
             namespace: item.metadata.namespace,
+            owner: (item.metadata as Record<string, unknown>).ownerReferences
+                ? ((item.metadata as Record<string, unknown>).ownerReferences as Array<{ name: string; kind: string }>)?.[0]?.name
+                : undefined,
+            ownerKind: (item.metadata as Record<string, unknown>).ownerReferences
+                ? ((item.metadata as Record<string, unknown>).ownerReferences as Array<{ name: string; kind: string }>)?.[0]?.kind
+                : undefined,
             status: (item.status?.phase as string) || (item.status?.conditions?.find((c: Record<string, unknown>) => c.type === 'Ready')?.status === 'True' ? 'Running' : 'Ready') || 'Unknown',
         }));
+        // Sort: group by owner, then alphabetical within group
+        items.sort((a, b) => {
+            const ownerA = a.owner || '~ungrouped';
+            const ownerB = b.owner || '~ungrouped';
+            if (ownerA !== ownerB) return ownerA.localeCompare(ownerB);
+            return a.name.localeCompare(b.name);
+        });
+        return items;
     }, [listData]);
 
     /* ── Queries ── */
@@ -823,32 +851,66 @@ export function ResourceComparisonView({
                     )}
                 </div>
 
-                {/* Resource selector row */}
+                {/* Resource selector row — namespace selector + resource dropdown */}
                 <div className="flex items-center gap-2">
-                    <Select onValueChange={handleAdd}>
+                    {/* Namespace selector for cross-namespace comparison */}
+                    {allNamespaces.length > 0 && (
+                      <Select value={browseNamespace} onValueChange={setBrowseNamespace}>
+                          <SelectTrigger className="w-auto min-w-[120px] max-w-[220px] h-8 text-xs bg-background border-border/50">
+                              <SelectValue placeholder="Namespace..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                              {allNamespaces.map(ns => (
+                                  <SelectItem key={ns} value={ns}>
+                                      <span className={cn("truncate", ns === namespace ? "font-semibold" : "")}>
+                                          {ns}
+                                          {ns === namespace && " (current)"}
+                                      </span>
+                                  </SelectItem>
+                              ))}
+                          </SelectContent>
+                      </Select>
+                    )}
+
+                    {/* Resource dropdown — grouped by owner, key resets after selection */}
+                    <Select key={selectedResources.length} onValueChange={handleAdd}>
                         <SelectTrigger className="w-56 h-8 text-xs bg-background border-border/50">
                             <SelectValue placeholder={`Add ${resourceKind}...`} />
                         </SelectTrigger>
                         <SelectContent>
-                            {availableResources
-                                .filter(r => !selectedResources.includes(r.namespace ? `${r.namespace}/${r.name}` : r.name))
-                                .map(r => {
+                            {(() => {
+                                const filtered = availableResources
+                                    .filter(r => !selectedResources.includes(r.namespace ? `${r.namespace}/${r.name}` : r.name));
+                                let lastOwner: string | undefined;
+                                return filtered.map(r => {
                                     const key = r.namespace ? `${r.namespace}/${r.name}` : r.name;
+                                    const showGroupHeader = r.owner && r.owner !== lastOwner;
+                                    lastOwner = r.owner;
                                     return (
-                                        <SelectItem key={key} value={key}>
-                                            <div className="flex items-center gap-2">
-                                                <span className="truncate">{r.name}</span>
-                                                {r.namespace && <span className="text-muted-foreground/50 text-[10px]">{r.namespace}</span>}
-                                            </div>
-                                        </SelectItem>
+                                        <React.Fragment key={key}>
+                                            {showGroupHeader && (
+                                                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider border-t border-border/30 mt-1 first:mt-0 first:border-0">
+                                                    {r.ownerKind}: {r.owner}
+                                                </div>
+                                            )}
+                                            <SelectItem value={key}>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="truncate">{r.name}</span>
+                                                    {r.namespace && r.namespace !== namespace && (
+                                                        <span className="text-muted-foreground/50 text-[10px] bg-muted/50 px-1 rounded">{r.namespace}</span>
+                                                    )}
+                                                </div>
+                                            </SelectItem>
+                                        </React.Fragment>
                                     );
-                                })}
+                                });
+                            })()}
                         </SelectContent>
                     </Select>
 
                     {selectedResources.length > 0 && <div className="h-4 w-px bg-border/30" />}
 
-                    <div className="flex items-center gap-2 overflow-x-auto flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
                         {selectedResources.map((key, idx) => (
                             <div
                               key={key}
