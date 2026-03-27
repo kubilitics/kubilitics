@@ -98,9 +98,7 @@ export {
 } from './utils/exportUtils';
 export type { ExportOptions as TopologyExportOptions } from './utils/exportUtils';
 
-// ─── Hooks ────────────────────────────────────────────────────
-export { useTopologyEngine } from './hooks/useTopologyEngine';
-export { useInsightOverlay } from './hooks/useInsightOverlay';
+// ─── Types ───────────────────────────────────────────────────
 export type { RendererEngine, EngineRef, EngineState } from './types/engine.types';
 
 // ─── UI Components ────────────────────────────────────────────

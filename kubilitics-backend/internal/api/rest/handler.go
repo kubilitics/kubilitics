@@ -1364,22 +1364,12 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fallback to v1 if v2 fails
-	graph, err := h.topologyService.GetResourceTopologyWithClient(ctx, client, clusterID, kind, namespace, name)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			respondError(w, http.StatusServiceUnavailable, "Resource topology build timed out")
-			return
-		}
-		if errors.Is(err, topology.ErrResourceNotFound) {
-			respondError(w, http.StatusNotFound, "Resource not found")
-			return
-		}
-		respondError(w, http.StatusInternalServerError, err.Error())
+	// v2 engine failed — return the build error directly (no v1 fallback)
+	if buildErr != nil {
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("topology build failed: %v", buildErr))
 		return
 	}
-
-	respondJSON(w, http.StatusOK, graph)
+	respondError(w, http.StatusNotFound, fmt.Sprintf("Resource %s/%s not found in topology", kind, name))
 }
 
 // attachCriticalityScores runs ScoreNodes on the full topology and writes
