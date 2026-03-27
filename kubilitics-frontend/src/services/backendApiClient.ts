@@ -754,7 +754,7 @@ export async function getResourceTopology(
 }
 
 /**
- * GET /api/v1/clusters/{clusterId}/topology/v2 — v2 topology API.
+ * GET /api/v1/clusters/{clusterId}/topology/cluster — cluster topology API.
  * Query: mode, namespace, resource, depth, includeMetrics, includeHealth, includeCost.
  */
 export async function getTopologyV2(
@@ -768,7 +768,7 @@ export async function getTopologyV2(
   if (params?.resource) search.set('resource', params.resource);
   if (params?.depth != null) search.set('depth', String(params.depth));
   const query = search.toString();
-  const path = `clusters/${encodeURIComponent(clusterId)}/topology/v2${query ? `?${query}` : ''}`;
+  const path = `clusters/${encodeURIComponent(clusterId)}/topology/cluster${query ? `?${query}` : ''}`;
   return backendRequest(baseUrl, path);
 }
 

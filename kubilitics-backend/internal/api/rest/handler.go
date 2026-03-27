@@ -293,10 +293,10 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 
 	// Topology routes (BE-AUTHZ-001: GET = viewer, POST export = operator)
 	router.Handle("/clusters/{clusterId}/topology", h.wrapWithRBAC(h.GetTopology, auth.RoleViewer)).Methods("GET")
-	router.Handle("/clusters/{clusterId}/topology/v2", h.wrapWithRBAC(h.GetTopologyV2, auth.RoleViewer)).Methods("GET")
-	router.Handle("/clusters/{clusterId}/topology/v2/traffic", h.wrapWithRBAC(h.GetTopologyV2Traffic, auth.RoleViewer)).Methods("GET")
-	router.Handle("/clusters/{clusterId}/topology/v2/impact/{kind}/{namespace}/{name}", h.wrapWithRBAC(h.GetTopologyV2Impact, auth.RoleViewer)).Methods("GET")
-	router.Handle("/clusters/{clusterId}/topology/v2/criticality", h.wrapWithRBAC(h.GetCriticality, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/topology/cluster", h.wrapWithRBAC(h.GetTopologyV2, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/topology/traffic", h.wrapWithRBAC(h.GetTopologyV2Traffic, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/topology/impact/{kind}/{namespace}/{name}", h.wrapWithRBAC(h.GetTopologyV2Impact, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/topology/criticality", h.wrapWithRBAC(h.GetCriticality, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/topology/resource/{kind}/{namespace}/{name}", h.wrapWithRBAC(h.GetResourceTopology, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/topology/export", h.wrapWithRBAC(h.ExportTopology, auth.RoleOperator)).Methods("POST")
 	router.Handle("/clusters/{clusterId}/topology/export/drawio", h.wrapWithRBAC(h.GetTopologyExportDrawio, auth.RoleViewer)).Methods("GET")
@@ -938,7 +938,7 @@ func filterTopologyByDepth(nodes []models.TopologyNode, edges []models.TopologyE
 	return filteredNodes, filteredEdges
 }
 
-// GetTopologyV2 handles GET /clusters/{clusterId}/topology/v2. Builds topology from live cluster data.
+// GetTopologyV2 handles GET /clusters/{clusterId}/topology/cluster. Builds topology from live cluster data.
 //
 // Query parameters:
 //   - mode: view mode (cluster, namespace, workload, resource, rbac). Default: namespace
@@ -1085,7 +1085,7 @@ func (h *Handler) GetTopologyV2(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, resp)
 }
 
-// GetTopologyV2Traffic handles GET /clusters/{clusterId}/topology/v2/traffic.
+// GetTopologyV2Traffic handles GET /clusters/{clusterId}/topology/cluster/traffic.
 // Returns inferred traffic edges and criticality scores for every topology node.
 func (h *Handler) GetTopologyV2Traffic(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -1173,7 +1173,7 @@ func (h *Handler) GetTopologyV2Traffic(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-// GetTopologyV2Impact handles GET /clusters/{clusterId}/topology/v2/impact/{kind}/{namespace}/{name}.
+// GetTopologyV2Impact handles GET /clusters/{clusterId}/topology/cluster/impact/{kind}/{namespace}/{name}.
 // Returns blast radius: all resources transitively impacted if the given resource fails.
 func (h *Handler) GetTopologyV2Impact(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -1417,7 +1417,7 @@ type criticalitySummary struct {
 	Score       float64 `json:"score"`
 }
 
-// GetCriticality handles GET /clusters/{clusterId}/topology/v2/criticality.
+// GetCriticality handles GET /clusters/{clusterId}/topology/cluster/criticality.
 // Returns a flat JSON array of criticality scores for every resource in the topology.
 // Optional query param: namespace (filter results to a single namespace).
 func (h *Handler) GetCriticality(w http.ResponseWriter, r *http.Request) {

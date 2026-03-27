@@ -1,5 +1,5 @@
 /**
- * Hook to fetch criticality scores from the topology v2 criticality endpoint.
+ * Hook to fetch criticality scores from the topology criticality endpoint.
  *
  * Returns a Map indexed by "Kind/namespace/name" and "Kind/name" for fast lookup
  * from resource list tables.
@@ -29,7 +29,7 @@ export function useCriticalityScores(namespace?: string) {
     queryKey: ['criticality-scores', clusterId, namespace],
     queryFn: async () => {
       const nsParam = namespace ? `?namespace=${encodeURIComponent(namespace)}` : '';
-      const path = `clusters/${encodeURIComponent(clusterId!)}/topology/v2/criticality${nsParam}`;
+      const path = `clusters/${encodeURIComponent(clusterId!)}/topology/criticality${nsParam}`;
       const url = effectiveBaseUrl ? `${effectiveBaseUrl}/api/v1/${path}` : `/api/v1/${path}`;
       const res = await fetch(url);
       if (!res.ok) return new Map();

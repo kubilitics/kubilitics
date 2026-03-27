@@ -123,7 +123,7 @@ export function useNodeTrafficImpact(
     queryKey: ["topology-traffic", clusterId, nodeId],
     queryFn: async () => {
       if (!clusterId || !parsed) throw new Error("Missing params");
-      const path = `clusters/${encodeURIComponent(clusterId)}/topology/v2/traffic`;
+      const path = `clusters/${encodeURIComponent(clusterId)}/topology/traffic`;
       const data = await backendRequest<TrafficApiResponse>(effectiveBaseUrl, path);
 
       const edges: TrafficEdge[] = [];
@@ -157,7 +157,7 @@ export function useNodeTrafficImpact(
     queryKey: ["topology-impact", clusterId, nodeId],
     queryFn: async () => {
       if (!clusterId || !parsed) throw new Error("Missing params");
-      const path = `clusters/${encodeURIComponent(clusterId)}/topology/v2/impact/${encodeURIComponent(parsed.kind)}/${encodeURIComponent(parsed.namespace)}/${encodeURIComponent(parsed.name)}?depth=3`;
+      const path = `clusters/${encodeURIComponent(clusterId)}/topology/impact/${encodeURIComponent(parsed.kind)}/${encodeURIComponent(parsed.namespace)}/${encodeURIComponent(parsed.name)}?depth=3`;
       const data = await backendRequest<ImpactApiResponse>(effectiveBaseUrl, path);
 
       const impacted: ImpactedResource[] = (data.impacted ?? []).map((r) => ({

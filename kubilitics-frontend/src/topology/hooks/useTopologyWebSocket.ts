@@ -24,7 +24,7 @@ const BATCH_INTERVAL = 100;
 
 /**
  * useTopologyWebSocket: Real-time topology updates with auto-reconnect.
- * - Connects to WS /api/v1/ws/topology/{clusterId}/v2
+ * - Connects to WS /api/v1/ws/topology/{clusterId}
  * - Batches events in 100ms windows to prevent render flooding
  * - Reconnects with exponential backoff (1s, 2s, 4s, 8s... max 30s)
  */
@@ -84,7 +84,7 @@ export function useTopologyWebSocket({
     const wsUrl = baseUrl
       .replace(/^http/, "ws")
       .replace(/\/$/, "");
-    const url = `${wsUrl}/api/v1/ws/topology/${clusterId}/v2`;
+    const url = `${wsUrl}/api/v1/ws/topology/${clusterId}`;
 
     try {
       const ws = new WebSocket(url);
