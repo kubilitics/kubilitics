@@ -92,25 +92,29 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
     return focusNode ? [focusNode.id] : [];
   }, [focusNode]);
 
-  // BFS to compute affected nodes when simulating failure
+  // BFS to compute affected nodes when simulating failure.
+  // Traverses BOTH directions: if a resource fails, everything connected
+  // to it is affected — upstream consumers AND downstream dependencies.
   const simulationAffectedNodes = useMemo(() => {
     if (!simulatedFailureNodeId || !topology) return null;
-    // Build adjacency: if Target fails, Source is affected (dependents map)
-    const dependents = new Map<string, string[]>();
+    // Build bidirectional adjacency
+    const adj = new Map<string, Set<string>>();
     for (const edge of topology.edges) {
-      if (!dependents.has(edge.target)) dependents.set(edge.target, []);
-      dependents.get(edge.target)!.push(edge.source);
+      if (!adj.has(edge.source)) adj.set(edge.source, new Set());
+      if (!adj.has(edge.target)) adj.set(edge.target, new Set());
+      adj.get(edge.source)!.add(edge.target);
+      adj.get(edge.target)!.add(edge.source);
     }
-    // BFS from the failed node through dependents
+    // BFS from the failed node in all directions
     const affected = new Set<string>();
     affected.add(simulatedFailureNodeId);
     const queue = [simulatedFailureNodeId];
     while (queue.length > 0) {
       const current = queue.shift()!;
-      for (const dep of dependents.get(current) ?? []) {
-        if (!affected.has(dep)) {
-          affected.add(dep);
-          queue.push(dep);
+      for (const neighbor of adj.get(current) ?? []) {
+        if (!affected.has(neighbor)) {
+          affected.add(neighbor);
+          queue.push(neighbor);
         }
       }
     }
