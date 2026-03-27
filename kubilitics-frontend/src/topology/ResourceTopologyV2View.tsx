@@ -250,7 +250,7 @@ export function ResourceTopologyV2View({
   return (
     <div
       className="relative w-full bg-white rounded-lg border border-gray-200 shadow-sm"
-      style={{ height: presentationMode ? "100vh" : "calc(100vh - 18rem)", minHeight: "500px", ...(presentationMode ? { position: "fixed", inset: 0, zIndex: 50, borderRadius: 0 } : {}) }}
+      style={{ height: presentationMode ? "100vh" : "calc(100vh - 18rem)", minHeight: "500px", ...(presentationMode ? { position: "fixed", inset: 0, zIndex: 200, borderRadius: 0 } : {}) }}
       data-topology-container
     >
       {/* Header Bar — hidden in presentation mode */}
@@ -299,51 +299,18 @@ export function ResourceTopologyV2View({
 
           <Separator orientation="vertical" className="h-6" />
 
-          {/* Fit View */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleFitView}
-            className="h-8 px-3 text-xs text-gray-600 hover:text-gray-900"
-          >
-            <Maximize className="h-3.5 w-3.5 mr-1.5" />
-            Fit
+          {/* Toolbar icons — compact, tooltip-only */}
+          <Button variant="ghost" size="sm" onClick={handleFitView} className="h-8 w-8 p-0 text-gray-600 hover:text-gray-900" title="Fit to view">
+            <Maximize className="h-4 w-4" />
           </Button>
-
-          {/* Center on Focus Resource */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleCenterOnFocus}
-            className="h-8 px-3 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-            title={`Center on ${name}`}
-          >
-            <Crosshair className="h-3.5 w-3.5 mr-1.5" />
-            Center
+          <Button variant="ghost" size="sm" onClick={handleCenterOnFocus} className="h-8 w-8 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50" title={`Center on ${name}`}>
+            <Crosshair className="h-4 w-4" />
           </Button>
-
-          {/* Expand to full screen */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setExpandedFullScreen(true)}
-            className="h-8 px-3 text-xs text-gray-600 hover:text-gray-900"
-            title="Expand to full screen"
-          >
-            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-            Expand
+          <Button variant="ghost" size="sm" onClick={() => setExpandedFullScreen(true)} className="h-8 w-8 p-0 text-gray-600 hover:text-gray-900" title="Expand full screen">
+            <ExternalLink className="h-4 w-4" />
           </Button>
-
-          {/* Refresh */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="h-8 px-3 text-xs text-gray-600 hover:text-gray-900"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
-            {isFetching ? "Refreshing..." : "Refresh"}
+          <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching} className="h-8 w-8 p-0 text-gray-600 hover:text-gray-900" title="Refresh">
+            <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
           </Button>
 
           <Separator orientation="vertical" className="h-6" />
@@ -371,15 +338,8 @@ export function ResourceTopologyV2View({
 
           <Separator orientation="vertical" className="h-6" />
 
-          {/* Present */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setPresentationMode(true)}
-            className="h-8 px-3 text-xs text-gray-600 hover:text-gray-900"
-          >
-            <Monitor className="h-3.5 w-3.5 mr-1.5" />
-            Present
+          <Button variant="ghost" size="sm" onClick={() => setPresentationMode(true)} className="h-8 w-8 p-0 text-gray-600 hover:text-gray-900" title="Presentation mode">
+            <Monitor className="h-4 w-4" />
           </Button>
         </div>
       </div>}

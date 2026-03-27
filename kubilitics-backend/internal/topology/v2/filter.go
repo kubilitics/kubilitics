@@ -181,6 +181,8 @@ func (f *ViewFilter) filterResource(resp *TopologyResponse, resource, ns string,
 	included := make(map[string]bool, len(resp.Nodes))
 	included[focusID] = true
 
+	focusKind := nodeKind[focusID]
+
 	traverse := func(adj map[string][]adjacencyEntry) {
 		visited := make(map[string]int)
 		visited[focusID] = 0
@@ -198,6 +200,14 @@ func (f *ViewFilter) filterResource(resp *TopologyResponse, resource, ns string,
 
 			for _, neighbor := range adj[current.id] {
 				if _, seen := visited[neighbor.nodeID]; seen {
+					continue
+				}
+
+				// Skip siblings: same kind as the focus node reached through
+				// an intermediate (e.g., sibling Pod via shared ReplicaSet).
+				// The focus node's own chain goes UP (RS→Deployment) or DOWN
+				// (Service→Endpoints), never sideways to peer pods.
+				if current.id != focusID && nodeKind[neighbor.nodeID] == focusKind && neighbor.nodeID != focusID {
 					continue
 				}
 
