@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
-import { ResourceOverviewMetadata } from '@/components/resources/ResourceOverviewMetadata';
 import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
 import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
 import {
@@ -14,12 +13,13 @@ import {
   EventsSection,
   ActionsSection,
   DeleteConfirmDialog,
-  MetadataSection,
   SectionCard,
+  DetailRow,
+  LabelList,
+  AnnotationList,
   YamlViewer,
   ResourceTopologyView,
   type ResourceStatus,
-  type YamlVersion,
 } from '@/components/resources';
 import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
 import { useDeleteK8sResource, useUpdateK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
@@ -140,8 +140,6 @@ export default function DeviceClassDetail() {
     { label: 'Age', value: age, icon: Clock, iconColor: 'muted' as const },
   ];
 
-  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
-
   const handleSaveYaml = async (newYaml: string) => {
     if (!name) return;
     try {
@@ -160,30 +158,26 @@ export default function DeviceClassDetail() {
       label: 'Overview',
       icon: Info,
       content: (
-        <div className="space-y-6">
-          <MetadataSection
-            metadata={dc?.metadata ?? { name: dcName }}
-            showMetadataGrid
-            createdLabel={age}
-          />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <SectionCard icon={Cpu} title="Device Class Spec" tooltip={<p className="text-xs text-muted-foreground">DRA device presets</p>}>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-              <div><p className="text-muted-foreground mb-1">Extended Resource Name</p><p className="font-mono text-xs">{extendedName}</p></div>
-              <div><p className="text-muted-foreground mb-1">Config Drivers</p><p className="font-mono text-xs">{configStr}</p></div>
-              <div><p className="text-muted-foreground mb-1">Age</p><p>{age}</p></div>
-              {dc?.spec?.selectors?.length ? (
-                <div className="col-span-full">
-                  <p className="text-muted-foreground mb-1">CEL Selectors</p>
-                  <div className="space-y-2">
-                    {dc.spec.selectors.map((s, i) => (
-                      <pre key={i} className="p-3 rounded-lg bg-muted/50 text-xs font-mono overflow-x-auto">{s.cel?.expression ?? '—'}</pre>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Extended Resource Name" value={<span className="font-mono">{extendedName}</span>} />
+              <DetailRow label="Config Drivers" value={<span className="font-mono">{configStr}</span>} />
+              <DetailRow label="Age" value={age} />
             </div>
+            {dc?.spec?.selectors?.length ? (
+              <div className="mt-4">
+                <span className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider">CEL Selectors</span>
+                <div className="mt-2 space-y-2">
+                  {dc.spec.selectors.map((s, i) => (
+                    <pre key={i} className="p-3 rounded-lg bg-muted/50 text-xs font-mono overflow-x-auto">{s.cel?.expression ?? '—'}</pre>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </SectionCard>
-          <ResourceOverviewMetadata metadata={dc?.metadata} skipMetadataGrid />
+          <LabelList labels={dc?.metadata?.labels ?? {}} />
+          <AnnotationList annotations={dc?.metadata?.annotations ?? {}} />
         </div>
       ),
     },

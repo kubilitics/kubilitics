@@ -7,13 +7,14 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
-import { ResourceOverviewMetadata } from '@/components/resources/ResourceOverviewMetadata';
 import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
 import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
 import {
   ResourceDetailLayout,
   SectionCard,
-  MetadataSection,
+  DetailRow,
+  LabelList,
+  AnnotationList,
   YamlViewer,
   EventsSection,
   ActionsSection,
@@ -117,56 +118,51 @@ export default function ComponentStatusDetail() {
       id: 'overview',
       label: 'Overview',
       content: (
-        <div className="space-y-6">
-          <MetadataSection metadata={cs.metadata ?? { name: csName }} showMetadataGrid />
-          <div className="grid grid-cols-1 gap-6">
-            <SectionCard icon={Info} title="Component Info">
-                <div className="flex items-center gap-4">
-                  <div className={`p-4 rounded-full ${isHealthy ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-                    {isHealthy ? (
-                      <CheckCircle className="h-8 w-8 text-green-500" />
-                    ) : (
-                      <AlertTriangle className="h-8 w-8 text-red-500" />
-                    )}
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-semibold">{csName}</h3>
-                    <p className="text-muted-foreground">
-                      {isHealthy ? 'Component is healthy and responding normally' : 'Component is experiencing issues'}
-                    </p>
-                  </div>
-                </div>
-            </SectionCard>
-            <SectionCard icon={Activity} title="Conditions">
-                {conditions.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No conditions reported.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {conditions.map((condition, idx) => (
-                      <div key={idx} className="p-4 rounded-lg bg-muted/50 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Badge variant={condition.status === 'True' ? 'default' : 'destructive'}>
-                            {condition.type}
-                          </Badge>
-                          <Badge variant="outline">{condition.status}</Badge>
-                        </div>
-                        {condition.message && (
-                          <p className="text-sm font-mono text-muted-foreground break-all">
-                            {condition.message}
-                          </p>
-                        )}
-                        {condition.error && (
-                          <p className="text-sm text-destructive">
-                            Error: {condition.error}
-                          </p>
-                        )}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <SectionCard icon={Info} title="Component Info">
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="Component" value={csName} />
+                <DetailRow label="Status" value={
+                  <Badge variant={isHealthy ? 'default' : 'destructive'}>
+                    {isHealthy ? 'Healthy' : 'Unhealthy'}
+                  </Badge>
+                } />
+                <DetailRow label="Description" value={
+                  isHealthy ? 'Component is healthy and responding normally' : 'Component is experiencing issues'
+                } />
+                <DetailRow label="Age" value={age} />
+              </div>
+          </SectionCard>
+          <SectionCard icon={Activity} title="Conditions" className="lg:col-span-2">
+              {conditions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No conditions reported.</p>
+              ) : (
+                <div className="space-y-3">
+                  {conditions.map((condition, idx) => (
+                    <div key={idx} className="p-4 rounded-lg bg-muted/50 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Badge variant={condition.status === 'True' ? 'default' : 'destructive'}>
+                          {condition.type}
+                        </Badge>
+                        <Badge variant="outline">{condition.status}</Badge>
                       </div>
-                    ))}
-                  </div>
-                )}
-            </SectionCard>
-          </div>
-          <ResourceOverviewMetadata metadata={cs?.metadata} skipMetadataGrid />
+                      {condition.message && (
+                        <p className="text-sm font-mono text-muted-foreground break-all">
+                          {condition.message}
+                        </p>
+                      )}
+                      {condition.error && (
+                        <p className="text-sm text-destructive">
+                          Error: {condition.error}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+          </SectionCard>
+          <LabelList labels={cs?.metadata?.labels ?? {}} />
+          <AnnotationList annotations={cs?.metadata?.annotations ?? {}} />
         </div>
       ),
     },

@@ -10,6 +10,7 @@ import { downloadResourceJson } from '@/lib/exportUtils';
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
   YamlViewer,
   EventsSection,
   ActionsSection,
@@ -200,15 +201,17 @@ export default function HorizontalPodAutoscalerDetail() {
       content: (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <SectionCard icon={Target} title="Scale Target">
-              <div className="p-3 rounded-lg bg-muted/50">
-                <p className="text-muted-foreground text-sm mb-1">Reference</p>
-                {targetName !== '–' ? (
-                  <Button variant="link" className="p-0 h-auto font-mono text-primary" onClick={() => navigate(targetLink())}>{targetKind}/{targetName}</Button>
-                ) : (
-                  <p className="font-mono">–</p>
-                )}
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="Reference" value={
+                  targetName !== '–' ? (
+                    <Button variant="link" className="p-0 h-auto font-mono text-primary" onClick={() => navigate(targetLink())}>{targetKind}/{targetName}</Button>
+                  ) : '–'
+                } />
+                <DetailRow label="Min Replicas" value={<span className="font-mono">{minReplicas}</span>} />
+                <DetailRow label="Max Replicas" value={<span className="font-mono">{maxReplicas}</span>} />
+                <DetailRow label="Desired Replicas" value={<span className="font-mono">{desiredReplicas}</span>} />
               </div>
-              <div className="space-y-3">
+              <div className="mt-4 space-y-3">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span className="font-mono">Min {minReplicas}</span>
                   <span className="font-mono font-medium text-foreground">Current {currentReplicas}</span>
@@ -225,7 +228,6 @@ export default function HorizontalPodAutoscalerDetail() {
                     }}
                   />
                 </div>
-                <p className="text-sm text-muted-foreground">Desired replicas: <span className="font-mono font-medium">{desiredReplicas}</span></p>
               </div>
           </SectionCard>
           <SectionCard icon={Cpu} title="Current Metrics">

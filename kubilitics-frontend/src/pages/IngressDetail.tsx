@@ -15,6 +15,7 @@ import {
   DetailRow,
   ResourceTopologyView,
   ResourceComparisonView,
+  LabelList,
   AnnotationList,
   type ResourceStatus,
   type YamlVersion,
@@ -290,9 +291,7 @@ export default function IngressDetail() {
             <DetailRow label="Age" value={age} />
           </SectionCard>
           {rules.length > 0 && (
-            <Card className="lg:col-span-2">
-              <CardHeader><CardTitle className="text-base">Rules</CardTitle></CardHeader>
-              <CardContent>
+            <SectionCard title="Rules" icon={Route} className="lg:col-span-2">
                 {rules.map((rule, idx) => (
                   <div key={rule.host || idx} className="space-y-3">
                     <div className="flex items-center gap-2">
@@ -314,13 +313,10 @@ export default function IngressDetail() {
                     </div>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
+            </SectionCard>
           )}
           {tls.length > 0 && (
-            <Card>
-              <CardHeader><CardTitle className="text-base">TLS Configuration</CardTitle></CardHeader>
-              <CardContent>
+            <SectionCard title="TLS Configuration" icon={Lock}>
                 {tls.map((t, idx) => (
                   <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
                     <div className="flex items-center gap-2">
@@ -330,12 +326,10 @@ export default function IngressDetail() {
                     <Link to={`/secrets/${namespace}/${t.secretName}`}><Badge variant="secondary">{t.secretName}</Badge></Link>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
+            </SectionCard>
           )}
-          {Object.keys(annotations).length > 0 && (
-            <AnnotationList annotations={annotations} />
-          )}
+          <LabelList labels={ing.metadata?.labels ?? {}} />
+          <AnnotationList annotations={annotations} />
         </div>
       ),
     },

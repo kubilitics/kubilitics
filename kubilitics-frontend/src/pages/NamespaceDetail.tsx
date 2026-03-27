@@ -10,6 +10,7 @@ import { downloadResourceJson } from '@/lib/exportUtils';
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
   LabelList,
   AnnotationList,
   YamlViewer,
@@ -181,32 +182,14 @@ export default function NamespaceDetail() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Namespace Info */}
             <SectionCard icon={Folder} title="Namespace Info" tooltip="Phase, finalizers, labels, annotations">
-              <div className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
-                <div>
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Phase</p>
-                  <Badge variant={phase === 'Active' ? 'default' : 'secondary'} className={phase === 'Active' ? 'bg-emerald-600 hover:bg-emerald-600' : ''}>{phase}</Badge>
-                </div>
-                <div>
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Age</p>
-                  <p className="font-medium">{age}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Finalizers</p>
-                  <p className="text-muted-foreground">{finalizers.length ? finalizers.join(', ') : 'None'}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Labels</p>
-                  <p className="font-medium">{Object.keys(labels).length} labels</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Annotations</p>
-                  <p className="font-medium">{Object.keys(annotations).length} annotations</p>
-                </div>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="Phase" value={<Badge variant={phase === 'Active' ? 'default' : 'secondary'} className={phase === 'Active' ? 'bg-emerald-600 hover:bg-emerald-600' : ''}>{phase}</Badge>} />
+                <DetailRow label="Age" value={age} />
+                <DetailRow label="Finalizers" value={finalizers.length ? finalizers.join(', ') : 'None'} />
+                <DetailRow label="Labels" value={`${Object.keys(labels).length} labels`} />
+                <DetailRow label="Annotations" value={`${Object.keys(annotations).length} annotations`} />
                 {hasQuota && (
-                  <div>
-                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Resource Quotas</p>
-                    <p className="font-medium">{resourceQuotas.length} quota{resourceQuotas.length !== 1 ? 's' : ''}</p>
-                  </div>
+                  <DetailRow label="Resource Quotas" value={`${resourceQuotas.length} quota${resourceQuotas.length !== 1 ? 's' : ''}`} />
                 )}
               </div>
             </SectionCard>

@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Network, Clock, Download, Globe, Server, Trash2, Activity, GitCompare, Info, Zap } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -13,6 +13,7 @@ import {
   ActionsSection,
   DeleteConfirmDialog,
   SectionCard,
+  DetailRow,
   LabelList,
   AnnotationList,
   ResourceTopologyView,
@@ -147,35 +148,32 @@ export default function EndpointSliceDetail() {
       id: 'overview',
       label: 'Overview',
       content: (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <SectionCard title="EndpointSlice info" icon={Network}>
-            <p className="text-sm text-muted-foreground mb-2">Address type: {addressType}</p>
-            {serviceName && <p className="text-sm">Service: <Link to={`/services/${namespace}/${serviceName}`} className="text-primary hover:underline">{serviceName}</Link></p>}
-            <LabelList labels={labels} />
-            <AnnotationList annotations={es?.metadata?.annotations || {}} />
-          </SectionCard>
-          <Card>
-            <CardHeader><CardTitle className="text-base">Ports</CardTitle></CardHeader>
-            <CardContent>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <SectionCard title="EndpointSlice Info" icon={Network}>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="Address Type" value={addressType} />
+                <DetailRow label="Age" value={age} />
+                {serviceName && <DetailRow label="Service" value={<Link to={`/services/${namespace}/${serviceName}`} className="text-primary hover:underline">{serviceName}</Link>} />}
+              </div>
+            </SectionCard>
+            <SectionCard title="Ports" icon={Globe}>
               {portsList.length === 0 ? <p className="text-muted-foreground text-sm">No ports</p> : portsList.map((port, i) => (
                 <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50 mb-2">
                   <div>
-                    <p className="font-medium">{port.name || 'unnamed'}</p>
-                    <p className="text-sm text-muted-foreground">{port.protocol ?? 'TCP'}</p>
+                    <p className="font-medium text-sm">{port.name || 'unnamed'}</p>
+                    <p className="text-xs text-muted-foreground">{port.protocol ?? 'TCP'}</p>
                   </div>
                   <Badge variant="secondary" className="font-mono">{port.port}</Badge>
                 </div>
               ))}
-            </CardContent>
-          </Card>
-          <Card className="lg:col-span-2">
-            <CardHeader><CardTitle className="text-base">Endpoints</CardTitle></CardHeader>
-            <CardContent>
+            </SectionCard>
+            <SectionCard title="Endpoints" icon={Server} className="lg:col-span-2">
               <div className="space-y-3">
                 {endpointsList.map((ep, i) => (
                   <div key={i} className="p-3 rounded-lg bg-muted/50">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="font-mono">{(ep.addresses ?? []).join(', ')}</span>
+                      <span className="font-mono text-sm break-all">{(ep.addresses ?? []).join(', ')}</span>
                       <Badge variant={ep.conditions?.ready ? 'default' : 'secondary'} className={ep.conditions?.ready ? 'bg-green-600' : ''}>{ep.conditions?.ready ? 'Ready' : 'Not Ready'}</Badge>
                     </div>
                     {ep.targetRef?.kind === 'Pod' && (
@@ -186,8 +184,10 @@ export default function EndpointSliceDetail() {
                   </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
+            </SectionCard>
+          </div>
+          <LabelList labels={labels} />
+          <AnnotationList annotations={es?.metadata?.annotations || {}} />
         </div>
       ),
     },

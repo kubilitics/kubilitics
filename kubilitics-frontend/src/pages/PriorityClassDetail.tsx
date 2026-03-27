@@ -7,7 +7,9 @@ import { Button } from '@/components/ui/button';
 import {
   ResourceDetailLayout,
   SectionCard,
-  MetadataSection,
+  DetailRow,
+  LabelList,
+  AnnotationList,
   YamlViewer,
   EventsSection,
   ActionsSection,
@@ -26,7 +28,6 @@ import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/back
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
-import { ResourceOverviewMetadata } from '@/components/resources/ResourceOverviewMetadata';
 
 interface PriorityClassResource extends KubernetesResource {
   value?: number;
@@ -143,32 +144,13 @@ export default function PriorityClassDetail() {
       label: 'Overview',
       content: (
         <div className="space-y-6">
-          <MetadataSection
-            metadata={resource?.metadata ?? { name: pcName }}
-            showMetadataGrid
-            createdLabel={age}
-          />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <SectionCard icon={Info} title="Priority Class Info">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground mb-1">Priority Value</p>
-                    <p className="font-mono text-lg font-bold text-primary">{value.toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground mb-1">Global Default</p>
-                    <Badge variant={globalDefault ? 'default' : 'secondary'}>
-                      {globalDefault ? 'Yes' : 'No'}
-                    </Badge>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground mb-1">Preemption Policy</p>
-                    <Badge variant="outline">{preemptionPolicy}</Badge>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground mb-1">Age</p>
-                    <p>{age}</p>
-                  </div>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  <DetailRow label="Priority Value" value={<span className="font-mono text-primary">{value.toLocaleString()}</span>} />
+                  <DetailRow label="Global Default" value={<Badge variant={globalDefault ? 'default' : 'secondary'}>{globalDefault ? 'Yes' : 'No'}</Badge>} />
+                  <DetailRow label="Preemption Policy" value={<Badge variant="outline">{preemptionPolicy}</Badge>} />
+                  <DetailRow label="Age" value={age} />
                 </div>
             </SectionCard>
             <SectionCard icon={FileText} title="Description">
@@ -190,7 +172,8 @@ export default function PriorityClassDetail() {
                 </div>
             </SectionCard>
           </div>
-          <ResourceOverviewMetadata metadata={resource?.metadata} skipMetadataGrid />
+          <LabelList labels={resource?.metadata?.labels ?? {}} />
+          <AnnotationList annotations={resource?.metadata?.annotations ?? {}} />
         </div>
       ),
     },

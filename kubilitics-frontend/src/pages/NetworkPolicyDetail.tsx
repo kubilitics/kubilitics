@@ -1,22 +1,22 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Shield, Clock, Download, Trash2, ArrowDownToLine, ArrowUpFromLine, Activity, Network, GitCompare, Zap } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   ResourceDetailLayout,
-
+  DetailRow,
   YamlViewer,
   EventsSection,
   ActionsSection,
   DeleteConfirmDialog,
   SectionCard,
+  LabelList,
+  AnnotationList,
   ResourceTopologyView,
   ResourceComparisonView,
-
-
   type ResourceStatus,
   type EventInfo,
   type YamlVersion,
@@ -28,7 +28,6 @@ import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
-import { ResourceOverviewMetadata } from '@/components/resources/ResourceOverviewMetadata';
 
 interface NetworkPolicyResource extends KubernetesResource {
   spec?: {
@@ -181,10 +180,9 @@ export default function NetworkPolicyDetail() {
       id: 'overview',
       label: 'Overview',
       content: (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader><CardTitle className="text-base">Pod Selector</CardTitle></CardHeader>
-            <CardContent>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <SectionCard title="Pod Selector" icon={Shield}>
               {Object.keys(podSelector).length === 0 ? <p className="text-muted-foreground text-sm">All pods in namespace</p> : (
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(podSelector).map(([key, value]) => (
@@ -192,26 +190,27 @@ export default function NetworkPolicyDetail() {
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle className="text-base">Policy Types</CardTitle></CardHeader>
-            <CardContent>
-              <div className="flex gap-2">
-                {policyTypes.map((type) => (
-                  <Badge key={type} variant="secondary">{type}</Badge>
-                ))}
+            </SectionCard>
+            <SectionCard title="Policy Info" icon={Shield}>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="Policy Types" value={
+                  <div className="flex gap-2 flex-wrap">
+                    {policyTypes.map((type) => (
+                      <Badge key={type} variant="secondary">{type}</Badge>
+                    ))}
+                  </div>
+                } />
+                <DetailRow label="Namespace" value={npNamespace} />
+                <DetailRow label="Age" value={age} />
               </div>
-            </CardContent>
-          </Card>
+            </SectionCard>
+          </div>
           {ingressRules.length > 0 && (
-            <Card className="lg:col-span-2">
-              <CardHeader><CardTitle className="text-base">Ingress Rules</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
+            <SectionCard title="Ingress Rules" icon={ArrowDownToLine}>
                 {ingressRules.map((rule, idx) => (
-                  <div key={idx} className="p-4 rounded-lg bg-muted/50 space-y-3">
+                  <div key={idx} className="p-4 rounded-lg bg-muted/50 space-y-3 mb-3 last:mb-0">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground mb-2">From</p>
+                      <p className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider mb-2">From</p>
                       <div className="space-y-2">
                         {(rule.from ?? []).map((source, sIdx) => (
                           <div key={sIdx} className="flex gap-2 flex-wrap">
@@ -233,7 +232,7 @@ export default function NetworkPolicyDetail() {
                       </div>
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground mb-2">Ports</p>
+                      <p className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider mb-2">Ports</p>
                       <div className="flex gap-2 flex-wrap">
                         {(rule.ports ?? []).map((port, pIdx) => (
                           <Badge key={pIdx} variant="outline" className="font-mono text-xs">
@@ -244,17 +243,14 @@ export default function NetworkPolicyDetail() {
                     </div>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
+            </SectionCard>
           )}
           {egressRules.length > 0 && (
-            <Card className="lg:col-span-2">
-              <CardHeader><CardTitle className="text-base">Egress Rules</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
+            <SectionCard title="Egress Rules" icon={ArrowUpFromLine}>
                 {egressRules.map((rule, idx) => (
-                  <div key={idx} className="p-4 rounded-lg bg-muted/50 space-y-3">
+                  <div key={idx} className="p-4 rounded-lg bg-muted/50 space-y-3 mb-3 last:mb-0">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground mb-2">To</p>
+                      <p className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider mb-2">To</p>
                       <div className="space-y-2">
                         {(rule.to ?? []).map((dest, dIdx) => (
                           <div key={dIdx} className="flex gap-2 flex-wrap">
@@ -266,7 +262,7 @@ export default function NetworkPolicyDetail() {
                       </div>
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground mb-2">Ports</p>
+                      <p className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider mb-2">Ports</p>
                       <div className="flex gap-2 flex-wrap">
                         {(rule.ports ?? []).map((port, pIdx) => (
                           <Badge key={pIdx} variant="outline" className="font-mono text-xs">{port.port}/{port.protocol ?? 'TCP'}</Badge>
@@ -275,10 +271,10 @@ export default function NetworkPolicyDetail() {
                     </div>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
+            </SectionCard>
           )}
-          <ResourceOverviewMetadata metadata={np.metadata} skipMetadataGrid />
+          <LabelList labels={np.metadata?.labels ?? {}} />
+          <AnnotationList annotations={np.metadata?.annotations ?? {}} />
         </div>
       ),
     },

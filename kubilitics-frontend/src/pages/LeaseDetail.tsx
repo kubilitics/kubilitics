@@ -6,11 +6,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
-import { ResourceOverviewMetadata } from '@/components/resources/ResourceOverviewMetadata';
 import {
   ResourceDetailLayout,
-  MetadataSection,
   SectionCard,
+  DetailRow,
+  LabelList,
+  AnnotationList,
   YamlViewer,
   ResourceComparisonView,
   EventsSection,
@@ -18,7 +19,6 @@ import {
   DeleteConfirmDialog,
   ResourceTopologyView,
   type ResourceStatus,
-  type YamlVersion,
 } from '@/components/resources';
 import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
 import { useDeleteK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
@@ -127,52 +127,24 @@ export default function LeaseDetail() {
       id: 'overview',
       label: 'Overview',
       content: (
-        <div className="space-y-6">
-          <MetadataSection
-            metadata={lease?.metadata ?? { name: leaseName, namespace: leaseNamespace }}
-            showMetadataGrid
-            createdLabel={age}
-            namespace={leaseNamespace}
-          />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <SectionCard icon={Activity} title="Lease Info" tooltip="Holder, duration, transitions">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground mb-1">Holder Identity</p>
-                  <p className="font-mono text-xs break-all">{holderIdentity}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Lease Duration</p>
-                  <Badge variant="secondary">{leaseDurationSeconds ? `${leaseDurationSeconds}s` : '–'}</Badge>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Transitions</p>
-                  <p>{leaseTransitions}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Age</p>
-                  <p>{age}</p>
-                </div>
-              </div>
-            </SectionCard>
-            <SectionCard icon={Clock} title="Timing" tooltip="Acquire and renew timestamps">
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between p-3 rounded-lg bg-muted/50">
-                  <span className="text-muted-foreground">Acquire Time</span>
-                  <span className="font-mono text-xs">{acquireTime ? new Date(acquireTime).toLocaleString() : '–'}</span>
-                </div>
-                <div className="flex justify-between p-3 rounded-lg bg-muted/50">
-                  <span className="text-muted-foreground">Renew Time</span>
-                  <span className="font-mono text-xs">{renewTime ? new Date(renewTime).toLocaleString() : '–'}</span>
-                </div>
-                <div className={`flex justify-between p-3 rounded-lg ${isExpired ? 'bg-destructive/10' : 'bg-muted/50'}`}>
-                  <span className="text-muted-foreground">Status</span>
-                  <Badge variant={isExpired ? 'destructive' : 'default'}>{isExpired ? 'Expired' : 'Active'}</Badge>
-                </div>
-              </div>
-            </SectionCard>
-          </div>
-          <ResourceOverviewMetadata metadata={lease?.metadata} skipMetadataGrid />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <SectionCard icon={Activity} title="Lease Info" tooltip="Holder, duration, transitions">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Holder Identity" value={<span className="font-mono break-all">{holderIdentity}</span>} />
+              <DetailRow label="Lease Duration" value={<Badge variant="secondary">{leaseDurationSeconds ? `${leaseDurationSeconds}s` : '–'}</Badge>} />
+              <DetailRow label="Transitions" value={String(leaseTransitions)} />
+              <DetailRow label="Age" value={age} />
+            </div>
+          </SectionCard>
+          <SectionCard icon={Clock} title="Timing" tooltip="Acquire and renew timestamps">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Acquire Time" value={<span className="font-mono">{acquireTime ? new Date(acquireTime).toLocaleString() : '–'}</span>} />
+              <DetailRow label="Renew Time" value={<span className="font-mono">{renewTime ? new Date(renewTime).toLocaleString() : '–'}</span>} />
+              <DetailRow label="Status" value={<Badge variant={isExpired ? 'destructive' : 'default'}>{isExpired ? 'Expired' : 'Active'}</Badge>} />
+            </div>
+          </SectionCard>
+          <LabelList labels={lease?.metadata?.labels ?? {}} />
+          <AnnotationList annotations={lease?.metadata?.annotations ?? {}} />
         </div>
       ),
     },

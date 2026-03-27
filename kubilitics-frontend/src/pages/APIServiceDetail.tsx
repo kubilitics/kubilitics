@@ -6,11 +6,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
-import { ResourceOverviewMetadata } from '@/components/resources/ResourceOverviewMetadata';
 import {
   ResourceDetailLayout,
-  MetadataSection,
   SectionCard,
+  DetailRow,
+  LabelList,
+  AnnotationList,
   YamlViewer,
   ResourceComparisonView,
   EventsSection,
@@ -18,7 +19,6 @@ import {
   DeleteConfirmDialog,
   ResourceTopologyView,
   type ResourceStatus,
-  type YamlVersion,
 } from '@/components/resources';
 import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
 import { useDeleteK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
@@ -128,42 +128,37 @@ export default function APIServiceDetail() {
       id: 'overview',
       label: 'Overview',
       content: (
-        <div className="space-y-6">
-          <MetadataSection
-            metadata={api?.metadata ?? { name: apiName }}
-            showMetadataGrid
-            createdLabel={age}
-          />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <SectionCard icon={FileCode} title="API Service Info" tooltip="Group, version, service reference">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><p className="text-muted-foreground mb-1">Group</p><p className="font-mono">{group}</p></div>
-                <div><p className="text-muted-foreground mb-1">Version</p><Badge variant="secondary">{version}</Badge></div>
-                <div><p className="text-muted-foreground mb-1">Service</p><p>{serviceRef}</p></div>
-                <div><p className="text-muted-foreground mb-1">Insecure Skip TLS</p><p>{api?.spec?.insecureSkipTLSVerify ? 'Yes' : 'No'}</p></div>
-                <div><p className="text-muted-foreground mb-1">Group Priority Minimum</p><p className="font-mono">{api?.spec?.groupPriorityMinimum ?? '–'}</p></div>
-                <div><p className="text-muted-foreground mb-1">Version Priority</p><p className="font-mono">{api?.spec?.versionPriority ?? '–'}</p></div>
-              </div>
-            </SectionCard>
-            <SectionCard icon={FileCode} title="Conditions" tooltip="Status conditions" className="lg:col-span-2">
-              {conditions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No conditions.</p>
-              ) : (
-                <div className="space-y-3">
-                  {conditions.map((c) => (
-                    <div key={c.type} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        <Badge variant={c.status === 'True' ? 'default' : 'secondary'}>{c.type}</Badge>
-                        <span className="text-sm text-muted-foreground">{c.reason ?? '–'}</span>
-                      </div>
-                      <p className="text-sm">{c.message ?? '–'}</p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <SectionCard icon={FileCode} title="API Service Info" tooltip="Group, version, service reference">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Group" value={<span className="font-mono">{group}</span>} />
+              <DetailRow label="Version" value={<Badge variant="secondary">{version}</Badge>} />
+              <DetailRow label="Service" value={serviceRef} />
+              <DetailRow label="Insecure Skip TLS" value={api?.spec?.insecureSkipTLSVerify ? 'Yes' : 'No'} />
+              <DetailRow label="Group Priority Minimum" value={<span className="font-mono">{api?.spec?.groupPriorityMinimum ?? '–'}</span>} />
+              <DetailRow label="Version Priority" value={<span className="font-mono">{api?.spec?.versionPriority ?? '–'}</span>} />
+              <DetailRow label="Age" value={age} />
+            </div>
+          </SectionCard>
+          <SectionCard icon={CheckCircle} title="Conditions" tooltip="Status conditions" className="lg:col-span-2">
+            {conditions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No conditions.</p>
+            ) : (
+              <div className="space-y-3">
+                {conditions.map((c) => (
+                  <div key={c.type} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                    <div className="flex items-center gap-3">
+                      <Badge variant={c.status === 'True' ? 'default' : 'secondary'}>{c.type}</Badge>
+                      <span className="text-sm text-muted-foreground">{c.reason ?? '–'}</span>
                     </div>
-                  ))}
-                </div>
-              )}
-            </SectionCard>
-          </div>
-          <ResourceOverviewMetadata metadata={api?.metadata} skipMetadataGrid />
+                    <p className="text-sm font-semibold">{c.message ?? '–'}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+          <LabelList labels={api?.metadata?.labels ?? {}} />
+          <AnnotationList annotations={api?.metadata?.annotations ?? {}} />
         </div>
       ),
     },

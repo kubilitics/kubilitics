@@ -9,6 +9,7 @@ import { downloadResourceJson } from '@/lib/exportUtils';
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
   LabelList,
   AnnotationList,
   YamlViewer,
@@ -128,11 +129,10 @@ export default function ServiceAccountDetail() {
       content: (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <SectionCard icon={Info} title="Service Account Info">
-              <div className="flex justify-between p-2 rounded-lg bg-muted/50">
-                <span>Automount Token</span>
-                <Badge variant={automount ? 'default' : 'secondary'}>{automount ? 'Yes' : 'No'}</Badge>
-              </div>
-              <div className="text-sm text-muted-foreground">Age: {age}</div>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Automount Token" value={<Badge variant={automount ? 'default' : 'secondary'}>{automount ? 'Yes' : 'No'}</Badge>} />
+              <DetailRow label="Age" value={age} />
+            </div>
           </SectionCard>
           <SectionCard icon={Key} title="Secrets">
               <div className="space-y-2">

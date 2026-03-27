@@ -569,25 +569,14 @@ export default function ServiceDetail() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Service Configuration */}
             <SectionCard title="Configuration" icon={Globe}>
-              <div className="space-y-0 divide-y divide-border/40">
-                {[
-                  { label: 'Service Type', value: serviceType, color: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20' },
-                  { label: 'Session Affinity', value: sessionAffinity, color: sessionAffinity === 'None' ? '' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20' },
-                  { label: 'External Traffic', value: svc.spec?.externalTrafficPolicy ?? 'Cluster', color: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20' },
-                  { label: 'Internal Traffic', value: svc.spec?.internalTrafficPolicy ?? 'Cluster', color: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/20' },
-                  { label: 'IP Family Policy', value: svc.spec?.ipFamilyPolicy ?? '—', color: '' },
-                  { label: 'IP Families', value: svc.spec?.ipFamilies?.join(', ') ?? '—', color: '', mono: true },
-                  { label: 'Publish Not Ready', value: svc.spec?.publishNotReadyAddresses ? 'Yes' : 'No', color: svc.spec?.publishNotReadyAddresses ? 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20' : '' },
-                ].map((row) => (
-                  <div key={row.label} className="flex items-center justify-between py-2.5 px-1">
-                    <span className="text-sm text-muted-foreground">{row.label}</span>
-                    {row.color ? (
-                      <Badge variant="outline" className={cn('font-semibold text-xs border', row.color)}>{row.value}</Badge>
-                    ) : (
-                      <span className={cn('text-sm', row.mono && 'font-mono', row.bold && 'font-semibold')}>{row.value}</span>
-                    )}
-                  </div>
-                ))}
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="Service Type" value={<Badge variant="outline" className="font-semibold text-xs border bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20">{serviceType}</Badge>} />
+                <DetailRow label="Session Affinity" value={sessionAffinity === 'None' ? sessionAffinity : <Badge variant="outline" className="font-semibold text-xs border bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20">{sessionAffinity}</Badge>} />
+                <DetailRow label="External Traffic" value={<Badge variant="outline" className="font-semibold text-xs border bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20">{svc.spec?.externalTrafficPolicy ?? 'Cluster'}</Badge>} />
+                <DetailRow label="Internal Traffic" value={<Badge variant="outline" className="font-semibold text-xs border bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/20">{svc.spec?.internalTrafficPolicy ?? 'Cluster'}</Badge>} />
+                <DetailRow label="IP Family Policy" value={svc.spec?.ipFamilyPolicy ?? '—'} />
+                <DetailRow label="IP Families" value={<span className="font-mono">{svc.spec?.ipFamilies?.join(', ') ?? '—'}</span>} />
+                <DetailRow label="Publish Not Ready" value={svc.spec?.publishNotReadyAddresses ? <Badge variant="outline" className="font-semibold text-xs border bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20">Yes</Badge> : 'No'} />
               </div>
             </SectionCard>
 

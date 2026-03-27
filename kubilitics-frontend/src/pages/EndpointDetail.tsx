@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Network, Clock, Server, Download, Globe, Trash2, Activity, GitCompare, Info, Zap } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -14,6 +14,8 @@ import {
   DeleteConfirmDialog,
   SectionCard,
   DetailRow,
+  LabelList,
+  AnnotationList,
   ResourceTopologyView,
   type ResourceStatus,
   type EventInfo,
@@ -27,7 +29,6 @@ import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/back
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
-import { ResourceOverviewMetadata } from '@/components/resources/ResourceOverviewMetadata';
 
 interface EndpointsResource extends KubernetesResource {
   subsets?: Array<{
@@ -144,15 +145,16 @@ export default function EndpointDetail() {
       content: (
         <div className="space-y-6">
           <SectionCard title="Metadata & Subsets" icon={Network}>
-            <DetailRow label="Service (same name)" value={epName ? <Link to={`/services/${namespace}/${epName}`} className="text-primary hover:underline">{epName}</Link> : '—'} />
-            <DetailRow label="Age" value={age} />
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Service (same name)" value={epName ? <Link to={`/services/${namespace}/${epName}`} className="text-primary hover:underline">{epName}</Link> : '—'} />
+              <DetailRow label="Age" value={age} />
+            </div>
           </SectionCard>
           {subsets.map((subset, idx) => (
-            <Card key={idx}>
-              <CardHeader><CardTitle className="text-base">Subset {idx + 1}</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
+            <SectionCard key={idx} title={`Subset ${idx + 1}`} icon={Server}>
+              <div className="space-y-4">
                 <div>
-                  <h4 className="text-sm font-medium text-muted-foreground mb-3">Ports</h4>
+                  <h4 className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider mb-3">Ports</h4>
                   <div className="flex gap-2">
                     {(subset.ports ?? []).map((port) => (
                       <Badge key={port.name || port.port} variant="secondary" className="font-mono">
@@ -162,7 +164,7 @@ export default function EndpointDetail() {
                   </div>
                 </div>
                 <div>
-                  <h4 className="text-sm font-medium text-muted-foreground mb-3">Addresses</h4>
+                  <h4 className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider mb-3">Addresses</h4>
                   <div className="space-y-2">
                     {(subset.addresses ?? []).map((addr) => (
                       <div key={addr.ip} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
@@ -175,10 +177,11 @@ export default function EndpointDetail() {
                     ))}
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </SectionCard>
           ))}
-          <ResourceOverviewMetadata metadata={ep.metadata} skipMetadataGrid />
+          <LabelList labels={ep.metadata?.labels ?? {}} />
+          <AnnotationList annotations={ep.metadata?.annotations ?? {}} />
         </div>
       ),
     },

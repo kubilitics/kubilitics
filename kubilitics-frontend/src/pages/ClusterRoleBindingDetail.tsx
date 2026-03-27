@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
   LabelList,
   AnnotationList,
   YamlViewer,
@@ -64,6 +65,8 @@ export default function ClusterRoleBindingDetail() {
   const subjects = resource?.subjects ?? [];
   const clusterRoleName = roleRef.name ?? '–';
   const subjectKinds = [...new Set(subjects.map((s) => s.kind))];
+  const labels = resource?.metadata?.labels ?? {};
+  const annotations = resource?.metadata?.annotations ?? {};
 
   const handleDownloadYaml = useCallback(() => {
     if (!yaml) return;
@@ -122,34 +125,41 @@ export default function ClusterRoleBindingDetail() {
       content: (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <SectionCard icon={ShieldCheck} title="Cluster Role Reference">
-              <div
-                className="p-4 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted"
-                onClick={() => clusterRoleName !== '–' && navigate(`/clusterroles/${clusterRoleName}`)}
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <Badge variant="secondary">ClusterRole</Badge>
-                  <span className="font-medium">{clusterRoleName}</span>
-                </div>
-                <p className="text-xs text-muted-foreground font-mono">{roleRef.apiGroup ?? 'rbac.authorization.k8s.io'}</p>
-              </div>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Kind" value={<Badge variant="secondary">ClusterRole</Badge>} />
+              <DetailRow
+                label="Name"
+                value={
+                  <span
+                    className={clusterRoleName !== '–' ? 'cursor-pointer text-primary hover:underline font-semibold' : 'font-semibold'}
+                    onClick={() => clusterRoleName !== '–' && navigate(`/clusterroles/${clusterRoleName}`)}
+                  >
+                    {clusterRoleName}
+                  </span>
+                }
+              />
+              <DetailRow label="API Group" value={<span className="font-mono">{roleRef.apiGroup ?? 'rbac.authorization.k8s.io'}</span>} />
+            </div>
           </SectionCard>
           <SectionCard icon={Users} title="Subjects">
-              <div className="space-y-3">
-                {subjects.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No subjects</p>
-                ) : (
-                  subjects.map((subject, i) => (
-                    <div key={i} className="p-3 rounded-lg bg-muted/50">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Badge variant="outline">{subject.kind}</Badge>
-                        <span className="font-medium">{subject.name}</span>
-                      </div>
-                      {subject.namespace && <p className="text-xs text-muted-foreground">Namespace: {subject.namespace}</p>}
+            <div className="space-y-3">
+              {subjects.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No subjects</p>
+              ) : (
+                subjects.map((subject, i) => (
+                  <div key={i} className="p-3 rounded-lg bg-muted/50">
+                    <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                      <DetailRow label="Kind" value={<Badge variant="outline">{subject.kind}</Badge>} />
+                      <DetailRow label="Name" value={<span className="font-semibold">{subject.name}</span>} />
+                      {subject.namespace && <DetailRow label="Namespace" value={subject.namespace} />}
                     </div>
-                  ))
-                )}
-              </div>
+                  </div>
+                ))
+              )}
+            </div>
           </SectionCard>
+          <LabelList labels={labels} />
+          <AnnotationList annotations={annotations} />
         </div>
       ),
     },
@@ -158,26 +168,26 @@ export default function ClusterRoleBindingDetail() {
       label: 'Subjects',
       content: (
         <SectionCard icon={Users} title="Subject Details">
-            <div className="space-y-3">
-              {subjects.length === 0 ? (
-                <p className="text-muted-foreground text-sm">No subjects</p>
-              ) : (
-                subjects.map((subject, i) => (
-                  <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                    <div>
-                      <Badge variant="outline" className="mr-2">{subject.kind}</Badge>
-                      <span className="font-mono">{subject.name}</span>
-                      {subject.namespace && <span className="text-muted-foreground text-sm ml-2">({subject.namespace})</span>}
-                    </div>
-                    {subject.kind === 'ServiceAccount' && subject.namespace && (
-                      <Button variant="link" size="sm" onClick={() => navigate(`/serviceaccounts/${subject.namespace}/${subject.name}`)}>
-                        View Service Account
-                      </Button>
-                    )}
+          <div className="space-y-3">
+            {subjects.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No subjects</p>
+            ) : (
+              subjects.map((subject, i) => (
+                <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{subject.kind}</Badge>
+                    <span className="font-mono text-sm font-semibold">{subject.name}</span>
+                    {subject.namespace && <span className="text-xs text-muted-foreground">({subject.namespace})</span>}
                   </div>
-                ))
-              )}
-            </div>
+                  {subject.kind === 'ServiceAccount' && subject.namespace && (
+                    <Button variant="link" size="sm" onClick={() => navigate(`/serviceaccounts/${subject.namespace}/${subject.name}`)}>
+                      View Service Account
+                    </Button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         </SectionCard>
       ),
     },

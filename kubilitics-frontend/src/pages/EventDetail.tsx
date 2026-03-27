@@ -1,19 +1,20 @@
 import { useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Bell, Clock, Download, AlertTriangle, CheckCircle2, ExternalLink, Network, Zap } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
+  LabelList,
+  AnnotationList,
   YamlViewer,
   EventsSection,
   ActionsSection,
   ResourceTopologyView,
   type ResourceStatus,
-  type YamlVersion,
 } from '@/components/resources';
 import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
 import type { KubernetesResource } from '@/hooks/useKubernetes';
@@ -112,8 +113,6 @@ export default function EventDetail() {
     toast.success('JSON downloaded');
   }, [ev, eventNamespace, eventName]);
 
-  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
-
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -160,17 +159,22 @@ export default function EventDetail() {
       id: 'overview',
       label: 'Overview',
       content: (
-        <div className="space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <SectionCard icon={Bell} title="Event" tooltip="Full event details">
-            <div className="space-y-3 text-sm">
-              <div><span className="text-muted-foreground">Message</span><p className="mt-1">{ev?.message ?? '–'}</p></div>
-              <div><span className="text-muted-foreground">Reason</span><p className="mt-1 font-medium">{ev?.reason ?? '–'}</p></div>
-              <div><span className="text-muted-foreground">Count</span><p className="mt-1 font-mono">{ev?.count ?? 1}</p></div>
-              <div><span className="text-muted-foreground">First Timestamp</span><p className="mt-1 font-mono">{ev?.firstTimestamp ?? '–'}</p></div>
-              <div><span className="text-muted-foreground">Last Timestamp</span><p className="mt-1 font-mono">{ev?.lastTimestamp ?? '–'}</p></div>
-              <div><span className="text-muted-foreground">Source</span><p className="mt-1">{ev?.source?.component ?? '–'}</p></div>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Reason" value={ev?.reason ?? '–'} />
+              <DetailRow label="Type" value={<Badge variant={eventType === 'Normal' ? 'secondary' : 'destructive'}>{eventType}</Badge>} />
+              <DetailRow label="Count" value={<span className="font-mono">{ev?.count ?? 1}</span>} />
+              <DetailRow label="Source" value={ev?.source?.component ?? '–'} />
+              <DetailRow label="First Timestamp" value={<span className="font-mono">{ev?.firstTimestamp ?? '–'}</span>} />
+              <DetailRow label="Last Timestamp" value={<span className="font-mono">{ev?.lastTimestamp ?? '–'}</span>} />
             </div>
           </SectionCard>
+          <SectionCard icon={Bell} title="Message">
+            <p className="text-sm font-semibold">{ev?.message ?? '–'}</p>
+          </SectionCard>
+          <LabelList labels={ev?.metadata?.labels ?? {}} />
+          <AnnotationList annotations={ev?.metadata?.annotations ?? {}} />
         </div>
       ),
     },
@@ -178,27 +182,25 @@ export default function EventDetail() {
       id: 'involved',
       label: 'Involved Resource',
       content: (
-        <div className="space-y-4">
+        <SectionCard icon={Bell} title="Involved Resource">
           {involvedKind && involvedName ? (
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground mb-2">This event is about the following resource:</p>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge variant="secondary">{involvedKind}</Badge>
-                  <span className="font-mono">{involvedName}</span>
-                  {involvedNs && <Badge variant="outline">{involvedNs}</Badge>}
-                  {involvedLink !== '#' && (
-                    <Button variant="link" size="sm" className="gap-1" onClick={() => navigate(involvedLink)}>
-                      View resource <ExternalLink className="h-3 w-3" />
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            <div>
+              <p className="text-sm text-muted-foreground mb-2">This event is about the following resource:</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="secondary">{involvedKind}</Badge>
+                <span className="font-mono text-sm font-semibold">{involvedName}</span>
+                {involvedNs && <Badge variant="outline">{involvedNs}</Badge>}
+                {involvedLink !== '#' && (
+                  <Button variant="link" size="sm" className="gap-1" onClick={() => navigate(involvedLink)}>
+                    View resource <ExternalLink className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
+            </div>
           ) : (
-            <p className="text-muted-foreground">No involved object.</p>
+            <p className="text-sm text-muted-foreground">No involved object.</p>
           )}
-        </div>
+        </SectionCard>
       ),
     },
     { id: 'events', label: 'Events', content: <EventsSection events={relatedEvents} /> },

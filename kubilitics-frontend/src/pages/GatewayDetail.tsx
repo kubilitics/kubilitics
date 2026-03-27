@@ -24,7 +24,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { StatusPill, NamespaceBadge, type StatusPillVariant } from '@/components/list';
-import { LabelList, AnnotationList } from '@/components/resources';
+import { LabelList, AnnotationList, SectionCard, DetailRow } from '@/components/resources';
 import { cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
@@ -353,130 +353,123 @@ export default function GatewayDetail() {
 
         {/* Overview Tab */}
         <TabsContent value="overview" className="mt-4">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Gateway Info */}
+            <SectionCard icon={Network} title="Gateway Info">
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="Name" value={name} />
+                <DetailRow label="Namespace" value={ns} />
+                <DetailRow label="Gateway Class" value={gateway.spec.gatewayClassName ?? '-'} />
+                <DetailRow label="Age" value={calculateAge(gateway.metadata.creationTimestamp)} />
+              </div>
+            </SectionCard>
+
+            {/* Addresses */}
+            <SectionCard icon={Globe} title="Addresses">
+              {addresses.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No addresses assigned.</p>
+              ) : (
+                <div className="space-y-2">
+                  {addresses.map((addr, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Badge variant="outline">{addr.type ?? 'IPAddress'}</Badge>
+                      <span className="font-mono text-sm font-semibold">{addr.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+
             {/* Conditions */}
-            <Card>
-              <CardHeader><CardTitle className="text-sm">Conditions</CardTitle></CardHeader>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Reason</TableHead>
-                      <TableHead>Age</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {conditions.length === 0 ? (
+            <SectionCard icon={CheckCircle2} title="Conditions" className="md:col-span-2">
+              {conditions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No conditions</p>
+              ) : (
+                <div className="rounded-md border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
                       <TableRow>
-                        <TableCell colSpan={4} className="text-center text-muted-foreground">No conditions</TableCell>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead>Age</TableHead>
                       </TableRow>
-                    ) : (
-                      conditions.map((c, i) => (
+                    </TableHeader>
+                    <TableBody>
+                      {conditions.map((c, i) => (
                         <TableRow key={i}>
-                          <TableCell className="font-medium">{c.type}</TableCell>
+                          <TableCell className="text-sm font-semibold">{c.type}</TableCell>
                           <TableCell>
                             <Badge variant={c.status === 'True' ? 'default' : 'destructive'}>{c.status}</Badge>
                           </TableCell>
-                          <TableCell className="text-muted-foreground">{c.reason ?? '-'}</TableCell>
-                          <TableCell className="text-muted-foreground text-xs">
+                          <TableCell className="text-sm text-muted-foreground">{c.reason ?? '-'}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
                             {c.lastTransitionTime ? calculateAge(c.lastTransitionTime) : '-'}
                           </TableCell>
                         </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-
-            {/* Addresses */}
-            <Card>
-              <CardHeader><CardTitle className="text-sm">Addresses</CardTitle></CardHeader>
-              <CardContent>
-                {addresses.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No addresses assigned.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {addresses.map((addr, i) => (
-                      <div key={i} className="flex items-center gap-2">
-                        <Badge variant="outline">{addr.type ?? 'IPAddress'}</Badge>
-                        <span className="font-mono text-sm">{addr.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </SectionCard>
           </div>
         </TabsContent>
 
         {/* Listeners Tab */}
         <TabsContent value="listeners" className="mt-4">
-          <div className="grid gap-4">
+          <div className="grid gap-6">
             {listeners.map((listener) => {
               const listenerStatus = listenerStatuses.find((ls) => ls.name === listener.name);
               return (
-                <Card key={listener.name}>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <Globe className="h-4 w-4 text-muted-foreground" />
-                        {listener.name}
-                        <Badge variant="outline">{listener.protocol}</Badge>
-                        <Badge variant="secondary">:{listener.port}</Badge>
-                      </CardTitle>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary" className="text-[10px]">
-                          {listenerStatus?.attachedRoutes ?? 0} routes attached
-                        </Badge>
-                        {listenerStatus?.conditions && (
-                          <StatusPill
-                            variant={getConditionStatus(listenerStatus.conditions, 'Ready')}
-                            label={listenerStatus.conditions.find((c) => c.type === 'Ready')?.status === 'True' ? 'Ready' : 'Not Ready'}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Hostname</p>
-                        <p className="font-mono">{listener.hostname ?? '*'}</p>
-                      </div>
-                      {listener.tls && (
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">TLS Mode</p>
-                          <div className="flex items-center gap-1.5">
-                            <Shield className="h-3.5 w-3.5 text-emerald-500" />
-                            <span>{listener.tls.mode ?? 'Terminate'}</span>
-                          </div>
-                          {listener.tls.certificateRefs?.map((ref, i) => (
-                            <Badge key={i} variant="outline" className="mt-1 text-[10px]">
-                              {ref.namespace ? `${ref.namespace}/` : ''}{ref.name}
-                            </Badge>
+                <SectionCard key={listener.name} icon={Globe} title={listener.name}>
+                  <div className="flex items-center gap-2 mb-4">
+                    <Badge variant="outline">{listener.protocol}</Badge>
+                    <Badge variant="secondary">:{listener.port}</Badge>
+                    <Badge variant="secondary" className="text-xs">
+                      {listenerStatus?.attachedRoutes ?? 0} routes attached
+                    </Badge>
+                    {listenerStatus?.conditions && (
+                      <StatusPill
+                        variant={getConditionStatus(listenerStatus.conditions, 'Ready')}
+                        label={listenerStatus.conditions.find((c) => c.type === 'Ready')?.status === 'True' ? 'Ready' : 'Not Ready'}
+                      />
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                    <DetailRow label="Hostname" value={<span className="font-mono">{listener.hostname ?? '*'}</span>} />
+                    {listener.tls && (
+                      <DetailRow label="TLS Mode" value={
+                        <div className="flex items-center gap-1.5">
+                          <Shield className="h-3.5 w-3.5 text-emerald-500" />
+                          <span className="text-sm font-semibold">{listener.tls.mode ?? 'Terminate'}</span>
+                        </div>
+                      } />
+                    )}
+                    <DetailRow label="Allowed Routes" value={listener.allowedRoutes?.namespaces?.from ?? 'Same'} />
+                    {listenerStatus?.supportedKinds && (
+                      <DetailRow label="Supported Kinds" value={
+                        <div className="flex flex-wrap gap-1">
+                          {listenerStatus.supportedKinds.map((sk, i) => (
+                            <Badge key={i} variant="secondary" className="text-xs">{sk.kind}</Badge>
                           ))}
                         </div>
-                      )}
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Allowed Routes</p>
-                        <p>{listener.allowedRoutes?.namespaces?.from ?? 'Same'}</p>
+                      } />
+                    )}
+                  </div>
+                  {listener.tls?.certificateRefs && listener.tls.certificateRefs.length > 0 && (
+                    <div className="mt-3">
+                      <span className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider">Certificate Refs</span>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {listener.tls.certificateRefs.map((ref, i) => (
+                          <Badge key={i} variant="outline" className="text-xs">
+                            {ref.namespace ? `${ref.namespace}/` : ''}{ref.name}
+                          </Badge>
+                        ))}
                       </div>
-                      {listenerStatus?.supportedKinds && (
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Supported Kinds</p>
-                          <div className="flex flex-wrap gap-1">
-                            {listenerStatus.supportedKinds.map((sk, i) => (
-                              <Badge key={i} variant="secondary" className="text-[10px]">{sk.kind}</Badge>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                     </div>
-                  </CardContent>
-                </Card>
+                  )}
+                </SectionCard>
               );
             })}
           </div>
@@ -485,63 +478,57 @@ export default function GatewayDetail() {
         {/* Routes Tab */}
         <TabsContent value="routes" className="mt-4">
           {routes.length === 0 ? (
-            <Card>
-              <CardContent className="flex items-center justify-center p-8">
-                <div className="text-center">
-                  <Route className="mx-auto h-8 w-8 text-muted-foreground/50 mb-2" />
-                  <p className="text-sm text-muted-foreground">No HTTPRoutes attached to this Gateway.</p>
-                </div>
-              </CardContent>
-            </Card>
+            <SectionCard icon={Route} title="HTTP Routes">
+              <div className="flex flex-col items-center justify-center p-8">
+                <Route className="mx-auto h-8 w-8 text-muted-foreground/50 mb-2" />
+                <p className="text-sm text-muted-foreground">No HTTPRoutes attached to this Gateway.</p>
+              </div>
+            </SectionCard>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-6">
               {routes.map((route) => (
-                <Card key={route.metadata.uid}>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <Route className="h-4 w-4 text-muted-foreground" />
-                        {route.metadata.name}
-                        <NamespaceBadge namespace={route.metadata.namespace ?? '-'} />
-                      </CardTitle>
-                      <div className="flex flex-wrap gap-1">
-                        {route.spec.hostnames?.map((h) => (
-                          <Badge key={h} variant="outline" className="font-mono text-[10px]">{h}</Badge>
-                        ))}
+                <SectionCard key={route.metadata.uid} icon={Route} title={route.metadata.name}>
+                  <div className="flex items-center gap-2 mb-4">
+                    <NamespaceBadge namespace={route.metadata.namespace ?? '-'} />
+                    {route.spec.hostnames?.map((h) => (
+                      <Badge key={h} variant="outline" className="font-mono text-xs">{h}</Badge>
+                    ))}
+                  </div>
+                  {route.spec.rules?.map((rule, ri) => (
+                    <div key={ri} className="mb-3 last:mb-0">
+                      <span className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider">Rule {ri + 1}</span>
+                      <div className="grid grid-cols-2 gap-x-8 gap-y-3 mt-2">
+                        <DetailRow label="Matches" value={
+                          rule.matches?.length ? (
+                            <div className="space-y-0.5">
+                              {rule.matches.map((m, mi) => (
+                                <div key={mi} className="font-mono text-sm font-semibold">
+                                  {m.path?.type ?? 'PathPrefix'}: {m.path?.value ?? '/'}
+                                </div>
+                              ))}
+                            </div>
+                          ) : '*'
+                        } />
+                        <DetailRow label="Backends" value={
+                          rule.backendRefs?.length ? (
+                            <div className="space-y-1">
+                              {rule.backendRefs.map((b, bi) => (
+                                <div key={bi} className="flex items-center gap-1">
+                                  <Badge variant="secondary" className="text-xs">
+                                    {b.namespace ? `${b.namespace}/` : ''}{b.name}:{b.port ?? '?'}
+                                  </Badge>
+                                  {b.weight != null && (
+                                    <span className="text-xs text-muted-foreground">w:{b.weight}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : '-'
+                        } />
                       </div>
                     </div>
-                  </CardHeader>
-                  <CardContent>
-                    {route.spec.rules?.map((rule, ri) => (
-                      <div key={ri} className="mb-3 last:mb-0">
-                        <p className="text-xs font-medium text-muted-foreground mb-1">Rule {ri + 1}</p>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div>
-                            <p className="text-xs text-muted-foreground uppercase tracking-wider">Matches</p>
-                            {rule.matches?.map((m, mi) => (
-                              <div key={mi} className="font-mono text-xs mt-0.5">
-                                {m.path?.type ?? 'PathPrefix'}: {m.path?.value ?? '/'}
-                              </div>
-                            )) ?? <span className="text-muted-foreground">*</span>}
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground uppercase tracking-wider">Backends</p>
-                            {rule.backendRefs?.map((b, bi) => (
-                              <div key={bi} className="flex items-center gap-1 mt-0.5">
-                                <Badge variant="secondary" className="text-[10px]">
-                                  {b.namespace ? `${b.namespace}/` : ''}{b.name}:{b.port ?? '?'}
-                                </Badge>
-                                {b.weight != null && (
-                                  <span className="text-xs text-muted-foreground">w:{b.weight}</span>
-                                )}
-                              </div>
-                            )) ?? <span className="text-muted-foreground">-</span>}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
+                  ))}
+                </SectionCard>
               ))}
             </div>
           )}
@@ -549,9 +536,7 @@ export default function GatewayDetail() {
 
         {/* Topology Tab */}
         <TabsContent value="topology" className="mt-4">
-          <Card>
-            <CardHeader><CardTitle className="text-sm">Gateway Topology</CardTitle></CardHeader>
-            <CardContent>
+          <SectionCard icon={Layers} title="Gateway Topology">
               <div className="min-h-[300px] flex flex-col items-center gap-6 py-4">
                 {/* GatewayClass */}
                 {topology.nodes.filter((n) => n.kind === 'GatewayClass').map((node) => (
@@ -613,8 +598,7 @@ export default function GatewayDetail() {
                   </div>
                 )}
               </div>
-            </CardContent>
-          </Card>
+          </SectionCard>
         </TabsContent>
 
         {/* Blast Radius Tab */}
@@ -628,13 +612,11 @@ export default function GatewayDetail() {
 
         {/* YAML Tab */}
         <TabsContent value="yaml" className="mt-4">
-          <Card>
-            <CardContent className="p-4">
-              <pre className="overflow-auto rounded-md bg-muted/50 dark:bg-muted/20 p-4 text-xs font-mono text-foreground max-h-[600px]">
-                {JSON.stringify(gateway, null, 2)}
-              </pre>
-            </CardContent>
-          </Card>
+          <SectionCard icon={Server} title="YAML">
+            <pre className="overflow-auto rounded-md bg-muted/50 dark:bg-muted/20 p-4 text-xs font-mono text-foreground max-h-[600px]">
+              {JSON.stringify(gateway, null, 2)}
+            </pre>
+          </SectionCard>
         </TabsContent>
       </Tabs>
     </motion.div>

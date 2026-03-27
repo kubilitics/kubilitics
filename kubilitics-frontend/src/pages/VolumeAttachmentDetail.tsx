@@ -1,16 +1,17 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Database, Clock, Server, Download, Trash2, HardDrive, Info, Network, Loader2, Edit, FileCode, GitCompare, Zap } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Database, Clock, Server, Download, Trash2, HardDrive, Info, Network, Edit, FileCode, GitCompare, Zap } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
-import { ResourceOverviewMetadata } from '@/components/resources/ResourceOverviewMetadata';
 import {
   ResourceDetailLayout,
-  MetadataSection,
   SectionCard,
+  DetailRow,
+  LabelList,
+  AnnotationList,
   YamlViewer,
   EventsSection,
   ActionsSection,
@@ -159,34 +160,47 @@ export default function VolumeAttachmentDetail() {
       icon: Info,
       content: (
         <div className="space-y-6">
-          <MetadataSection
-            metadata={va?.metadata ?? { name: vaName }}
-            showMetadataGrid
-            createdLabel={age}
-          />
           <SectionCard icon={Database} title="Attachment information" tooltip={<p className="text-xs text-muted-foreground">Volume attachment status and references</p>}>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-              <div><p className="text-muted-foreground mb-1">Attacher</p><p className="font-mono text-xs">{attacher}</p></div>
-              <div><p className="text-muted-foreground mb-1">Status</p><Badge variant={attached ? 'default' : 'secondary'}>{attached ? 'Attached' : 'Detached'}</Badge></div>
-              <div><p className="text-muted-foreground mb-1">Node</p><button type="button" className="font-medium text-primary hover:underline" onClick={() => nodeName !== '—' && navigate(`/nodes/${nodeName}`)}>{nodeName}</button></div>
-              <div><p className="text-muted-foreground mb-1">PersistentVolume</p><button type="button" className="font-mono text-xs text-primary hover:underline" onClick={() => pvName !== '—' && navigate(`/persistentvolumes/${pvName}`)}>{pvName}</button></div>
-              <div><p className="text-muted-foreground mb-1">Age</p><p>{age}</p></div>
-              {attachError !== '—' && <div className="col-span-2 md:col-span-3"><p className="text-muted-foreground mb-1">Attach Error</p><p className="text-destructive text-sm">{attachError}</p></div>}
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Attacher" value={<span className="font-mono text-xs break-all">{attacher}</span>} />
+              <DetailRow label="Status" value={<Badge variant={attached ? 'default' : 'secondary'}>{attached ? 'Attached' : 'Detached'}</Badge>} />
+              <DetailRow
+                label="Node"
+                value={
+                  nodeName !== '—' ? (
+                    <Button variant="link" className="h-auto p-0 font-mono text-left break-all" onClick={() => navigate(`/nodes/${nodeName}`)}>
+                      {nodeName}
+                    </Button>
+                  ) : '—'
+                }
+              />
+              <DetailRow
+                label="PersistentVolume"
+                value={
+                  pvName !== '—' ? (
+                    <Button variant="link" className="h-auto p-0 font-mono text-left break-all" onClick={() => navigate(`/persistentvolumes/${pvName}`)}>
+                      {pvName}
+                    </Button>
+                  ) : '—'
+                }
+              />
+              <DetailRow label="Age" value={age} />
+              {attachError !== '—' && (
+                <DetailRow label="Attach Error" value={<span className="text-destructive">{attachError}</span>} />
+              )}
             </div>
           </SectionCard>
           {Object.keys(attachmentMetadata).length > 0 && (
             <SectionCard icon={Info} title="Attachment Metadata" tooltip={<p className="text-xs text-muted-foreground">Driver-specific metadata</p>}>
-              <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
                 {Object.entries(attachmentMetadata).map(([key, value]) => (
-                  <div key={key} className="flex justify-between p-3 rounded-lg bg-muted/50">
-                    <span className="text-sm text-muted-foreground">{key}</span>
-                    <span className="font-mono text-sm">{value}</span>
-                  </div>
+                  <DetailRow key={key} label={key} value={<span className="font-mono break-all">{value}</span>} />
                 ))}
               </div>
             </SectionCard>
           )}
-          <ResourceOverviewMetadata metadata={va?.metadata} skipMetadataGrid />
+          <LabelList labels={va?.metadata?.labels ?? {}} />
+          <AnnotationList annotations={va?.metadata?.annotations ?? {}} />
         </div>
       ),
     },

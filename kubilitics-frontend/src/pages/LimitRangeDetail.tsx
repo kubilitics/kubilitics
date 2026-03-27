@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
   YamlViewer,
   EventsSection,
   ActionsSection,
@@ -155,57 +156,22 @@ export default function LimitRangeDetail() {
         <div className="space-y-6">
           {limits.map((limit, idx) => (
             <SectionCard key={idx} icon={Sliders} title={`${limit.type} Limits`}>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {limit.default && Object.keys(limit.default).length > 0 && (
-                    <div className="p-4 rounded-lg bg-muted/50">
-                      <p className="text-sm text-muted-foreground mb-2">Default</p>
-                      <div className="space-y-1 text-sm font-mono">
-                        {Object.entries(limit.default).map(([k, v]) => (
-                          <p key={k}>{k}: {v}</p>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {limit.defaultRequest && Object.keys(limit.defaultRequest).length > 0 && (
-                    <div className="p-4 rounded-lg bg-muted/50">
-                      <p className="text-sm text-muted-foreground mb-2">Default Request</p>
-                      <div className="space-y-1 text-sm font-mono">
-                        {Object.entries(limit.defaultRequest).map(([k, v]) => (
-                          <p key={k}>{k}: {v}</p>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {limit.max && Object.keys(limit.max).length > 0 && (
-                    <div className="p-4 rounded-lg bg-muted/50">
-                      <p className="text-sm text-muted-foreground mb-2">Max</p>
-                      <div className="space-y-1 text-sm font-mono">
-                        {Object.entries(limit.max).map(([k, v]) => (
-                          <p key={k}>{k}: {v}</p>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {limit.min && Object.keys(limit.min).length > 0 && (
-                    <div className="p-4 rounded-lg bg-muted/50">
-                      <p className="text-sm text-muted-foreground mb-2">Min</p>
-                      <div className="space-y-1 text-sm font-mono">
-                        {Object.entries(limit.min).map(([k, v]) => (
-                          <p key={k}>{k}: {v}</p>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {limit.maxLimitRequestRatio && Object.keys(limit.maxLimitRequestRatio).length > 0 && (
-                    <div className="p-4 rounded-lg bg-muted/50">
-                      <p className="text-sm text-muted-foreground mb-2">Max Limit/Request Ratio</p>
-                      <div className="space-y-1 text-sm font-mono">
-                        {Object.entries(limit.maxLimitRequestRatio).map(([k, v]) => (
-                          <p key={k}>{k}: {v}</p>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  {limit.default && Object.entries(limit.default).map(([k, v]) => (
+                    <DetailRow key={`default-${k}`} label={`Default ${k}`} value={<span className="font-mono">{v}</span>} />
+                  ))}
+                  {limit.defaultRequest && Object.entries(limit.defaultRequest).map(([k, v]) => (
+                    <DetailRow key={`defaultReq-${k}`} label={`Default Request ${k}`} value={<span className="font-mono">{v}</span>} />
+                  ))}
+                  {limit.max && Object.entries(limit.max).map(([k, v]) => (
+                    <DetailRow key={`max-${k}`} label={`Max ${k}`} value={<span className="font-mono">{v}</span>} />
+                  ))}
+                  {limit.min && Object.entries(limit.min).map(([k, v]) => (
+                    <DetailRow key={`min-${k}`} label={`Min ${k}`} value={<span className="font-mono">{v}</span>} />
+                  ))}
+                  {limit.maxLimitRequestRatio && Object.entries(limit.maxLimitRequestRatio).map(([k, v]) => (
+                    <DetailRow key={`ratio-${k}`} label={`Max Limit/Request Ratio ${k}`} value={<span className="font-mono">{v}</span>} />
+                  ))}
                 </div>
             </SectionCard>
           ))}

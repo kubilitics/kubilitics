@@ -10,6 +10,7 @@ import { downloadResourceJson } from '@/lib/exportUtils';
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
   YamlViewer,
   ResourceComparisonView,
   EventsSection,
@@ -165,25 +166,13 @@ export default function ReplicationControllerDetail() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <SectionCard icon={Server} title="Replica Status">
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div className="text-center p-4 rounded-lg bg-muted/50">
-                    <p className="text-2xl font-bold text-primary">{desired}</p>
-                    <p className="text-muted-foreground">Desired</p>
-                  </div>
-                  <div className="text-center p-4 rounded-lg bg-muted/50">
-                    <p className="text-2xl font-bold text-info">{current}</p>
-                    <p className="text-muted-foreground">Current</p>
-                  </div>
-                  <div className="text-center p-4 rounded-lg bg-muted/50">
-                    <p className="text-2xl font-bold text-success">{ready}</p>
-                    <p className="text-muted-foreground">Ready</p>
-                  </div>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  <DetailRow label="Desired" value={<span className="text-sm font-semibold text-primary">{desired}</span>} />
+                  <DetailRow label="Current" value={<span className="text-sm font-semibold">{current}</span>} />
+                  <DetailRow label="Ready" value={<span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">{ready}</span>} />
+                  <DetailRow label="Readiness" value={<span className="font-mono">{ready}/{desired}</span>} />
                 </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Readiness</span>
-                    <span className="font-mono">{ready}/{desired}</span>
-                  </div>
+                <div className="mt-4 space-y-1">
                   <div className="h-2 rounded-full bg-secondary overflow-hidden">
                     <div
                       className="h-full bg-primary transition-all duration-300"
@@ -228,21 +217,11 @@ export default function ReplicationControllerDetail() {
                       )}
 
                       {container.resources && (
-                        <div className="grid grid-cols-2 gap-4 text-xs">
-                          <div>
-                            <p className="text-muted-foreground mb-1">Requests</p>
-                            <div className="space-y-0.5">
-                              <p className="font-mono text-xs">CPU: {container.resources.requests?.cpu || '-'}</p>
-                              <p className="font-mono text-xs">Mem: {container.resources.requests?.memory || '-'}</p>
-                            </div>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground mb-1">Limits</p>
-                            <div className="space-y-0.5">
-                              <p className="font-mono text-xs">CPU: {container.resources.limits?.cpu || '-'}</p>
-                              <p className="font-mono text-xs">Mem: {container.resources.limits?.memory || '-'}</p>
-                            </div>
-                          </div>
+                        <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                          <DetailRow label="CPU Request" value={<span className="font-mono">{container.resources.requests?.cpu || '-'}</span>} />
+                          <DetailRow label="Memory Request" value={<span className="font-mono">{container.resources.requests?.memory || '-'}</span>} />
+                          <DetailRow label="CPU Limit" value={<span className="font-mono">{container.resources.limits?.cpu || '-'}</span>} />
+                          <DetailRow label="Memory Limit" value={<span className="font-mono">{container.resources.limits?.memory || '-'}</span>} />
                         </div>
                       )}
                     </div>

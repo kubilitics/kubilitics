@@ -15,6 +15,7 @@ import {
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
   LabelList,
   AnnotationList,
   YamlViewer,
@@ -159,42 +160,48 @@ export default function RoleDetail() {
       content: (
         <div className="grid grid-cols-1 gap-6">
           <SectionCard icon={Shield} title="Rules">
-              <div className="space-y-4">
-                {rules.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No rules</p>
-                ) : (
-                  rules.map((rule, i) => (
-                    <div key={i} className="p-4 rounded-lg bg-muted/50">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-                        <div>
-                          <p className="text-muted-foreground mb-2">API Groups</p>
+            <div className="space-y-4">
+              {rules.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No rules</p>
+              ) : (
+                rules.map((rule, i) => (
+                  <div key={i} className="p-4 rounded-lg bg-muted/50">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <DetailRow
+                        label="API Groups"
+                        value={
                           <div className="flex flex-wrap gap-1">
                             {(rule.apiGroups ?? ['']).map((g, j) => (
                               <Badge key={j} variant="secondary" className="font-mono">{g || 'core'}</Badge>
                             ))}
                           </div>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground mb-2">Resources</p>
+                        }
+                      />
+                      <DetailRow
+                        label="Resources"
+                        value={
                           <div className="flex flex-wrap gap-1">
                             {(rule.resources ?? []).map((r, j) => (
                               <Badge key={j} variant="outline" className="font-mono">{r}</Badge>
                             ))}
                           </div>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground mb-2">Verbs</p>
+                        }
+                      />
+                      <DetailRow
+                        label="Verbs"
+                        value={
                           <div className="flex flex-wrap gap-1">
                             {(rule.verbs ?? []).map((v, j) => (
                               <Badge key={j} variant="default" className="font-mono text-xs">{v}</Badge>
                             ))}
                           </div>
-                        </div>
-                      </div>
+                        }
+                      />
                     </div>
-                  ))
-                )}
-              </div>
+                  </div>
+                ))
+              )}
+            </div>
           </SectionCard>
           <LabelList labels={labels} />
           <AnnotationList annotations={annotations} />

@@ -9,6 +9,7 @@ import { downloadResourceJson } from '@/lib/exportUtils';
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
   YamlViewer,
   LabelList,
   AnnotationList,
@@ -136,31 +137,16 @@ export default function PodDisruptionBudgetDetail() {
       content: (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <SectionCard icon={Settings} title="Budget Configuration">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-3 rounded-lg bg-muted/50">
-                  <p className="text-muted-foreground text-sm mb-1">Min Available</p>
-                  <p className="text-xl font-bold">{minAvailable != null && minAvailable !== '' ? String(minAvailable) : '–'}</p>
-                </div>
-                <div className="p-3 rounded-lg bg-muted/50">
-                  <p className="text-muted-foreground text-sm mb-1">Max Unavailable</p>
-                  <p className="text-xl font-bold">{maxUnavailable != null && maxUnavailable !== '' ? String(maxUnavailable) : '–'}</p>
-                </div>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="Min Available" value={minAvailable != null && minAvailable !== '' ? String(minAvailable) : '–'} />
+                <DetailRow label="Max Unavailable" value={maxUnavailable != null && maxUnavailable !== '' ? String(maxUnavailable) : '–'} />
               </div>
           </SectionCard>
           <SectionCard icon={Activity} title="Current Status">
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div className="p-3 rounded-lg bg-muted/50">
-                  <p className="text-xl font-bold">{expectedPods > 0 ? expectedPods : desiredHealthy}</p>
-                  <p className="text-xs text-muted-foreground">Expected / Desired</p>
-                </div>
-                <div className="p-3 rounded-lg bg-[hsl(var(--success))]/10">
-                  <p className="text-xl font-bold text-[hsl(var(--success))]">{currentHealthy}</p>
-                  <p className="text-xs text-muted-foreground">Healthy</p>
-                </div>
-                <div className="p-3 rounded-lg bg-primary/10">
-                  <p className="text-xl font-bold text-primary">{disruptionsAllowed}</p>
-                  <p className="text-xs text-muted-foreground">Allowed</p>
-                </div>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="Expected / Desired" value={<span className="font-semibold">{expectedPods > 0 ? expectedPods : desiredHealthy}</span>} />
+                <DetailRow label="Healthy" value={<span className="font-semibold text-[hsl(var(--success))]">{currentHealthy}</span>} />
+                <DetailRow label="Disruptions Allowed" value={<span className="font-semibold text-primary">{disruptionsAllowed}</span>} />
               </div>
           </SectionCard>
           <SectionCard icon={Target} title="Pod Selector">

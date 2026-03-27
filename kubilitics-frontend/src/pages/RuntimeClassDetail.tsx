@@ -2,18 +2,19 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
 import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
-import { FolderCog, Clock, Cpu, Download, Trash2, Settings, Package, Box, Network, Loader2, GitCompare, Info, Target, Zap } from 'lucide-react';
+import { FolderCog, Clock, Cpu, Download, Trash2, Settings, Package, Box, Network, GitCompare, Info, Target, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { NamespaceBadge } from '@/components/list';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
-import { ResourceOverviewMetadata } from '@/components/resources/ResourceOverviewMetadata';
 import {
   ResourceDetailLayout,
   SectionCard,
-  MetadataSection,
+  DetailRow,
+  LabelList,
+  AnnotationList,
   YamlViewer,
   EventsSection,
   ActionsSection,
@@ -173,18 +174,11 @@ export default function RuntimeClassDetail() {
       label: 'Overview',
       content: (
         <div className="space-y-6">
-          <MetadataSection metadata={{ name: rc.name }} showMetadataGrid />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <SectionCard icon={Info} title="Runtime Info">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground mb-1">Handler</p>
-                    <Badge variant="default" className="font-mono">{rc.handler}</Badge>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground mb-1">Age</p>
-                    <p>{rc.age}</p>
-                  </div>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  <DetailRow label="Handler" value={<Badge variant="default" className="font-mono">{rc.handler}</Badge>} />
+                  <DetailRow label="Age" value={rc.age} />
                 </div>
                 <div className="pt-2">
                   <p className="text-sm text-muted-foreground">
@@ -195,15 +189,9 @@ export default function RuntimeClassDetail() {
             </SectionCard>
             <SectionCard icon={Cpu} title="Overhead" tooltip="Additional resources consumed by the runtime">
                 {rc.overhead?.podFixed ? (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 rounded-lg bg-muted/50">
-                      <p className="text-sm text-muted-foreground mb-1">CPU</p>
-                      <p className="font-mono text-lg font-medium">{rc.overhead.podFixed.cpu}</p>
-                    </div>
-                    <div className="p-4 rounded-lg bg-muted/50">
-                      <p className="text-sm text-muted-foreground mb-1">Memory</p>
-                      <p className="font-mono text-lg font-medium">{rc.overhead.podFixed.memory}</p>
-                    </div>
+                  <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                    <DetailRow label="CPU" value={<span className="font-mono">{rc.overhead.podFixed.cpu}</span>} />
+                    <DetailRow label="Memory" value={<span className="font-mono">{rc.overhead.podFixed.memory}</span>} />
                   </div>
                 ) : (
                   <p className="text-muted-foreground">No overhead defined</p>
@@ -264,7 +252,8 @@ export default function RuntimeClassDetail() {
                 )}
             </SectionCard>
           </div>
-          <ResourceOverviewMetadata metadata={k8sRc?.metadata} skipMetadataGrid />
+          <LabelList labels={k8sRc?.metadata?.labels ?? {}} />
+          <AnnotationList annotations={k8sRc?.metadata?.annotations ?? {}} />
         </div>
       ),
     },

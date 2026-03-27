@@ -12,6 +12,7 @@ import { downloadResourceJson } from '@/lib/exportUtils';
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
   YamlViewer,
   EventsSection,
   ActionsSection,
@@ -446,13 +447,13 @@ export default function NodeDetail() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Node Info */}
             <SectionCard icon={Info} title="Node Info" tooltip={<p className="text-xs text-muted-foreground">OS, kernel, runtime, and network info</p>}>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><p className="text-muted-foreground mb-1">OS Image</p><p>{nodeInfo?.osImage || '-'}</p></div>
-                <div><p className="text-muted-foreground mb-1">Architecture</p><p>{nodeInfo?.architecture || '-'}</p></div>
-                <div><p className="text-muted-foreground mb-1">Kernel</p><p className="font-mono text-xs">{nodeInfo?.kernelVersion || '-'}</p></div>
-                <div><p className="text-muted-foreground mb-1">Container Runtime</p><p className="font-mono text-xs">{nodeInfo?.containerRuntimeVersion || '-'}</p></div>
-                <div><p className="text-muted-foreground mb-1">Kubelet</p><Badge variant="secondary">{nodeInfo?.kubeletVersion || '-'}</Badge></div>
-                <div><p className="text-muted-foreground mb-1">Pod CIDR</p><p className="font-mono text-xs">{podCIDR}</p></div>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="OS Image" value={nodeInfo?.osImage || '-'} />
+                <DetailRow label="Architecture" value={nodeInfo?.architecture || '-'} />
+                <DetailRow label="Kernel" value={<span className="font-mono text-xs">{nodeInfo?.kernelVersion || '-'}</span>} />
+                <DetailRow label="Container Runtime" value={<span className="font-mono text-xs">{nodeInfo?.containerRuntimeVersion || '-'}</span>} />
+                <DetailRow label="Kubelet" value={<Badge variant="secondary">{nodeInfo?.kubeletVersion || '-'}</Badge>} />
+                <DetailRow label="Pod CIDR" value={<span className="font-mono text-xs">{podCIDR}</span>} />
               </div>
             </SectionCard>
 
@@ -510,12 +511,9 @@ export default function NodeDetail() {
 
             {/* Addresses */}
             <SectionCard icon={MapPin} title="Addresses" tooltip={<p className="text-xs text-muted-foreground">Node network addresses</p>}>
-              <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
                 {addresses.map((addr) => (
-                  <div key={addr.type} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
-                    <span className="text-sm text-muted-foreground">{addr.type}</span>
-                    <span className="font-mono text-sm">{addr.address}</span>
-                  </div>
+                  <DetailRow key={addr.type} label={addr.type} value={<span className="font-mono">{addr.address}</span>} />
                 ))}
               </div>
             </SectionCard>

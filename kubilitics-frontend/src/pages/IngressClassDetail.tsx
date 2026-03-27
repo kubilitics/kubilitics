@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Route, Clock, Download, Trash2, Star, Server, Activity, Network, GitCompare, Zap } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -160,16 +160,13 @@ export default function IngressClassDetail() {
             <DetailRow label="Age" value={age} />
           </SectionCard>
           {params && (
-            <Card>
-              <CardHeader><CardTitle className="text-base">Parameters</CardTitle></CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <DetailRow label="API Group" value={params.apiGroup ?? '—'} />
-                  <DetailRow label="Kind" value={params.kind ?? '—'} />
-                  <DetailRow label="Name" value={params.name ?? '—'} />
-                </div>
-              </CardContent>
-            </Card>
+            <SectionCard title="Parameters" icon={Server}>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="API Group" value={params.apiGroup ?? '—'} />
+                <DetailRow label="Kind" value={params.kind ?? '—'} />
+                <DetailRow label="Name" value={params.name ?? '—'} />
+              </div>
+            </SectionCard>
           )}
           <LabelList labels={labels} />
           <AnnotationList annotations={icResource?.metadata?.annotations ?? {}} />

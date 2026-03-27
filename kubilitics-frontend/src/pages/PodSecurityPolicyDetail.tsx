@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Shield, Clock, Lock, Download, Trash2, AlertTriangle, Network, GitCompare, Zap } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Shield, Clock, Lock, Download, Trash2, AlertTriangle, Network, GitCompare, Zap, Info, UserCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
@@ -9,6 +8,8 @@ import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
 import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
 import {
   ResourceDetailLayout,
+  SectionCard,
+  DetailRow,
   YamlViewer,
   EventsSection,
   ActionsSection,
@@ -99,80 +100,64 @@ export default function PodSecurityPolicyDetail() {
       label: 'Overview',
       content: (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader><CardTitle className="text-base">Security Settings</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground mb-1">Privileged</p>
+          <SectionCard icon={Lock} title="Security Settings">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow
+                label="Privileged"
+                value={
                   <Badge variant={psp.privileged ? 'destructive' : 'default'}>
                     {psp.privileged ? 'Allowed' : 'Denied'}
                   </Badge>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Privilege Escalation</p>
+                }
+              />
+              <DetailRow
+                label="Privilege Escalation"
+                value={
                   <Badge variant={psp.allowPrivilegeEscalation ? 'destructive' : 'default'}>
                     {psp.allowPrivilegeEscalation ? 'Allowed' : 'Denied'}
                   </Badge>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Host Network</p>
+                }
+              />
+              <DetailRow
+                label="Host Network"
+                value={
                   <Badge variant={psp.hostNetwork ? 'destructive' : 'secondary'}>
                     {psp.hostNetwork ? 'Allowed' : 'Denied'}
                   </Badge>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Host PID</p>
+                }
+              />
+              <DetailRow
+                label="Host PID"
+                value={
                   <Badge variant={psp.hostPID ? 'destructive' : 'secondary'}>
                     {psp.hostPID ? 'Allowed' : 'Denied'}
                   </Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle className="text-base">Run As User</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground mb-1">Run As User Rule</p>
-                  <Badge variant="outline">{psp.runAsUser.rule}</Badge>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">SELinux Rule</p>
-                  <Badge variant="outline">{psp.seLinux.rule}</Badge>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">FS Group Rule</p>
-                  <Badge variant="outline">{psp.fsGroup.rule}</Badge>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Supplemental Groups</p>
-                  <Badge variant="outline">{psp.supplementalGroups.rule}</Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle className="text-base">Allowed Volumes</CardTitle></CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {psp.volumes.map((vol) => (
-                  <Badge key={vol} variant="secondary">{vol}</Badge>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle className="text-base">Required Drop Capabilities</CardTitle></CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {psp.requiredDropCapabilities.map((cap) => (
-                  <Badge key={cap} variant="destructive">{cap}</Badge>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                }
+              />
+            </div>
+          </SectionCard>
+          <SectionCard icon={UserCircle} title="Run As User">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Run As User Rule" value={<Badge variant="outline">{psp.runAsUser.rule}</Badge>} />
+              <DetailRow label="SELinux Rule" value={<Badge variant="outline">{psp.seLinux.rule}</Badge>} />
+              <DetailRow label="FS Group Rule" value={<Badge variant="outline">{psp.fsGroup.rule}</Badge>} />
+              <DetailRow label="Supplemental Groups" value={<Badge variant="outline">{psp.supplementalGroups.rule}</Badge>} />
+            </div>
+          </SectionCard>
+          <SectionCard icon={Info} title="Allowed Volumes">
+            <div className="flex flex-wrap gap-2">
+              {psp.volumes.map((vol) => (
+                <Badge key={vol} variant="secondary">{vol}</Badge>
+              ))}
+            </div>
+          </SectionCard>
+          <SectionCard icon={AlertTriangle} title="Required Drop Capabilities">
+            <div className="flex flex-wrap gap-2">
+              {psp.requiredDropCapabilities.map((cap) => (
+                <Badge key={cap} variant="destructive">{cap}</Badge>
+              ))}
+            </div>
+          </SectionCard>
         </div>
       ),
     },

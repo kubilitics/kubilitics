@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
-import { ResourceOverviewMetadata } from '@/components/resources/ResourceOverviewMetadata';
 import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
 import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
 import {
@@ -14,12 +13,13 @@ import {
   EventsSection,
   ActionsSection,
   DeleteConfirmDialog,
-  MetadataSection,
   SectionCard,
+  DetailRow,
+  LabelList,
+  AnnotationList,
   YamlViewer,
   ResourceTopologyView,
   type ResourceStatus,
-  type YamlVersion,
 } from '@/components/resources';
 import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
 import { useDeleteK8sResource, useUpdateK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
@@ -147,8 +147,6 @@ export default function ResourceSliceDetail() {
     { label: 'Capacity', value: capacity, icon: Cpu, iconColor: 'muted' as const },
   ];
 
-  const yamlVersions: YamlVersion[] = yaml ? [{ id: 'current', label: 'Current Version', yaml, timestamp: 'now' }] : [];
-
   const handleSaveYaml = async (newYaml: string) => {
     if (!name) return;
     try {
@@ -167,24 +165,20 @@ export default function ResourceSliceDetail() {
       label: 'Overview',
       icon: Info,
       content: (
-        <div className="space-y-6">
-          <MetadataSection
-            metadata={rs?.metadata ?? { name: rsName }}
-            showMetadataGrid
-            createdLabel={age}
-          />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <SectionCard icon={Cpu} title="Resource Slice" tooltip={<p className="text-xs text-muted-foreground">DRA capacity info</p>}>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-              <div><p className="text-muted-foreground mb-1">Driver</p><p className="font-mono text-xs">{driver}</p></div>
-              <div><p className="text-muted-foreground mb-1">Node</p>{node !== '—' ? <Link to={`/nodes/${node}`} className="text-primary hover:underline font-mono text-xs">{node}</Link> : <span>—</span>}</div>
-              <div><p className="text-muted-foreground mb-1">Pool</p><p className="font-mono text-xs">{poolName}</p></div>
-              {pool?.generation != null && <div><p className="text-muted-foreground mb-1">Generation</p><Badge variant="outline">{pool.generation}</Badge></div>}
-              {pool?.resourceSliceCount != null && <div><p className="text-muted-foreground mb-1">Slices in Pool</p><p>{pool.resourceSliceCount}</p></div>}
-              <div><p className="text-muted-foreground mb-1">Capacity</p><p className="font-mono text-xs">{capacity}</p></div>
-              <div><p className="text-muted-foreground mb-1">Age</p><p>{age}</p></div>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Driver" value={<span className="font-mono">{driver}</span>} />
+              <DetailRow label="Node" value={node !== '—' ? <Link to={`/nodes/${node}`} className="text-primary hover:underline font-mono">{node}</Link> : '—'} />
+              <DetailRow label="Pool" value={<span className="font-mono">{poolName}</span>} />
+              {pool?.generation != null && <DetailRow label="Generation" value={<Badge variant="outline">{pool.generation}</Badge>} />}
+              {pool?.resourceSliceCount != null && <DetailRow label="Slices in Pool" value={String(pool.resourceSliceCount)} />}
+              <DetailRow label="Capacity" value={<span className="font-mono">{capacity}</span>} />
+              <DetailRow label="Age" value={age} />
             </div>
           </SectionCard>
-          <ResourceOverviewMetadata metadata={rs?.metadata} skipMetadataGrid />
+          <LabelList labels={rs?.metadata?.labels ?? {}} />
+          <AnnotationList annotations={rs?.metadata?.annotations ?? {}} />
         </div>
       ),
     },

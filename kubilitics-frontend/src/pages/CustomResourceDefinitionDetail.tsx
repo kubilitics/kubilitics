@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
   LabelList,
   AnnotationList,
   YamlViewer,
@@ -126,35 +127,22 @@ export default function CustomResourceDefinitionDetail() {
       content: (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <SectionCard icon={Info} title="CRD Info">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground mb-1">Group</p>
-                  <p className="font-mono">{group}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Kind</p>
-                  <Badge variant="default">{kind}</Badge>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Plural</p>
-                  <p className="font-mono">{plural}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Singular</p>
-                  <p className="font-mono">{singular}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Scope</p>
-                  <Badge variant="outline">{scope}</Badge>
-                </div>
-                <div>
-                  <p className="text-muted-foreground mb-1">Short Names</p>
-                  <div className="flex gap-1 flex-wrap">
-                    {shortNames.map((sn) => (
-                      <Badge key={sn} variant="secondary" className="font-mono text-xs">{sn}</Badge>
-                    ))}
-                  </div>
-                </div>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                <DetailRow label="Group" value={<span className="font-mono">{group}</span>} />
+                <DetailRow label="Kind" value={<Badge variant="default">{kind}</Badge>} />
+                <DetailRow label="Plural" value={<span className="font-mono">{plural}</span>} />
+                <DetailRow label="Singular" value={<span className="font-mono">{singular}</span>} />
+                <DetailRow label="Scope" value={<Badge variant="outline">{scope}</Badge>} />
+                <DetailRow label="Short Names" value={
+                  shortNames.length > 0 ? (
+                    <div className="flex gap-1 flex-wrap">
+                      {shortNames.map((sn) => (
+                        <Badge key={sn} variant="secondary" className="font-mono text-xs">{sn}</Badge>
+                      ))}
+                    </div>
+                  ) : '–'
+                } />
+                <DetailRow label="Age" value={age} />
               </div>
           </SectionCard>
           <SectionCard icon={Layers} title="Versions">

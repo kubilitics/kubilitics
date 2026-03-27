@@ -7,6 +7,9 @@ import { Button } from '@/components/ui/button';
 import {
   ResourceDetailLayout,
   SectionCard,
+  DetailRow,
+  LabelList,
+  AnnotationList,
   YamlViewer,
   ResourceComparisonView,
   EventsSection,
@@ -24,7 +27,6 @@ import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
 import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
 import { toast } from '@/components/ui/sonner';
 import { downloadResourceJson } from '@/lib/exportUtils';
-import { ResourceOverviewMetadata } from '@/components/resources/ResourceOverviewMetadata';
 
 interface ValidatingWebhookResource extends KubernetesResource {
   webhooks?: Array<{
@@ -129,47 +131,45 @@ export default function ValidatingWebhookDetail() {
       content: (
         <div className="space-y-6">
           {webhooks.length === 0 ? (
-            <SectionCard icon={Webhook} title="Webhooks"><p className="text-muted-foreground">No webhooks configured</p></SectionCard>
+            <SectionCard icon={Webhook} title="Webhooks"><p className="text-sm text-muted-foreground">No webhooks configured</p></SectionCard>
           ) : (
             webhooks.map((webhook, idx) => (
               <SectionCard key={idx} icon={Webhook} title={webhook.name}>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground mb-1">Failure Policy</p>
-                      <Badge variant={webhook.failurePolicy === 'Fail' ? 'destructive' : 'secondary'}>
-                        {webhook.failurePolicy}
-                      </Badge>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground mb-1">Match Policy</p>
-                      <Badge variant="outline">{webhook.matchPolicy}</Badge>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground mb-1">Side Effects</p>
-                      <Badge variant="outline">{webhook.sideEffects}</Badge>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground mb-1">Timeout</p>
-                      <p>{webhook.timeoutSeconds}s</p>
-                    </div>
+                  <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                    <DetailRow label="Failure Policy" value={<Badge variant={webhook.failurePolicy === 'Fail' ? 'destructive' : 'secondary'}>{webhook.failurePolicy}</Badge>} />
+                    <DetailRow label="Match Policy" value={<Badge variant="outline">{webhook.matchPolicy}</Badge>} />
+                    <DetailRow label="Side Effects" value={<Badge variant="outline">{webhook.sideEffects}</Badge>} />
+                    <DetailRow label="Timeout" value={`${webhook.timeoutSeconds}s`} />
+                    <DetailRow
+                      label="Client Config"
+                      value={
+                        webhook.clientConfig?.service
+                          ? `${webhook.clientConfig.service.namespace}/${webhook.clientConfig.service.name}:${webhook.clientConfig.service.port}`
+                          : webhook.clientConfig?.url
+                            ? webhook.clientConfig.url
+                            : 'No client configuration'
+                      }
+                    />
                   </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-2">Rules</p>
-                    <div className="space-y-2">
-                      {webhook.rules?.map((rule, ruleIdx) => (
-                        <div key={ruleIdx} className="p-3 rounded-lg bg-muted/50 text-sm font-mono">
-                          <p>Groups: {rule.apiGroups.join(', ')}</p>
-                          <p>Versions: {rule.apiVersions.join(', ')}</p>
-                          <p>Operations: {rule.operations.join(', ')}</p>
-                          <p>Resources: {rule.resources.join(', ')}</p>
-                        </div>
-                      ))}
+                  {webhook.rules && webhook.rules.length > 0 && (
+                    <div className="mt-4">
+                      <span className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider">Rules</span>
+                      <div className="mt-2 space-y-2">
+                        {webhook.rules.map((rule, ruleIdx) => (
+                          <div key={ruleIdx} className="p-3 rounded-lg bg-muted/50 text-sm font-mono">
+                            <p>Groups: {rule.apiGroups.join(', ')}</p>
+                            <p>Versions: {rule.apiVersions.join(', ')}</p>
+                            <p>Operations: {rule.operations.join(', ')}</p>
+                            <p>Resources: {rule.resources.join(', ')}</p>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
                   {webhook.namespaceSelector && (
-                    <div>
-                      <p className="text-sm text-muted-foreground mb-2">Namespace Selector</p>
-                      <div className="p-3 rounded-lg bg-muted/50 text-sm font-mono">
+                    <div className="mt-4">
+                      <span className="text-[11px] font-semibold text-foreground/50 uppercase tracking-wider">Namespace Selector</span>
+                      <div className="mt-2 p-3 rounded-lg bg-muted/50 text-sm font-mono">
                         {webhook.namespaceSelector.matchExpressions?.map((expr, i) => (
                           <p key={i}>{expr.key} {expr.operator} {expr.values?.join(', ')}</p>
                         ))}
@@ -179,22 +179,11 @@ export default function ValidatingWebhookDetail() {
                       </div>
                     </div>
                   )}
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-2">Client Config</p>
-                    <div className="p-3 rounded-lg bg-muted/50 text-sm">
-                      {webhook.clientConfig?.service ? (
-                        <p>Service: {webhook.clientConfig.service.namespace}/{webhook.clientConfig.service.name}:{webhook.clientConfig.service.port}</p>
-                      ) : webhook.clientConfig?.url ? (
-                        <p>URL: {webhook.clientConfig.url}</p>
-                      ) : (
-                        <p>No client configuration</p>
-                      )}
-                    </div>
-                  </div>
               </SectionCard>
             ))
           )}
-          <ResourceOverviewMetadata metadata={wh?.metadata} skipMetadataGrid />
+          <LabelList labels={wh?.metadata?.labels ?? {}} />
+          <AnnotationList annotations={wh?.metadata?.annotations ?? {}} />
         </div>
       ),
     },
