@@ -740,6 +740,7 @@ func (h *Handler) GetClusterSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fetch all resource counts — original 10 types
 	pods, _ := client.Clientset.CoreV1().Pods("").List(r.Context(), metav1.ListOptions{})
 	deployments, _ := client.Clientset.AppsV1().Deployments("").List(r.Context(), metav1.ListOptions{})
 	services, _ := client.Clientset.CoreV1().Services("").List(r.Context(), metav1.ListOptions{})
@@ -749,79 +750,143 @@ func (h *Handler) GetClusterSummary(w http.ResponseWriter, r *http.Request) {
 	jobs, _ := client.Clientset.BatchV1().Jobs("").List(r.Context(), metav1.ListOptions{})
 	cronjobs, _ := client.Clientset.BatchV1().CronJobs("").List(r.Context(), metav1.ListOptions{})
 
-	podCount := len(pods.Items)
-	deploymentCount := len(deployments.Items)
-	serviceCount := len(services.Items)
-	statefulsetCount := len(statefulsets.Items)
-	replicasetCount := len(replicasets.Items)
-	daemonsetCount := len(daemonsets.Items)
-	jobCount := len(jobs.Items)
-	cronjobCount := len(cronjobs.Items)
+	// Extended resource counts — networking, config, storage, RBAC, policy, scheduling
+	ingresses, _ := client.Clientset.NetworkingV1().Ingresses("").List(r.Context(), metav1.ListOptions{})
+	ingressClasses, _ := client.Clientset.NetworkingV1().IngressClasses().List(r.Context(), metav1.ListOptions{})
+	endpoints, _ := client.Clientset.CoreV1().Endpoints("").List(r.Context(), metav1.ListOptions{})
+	endpointSlices, _ := client.Clientset.DiscoveryV1().EndpointSlices("").List(r.Context(), metav1.ListOptions{})
+	networkPolicies, _ := client.Clientset.NetworkingV1().NetworkPolicies("").List(r.Context(), metav1.ListOptions{})
+	configmaps, _ := client.Clientset.CoreV1().ConfigMaps("").List(r.Context(), metav1.ListOptions{})
+	secrets, _ := client.Clientset.CoreV1().Secrets("").List(r.Context(), metav1.ListOptions{})
+	pvs, _ := client.Clientset.CoreV1().PersistentVolumes().List(r.Context(), metav1.ListOptions{})
+	pvcs, _ := client.Clientset.CoreV1().PersistentVolumeClaims("").List(r.Context(), metav1.ListOptions{})
+	storageClasses, _ := client.Clientset.StorageV1().StorageClasses().List(r.Context(), metav1.ListOptions{})
+	serviceAccounts, _ := client.Clientset.CoreV1().ServiceAccounts("").List(r.Context(), metav1.ListOptions{})
+	roles, _ := client.Clientset.RbacV1().Roles("").List(r.Context(), metav1.ListOptions{})
+	clusterRoles, _ := client.Clientset.RbacV1().ClusterRoles().List(r.Context(), metav1.ListOptions{})
+	roleBindings, _ := client.Clientset.RbacV1().RoleBindings("").List(r.Context(), metav1.ListOptions{})
+	clusterRoleBindings, _ := client.Clientset.RbacV1().ClusterRoleBindings().List(r.Context(), metav1.ListOptions{})
+	hpas, _ := client.Clientset.AutoscalingV2().HorizontalPodAutoscalers("").List(r.Context(), metav1.ListOptions{})
+	limitRanges, _ := client.Clientset.CoreV1().LimitRanges("").List(r.Context(), metav1.ListOptions{})
+	resourceQuotas, _ := client.Clientset.CoreV1().ResourceQuotas("").List(r.Context(), metav1.ListOptions{})
+	pdbs, _ := client.Clientset.PolicyV1().PodDisruptionBudgets("").List(r.Context(), metav1.ListOptions{})
+	priorityClasses, _ := client.Clientset.SchedulingV1().PriorityClasses().List(r.Context(), metav1.ListOptions{})
+	mutatingWebhooks, _ := client.Clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().List(r.Context(), metav1.ListOptions{})
+	validatingWebhooks, _ := client.Clientset.AdmissionregistrationV1().ValidatingWebhookConfigurations().List(r.Context(), metav1.ListOptions{})
+
+	// Nil-safe count helper
+	safeCount := func(items interface{}) int {
+		if items == nil {
+			return 0
+		}
+		// Use reflection-free counting via type switches for common types
+		return -1 // sentinel — use direct len() below
+	}
+	_ = safeCount // suppress unused
+
+	// Compute counts — nil-safe
+	podCount := 0; if pods != nil { podCount = len(pods.Items) }
+	deploymentCount := 0; if deployments != nil { deploymentCount = len(deployments.Items) }
+	serviceCount := 0; if services != nil { serviceCount = len(services.Items) }
+	statefulsetCount := 0; if statefulsets != nil { statefulsetCount = len(statefulsets.Items) }
+	replicasetCount := 0; if replicasets != nil { replicasetCount = len(replicasets.Items) }
+	daemonsetCount := 0; if daemonsets != nil { daemonsetCount = len(daemonsets.Items) }
+	jobCount := 0; if jobs != nil { jobCount = len(jobs.Items) }
+	cronjobCount := 0; if cronjobs != nil { cronjobCount = len(cronjobs.Items) }
+	ingressCount := 0; if ingresses != nil { ingressCount = len(ingresses.Items) }
+	ingressClassCount := 0; if ingressClasses != nil { ingressClassCount = len(ingressClasses.Items) }
+	endpointCount := 0; if endpoints != nil { endpointCount = len(endpoints.Items) }
+	endpointSliceCount := 0; if endpointSlices != nil { endpointSliceCount = len(endpointSlices.Items) }
+	networkPolicyCount := 0; if networkPolicies != nil { networkPolicyCount = len(networkPolicies.Items) }
+	configmapCount := 0; if configmaps != nil { configmapCount = len(configmaps.Items) }
+	secretCount := 0; if secrets != nil { secretCount = len(secrets.Items) }
+	pvCount := 0; if pvs != nil { pvCount = len(pvs.Items) }
+	pvcCount := 0; if pvcs != nil { pvcCount = len(pvcs.Items) }
+	storageClassCount := 0; if storageClasses != nil { storageClassCount = len(storageClasses.Items) }
+	serviceAccountCount := 0; if serviceAccounts != nil { serviceAccountCount = len(serviceAccounts.Items) }
+	roleCount := 0; if roles != nil { roleCount = len(roles.Items) }
+	clusterRoleCount := 0; if clusterRoles != nil { clusterRoleCount = len(clusterRoles.Items) }
+	roleBindingCount := 0; if roleBindings != nil { roleBindingCount = len(roleBindings.Items) }
+	clusterRoleBindingCount := 0; if clusterRoleBindings != nil { clusterRoleBindingCount = len(clusterRoleBindings.Items) }
+	hpaCount := 0; if hpas != nil { hpaCount = len(hpas.Items) }
+	limitRangeCount := 0; if limitRanges != nil { limitRangeCount = len(limitRanges.Items) }
+	resourceQuotaCount := 0; if resourceQuotas != nil { resourceQuotaCount = len(resourceQuotas.Items) }
+	pdbCount := 0; if pdbs != nil { pdbCount = len(pdbs.Items) }
+	priorityClassCount := 0; if priorityClasses != nil { priorityClassCount = len(priorityClasses.Items) }
+	mutatingWebhookCount := 0; if mutatingWebhooks != nil { mutatingWebhookCount = len(mutatingWebhooks.Items) }
+	validatingWebhookCount := 0; if validatingWebhooks != nil { validatingWebhookCount = len(validatingWebhooks.Items) }
+
+	// Project namespace filtering for namespaced resources
 	if projectNSSet != nil {
-		podCount = 0
-		for _, p := range pods.Items {
-			if _, ok := projectNSSet[p.Namespace]; ok {
-				podCount++
-			}
-		}
-		deploymentCount = 0
-		for _, d := range deployments.Items {
-			if _, ok := projectNSSet[d.Namespace]; ok {
-				deploymentCount++
-			}
-		}
-		serviceCount = 0
-		for _, s := range services.Items {
-			if _, ok := projectNSSet[s.Namespace]; ok {
-				serviceCount++
-			}
-		}
-		statefulsetCount = 0
-		for _, sts := range statefulsets.Items {
-			if _, ok := projectNSSet[sts.Namespace]; ok {
-				statefulsetCount++
-			}
-		}
-		replicasetCount = 0
-		for _, rs := range replicasets.Items {
-			if _, ok := projectNSSet[rs.Namespace]; ok {
-				replicasetCount++
-			}
-		}
-		daemonsetCount = 0
-		for _, ds := range daemonsets.Items {
-			if _, ok := projectNSSet[ds.Namespace]; ok {
-				daemonsetCount++
-			}
-		}
-		jobCount = 0
-		for _, j := range jobs.Items {
-			if _, ok := projectNSSet[j.Namespace]; ok {
-				jobCount++
-			}
-		}
-		cronjobCount = 0
-		for _, cj := range cronjobs.Items {
-			if _, ok := projectNSSet[cj.Namespace]; ok {
-				cronjobCount++
-			}
-		}
+		podCount = 0; for _, p := range pods.Items { if _, ok := projectNSSet[p.Namespace]; ok { podCount++ } }
+		deploymentCount = 0; for _, d := range deployments.Items { if _, ok := projectNSSet[d.Namespace]; ok { deploymentCount++ } }
+		serviceCount = 0; for _, s := range services.Items { if _, ok := projectNSSet[s.Namespace]; ok { serviceCount++ } }
+		statefulsetCount = 0; for _, sts := range statefulsets.Items { if _, ok := projectNSSet[sts.Namespace]; ok { statefulsetCount++ } }
+		replicasetCount = 0; for _, rs := range replicasets.Items { if _, ok := projectNSSet[rs.Namespace]; ok { replicasetCount++ } }
+		daemonsetCount = 0; for _, ds := range daemonsets.Items { if _, ok := projectNSSet[ds.Namespace]; ok { daemonsetCount++ } }
+		jobCount = 0; for _, j := range jobs.Items { if _, ok := projectNSSet[j.Namespace]; ok { jobCount++ } }
+		cronjobCount = 0; for _, cj := range cronjobs.Items { if _, ok := projectNSSet[cj.Namespace]; ok { cronjobCount++ } }
+		ingressCount = 0; if ingresses != nil { for _, i := range ingresses.Items { if _, ok := projectNSSet[i.Namespace]; ok { ingressCount++ } } }
+		endpointCount = 0; if endpoints != nil { for _, e := range endpoints.Items { if _, ok := projectNSSet[e.Namespace]; ok { endpointCount++ } } }
+		endpointSliceCount = 0; if endpointSlices != nil { for _, e := range endpointSlices.Items { if _, ok := projectNSSet[e.Namespace]; ok { endpointSliceCount++ } } }
+		networkPolicyCount = 0; if networkPolicies != nil { for _, n := range networkPolicies.Items { if _, ok := projectNSSet[n.Namespace]; ok { networkPolicyCount++ } } }
+		configmapCount = 0; if configmaps != nil { for _, c := range configmaps.Items { if _, ok := projectNSSet[c.Namespace]; ok { configmapCount++ } } }
+		secretCount = 0; if secrets != nil { for _, s := range secrets.Items { if _, ok := projectNSSet[s.Namespace]; ok { secretCount++ } } }
+		pvcCount = 0; if pvcs != nil { for _, p := range pvcs.Items { if _, ok := projectNSSet[p.Namespace]; ok { pvcCount++ } } }
+		serviceAccountCount = 0; if serviceAccounts != nil { for _, s := range serviceAccounts.Items { if _, ok := projectNSSet[s.Namespace]; ok { serviceAccountCount++ } } }
+		roleCount = 0; if roles != nil { for _, ro := range roles.Items { if _, ok := projectNSSet[ro.Namespace]; ok { roleCount++ } } }
+		roleBindingCount = 0; if roleBindings != nil { for _, rb := range roleBindings.Items { if _, ok := projectNSSet[rb.Namespace]; ok { roleBindingCount++ } } }
+		hpaCount = 0; if hpas != nil { for _, h := range hpas.Items { if _, ok := projectNSSet[h.Namespace]; ok { hpaCount++ } } }
+		limitRangeCount = 0; if limitRanges != nil { for _, l := range limitRanges.Items { if _, ok := projectNSSet[l.Namespace]; ok { limitRangeCount++ } } }
+		resourceQuotaCount = 0; if resourceQuotas != nil { for _, rq := range resourceQuotas.Items { if _, ok := projectNSSet[rq.Namespace]; ok { resourceQuotaCount++ } } }
+		pdbCount = 0; if pdbs != nil { for _, p := range pdbs.Items { if _, ok := projectNSSet[p.Namespace]; ok { pdbCount++ } } }
+		// Cluster-scoped resources (PVs, StorageClasses, ClusterRoles, etc.) are NOT project-filtered
 	}
 
 	summary := &models.ClusterSummary{
-		ID:                 clusterID,
-		Name:               clusterID,
-		NodeCount:          nodeCount,
-		NamespaceCount:     namespaceCount,
-		PodCount:            podCount,
-		DeploymentCount:     deploymentCount,
-		ServiceCount:        serviceCount,
-		StatefulSetCount:   statefulsetCount,
-		ReplicaSetCount:    replicasetCount,
-		DaemonSetCount:     daemonsetCount,
-		JobCount:            jobCount,
-		CronJobCount:       cronjobCount,
-		HealthStatus:       "healthy",
+		ID:               clusterID,
+		Name:             clusterID,
+		NodeCount:        nodeCount,
+		NamespaceCount:   namespaceCount,
+		PodCount:         podCount,
+		DeploymentCount:  deploymentCount,
+		ServiceCount:     serviceCount,
+		StatefulSetCount: statefulsetCount,
+		ReplicaSetCount:  replicasetCount,
+		DaemonSetCount:   daemonsetCount,
+		JobCount:         jobCount,
+		CronJobCount:     cronjobCount,
+		HealthStatus:     "healthy",
+
+		IngressCount:       ingressCount,
+		IngressClassCount:  ingressClassCount,
+		EndpointCount:      endpointCount,
+		EndpointSliceCount: endpointSliceCount,
+		NetworkPolicyCount: networkPolicyCount,
+
+		ConfigMapCount: configmapCount,
+		SecretCount:    secretCount,
+
+		PersistentVolumeCount:      pvCount,
+		PersistentVolumeClaimCount: pvcCount,
+		StorageClassCount:          storageClassCount,
+
+		ServiceAccountCount:     serviceAccountCount,
+		RoleCount:               roleCount,
+		ClusterRoleCount:        clusterRoleCount,
+		RoleBindingCount:        roleBindingCount,
+		ClusterRoleBindingCount: clusterRoleBindingCount,
+
+		HPACount:                 hpaCount,
+		LimitRangeCount:          limitRangeCount,
+		ResourceQuotaCount:       resourceQuotaCount,
+		PodDisruptionBudgetCount: pdbCount,
+
+		PriorityClassCount: priorityClassCount,
+
+		CustomResourceDefinitionCount: 0, // CRDs require dynamic client, handled separately if needed
+		MutatingWebhookConfigCount:    mutatingWebhookCount,
+		ValidatingWebhookConfigCount:  validatingWebhookCount,
 	}
 	respondJSON(w, http.StatusOK, summary)
 }

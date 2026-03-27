@@ -16,7 +16,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 		return nil, nil
 	}
 	cs := client.Clientset
-	opts := metav1.ListOptions{}
+	opts := metav1.ListOptions{Limit: 500}
 	nsOpts := namespace
 	if namespace == "" {
 		nsOpts = metav1.NamespaceAll
@@ -25,12 +25,20 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		list, err := cs.CoreV1().Pods(nsOpts).List(gctx, opts)
-		if err != nil {
-			slog.Warn("topology v2 collect pods", "error", err)
-			return nil
+		var continueToken string
+		for {
+			listOpts := metav1.ListOptions{Limit: 500, Continue: continueToken}
+			list, err := cs.CoreV1().Pods(nsOpts).List(gctx, listOpts)
+			if err != nil {
+				slog.Warn("topology v2 collect pods", "error", err)
+				return nil
+			}
+			bundle.Pods = append(bundle.Pods, list.Items...)
+			continueToken = list.Continue
+			if continueToken == "" {
+				break
+			}
 		}
-		bundle.Pods = list.Items
 		return nil
 	})
 	g.Go(func() error {
@@ -108,7 +116,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.DiscoveryV1().EndpointSlices(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect endpointlices", "error", err)
+			slog.Warn("topology v2 collect endpointslices", "error", err)
 			return nil
 		}
 		bundle.EndpointSlices = list.Items
@@ -305,12 +313,20 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	})
 
 	g.Go(func() error {
-		list, err := cs.CoreV1().Events(nsOpts).List(gctx, opts)
-		if err != nil {
-			slog.Warn("topology v2 collect events", "error", err)
-			return nil
+		var continueToken string
+		for {
+			listOpts := metav1.ListOptions{Limit: 500, Continue: continueToken}
+			list, err := cs.CoreV1().Events(nsOpts).List(gctx, listOpts)
+			if err != nil {
+				slog.Warn("topology v2 collect events", "error", err)
+				return nil
+			}
+			bundle.Events = append(bundle.Events, list.Items...)
+			continueToken = list.Continue
+			if continueToken == "" {
+				break
+			}
 		}
-		bundle.Events = list.Items
 		return nil
 	})
 	g.Go(func() error {

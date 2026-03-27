@@ -480,7 +480,7 @@ func main() {
 		ExposedHeaders:   []string{"X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"},
 		AllowCredentials: true,
 	})
-	handlerWithCORS := c.Handler(routerWrapped)
+	handlerWithCORS := middleware.Gzip(c.Handler(routerWrapped))
 
 	readTimeout := 15 * time.Second
 	writeTimeout := 15 * time.Second

@@ -98,7 +98,7 @@ func (c *Client) DetectProvider(ctx context.Context) (string, error) {
 	}
 
 	// 5. OpenShift / Rancher: check namespaces
-	nsList, err := c.Clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	nsList, err := c.Clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 500})
 	if err == nil {
 		for _, ns := range nsList.Items {
 			if strings.HasPrefix(ns.Name, "openshift") {

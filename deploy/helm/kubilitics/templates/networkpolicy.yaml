@@ -63,6 +63,8 @@ spec:
       ports:
         - protocol: UDP
           port: 53
+        - protocol: TCP
+          port: 53
     # Allow egress to Kubernetes API server
     - to:
         - namespaceSelector: {}
@@ -143,6 +145,8 @@ spec:
       ports:
         - protocol: UDP
           port: 53
+        - protocol: TCP
+          port: 53
     # Allow egress to Kubernetes API server
     - to:
         - namespaceSelector: {}
@@ -209,6 +213,8 @@ spec:
         - namespaceSelector: {}
       ports:
         - protocol: UDP
+          port: 53
+        - protocol: TCP
           port: 53
     # Allow egress to backend service
     - to:
