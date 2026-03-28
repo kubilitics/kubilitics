@@ -236,7 +236,7 @@ export function Header() {
           {/* Tauri overlay title bar: extra left padding for macOS traffic lights */}
           <div className={cn(
             'shrink-0 flex items-center h-full bg-slate-50/20 dark:bg-slate-900/20 border-r border-slate-100/60 dark:border-slate-800/60 transition-all duration-300',
-            collapsed ? 'w-[5.5rem] justify-center px-0' : 'w-72 justify-start px-5',
+            collapsed ? 'w-[5.5rem] justify-center px-0' : 'w-72 justify-start px-4',
             isTauri() && 'pl-[78px]'
           )} data-tauri-drag-region>
             <button
