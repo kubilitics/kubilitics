@@ -958,8 +958,7 @@ export default function ServiceDetail() {
         ]}
         extraActionItems={(ctx) => {
           const svc = ctx.resource;
-          const selectorPodsList = useK8sResourceList<KubernetesResource>('pods', namespace, { enabled: false });
-          // We can't reliably compute backingDeployment in a callback, so provide static actions
+          // Static actions — no hooks allowed in callbacks
           return [
             { icon: ExternalLink, label: 'Port Forward', description: 'Forward local port to this service', onClick: () => {/* tab switch */} },
             { icon: Globe, label: 'Test Connectivity', description: 'Simple connectivity check', onClick: () => toast.info('Test connectivity: requires backend support (design 3.1)') },
