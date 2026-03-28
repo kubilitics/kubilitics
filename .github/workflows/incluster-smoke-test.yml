@@ -23,6 +23,9 @@ concurrency:
   group: smoke-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   smoke-test:
     runs-on: ubuntu-latest

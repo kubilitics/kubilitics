@@ -17,6 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   GO_VERSION: '1.25.8'  # must be >= go directive in kubilitics-backend/go.mod
   # Pinned kubectl — keep aligned with k8s.io/client-go major version in go.mod
   # k8s.io/client-go v0.33.x → kubectl v1.33.x

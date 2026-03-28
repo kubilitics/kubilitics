@@ -35,6 +35,7 @@ on:
         default: 'latest'
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   REGISTRY: ghcr.io
   BACKEND_IMAGE: kubilitics-backend
   FRONTEND_IMAGE: kubilitics-frontend

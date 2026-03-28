@@ -27,6 +27,9 @@ concurrency:
   group: integration-test-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   integration-test-backend-only:
     name: Integration Test - Backend Only
