@@ -153,14 +153,14 @@ export default function CRDsOverview() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" aria-hidden />
                 <Input
                   placeholder="Search definitions..."
-                  className="pl-10 bg-slate-50 border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-300 h-10 text-sm"
+                  className="pl-10 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-blue-500/10 focus:border-blue-300 dark:focus:border-blue-600 h-10 text-sm"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   aria-label="Search custom resource definitions"
                 />
               </div>
               {selectedItems.size > 0 && (
-                <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-200">
+                <Badge variant="secondary" className="bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700">
                   {selectedItems.size} selected
                 </Badge>
               )}
@@ -171,17 +171,17 @@ export default function CRDsOverview() {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50/80">
-                <th className="px-6 py-3.5 border-b border-slate-100 w-10">
+              <tr className="bg-slate-50/80 dark:bg-slate-800/80">
+                <th className="px-6 py-3.5 border-b border-slate-100 dark:border-slate-700 w-10">
                   <Checkbox checked={isAllSelected} onCheckedChange={toggleAll} />
                 </th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-100">Name</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-100">API Group</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-100">Status</th>
-                <th className="px-6 py-3.5 border-b border-slate-100"></th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">Name</th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">API Group</th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">Status</th>
+                <th className="px-6 py-3.5 border-b border-slate-100 dark:border-slate-700"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50 text-sm">
+            <tbody className="divide-y divide-slate-50 dark:divide-slate-800 text-sm">
               {itemsOnPage.map((resource, idx) => {
                 const isSelected = selectedItems.has(getResourceKey(resource));
                 return (
@@ -190,25 +190,25 @@ export default function CRDsOverview() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.02 }}
                     key={getResourceKey(resource)}
-                    className={cn('group hover:bg-slate-50/80 transition-colors', isSelected && 'bg-blue-50/40')}
+                    className={cn('group hover:bg-slate-50/80 dark:hover:bg-slate-800/80 transition-colors', isSelected && 'bg-blue-50/40 dark:bg-blue-900/20')}
                   >
                     <td className="px-6 py-3.5">
                       <Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(resource)} />
                     </td>
                     <td className="px-6 py-3.5">
-                      <span className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">{resource.name}</span>
+                      <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{resource.name}</span>
                     </td>
                     <td className="px-6 py-3.5">
-                      <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{resource.group ?? '—'}</span>
+                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">{resource.group ?? '—'}</span>
                     </td>
                     <td className="px-6 py-3.5">
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        <span className="text-xs font-medium text-slate-700">Established</span>
+                        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Established</span>
                       </div>
                     </td>
                     <td className="px-6 py-3.5 text-right">
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-white hover:text-blue-600 hover:shadow-sm rounded-lg transition-all border border-transparent hover:border-slate-200">
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-white dark:hover:bg-slate-800 hover:text-blue-600 dark:hover:text-blue-400 hover:shadow-sm rounded-lg transition-all border border-transparent hover:border-slate-200 dark:hover:border-slate-600">
                         <ArrowUpRight className="h-4 w-4" aria-hidden />
                       </Button>
                     </td>
@@ -233,7 +233,7 @@ export default function CRDsOverview() {
         </div>
 
         {totalFiltered > 0 && (
-          <div className="p-4 border-t border-slate-100 bg-slate-50/50">
+          <div className="p-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50">
             <ListPagination
               rangeLabel={`${totalFiltered} ${totalFiltered === 1 ? 'definition' : 'definitions'}`}
               hasPrev={safePageIndex > 0}

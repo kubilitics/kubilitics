@@ -24,7 +24,7 @@ import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
 import { applyManifest, CONFIRM_DESTRUCTIVE_HEADER, getDeploymentRolloutHistory, getEvents, postDeploymentRollback } from '@/services/backendApiClient';
-import { DeleteConfirmDialog, ScaleDialog, RolloutActionsDialog, MetricBar, parseCpu, parseMemory, calculatePodResourceMax } from '@/components/resources';
+import { DeleteConfirmDialog, ScaleDialog, RolloutActionsDialog, MetricBar, parseCpu, parseMemory, calculatePodResourceMax, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import { ResourceCommandBar, ResourceExportDropdown, ListViewSegmentedControl } from '@/components/list';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
@@ -33,6 +33,7 @@ import { toast } from '@/components/ui/sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { DeploymentIcon } from '@/components/icons/KubernetesIcons';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface DeploymentResource extends KubernetesResource {
  spec: {
@@ -217,7 +218,9 @@ export default function Deployments() {
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [listView, setListView] = useState<ListView>('flat');
  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
+ const setSelectedItems = (s: Set<string>) => { if (s.size === 0) multiSelect.clearSelection(); else multiSelect.selectAll(Array.from(s)); };
  const [showTableFilters, setShowTableFilters] = useState(false);
 
  const [pageSize, setPageSize] = useState(10);
@@ -423,37 +426,58 @@ export default function Deployments() {
  setDeleteDialog({ open: false, item: null });
  };
 
- const toggleSelection = (item: Deployment) => {
+ const allItemKeys = useMemo(() => itemsOnPage.map(i => `${i.namespace}/${i.name}`), [itemsOnPage]);
+
+ const toggleSelection = (item: Deployment, event?: React.MouseEvent) => {
  const key = `${item.namespace}/${item.name}`;
- const newSel = new Set(selectedItems);
- if (newSel.has(key)) newSel.delete(key); else newSel.add(key);
- setSelectedItems(newSel);
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(key, allItemKeys);
+ } else {
+ multiSelect.toggle(key);
+ }
  };
 
  const toggleAll = () => {
- if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set());
- else setSelectedItems(new Set(itemsOnPage.map(i => `${i.namespace}/${i.name}`)));
+ if (multiSelect.isAllSelected(allItemKeys)) multiSelect.clearSelection();
+ else multiSelect.selectAll(allItemKeys);
  };
 
- const handleBulkRestart = () => {
- if (!isConnected) {
- toast.error('Connect cluster to restart deployments');
- return;
- }
- toast.info(`Restarting ${selectedItems.size} deployments…`);
- setSelectedItems(new Set());
+ const handleBulkDelete = async () => {
+ if (!isConnected) { toast.error('Connect cluster to delete deployments'); return []; }
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
  };
 
- const handleBulkScale = () => {
- if (!isConnected) {
- toast.error('Connect cluster to scale deployments');
- return;
- }
- toast.info(`Scale ${selectedItems.size} deployment(s): use row-level scale for per-deployment replica control.`);
+ const handleBulkRestart = async () => {
+ if (!isConnected) { toast.error('Connect cluster to restart deployments'); return []; }
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchDeployment.mutateAsync({
+ name,
+ namespace: ns,
+ patch: { spec: { template: { metadata: { annotations: { 'kubectl.kubernetes.io/restartedAt': new Date().toISOString() } } } } },
+ });
+ });
  };
 
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+ const handleBulkScale = async (replicas: number) => {
+ if (!isConnected) { toast.error('Connect cluster to scale deployments'); return []; }
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchDeployment.mutateAsync({ name, namespace: ns, patch: { spec: { replicas } } });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ if (!isConnected) { toast.error('Connect cluster to label deployments'); return []; }
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchDeployment.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allItemKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allItemKeys);
 
  const keyboardNav = useTableKeyboardNav({
  rowCount: itemsOnPage.length,
@@ -583,24 +607,16 @@ spec:
  <ListPageStatCard label="Scale Events (24h)" value={stats.scaleEvents24h} icon={Activity} iconColor="text-cyan-500" valueClassName="text-cyan-600" isLoading={isLoading} selected={columnFilters.hadScaleEvent24h?.size === 1 && columnFilters.hadScaleEvent24h?.has('Yes')} onClick={() => { if (columnFilters.hadScaleEvent24h?.size === 1 && columnFilters.hadScaleEvent24h?.has('Yes')) setColumnFilter('hadScaleEvent24h', null); else setColumnFilter('hadScaleEvent24h', new Set(['Yes'])); }} className={cn(columnFilters.hadScaleEvent24h?.size === 1 && columnFilters.hadScaleEvent24h?.has('Yes') && 'ring-2 ring-cyan-500')} />
  </div>
 
- <BulkActionToolbar
+ <BulkActionBar
  selectedCount={selectedItems.size}
  resourceName="deployment"
- onClearSelection={() => setSelectedItems(new Set())}
- >
- <Button variant="outline" size="sm" className="gap-2" onClick={handleBulkRestart}>
- <RotateCcw className="h-4 w-4" />
- Restart
- </Button>
- <Button variant="outline" size="sm" className="gap-2" onClick={handleBulkScale}>
- <Scale className="h-4 w-4" />
- Scale
- </Button>
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}>
- <Trash2 className="h-4 w-4" />
- Delete
- </Button>
- </BulkActionToolbar>
+ resourceType="deployments"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkRestart={handleBulkRestart}
+ onBulkScale={handleBulkScale}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  globalFilterBar={
@@ -900,7 +916,7 @@ spec:
  {...keyboardNav.getRowProps(idx)}
  className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', isSelected && 'bg-primary/5', keyboardNav.getRowProps(idx).className)}
  >
- <TableCell><Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(item)} /></TableCell>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(item, e); }}><Checkbox checked={isSelected} tabIndex={-1} /></TableCell>
  {columnVisibility.isColumnVisible('name') && <ResizableTableCell columnId="name"><Link to={`/deployments/${item.namespace}/${item.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate"><DeploymentIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" /><span className="truncate">{item.name}</span></Link></ResizableTableCell>}
  {columnVisibility.isColumnVisible('namespace') && <ResizableTableCell columnId="namespace"><NamespaceBadge namespace={item.namespace} className="font-normal truncate block w-fit max-w-full" /></ResizableTableCell>}
  {columnVisibility.isColumnVisible('status') && (
@@ -1023,7 +1039,7 @@ spec:
  const memDataPoints = memNum != null ? Array(12).fill(memNum) : undefined;
  return (
  <tr key={key} className={cn(resourceTableRowClassName, getRowAnimationClass(item.uid), idx % 2 === 1 && 'bg-muted/5', isSelected && 'bg-primary/5')}>
- <TableCell><Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(item)} /></TableCell>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(item, e); }}><Checkbox checked={isSelected} tabIndex={-1} /></TableCell>
  {columnVisibility.isColumnVisible('name') && <ResizableTableCell columnId="name"><Link to={`/deployments/${item.namespace}/${item.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate"><DeploymentIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" /><span className="truncate">{item.name}</span></Link></ResizableTableCell>}
  {columnVisibility.isColumnVisible('namespace') && <ResizableTableCell columnId="namespace"><NamespaceBadge namespace={item.namespace} className="font-normal truncate block w-fit max-w-full" /></ResizableTableCell>}
  {columnVisibility.isColumnVisible('status') && (

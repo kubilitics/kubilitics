@@ -520,7 +520,7 @@ function TopologyCanvasInner({
       {/* Live region for export status */}
       {isExporting && (
         <div
-          className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg bg-white/95 px-4 py-2 shadow-lg border border-gray-200 backdrop-blur-sm"
+          className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg bg-white/95 dark:bg-slate-900/95 px-4 py-2 shadow-lg border border-gray-200 dark:border-slate-700 backdrop-blur-sm"
           role="status"
           aria-live="polite"
         >
@@ -528,7 +528,7 @@ function TopologyCanvasInner({
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
-          <span className="text-sm font-medium text-gray-700">Exporting topology...</span>
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Exporting topology...</span>
         </div>
       )}
     </div>

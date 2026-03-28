@@ -442,8 +442,8 @@ export function ResourceTopologyV2View({
               namespace={namespace ?? undefined}
             />
             {topology && (
-              <div className="absolute bottom-4 right-4 z-50 bg-gray-100 border border-gray-200 rounded-md px-2.5 py-1">
-                <span className="text-xs font-medium text-gray-700">
+              <div className="absolute bottom-4 right-4 z-50 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-md px-2.5 py-1">
+                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
                   {topology.nodes.length} Resources &middot; {topology.edges.length} Connections
                 </span>
               </div>

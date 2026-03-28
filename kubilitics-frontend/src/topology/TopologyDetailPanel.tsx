@@ -346,7 +346,7 @@ function ConnectionRow({
   return (
     <button
       type="button"
-      className={`group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-gray-50 border border-transparent hover:border-gray-100 ${A11Y.focusRing} ${A11Y.transition}`}
+      className={`group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-gray-50 dark:hover:bg-slate-700/50 border border-transparent hover:border-gray-100 dark:hover:border-slate-600 ${A11Y.focusRing} ${A11Y.transition}`}
       onClick={() => onNavigate(peerId)}
       role="listitem"
       aria-label={`${direction === "outgoing" ? "connects to" : "connected from"} ${peerKind} ${peerName} via ${edge.label}`}

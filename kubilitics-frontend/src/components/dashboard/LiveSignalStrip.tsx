@@ -62,7 +62,7 @@ function MetricChip({
       className={cn(
         'group flex items-center gap-2 px-4 py-2 rounded-xl shrink-0 relative z-10',
         'transition-all duration-200 hover:shadow-md cursor-pointer',
-        'border bg-white/60 backdrop-blur-sm',
+        'border bg-white/60 dark:bg-slate-900/60 backdrop-blur-sm',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         isError && 'border-[hsl(var(--error)/0.3)] bg-[hsl(var(--error)/0.04)] hover:bg-[hsl(var(--error)/0.08)]',
         isWarning && 'border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.04)] hover:bg-[hsl(var(--warning)/0.08)]',
@@ -155,7 +155,7 @@ export function LiveSignalStrip() {
           to="/dashboard"
           className={cn(
             'flex items-center gap-3 px-4 py-2 rounded-xl transition-all duration-200 cursor-pointer relative z-10',
-            'border bg-white/60 backdrop-blur-sm hover:shadow-md',
+            'border bg-white/60 dark:bg-slate-900/60 backdrop-blur-sm hover:shadow-md',
             healthSemantic === 'success' && 'border-[hsl(var(--success)/0.2)] hover:bg-[hsl(var(--success)/0.04)]',
             healthSemantic === 'warning' && 'border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.04)]',
             healthSemantic === 'error' && 'border-[hsl(var(--error)/0.3)] bg-[hsl(var(--error)/0.04)]'

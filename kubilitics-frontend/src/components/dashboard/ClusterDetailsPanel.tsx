@@ -50,7 +50,7 @@ export function ClusterDetailsPanel() {
       className={cn(
         'dashboard-panel overflow-hidden',
         'rounded-2xl border border-[hsl(var(--accent)/0.8)]',
-        'bg-white'
+        'bg-white dark:bg-slate-900'
       )}
       aria-label="Cluster details"
       style={{ boxShadow: '0 1px 3px rgb(0 0 0 / 0.06)' }}

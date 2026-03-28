@@ -150,36 +150,36 @@ export function SmartResourceGrouping<T>({
     switch (groupType) {
       case 'health': {
         const healthColors: Record<string, string> = {
-          healthy: 'bg-green-50 border-green-200',
-          warning: 'bg-yellow-50 border-yellow-200',
-          degraded: 'bg-orange-50 border-orange-200',
-          critical: 'bg-red-50 border-red-200'
+          healthy: 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800',
+          warning: 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800',
+          degraded: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
+          critical: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
         };
-        return healthColors[key] || 'bg-gray-50 border-gray-200';
+        return healthColors[key] || 'bg-gray-50 dark:bg-slate-800 border-gray-200 dark:border-slate-700';
       }
 
       case 'risk': {
         const riskColors: Record<string, string> = {
-          low: 'bg-green-50 border-green-200',
-          medium: 'bg-yellow-50 border-yellow-200',
-          high: 'bg-orange-50 border-orange-200',
-          critical: 'bg-red-50 border-red-200'
+          low: 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800',
+          medium: 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800',
+          high: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
+          critical: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
         };
-        return riskColors[key] || 'bg-gray-50 border-gray-200';
+        return riskColors[key] || 'bg-gray-50 dark:bg-slate-800 border-gray-200 dark:border-slate-700';
       }
 
       case 'cost': {
         const costColors: Record<string, string> = {
-          'high-cost': 'bg-red-50 border-red-200',
-          'medium-cost': 'bg-orange-50 border-orange-200',
-          'low-cost': 'bg-yellow-50 border-yellow-200',
-          'minimal-cost': 'bg-green-50 border-green-200'
+          'high-cost': 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800',
+          'medium-cost': 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
+          'low-cost': 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800',
+          'minimal-cost': 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
         };
-        return costColors[key] || 'bg-gray-50 border-gray-200';
+        return costColors[key] || 'bg-gray-50 dark:bg-slate-800 border-gray-200 dark:border-slate-700';
       }
 
       default:
-        return 'bg-gray-50 border-gray-200';
+        return 'bg-gray-50 dark:bg-slate-800 border-gray-200 dark:border-slate-700';
     }
   };
 
@@ -259,7 +259,7 @@ export function SmartResourceGrouping<T>({
                 )}
                 <Layers className="h-4 w-4" />
                 <span className="font-semibold text-sm">{group.label}</span>
-                <span className="text-xs bg-white/50 px-2 py-0.5 rounded-full">
+                <span className="text-xs bg-white/50 dark:bg-slate-800/50 px-2 py-0.5 rounded-full">
                   {group.resources.length} {group.resources.length === 1 ? 'resource' : 'resources'}
                 </span>
               </div>
@@ -267,7 +267,7 @@ export function SmartResourceGrouping<T>({
 
             {/* Group Content */}
             {isExpanded && (
-              <div className="bg-white border-t px-2 py-2 space-y-1">
+              <div className="bg-white dark:bg-slate-900 border-t dark:border-slate-700 px-2 py-2 space-y-1">
                 {group.resources.map((resource) => (
                   <div key={getResourceId(resource)}>
                     {renderResource(resource)}

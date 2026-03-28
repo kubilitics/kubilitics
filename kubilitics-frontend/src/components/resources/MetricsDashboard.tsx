@@ -695,10 +695,10 @@ export function MetricsDashboard({ resourceType, resourceName, namespace, podRes
           <div className="flex items-center justify-between gap-3 mb-3">
             {/* Chart type tabs */}
             <TabsList className="bg-muted/50 p-1 border border-border/50 shadow-sm h-9">
-              <TabsTrigger value="overview" className="px-4 py-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-xs">Overview</TabsTrigger>
-              <TabsTrigger value="cpu" className="px-4 py-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-xs">CPU</TabsTrigger>
-              <TabsTrigger value="memory" className="px-4 py-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-xs">Memory</TabsTrigger>
-              <TabsTrigger value="network" className="px-4 py-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-xs">Network</TabsTrigger>
+              <TabsTrigger value="overview" className="px-4 py-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-xs">Overview</TabsTrigger>
+              <TabsTrigger value="cpu" className="px-4 py-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-xs">CPU</TabsTrigger>
+              <TabsTrigger value="memory" className="px-4 py-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-xs">Memory</TabsTrigger>
+              <TabsTrigger value="network" className="px-4 py-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-xs">Network</TabsTrigger>
             </TabsList>
 
             {/* Time range + controls — right-aligned, same row */}
@@ -814,7 +814,7 @@ export function MetricsDashboard({ resourceType, resourceName, namespace, podRes
                 </CardContent>
               </Card>
 
-              <Card className="rounded-xl border border-border/50 shadow-sm overflow-hidden bg-white/40 backdrop-blur-[2px]">
+              <Card className="rounded-xl border border-border/50 shadow-sm overflow-hidden bg-white/40 dark:bg-slate-900/40 backdrop-blur-[2px]">
                 <CardHeader className="pb-2">
                   <div className="flex items-center gap-2">
                     <CardTitle className="text-sm font-bold tracking-tight">Memory Utilization</CardTitle>

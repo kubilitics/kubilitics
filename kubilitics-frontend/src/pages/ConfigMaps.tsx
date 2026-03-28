@@ -50,16 +50,17 @@ import { ConfigMapIcon } from '@/components/icons/KubernetesIcons';
 import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
 import { useColumnVisibility } from '@/hooks/useColumnVisibility';
 import { getRowAnimationClass } from '@/hooks/useResourceLiveUpdates';
-import { usePaginatedResourceList, useDeleteK8sResource, useCreateK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { usePaginatedResourceList, useDeleteK8sResource, useCreateK8sResource, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { resourceToYaml } from '@/hooks/useK8sResourceDetail';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
 import { getConfigMapConsumers } from '@/services/backendApiClient';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
-import { DeleteConfirmDialog } from '@/components/resources';
+import { DeleteConfirmDialog, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui/sonner';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface ConfigMap {
  uid?: string;
@@ -144,7 +145,10 @@ export default function ConfigMaps() {
  const deleteResource = useDeleteK8sResource('configmaps');
  const createResource = useCreateK8sResource('configmaps');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: ConfigMap | null; bulk?: boolean }>({ open: false, item: null });
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
+ const setSelectedItems = (s: Set<string>) => { if (s.size === 0) multiSelect.clearSelection(); else multiSelect.selectAll(Array.from(s)); };
+ const patchCmResource = usePatchK8sResource('configmaps');
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [cloneInitialYaml, setCloneInitialYaml] = useState<string | null>(null);
  const [searchQuery, setSearchQuery] = useState('');
@@ -404,19 +408,38 @@ export default function ConfigMaps() {
  }
  };
 
- const toggleSelection = (cm: ConfigMap) => {
+ const allCmKeys = useMemo(() => itemsOnPage.map(cm => `${cm.namespace}/${cm.name}`), [itemsOnPage]);
+
+ const toggleSelection = (cm: ConfigMap, event?: React.MouseEvent) => {
  const key = `${cm.namespace}/${cm.name}`;
- const next = new Set(selectedItems);
- if (next.has(key)) next.delete(key);
- else next.add(key);
- setSelectedItems(next);
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(key, allCmKeys);
+ } else {
+ multiSelect.toggle(key);
+ }
  };
+
  const toggleAll = () => {
- if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set());
- else setSelectedItems(new Set(itemsOnPage.map((cm) => `${cm.namespace}/${cm.name}`)));
+ if (multiSelect.isAllSelected(allCmKeys)) multiSelect.clearSelection();
+ else multiSelect.selectAll(allCmKeys);
  };
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+
+ const handleBulkDeleteCm = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkLabelCm = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchCmResource.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allCmKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allCmKeys);
 
  const exportConfig = {
  filenamePrefix: 'configmaps',
@@ -526,25 +549,14 @@ data: {}
  />
  </div>
 
- {/* Bulk Actions Bar */}
- {selectedItems.size > 0 && (
- <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg">
- <Badge variant="secondary" className="gap-1.5">
- <CheckSquare className="h-3.5 w-3.5" />
- {selectedItems.size} selected
- </Badge>
- <div className="flex items-center gap-2">
- <ResourceExportDropdown items={filteredItems} selectedKeys={selectedItems} getKey={(cm) => `${cm.namespace}/${cm.name}`} config={exportConfig} selectionLabel="Selected configmaps" onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))} triggerLabel={`Export (${selectedItems.size})`} />
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}>
- <Trash2 className="h-4 w-4" />
- Delete
- </Button>
- <Button variant="ghost" size="sm" onClick={() => setSelectedItems(new Set())}>
- Clear
- </Button>
- </div>
- </div>
- )}
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="configmap"
+ resourceType="configmaps"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDeleteCm}
+ onBulkLabel={handleBulkLabelCm}
+ />
 
  <ResourceListTableToolbar
  globalFilterBar={
@@ -775,7 +787,7 @@ data: {}
  key={key}
  className={cn(resourceTableRowClassName, getRowAnimationClass(item.uid), idx % 2 === 1 && 'bg-muted/5', selectedItems.has(key) && 'bg-primary/5')}
  >
- <TableCell><Checkbox checked={selectedItems.has(key)} onCheckedChange={() => toggleSelection(item)} aria-label={`Select ${item.name}`} /></TableCell>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(item, e); }}><Checkbox checked={selectedItems.has(key)} tabIndex={-1} aria-label={`Select ${item.name}`} /></TableCell>
  <ResizableTableCell columnId="name">
  <Link to={`/configmaps/${item.namespace}/${item.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate">
  <FileJson className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -905,7 +917,7 @@ data: {}
  key={key}
  className={cn(resourceTableRowClassName, getRowAnimationClass(item.uid), idx % 2 === 1 && 'bg-muted/5', selectedItems.has(key) && 'bg-primary/5')}
  >
- <TableCell><Checkbox checked={selectedItems.has(key)} onCheckedChange={() => toggleSelection(item)} aria-label={`Select ${item.name}`} /></TableCell>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(item, e); }}><Checkbox checked={selectedItems.has(key)} tabIndex={-1} aria-label={`Select ${item.name}`} /></TableCell>
  <ResizableTableCell columnId="name">
  <Link to={`/configmaps/${item.namespace}/${item.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate">
  <FileJson className="h-4 w-4 text-muted-foreground flex-shrink-0" />

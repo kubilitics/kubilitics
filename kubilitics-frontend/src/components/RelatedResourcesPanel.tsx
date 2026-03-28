@@ -226,7 +226,7 @@ export function RelatedResourcesPanel({
             <Link
               key={idx}
               to={resource.link}
-              className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors group"
+              className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors group"
             >
               <div className="flex items-center gap-2">
                 {getResourceIcon(resource.type)}

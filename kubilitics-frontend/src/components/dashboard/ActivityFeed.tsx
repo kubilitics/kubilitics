@@ -234,7 +234,7 @@ export function ActivityFeed() {
         <select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value)}
-          className="text-xs bg-white/80 border border-[hsl(var(--accent))] rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
+          className="text-xs bg-white/80 dark:bg-slate-800/80 border border-[hsl(var(--accent))] rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
           aria-label="Filter activity by resource type"
         >
           <option value="all">All</option>

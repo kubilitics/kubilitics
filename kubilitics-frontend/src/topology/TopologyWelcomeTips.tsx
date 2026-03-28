@@ -59,7 +59,7 @@ export function TopologyWelcomeTips() {
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/20 backdrop-blur-sm">
       <div
-        className="w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-gray-200 overflow-hidden animate-in fade-in zoom-in-95 duration-300"
+        className="w-full max-w-lg rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-gray-200 dark:border-slate-700 overflow-hidden animate-in fade-in zoom-in-95 duration-300"
         role="dialog"
         aria-modal="true"
         aria-label="Welcome to Topology"
@@ -84,20 +84,20 @@ export function TopologyWelcomeTips() {
         <div className="px-6 py-4 space-y-3">
           {tips.map((tip, i) => (
             <div key={i} className="flex items-start gap-3">
-              <div className="flex-shrink-0 mt-0.5 w-9 h-9 rounded-lg bg-gray-50 flex items-center justify-center">
+              <div className="flex-shrink-0 mt-0.5 w-9 h-9 rounded-lg bg-gray-50 dark:bg-slate-800 flex items-center justify-center">
                 {tip.icon}
               </div>
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-gray-900">{tip.title}</div>
-                <div className="text-xs text-gray-500 leading-relaxed mt-0.5">{tip.detail}</div>
+                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{tip.title}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed mt-0.5">{tip.detail}</div>
               </div>
             </div>
           ))}
         </div>
 
         {/* Footer */}
-        <div className="border-t border-gray-100 px-6 py-4 flex items-center justify-between bg-gray-50/50">
-          <span className="text-[11px] text-gray-400">Press ? anytime for keyboard shortcuts</span>
+        <div className="border-t border-gray-100 dark:border-gray-700 px-6 py-4 flex items-center justify-between bg-gray-50/50 dark:bg-slate-800/50">
+          <span className="text-[11px] text-gray-400 dark:text-gray-500">Press ? anytime for keyboard shortcuts</span>
           <button
             type="button"
             className={`rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:from-blue-700 hover:to-indigo-700 shadow-sm ${A11Y.focusRing} ${A11Y.transition}`}

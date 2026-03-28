@@ -71,7 +71,7 @@ function InsightCard({ insight }: { insight: Insight }) {
   return (
     <div
       className={cn(
-        'rounded-lg border-l-[3px] bg-white/60 hover:bg-white/90',
+        'rounded-lg border-l-[3px] bg-white/60 dark:bg-slate-900/60 hover:bg-white/90 dark:hover:bg-slate-800/90',
         'shadow-sm hover:shadow-md transition-all duration-200',
         'overflow-hidden',
         config.border

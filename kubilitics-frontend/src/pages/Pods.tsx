@@ -36,12 +36,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useK8sResourceList, useDeleteK8sResource, useCreateK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { useK8sResourceList, useDeleteK8sResource, useCreateK8sResource, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
 import { getPodMetrics, postShellCommand } from '@/services/backendApiClient';
-import { DeleteConfirmDialog, PortForwardDialog, parseCpu, parseMemory, calculatePodResourceMax, ResourceComparisonView } from '@/components/resources';
+import { DeleteConfirmDialog, PortForwardDialog, parseCpu, parseMemory, calculatePodResourceMax, ResourceComparisonView, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import { ResourceCommandBar, ResourceExportDropdown, ListViewSegmentedControl, NamespaceFilter } from '@/components/list';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
 import { useQuery, useQueries } from '@tanstack/react-query';
@@ -52,6 +52,7 @@ import { Progress } from '@/components/ui/progress';
 import { buildAutoWidthColumns } from '@/lib/tableSizing';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { SearchHighlight } from '@/components/list/SearchHighlight';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface PodResource extends KubernetesResource {
  spec: {
@@ -220,7 +221,9 @@ export default function Pods() {
  const [showComparison, setShowComparison] = useState(false);
  const [listView, setListView] = useState<ListView>('flat');
  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
- const [selectedPods, setSelectedPods] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedPods = multiSelect.selectedIds;
+ const setSelectedPods = (s: Set<string>) => { if (s.size === 0) multiSelect.clearSelection(); else multiSelect.selectAll(Array.from(s)); };
  const [showTableFilters, setShowTableFilters] = useState(false);
 
  // Pagination State
@@ -230,6 +233,7 @@ export default function Pods() {
  const { isConnected } = useConnectionStatus();
  const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<PodResource>('pods', undefined, { limit: 10000 });
  const deleteResource = useDeleteK8sResource('pods');
+ const patchResource = usePatchK8sResource('pods');
  const createResource = useCreateK8sResource('pods');
  const backendBaseUrl = getEffectiveBackendBaseUrl(useBackendConfigStore((s) => s.backendBaseUrl));
  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured);
@@ -559,23 +563,27 @@ export default function Pods() {
  setDeleteDialog({ open: false, pod: null });
  };
 
- const togglePodSelection = (pod: Pod) => {
- const key = `${pod.namespace}/${pod.name}`;
- const newSel = new Set(selectedPods);
- if (newSel.has(key)) newSel.delete(key); else newSel.add(key);
- setSelectedPods(newSel);
- };
+ const allPodKeys = useMemo(() => filteredPods.map(p => `${p.namespace}/${p.name}`), [filteredPods]);
 
- const toggleAllSelection = () => {
- if (selectedPods.size === filteredPods.length && filteredPods.length > 0) {
- setSelectedPods(new Set());
+ const togglePodSelection = (pod: Pod, event?: React.MouseEvent) => {
+ const key = `${pod.namespace}/${pod.name}`;
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(key, allPodKeys);
  } else {
- setSelectedPods(new Set(filteredPods.map(p => `${p.namespace}/${p.name}`)));
+ multiSelect.toggle(key);
  }
  };
 
- const isAllSelected = filteredPods.length > 0 && selectedPods.size === filteredPods.length;
- const isSomeSelected = selectedPods.size > 0 && selectedPods.size < filteredPods.length;
+ const toggleAllSelection = () => {
+ if (multiSelect.isAllSelected(allPodKeys)) {
+ multiSelect.clearSelection();
+ } else {
+ multiSelect.selectAll(allPodKeys);
+ }
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allPodKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allPodKeys);
 
  const handleViewLogs = (pod: Pod) => {
  // FIX P2-001: Navigate to the pod detail page's Logs tab (internal LogViewer component)
@@ -663,9 +671,28 @@ export default function Pods() {
  ],
  }), []);
 
- const handleBulkRestart = () => {
- toast.info(`Restarting ${selectedPods.size} pods...`);
- setSelectedPods(new Set());
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedPods), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkRestart = async () => {
+ return executeBulkOperation(Array.from(selectedPods), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedPods), async (_key, ns, name) => {
+ await patchResource.mutateAsync({
+ name,
+ namespace: ns,
+ patch: { metadata: { labels: { [labelKey]: labelValue } } },
+ });
+ });
  };
 
  const keyboardNav = useTableKeyboardNav({
@@ -799,20 +826,15 @@ export default function Pods() {
  />
  </div>
 
- <BulkActionToolbar
+ <BulkActionBar
  selectedCount={selectedPods.size}
  resourceName="pod"
- onClearSelection={() => setSelectedPods(new Set())}
- >
- <Button variant="outline" size="sm" className="gap-2" onClick={handleBulkRestart}>
- <RotateCcw className="h-4 w-4" />
- Restart
- </Button>
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, pod: null, bulk: true })}>
- <Trash2 className="h-4 w-4" />
- Delete
- </Button>
- </BulkActionToolbar>
+ resourceType="pods"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkRestart={handleBulkRestart}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  globalFilterBar={
@@ -1209,10 +1231,10 @@ export default function Pods() {
  isSelected && 'bg-primary/5'
  )}
  >
- <TableCell className="w-10">
+ <TableCell className="w-10" onClick={(e) => { e.stopPropagation(); togglePodSelection(pod, e); }}>
  <Checkbox
  checked={isSelected}
- onCheckedChange={() => togglePodSelection(pod)}
+ tabIndex={-1}
  aria-label={`Select ${pod.name}`}
  />
  </TableCell>

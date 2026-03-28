@@ -111,66 +111,66 @@ export default function ScalingOverview() {
 
       {/* Hero: Scaling Pulse & Policy Summary */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <Card className="lg:col-span-8 overflow-hidden border-slate-200/80 shadow-sm bg-white" aria-live="polite">
+        <Card className="lg:col-span-8 overflow-hidden border-slate-200/80 dark:border-slate-700/80 shadow-sm bg-white dark:bg-slate-900" aria-live="polite">
           <CardHeader className="pb-0 pt-8 px-8">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-xl font-bold tracking-tight text-slate-900">Scaling Activity</CardTitle>
-                <p className="text-sm text-slate-500 mt-1">Autoscaler alignment and replica convergence</p>
+                <CardTitle className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Scaling Activity</CardTitle>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Autoscaler alignment and replica convergence</p>
               </div>
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-semibold text-slate-500">Active</span>
+                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Active</span>
               </div>
             </div>
           </CardHeader>
           <CardContent className="pt-0 pb-8 px-8">
             <ScalingPulse />
-            <div className="grid grid-cols-3 gap-6 mt-6 border-t border-slate-100 pt-6">
+            <div className="grid grid-cols-3 gap-6 mt-6 border-t border-slate-100 dark:border-slate-700 pt-6">
               <div>
-                <span className="block text-xs font-medium text-slate-500 mb-1">HPAs</span>
-                <span className="text-xl font-bold text-slate-900 tabular-nums">{hpaCount}</span>
+                <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">HPAs</span>
+                <span className="text-xl font-bold text-slate-900 dark:text-slate-100 tabular-nums">{hpaCount}</span>
               </div>
               <div>
-                <span className="block text-xs font-medium text-slate-500 mb-1">VPAs</span>
-                <span className="text-xl font-bold text-slate-900 tabular-nums">{vpaCount}</span>
+                <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">VPAs</span>
+                <span className="text-xl font-bold text-slate-900 dark:text-slate-100 tabular-nums">{vpaCount}</span>
               </div>
               <div>
-                <span className="block text-xs font-medium text-slate-500 mb-1">PDBs</span>
-                <span className="text-xl font-bold text-slate-900 tabular-nums">{pdbCount}</span>
+                <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">PDBs</span>
+                <span className="text-xl font-bold text-slate-900 dark:text-slate-100 tabular-nums">{pdbCount}</span>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-4 border-slate-200/80 shadow-sm bg-white flex flex-col p-8 overflow-hidden">
+        <Card className="lg:col-span-4 border-slate-200/80 dark:border-slate-700/80 shadow-sm bg-white dark:bg-slate-900 flex flex-col p-8 overflow-hidden">
           <div className="flex items-center gap-3 mb-5">
-            <div className="h-9 w-9 rounded-lg bg-slate-100 flex items-center justify-center">
-              <Shield className="h-4.5 w-4.5 text-slate-600" />
+            <div className="h-9 w-9 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+              <Shield className="h-4.5 w-4.5 text-slate-600 dark:text-slate-400" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-900">Disruption Budget</h3>
-              <p className="text-xs text-slate-500">Pod availability guarantees</p>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Disruption Budget</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Pod availability guarantees</p>
             </div>
           </div>
 
           <div className="flex-1 space-y-3">
-            <div className="flex items-center justify-between py-2.5 px-4 rounded-xl bg-slate-50 border border-slate-100">
-              <span className="text-sm font-medium text-slate-700">HPAs Configured</span>
-              <span className="text-sm font-bold text-slate-900 tabular-nums">{hpaCount}</span>
+            <div className="flex items-center justify-between py-2.5 px-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">HPAs Configured</span>
+              <span className="text-sm font-bold text-slate-900 dark:text-slate-100 tabular-nums">{hpaCount}</span>
             </div>
-            <div className="flex items-center justify-between py-2.5 px-4 rounded-xl bg-slate-50 border border-slate-100">
-              <span className="text-sm font-medium text-slate-700">VPAs Active</span>
-              <span className="text-sm font-bold text-slate-900 tabular-nums">{vpaCount}</span>
+            <div className="flex items-center justify-between py-2.5 px-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">VPAs Active</span>
+              <span className="text-sm font-bold text-slate-900 dark:text-slate-100 tabular-nums">{vpaCount}</span>
             </div>
-            <div className="flex items-center justify-between py-2.5 px-4 rounded-xl bg-slate-50 border border-slate-100">
-              <span className="text-sm font-medium text-slate-700">PDBs Enforced</span>
-              <span className="text-sm font-bold text-slate-900 tabular-nums">{pdbCount}</span>
+            <div className="flex items-center justify-between py-2.5 px-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">PDBs Enforced</span>
+              <span className="text-sm font-bold text-slate-900 dark:text-slate-100 tabular-nums">{pdbCount}</span>
             </div>
           </div>
 
           <div className="mt-6">
-            <Button variant="outline" asChild className="w-full h-9 border-slate-200 text-slate-600 font-medium hover:bg-slate-50 rounded-lg">
+            <Button variant="outline" asChild className="w-full h-9 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg">
               <Link to="/horizontal-pod-autoscalers">Manage Autoscalers</Link>
             </Button>
           </div>
@@ -178,26 +178,26 @@ export default function ScalingOverview() {
       </div>
 
       {/* Resources Table */}
-      <div className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden shadow-sm">
-        <div className="p-6 border-b border-slate-100">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl overflow-hidden shadow-sm">
+        <div className="p-6 border-b border-slate-100 dark:border-slate-700">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h3 className="text-lg font-bold tracking-tight text-slate-900">Scaling Resources</h3>
-              <p className="text-sm text-slate-500 mt-0.5">HPAs, VPAs, and disruption budgets</p>
+              <h3 className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">Scaling Resources</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">HPAs, VPAs, and disruption budgets</p>
             </div>
             <div className="flex items-center gap-3">
               <div className="relative min-w-[280px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" aria-hidden />
                 <Input
                   placeholder="Search scaling resources..."
-                  className="pl-10 bg-slate-50 border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-300 h-10 text-sm"
+                  className="pl-10 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-blue-500/10 focus:border-blue-300 dark:focus:border-blue-600 h-10 text-sm"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   aria-label="Search scaling resources"
                 />
               </div>
               {selectedItems.size > 0 && (
-                <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-200">
+                <Badge variant="secondary" className="bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700">
                   {selectedItems.size} selected
                 </Badge>
               )}
@@ -208,18 +208,18 @@ export default function ScalingOverview() {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50/80">
-                <th className="px-6 py-3.5 border-b border-slate-100 w-10">
+              <tr className="bg-slate-50/80 dark:bg-slate-800/80">
+                <th className="px-6 py-3.5 border-b border-slate-100 dark:border-slate-700 w-10">
                   <Checkbox checked={isAllSelected} onCheckedChange={toggleAll} />
                 </th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-100">Name</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-100">Kind</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-100">Namespace</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-100">Status</th>
-                <th className="px-6 py-3.5 border-b border-slate-100"></th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">Name</th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">Kind</th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">Namespace</th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">Status</th>
+                <th className="px-6 py-3.5 border-b border-slate-100 dark:border-slate-700"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50 text-sm">
+            <tbody className="divide-y divide-slate-50 dark:divide-slate-800 text-sm">
               {itemsOnPage.map((resource, idx) => {
                 const isSelected = selectedItems.has(getResourceKey(resource));
                 return (
@@ -228,28 +228,28 @@ export default function ScalingOverview() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.02 }}
                     key={getResourceKey(resource)}
-                    className={cn('group hover:bg-slate-50/80 transition-colors', isSelected && 'bg-blue-50/40')}
+                    className={cn('group hover:bg-slate-50/80 dark:hover:bg-slate-800/80 transition-colors', isSelected && 'bg-blue-50/40 dark:bg-blue-900/20')}
                   >
                     <td className="px-6 py-3.5">
                       <Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(resource)} />
                     </td>
                     <td className="px-6 py-3.5">
-                      <span className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">{resource.name}</span>
+                      <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{resource.name}</span>
                     </td>
                     <td className="px-6 py-3.5">
-                      <Badge variant="outline" className="text-xs uppercase tracking-wider font-semibold border-slate-200 text-slate-500">{resource.kind}</Badge>
+                      <Badge variant="outline" className="text-xs uppercase tracking-wider font-semibold border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">{resource.kind}</Badge>
                     </td>
                     <td className="px-6 py-3.5">
-                      <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{resource.namespace}</span>
+                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">{resource.namespace}</span>
                     </td>
                     <td className="px-6 py-3.5">
                       <div className="flex items-center gap-2">
                         <div className={cn('h-1.5 w-1.5 rounded-full', resource.status === 'Active' ? 'bg-emerald-500' : 'bg-amber-500')} />
-                        <span className="text-xs font-medium text-slate-700">{resource.status}</span>
+                        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{resource.status}</span>
                       </div>
                     </td>
                     <td className="px-6 py-3.5 text-right">
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-white hover:text-blue-600 hover:shadow-sm rounded-lg transition-all border border-transparent hover:border-slate-200">
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-white dark:hover:bg-slate-800 hover:text-blue-600 dark:hover:text-blue-400 hover:shadow-sm rounded-lg transition-all border border-transparent hover:border-slate-200 dark:hover:border-slate-600">
                         <ArrowUpRight className="h-4 w-4" aria-hidden />
                       </Button>
                     </td>
@@ -274,7 +274,7 @@ export default function ScalingOverview() {
         </div>
 
         {totalFiltered > 0 && (
-          <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="p-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 flex flex-col sm:flex-row items-center justify-between gap-4">
             <ListPagination
               rangeLabel={`${totalFiltered} ${totalFiltered === 1 ? 'resource' : 'resources'}`}
               hasPrev={safePageIndex > 0}
@@ -286,10 +286,10 @@ export default function ScalingOverview() {
               onPageChange={(p) => setPageIndex(p - 1)}
             />
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" asChild className="h-9 px-4 font-medium border-slate-200 text-slate-600 hover:bg-white hover:text-blue-600 rounded-lg transition-all">
+              <Button variant="outline" size="sm" asChild className="h-9 px-4 font-medium border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-800 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg transition-all">
                 <Link to="/horizontal-pod-autoscalers">HPAs</Link>
               </Button>
-              <Button variant="outline" size="sm" asChild className="h-9 px-4 font-medium border-slate-200 text-slate-600 hover:bg-white hover:text-blue-600 rounded-lg transition-all">
+              <Button variant="outline" size="sm" asChild className="h-9 px-4 font-medium border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-800 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg transition-all">
                 <Link to="/pod-disruption-budgets">PDBs</Link>
               </Button>
             </div>

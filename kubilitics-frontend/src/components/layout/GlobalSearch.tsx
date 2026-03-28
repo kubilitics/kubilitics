@@ -403,21 +403,21 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 shadow-2xl border border-slate-200/60 max-w-[540px] rounded-2xl gap-0 bg-white">
+      <DialogContent className="overflow-hidden p-0 shadow-2xl border border-slate-200/60 dark:border-slate-700/60 max-w-[540px] rounded-2xl gap-0 bg-white dark:bg-slate-900">
         {/* Search input */}
-        <div className="flex items-center gap-3 px-4 border-b border-slate-100" onKeyDown={handleKeyDown}>
+        <div className="flex items-center gap-3 px-4 border-b border-slate-100 dark:border-slate-700" onKeyDown={handleKeyDown>
           <Search className="h-[18px] w-[18px] shrink-0 text-blue-500" />
           <input
             ref={inputRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search pages, resources..."
-            className="flex h-13 w-full bg-transparent text-sm font-medium outline-none placeholder:text-slate-400 placeholder:font-normal"
+            className="flex h-13 w-full bg-transparent text-sm font-medium text-slate-900 dark:text-slate-100 outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500 placeholder:font-normal"
             autoComplete="off"
             spellCheck={false}
           />
           {isLoading && <Loader2 className="h-4 w-4 animate-spin text-blue-400" />}
-          <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 bg-slate-100 rounded-md border border-slate-200/80">
+          <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-md border border-slate-200/80 dark:border-slate-700">
             ESC
           </kbd>
         </div>
@@ -452,19 +452,19 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
                         className={cn(
                           'flex items-center gap-3 w-full px-3 py-2 mx-1 rounded-xl text-left transition-all duration-150 group',
                           isSelected
-                            ? 'bg-blue-50 shadow-[0_0_0_1px_rgba(59,130,246,0.15)]'
-                            : 'hover:bg-slate-50'
+                            ? 'bg-blue-50 dark:bg-blue-900/30 shadow-[0_0_0_1px_rgba(59,130,246,0.15)]'
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-800'
                         )}
                         style={{ width: 'calc(100% - 8px)' }}
                       >
                         <div className={cn(
                           'flex items-center justify-center w-8 h-8 rounded-lg transition-colors',
-                          isSelected ? 'bg-slate-200' : 'bg-slate-100'
+                          isSelected ? 'bg-slate-200 dark:bg-slate-700' : 'bg-slate-100 dark:bg-slate-800'
                         )}>
-                          <Clock className="h-4 w-4 text-slate-400" />
+                          <Clock className="h-4 w-4 text-slate-400 dark:text-slate-500" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <span className={cn('text-sm font-medium', isSelected ? 'text-blue-700' : 'text-slate-700')}>
+                          <span className={cn('text-sm font-medium', isSelected ? 'text-blue-700 dark:text-blue-300' : 'text-slate-700 dark:text-slate-300')}>
                             {entry.query}
                           </span>
                           {entry.resultType && (
@@ -473,7 +473,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
                         </div>
                         <button
                           onClick={(e) => { e.stopPropagation(); removeSearch(entry.query); }}
-                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-slate-200 rounded-md transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md transition-all"
                           title="Remove from history"
                         >
                           <X className="h-3 w-3 text-slate-400" />
@@ -481,7 +481,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
                       </button>
                     );
                   })}
-                  <div className="h-px bg-slate-100 mx-3 my-2" />
+                  <div className="h-px bg-slate-100 dark:bg-slate-700 mx-3 my-2" />
                 </>
               )}
 
@@ -513,11 +513,11 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
           {/* Live cluster resource results */}
           {hasSearchText && hasLiveResults && (
             <>
-              {hasNavResults && <div className="h-px bg-slate-100 mx-3 my-2" />}
+              {hasNavResults && <div className="h-px bg-slate-100 dark:bg-slate-700 mx-3 my-2" />}
               <div className="flex items-center gap-2 px-4 pt-1 pb-1">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cluster resources</span>
-                <span className="text-[10px] text-slate-300 bg-slate-100 rounded-full px-1.5">{liveResults.length}</span>
+                <span className="text-[10px] text-slate-300 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-full px-1.5">{liveResults.length}</span>
               </div>
               {Object.entries(groupedLive).map(([type, resources]) => {
                 const Icon = resourceIcons[type] || resourceIcons[type.toLowerCase()] || Box;
@@ -540,19 +540,19 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
                           className={cn(
                             'flex items-center gap-3 w-full px-3 py-2 mx-1 rounded-xl text-left transition-all duration-150',
                             isSelected
-                              ? 'bg-blue-50 shadow-[0_0_0_1px_rgba(59,130,246,0.15)]'
-                              : 'hover:bg-slate-50'
+                              ? 'bg-blue-50 dark:bg-blue-900/30 shadow-[0_0_0_1px_rgba(59,130,246,0.15)]'
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800'
                           )}
                           style={{ width: 'calc(100% - 8px)' }}
                         >
                           <div className={cn(
                             'flex items-center justify-center w-8 h-8 rounded-lg',
-                            isSelected ? 'bg-emerald-100 text-emerald-600' : 'bg-emerald-50 text-emerald-500'
+                            isSelected ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400' : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-500 dark:text-emerald-400'
                           )}>
                             <ResIcon className="h-4 w-4" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className={cn('text-sm truncate font-medium', isSelected ? 'text-blue-700' : 'text-slate-700')}>
+                            <p className={cn('text-sm truncate font-medium', isSelected ? 'text-blue-700 dark:text-blue-300' : 'text-slate-700 dark:text-slate-300')}>
                               <HighlightMatch text={resource.name} query={search.trim()} />
                             </p>
                             {resource.namespace && (
@@ -580,24 +580,24 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
           {/* Empty state */}
           {noResults && (
             <div className="flex flex-col items-center gap-2.5 py-12">
-              <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-slate-100">
-                <Search className="h-5 w-5 text-slate-300" />
+              <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800">
+                <Search className="h-5 w-5 text-slate-300 dark:text-slate-600" />
               </div>
-              <p className="text-sm font-medium text-slate-500">No results for &ldquo;{search.trim()}&rdquo;</p>
-              <p className="text-xs text-slate-400">Try a different search term</p>
+              <p className="text-sm font-medium text-slate-500 dark:text-slate-400">No results for &ldquo;{search.trim()}&rdquo;</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500">Try a different search term</p>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100 bg-slate-50/60">
-          <div className="flex items-center gap-4 text-xs text-slate-400">
+        <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/60">
+          <div className="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
             <span className="flex items-center gap-1.5">
-              <kbd className="px-1.5 py-0.5 bg-white rounded-md border border-slate-200 text-[10px] font-semibold shadow-sm">↵</kbd>
+              <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-[10px] font-semibold shadow-sm">↵</kbd>
               Open
             </span>
             <span className="flex items-center gap-1.5">
-              <kbd className="px-1.5 py-0.5 bg-white rounded-md border border-slate-200 text-[10px] font-semibold shadow-sm">↑↓</kbd>
+              <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-[10px] font-semibold shadow-sm">↑↓</kbd>
               Navigate
             </span>
           </div>

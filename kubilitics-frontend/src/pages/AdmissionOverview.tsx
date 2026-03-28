@@ -106,61 +106,61 @@ export default function AdmissionOverview() {
 
       {/* Hero: Webhook Summary */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <Card className="lg:col-span-8 overflow-hidden border-slate-200/80 shadow-sm bg-white">
+        <Card className="lg:col-span-8 overflow-hidden border-slate-200/80 dark:border-slate-700/80 shadow-sm bg-white dark:bg-slate-900">
           <CardHeader className="pt-8 px-8 pb-4">
-            <CardTitle className="text-xl font-bold tracking-tight text-slate-900">Webhook Summary</CardTitle>
-            <p className="text-sm text-slate-500 mt-1">Active admission controllers intercepting API requests</p>
+            <CardTitle className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Webhook Summary</CardTitle>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Active admission controllers intercepting API requests</p>
           </CardHeader>
           <CardContent className="pb-8 px-8">
             <div className="flex items-end gap-8 mt-2">
               <div>
-                <span className="block text-5xl font-bold text-slate-900 tabular-nums">{resources.length}</span>
-                <span className="text-xs font-medium text-slate-500 mt-1 block">Active Webhooks</span>
+                <span className="block text-5xl font-bold text-slate-900 dark:text-slate-100 tabular-nums">{resources.length}</span>
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-1 block">Active Webhooks</span>
               </div>
-              <div className="h-12 w-px bg-slate-100" />
+              <div className="h-12 w-px bg-slate-100 dark:bg-slate-700" />
               <div>
                 <span className="block text-2xl font-bold text-emerald-600">Active</span>
-                <span className="text-xs font-medium text-slate-500 mt-1 block">All webhooks responding</span>
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-1 block">All webhooks responding</span>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4 mt-8">
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="h-2 w-2 rounded-full bg-emerald-500" />
-                  <span className="text-sm font-medium text-slate-700">Mutating</span>
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Mutating</span>
                 </div>
-                <span className="text-sm font-bold text-slate-900 tabular-nums">{mutatingCount}</span>
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 tabular-nums">{mutatingCount}</span>
               </div>
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="h-2 w-2 rounded-full bg-blue-500" />
-                  <span className="text-sm font-medium text-slate-700">Validating</span>
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Validating</span>
                 </div>
-                <span className="text-sm font-bold text-slate-900 tabular-nums">{validatingCount}</span>
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 tabular-nums">{validatingCount}</span>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-4 border-slate-200/80 shadow-sm bg-white flex flex-col p-8 overflow-hidden">
+        <Card className="lg:col-span-4 border-slate-200/80 dark:border-slate-700/80 shadow-sm bg-white dark:bg-slate-900 flex flex-col p-8 overflow-hidden">
           <div className="flex items-center gap-3 mb-5">
-            <div className="h-9 w-9 rounded-lg bg-slate-100 flex items-center justify-center">
-              <ShieldCheck className="h-4.5 w-4.5 text-slate-600" />
+            <div className="h-9 w-9 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+              <ShieldCheck className="h-4.5 w-4.5 text-slate-600 dark:text-slate-400" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-900">Enforcement Status</h3>
-              <p className="text-xs text-slate-500">Webhook response health</p>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Enforcement Status</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Webhook response health</p>
             </div>
           </div>
 
           <div className="flex-1 space-y-4">
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-medium text-slate-500">
+              <div className="flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
                 <span>Webhook Latency</span>
                 <span className="text-emerald-600 font-semibold">Healthy</span>
               </div>
-              <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-2 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
                 <motion.div
                   initial={{ width: 0 }}
                   animate={{ width: '100%' }}
@@ -170,13 +170,13 @@ export default function AdmissionOverview() {
               </div>
             </div>
 
-            <p className="text-xs text-slate-500 leading-relaxed">
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
               All configured webhooks are responding within acceptable latency thresholds.
             </p>
           </div>
 
           <div className="mt-6">
-            <Button variant="outline" asChild className="w-full h-9 border-slate-200 text-slate-600 font-medium hover:bg-slate-50 rounded-lg">
+            <Button variant="outline" asChild className="w-full h-9 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg">
               <Link to="/mutating-webhooks">Manage Webhooks</Link>
             </Button>
           </div>
@@ -184,26 +184,26 @@ export default function AdmissionOverview() {
       </div>
 
       {/* Resources Table */}
-      <div className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden shadow-sm">
-        <div className="p-6 border-b border-slate-100">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl overflow-hidden shadow-sm">
+        <div className="p-6 border-b border-slate-100 dark:border-slate-700">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h3 className="text-lg font-bold tracking-tight text-slate-900">Admission Webhooks</h3>
-              <p className="text-sm text-slate-500 mt-0.5">Mutating and validating webhook configurations</p>
+              <h3 className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">Admission Webhooks</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Mutating and validating webhook configurations</p>
             </div>
             <div className="flex items-center gap-3">
               <div className="relative min-w-[280px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" aria-hidden />
                 <Input
                   placeholder="Search webhooks..."
-                  className="pl-10 bg-slate-50 border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-300 h-10 text-sm"
+                  className="pl-10 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-blue-500/10 focus:border-blue-300 dark:focus:border-blue-600 h-10 text-sm"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   aria-label="Search admission webhooks"
                 />
               </div>
               {selectedItems.size > 0 && (
-                <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-200">
+                <Badge variant="secondary" className="bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700">
                   {selectedItems.size} selected
                 </Badge>
               )}
@@ -214,17 +214,17 @@ export default function AdmissionOverview() {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50/80">
-                <th className="px-6 py-3.5 border-b border-slate-100 w-10">
+              <tr className="bg-slate-50/80 dark:bg-slate-800/80">
+                <th className="px-6 py-3.5 border-b border-slate-100 dark:border-slate-700 w-10">
                   <Checkbox checked={isAllSelected} onCheckedChange={toggleAll} />
                 </th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-100">Name</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-100">Kind</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-100">Status</th>
-                <th className="px-6 py-3.5 border-b border-slate-100"></th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">Name</th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">Kind</th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">Status</th>
+                <th className="px-6 py-3.5 border-b border-slate-100 dark:border-slate-700"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50 text-sm">
+            <tbody className="divide-y divide-slate-50 dark:divide-slate-800 text-sm">
               {itemsOnPage.map((resource, idx) => {
                 const isSelected = selectedItems.has(getResourceKey(resource));
                 return (
@@ -233,25 +233,25 @@ export default function AdmissionOverview() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.02 }}
                     key={getResourceKey(resource)}
-                    className={cn('group hover:bg-slate-50/80 transition-colors', isSelected && 'bg-blue-50/40')}
+                    className={cn('group hover:bg-slate-50/80 dark:hover:bg-slate-800/80 transition-colors', isSelected && 'bg-blue-50/40 dark:bg-blue-900/20')}
                   >
                     <td className="px-6 py-3.5">
                       <Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(resource)} />
                     </td>
                     <td className="px-6 py-3.5">
-                      <span className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">{resource.name}</span>
+                      <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{resource.name}</span>
                     </td>
                     <td className="px-6 py-3.5">
-                      <Badge variant="outline" className="text-xs uppercase tracking-wider font-semibold border-slate-200 text-slate-500">{resource.kind}</Badge>
+                      <Badge variant="outline" className="text-xs uppercase tracking-wider font-semibold border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">{resource.kind}</Badge>
                     </td>
                     <td className="px-6 py-3.5">
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        <span className="text-xs font-medium text-slate-700">Active</span>
+                        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Active</span>
                       </div>
                     </td>
                     <td className="px-6 py-3.5 text-right">
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-white hover:text-blue-600 hover:shadow-sm rounded-lg transition-all border border-transparent hover:border-slate-200">
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-white dark:hover:bg-slate-800 hover:text-blue-600 dark:hover:text-blue-400 hover:shadow-sm rounded-lg transition-all border border-transparent hover:border-slate-200 dark:hover:border-slate-600">
                         <ArrowUpRight className="h-4 w-4" aria-hidden />
                       </Button>
                     </td>
@@ -276,7 +276,7 @@ export default function AdmissionOverview() {
         </div>
 
         {totalFiltered > 0 && (
-          <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="p-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 flex flex-col sm:flex-row items-center justify-between gap-4">
             <ListPagination
               rangeLabel={`${totalFiltered} ${totalFiltered === 1 ? 'webhook' : 'webhooks'}`}
               hasPrev={safePageIndex > 0}
@@ -288,10 +288,10 @@ export default function AdmissionOverview() {
               onPageChange={(p) => setPageIndex(p - 1)}
             />
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" asChild className="h-9 px-4 font-medium border-slate-200 text-slate-600 hover:bg-white hover:text-blue-600 rounded-lg transition-all">
+              <Button variant="outline" size="sm" asChild className="h-9 px-4 font-medium border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-800 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg transition-all">
                 <Link to="/mutating-webhooks">Mutating</Link>
               </Button>
-              <Button variant="outline" size="sm" asChild className="h-9 px-4 font-medium border-slate-200 text-slate-600 hover:bg-white hover:text-blue-600 rounded-lg transition-all">
+              <Button variant="outline" size="sm" asChild className="h-9 px-4 font-medium border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-800 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg transition-all">
                 <Link to="/validating-webhooks">Validating</Link>
               </Button>
             </div>

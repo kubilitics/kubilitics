@@ -47,13 +47,13 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useK8sResourceList, useDeleteK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { useK8sResourceList, useDeleteK8sResource, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
 import { useQueries } from '@tanstack/react-query';
 import { getServiceEndpoints } from '@/services/backendApiClient';
-import { DeleteConfirmDialog, PortForwardDialog } from '@/components/resources';
+import { DeleteConfirmDialog, PortForwardDialog, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import { ResourceExportDropdown, ListPagination, PAGE_SIZE_OPTIONS, ResourceCommandBar, resourceTableRowClassName, ROW_MOTION, ListPageStatCard, ListPageHeader, TableColumnHeaderWithFilterAndSort, TableFilterCell, StatusPill, ListViewSegmentedControl, AgeCell, TableEmptyState, ListPageLoadingShell, TableErrorState, CopyNameDropdownItem, NamespaceBadge, ResourceListTableToolbar, type StatusPillVariant } from '@/components/list';
 import { ServiceIcon } from '@/components/icons/KubernetesIcons';
 import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
@@ -61,6 +61,7 @@ import { useColumnVisibility } from '@/hooks/useColumnVisibility';
 import { getRowAnimationClass } from '@/hooks/useResourceLiveUpdates';
 import { ServiceWizard } from '@/components/wizards';
 import { toast } from '@/components/ui/sonner';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface ServiceResource extends KubernetesResource {
  spec: {
@@ -212,7 +213,9 @@ export default function Services() {
  const [portForwardDialog, setPortForwardDialog] = useState<{ open: boolean; item: Service | null }>({ open: false, item: null });
  const [testConnectivityDialogOpen, setTestConnectivityDialogOpen] = useState(false);
  const [showCreateWizard, setShowCreateWizard] = useState(false);
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
+ const setSelectedItems = (s: Set<string>) => { if (s.size === 0) multiSelect.clearSelection(); else multiSelect.selectAll(Array.from(s)); };
  const [listView, setListView] = useState<ListView>('flat');
  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
  const [showTableFilters, setShowTableFilters] = useState(false);
@@ -227,6 +230,7 @@ export default function Services() {
  const clusterId = currentClusterId ?? null;
  const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<ServiceResource>('services', undefined, { limit: 5000 });
  const deleteResource = useDeleteK8sResource('services');
+ const patchServiceResource = usePatchK8sResource('services');
 
  // eslint-disable-next-line react-hooks/exhaustive-deps
  const services: Service[] = isConnected && data?.items
@@ -430,27 +434,38 @@ spec:
 `,
  };
 
- const toggleSelection = (item: Service) => {
+ const allServiceKeys = useMemo(() => filteredServices.map(s => `${s.namespace}/${s.name}`), [filteredServices]);
+
+ const toggleSelection = (item: Service, event?: React.MouseEvent) => {
  const key = `${item.namespace}/${item.name}`;
- const newSelection = new Set(selectedItems);
- if (newSelection.has(key)) {
- newSelection.delete(key);
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(key, allServiceKeys);
  } else {
- newSelection.add(key);
+ multiSelect.toggle(key);
  }
- setSelectedItems(newSelection);
  };
 
  const toggleAllSelection = () => {
- if (selectedItems.size === filteredServices.length) {
- setSelectedItems(new Set());
- } else {
- setSelectedItems(new Set(filteredServices.map(s => `${s.namespace}/${s.name}`)));
- }
+ if (multiSelect.isAllSelected(allServiceKeys)) multiSelect.clearSelection();
+ else multiSelect.selectAll(allServiceKeys);
  };
 
- const isAllSelected = filteredServices.length > 0 && selectedItems.size === filteredServices.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < filteredServices.length;
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchServiceResource.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allServiceKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allServiceKeys);
 
  return (
  <div className="space-y-6" role="main" aria-label="Services Resources">
@@ -499,41 +514,14 @@ spec:
  ) : undefined}
  />
 
- {/* Bulk Actions Bar */}
- {selectedItems.size > 0 && (
- <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg"
- >
- <Badge variant="secondary" className="gap-1.5">
- <CheckSquare className="h-3.5 w-3.5" />
- {selectedItems.size} selected
- </Badge>
- <div className="flex items-center gap-2">
- <ResourceExportDropdown
- items={filteredServices}
- selectedKeys={selectedItems}
- getKey={(s) => `${s.namespace}/${s.name}`}
- config={serviceExportConfig}
- selectionLabel="Selected services"
- onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
- triggerLabel={`Export (${selectedItems.size})`}
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="service"
+ resourceType="services"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkLabel={handleBulkLabel}
  />
- <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { const arr = Array.from(selectedItems); if (arr.length >= 1) { const [ns, n] = arr[0].split('/'); navigate(`/services/${ns}/${n}?tab=compare`); } else toast.info('Select a service'); }}>
- <GitCompare className="h-3.5 w-3.5" />
- Compare
- </Button>
- <Button variant="outline" size="sm" className="gap-1.5" onClick={() => toast.info('Test All Endpoints: coming soon')}>
- Test All Endpoints
- </Button>
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}>
- <Trash2 className="h-4 w-4" />
- Delete Selected
- </Button>
- <Button variant="ghost" size="sm" onClick={() => setSelectedItems(new Set())}>
- Clear
- </Button>
- </div>
- </div>
- )}
 
  {/* Stats Cards */}
  <div className="grid grid-cols-2 sm:grid-cols-6 gap-4">
@@ -760,10 +748,10 @@ spec:
  key={`${svc.namespace}/${svc.name}`}
  className={cn(resourceTableRowClassName, getRowAnimationClass(svc.uid), idx % 2 === 1 && 'bg-muted/5', isSelected && 'bg-primary/5')}
  >
- <TableCell>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(svc, e); }}>
  <Checkbox
  checked={isSelected}
- onCheckedChange={() => toggleSelection(svc)}
+ tabIndex={-1}
  aria-label={`Select ${svc.name}`}
  />
  </TableCell>
@@ -880,7 +868,7 @@ spec:
  key={`${svc.namespace}/${svc.name}`}
  className={cn(resourceTableRowClassName, getRowAnimationClass(svc.uid), idx % 2 === 1 && 'bg-muted/5', isSelected && 'bg-primary/5')}
  >
- <TableCell><Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(svc)} aria-label={`Select ${svc.name}`} /></TableCell>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(svc, e); }}><Checkbox checked={isSelected} tabIndex={-1} aria-label={`Select ${svc.name}`} /></TableCell>
  <ResizableTableCell columnId="name"><div className="min-w-0 overflow-hidden"><Link to={`/services/${svc.namespace}/${svc.name}`} className="font-medium text-primary hover:underline truncate block w-fit max-w-full">{svc.name}</Link></div></ResizableTableCell>
  <ResizableTableCell columnId="namespace"><NamespaceBadge namespace={svc.namespace} className="truncate max-w-full" /></ResizableTableCell>
  <ResizableTableCell columnId="status"><StatusPill variant={serviceStatusToPillVariant[svc.status]} label={svc.status} /></ResizableTableCell>
