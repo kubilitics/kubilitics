@@ -236,12 +236,12 @@ export function Header() {
           {/* Tauri overlay title bar: extra left padding for macOS traffic lights */}
           <div className={cn(
             'shrink-0 flex items-center h-full bg-slate-50/20 dark:bg-slate-900/20 border-r border-slate-100/60 dark:border-slate-800/60 transition-all duration-300',
-            collapsed ? 'w-[5.5rem] justify-center px-0' : 'w-72 justify-start px-4',
+            collapsed ? 'w-[5.5rem] justify-center px-0' : 'w-72 justify-start pl-6 pr-4',
             isTauri() && 'pl-[78px]'
           )} data-tauri-drag-region>
             <button
               onClick={() => navigate('/dashboard')}
-              className="flex items-center gap-3 group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 rounded-xl p-1.5 transition-all press-effect"
+              className="flex items-center gap-3 group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 rounded-xl py-1.5 transition-all press-effect"
               aria-label="Go to Dashboard"
             >
               <BrandLogo
