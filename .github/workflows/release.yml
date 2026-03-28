@@ -342,6 +342,7 @@ jobs:
       - name: Build Tauri app (Windows)
         if: matrix.os == 'windows-latest'
         working-directory: kubilitics-desktop/src-tauri
+        shell: bash
         env:
           TAURI_SKIP_DEVSERVER_CHECK: "true"
         run: |
