@@ -419,6 +419,13 @@ export function GenericResourceDetail<T extends KubernetesResource>({
       variant: 'outline',
       onClick: () => {
         handleTabChange('yaml');
+        // Signal the YAML viewer to enter edit mode via URL param
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('tab', 'yaml');
+          next.set('edit', '1');
+          return next;
+        });
       },
       className: 'press-effect',
     },

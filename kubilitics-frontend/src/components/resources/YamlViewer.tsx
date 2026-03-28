@@ -69,6 +69,18 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
   const [copied, setCopied] = useState(false);
   const [conflictDetected, setConflictDetected] = useState(false);
 
+  // Auto-enter edit mode when ?edit=1 is in URL (triggered by header Edit button)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('edit') === '1' && editable && !isEditing) {
+      setIsEditing(true);
+      // Clean up the URL param
+      params.delete('edit');
+      const newUrl = `${window.location.pathname}${params.toString() ? `?${params}` : ''}`;
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [editable, isEditing]);
+
   useEffect(() => {
     if (!isEditing) {
       setEditedYaml(yaml);
