@@ -30,7 +30,7 @@
     "category": "DeveloperTool",
     "shortDescription": "The Kubernetes OS",
     "longDescription": "Making Kubernetes finally human-friendly",
-    "createUpdaterArtifacts": "v2",
+    "createUpdaterArtifacts": false,
     "macOS": {
       "signingIdentity": null,
       "providerShortName": null,
