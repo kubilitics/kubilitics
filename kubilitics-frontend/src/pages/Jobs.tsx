@@ -12,7 +12,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
-import { useK8sResourceList, useDeleteK8sResource, useCreateK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { useK8sResourceList, useDeleteK8sResource, usePatchK8sResource, useCreateK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
@@ -28,6 +28,8 @@ import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
 import { toast } from '@/components/ui/sonner';
 import { Progress } from '@/components/ui/progress';
 import { JobIcon } from '@/components/icons/KubernetesIcons';
+import { BulkActionBar, executeBulkOperation } from '@/components/resources';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface JobResource extends KubernetesResource {
  metadata: KubernetesResource['metadata'] & { ownerReferences?: Array<{ kind: string; name: string }> };
@@ -170,7 +172,8 @@ export default function Jobs() {
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [listView, setListView] = useState<ListView>('flat');
  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
  const [showTableFilters, setShowTableFilters] = useState(false);
  const [pageSize, setPageSize] = useState(10);
  const [pageIndex, setPageIndex] = useState(0);
@@ -183,6 +186,7 @@ export default function Jobs() {
  const clusterId = currentClusterId ?? null;
  const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<JobResource>('jobs', undefined, { limit: 5000 });
  const deleteResource = useDeleteK8sResource('jobs');
+ const patchResource = usePatchK8sResource('jobs');
  const createResource = useCreateK8sResource('jobs');
 
  // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -369,7 +373,7 @@ export default function Jobs() {
  if (n && ns) await deleteResource.mutateAsync({ name: n, namespace: ns });
  }
  toast.success(`Deleted ${selectedItems.size} job(s)`);
- setSelectedItems(new Set());
+ multiSelect.clearSelection();
  } else if (deleteDialog.item) {
  await deleteResource.mutateAsync({ name: deleteDialog.item.name, namespace: deleteDialog.item.namespace });
  toast.success(`Job ${deleteDialog.item.name} deleted`);
@@ -403,11 +407,32 @@ spec:
 `,
  };
 
- const toggleSelection = (item: Job) => { const key = `${item.namespace}/${item.name}`; const newSel = new Set(selectedItems); if (newSel.has(key)) newSel.delete(key); else newSel.add(key); setSelectedItems(newSel); };
- const toggleAll = () => { if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set()); else setSelectedItems(new Set(itemsOnPage.map(i => `${i.namespace}/${i.name}`))); };
+ const allItemKeys = useMemo(() => filteredItems.map(i => `${i.namespace}/${i.name}`), [filteredItems]);
 
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+ const toggleSelection = (item: Job, event?: React.MouseEvent) => {
+ const key = `${item.namespace}/${item.name}`;
+ if (event?.shiftKey) { multiSelect.toggleRange(key, allItemKeys); } else { multiSelect.toggle(key); }
+ };
+ const toggleAll = () => {
+ if (multiSelect.isAllSelected(allItemKeys)) { multiSelect.clearSelection(); } else { multiSelect.selectAll(allItemKeys); }
+ };
+
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchResource.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allItemKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allItemKeys);
 
  return (
  <div className="space-y-6" role="main" aria-label="Jobs Resources">
@@ -440,7 +465,7 @@ spec:
  leftExtra={selectedItems.size > 0 ? (
  <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
  <span className="text-sm text-muted-foreground">{selectedItems.size} selected</span>
- <Button variant="ghost" size="sm" className="press-effect h-8" onClick={() => setSelectedItems(new Set())}>Clear</Button>
+ <Button variant="ghost" size="sm" className="press-effect h-8" onClick={() => multiSelect.clearSelection()}>Clear</Button>
  </div>
  ) : undefined}
  />
@@ -452,6 +477,15 @@ spec:
  <ListPageStatCard label="Failed" value={stats.failed} icon={XCircle} iconColor="text-rose-600" valueClassName="text-rose-600" selected={columnFilters.status?.size === 1 && columnFilters.status.has('Failed')} onClick={() => setColumnFilter('status', new Set(['Failed']))} className={cn(columnFilters.status?.size === 1 && columnFilters.status.has('Failed') && 'ring-2 ring-rose-500')} isLoading={isLoading} />
  <ListPageStatCard label="Completion Rate" value={stats.completionRatePct + '%'} icon={Gauge} iconColor="text-cyan-500" valueClassName="text-cyan-600" isLoading={isLoading} />
  </div>
+
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="job"
+ resourceType="jobs"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  globalFilterBar={

@@ -49,9 +49,10 @@ import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/back
 import { useClusterStore } from '@/stores/clusterStore';
 import { getStorageClassPVCounts } from '@/services/backendApiClient';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
-import { DeleteConfirmDialog } from '@/components/resources';
+import { DeleteConfirmDialog, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import { Star } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface StorageClass {
  name: string;
@@ -112,7 +113,9 @@ export default function StorageClasses() {
  const { data, isLoading, isError, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sStorageClass>('storageclasses');
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: StorageClass | null; bulk?: boolean }>({ open: false, item: null });
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
+ const setSelectedItems = (s: Set<string>) => { if (s.size === 0) multiSelect.clearSelection(); else multiSelect.selectAll(Array.from(s)); };
  const [searchQuery, setSearchQuery] = useState('');
  const [showTableFilters, setShowTableFilters] = useState(false);
  const [pageSize, setPageSize] = useState(10);
@@ -210,7 +213,8 @@ export default function StorageClasses() {
  return;
  }
  if (deleteDialog.bulk && selectedItems.size > 0) {
- for (const name of selectedItems) {
+ for (const key of selectedItems) {
+ const name = key.startsWith('_/') ? key.slice(2) : key;
  await deleteSC.mutateAsync({ name });
  }
  toast.success(`Deleted ${selectedItems.size} storage class(es)`);
@@ -223,18 +227,38 @@ export default function StorageClasses() {
  refetch();
  };
 
- const toggleSelection = (sc: StorageClass) => {
- const next = new Set(selectedItems);
- if (next.has(sc.name)) next.delete(sc.name);
- else next.add(sc.name);
- setSelectedItems(next);
+ const allSCKeys = useMemo(() => filteredItems.map(sc => `_/${sc.name}`), [filteredItems]);
+
+ const toggleSelection = (sc: StorageClass, event?: React.MouseEvent) => {
+ const key = `_/${sc.name}`;
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(key, allSCKeys);
+ } else {
+ multiSelect.toggle(key);
+ }
  };
+
  const toggleAll = () => {
- if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set());
- else setSelectedItems(new Set(itemsOnPage.map((sc) => sc.name)));
+ if (multiSelect.isAllSelected(allSCKeys)) multiSelect.clearSelection();
+ else multiSelect.selectAll(allSCKeys);
  };
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, _ns, name) => {
+ await deleteSC.mutateAsync({ name });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, _ns, name) => {
+ await patchSC.mutateAsync({ name, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allSCKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allSCKeys);
 
  const pagination = {
  rangeLabel: totalFiltered > 0 ? `Showing ${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered}` : 'No storage classes',
@@ -278,7 +302,7 @@ export default function StorageClasses() {
  onCreate={() => setShowCreateWizard(true)}
  actions={
  <>
- <ResourceExportDropdown items={filteredItems} selectedKeys={selectedItems} getKey={(sc) => sc.name} config={exportConfig} selectionLabel={selectedItems.size > 0 ? 'Selected storage classes' : 'All visible'} onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))} />
+ <ResourceExportDropdown items={filteredItems} selectedKeys={selectedItems} getKey={(sc) => `_/${sc.name}`} config={exportConfig} selectionLabel={selectedItems.size > 0 ? 'Selected storage classes' : 'All visible'} onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))} />
  {selectedItems.size > 0 && (
  <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}>
  <Trash2 className="h-4 w-4" />
@@ -335,25 +359,14 @@ export default function StorageClasses() {
  className={cn(!hasActiveFilters && !isLoading && 'ring-2 ring-primary')} isLoading={isLoading} />
  </div>
 
- {/* Bulk Actions Bar */}
- {selectedItems.size > 0 && (
- <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg">
- <Badge variant="secondary" className="gap-1.5">
- <CheckSquare className="h-3.5 w-3.5" isLoading={isLoading} />
- {selectedItems.size} selected
- </Badge>
- <div className="flex items-center gap-2">
- <ResourceExportDropdown items={filteredItems} selectedKeys={selectedItems} getKey={(sc) => sc.name} config={exportConfig} selectionLabel="Selected storage classes" onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))} triggerLabel={`Export (${selectedItems.size})`} />
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}>
- <Trash2 className="h-4 w-4" />
- Delete
- </Button>
- <Button variant="ghost" size="sm" onClick={() => setSelectedItems(new Set())}>
- Clear
- </Button>
- </div>
- </div>
- )}
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="storage class"
+ resourceType="storageclasses"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  globalFilterBar={
@@ -445,8 +458,8 @@ export default function StorageClasses() {
  </TableRow>
  ) : (
  itemsOnPage.map((item, idx) => (
- <tr key={item.name} className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', selectedItems.has(item.name) && 'bg-primary/5')}>
- <TableCell><Checkbox checked={selectedItems.has(item.name)} onCheckedChange={() => toggleSelection(item)} aria-label={`Select ${item.name}`} /></TableCell>
+ <tr key={item.name} className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', selectedItems.has(`_/${item.name}`) && 'bg-primary/5')}>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(item, e); }}><Checkbox checked={selectedItems.has(`_/${item.name}`)} tabIndex={-1} aria-label={`Select ${item.name}`} /></TableCell>
  <ResizableTableCell columnId="name">
  <Link to={`/storageclasses/${item.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate">
  <Layers className="h-4 w-4 text-muted-foreground flex-shrink-0" />

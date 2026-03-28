@@ -25,6 +25,8 @@ import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
 import { toast } from '@/components/ui/sonner';
 import { Progress } from '@/components/ui/progress';
 import { DaemonSetIcon } from '@/components/icons/KubernetesIcons';
+import { BulkActionBar, executeBulkOperation } from '@/components/resources';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface DaemonSetResource extends KubernetesResource {
  spec: {
@@ -148,7 +150,8 @@ export default function DaemonSets() {
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [listView, setListView] = useState<ListView>('flat');
  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
  const [showTableFilters, setShowTableFilters] = useState(false);
  const [pageSize, setPageSize] = useState(10);
  const [pageIndex, setPageIndex] = useState(0);
@@ -297,7 +300,7 @@ export default function DaemonSets() {
  if (n && ns) await deleteResource.mutateAsync({ name: n, namespace: ns });
  }
  toast.success(`Deleted ${selectedItems.size} daemonset(s)`);
- setSelectedItems(new Set());
+ multiSelect.clearSelection();
  } else if (deleteDialog.item) {
  await deleteResource.mutateAsync({ name: deleteDialog.item.name, namespace: deleteDialog.item.namespace });
  toast.success(`DaemonSet ${deleteDialog.item.name} deleted`);
@@ -336,16 +339,41 @@ spec:
 `,
  };
 
- const toggleSelection = (item: DaemonSet) => { const key = `${item.namespace}/${item.name}`; const newSel = new Set(selectedItems); if (newSel.has(key)) newSel.delete(key); else newSel.add(key); setSelectedItems(newSel); };
- const toggleAll = () => { if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set()); else setSelectedItems(new Set(itemsOnPage.map(i => `${i.namespace}/${i.name}`))); };
- const handleBulkRestart = () => {
- if (!isConnected) { toast.error('Connect cluster to restart daemonsets'); return; }
- toast.info('Bulk restart: trigger rollout restart for each selected DaemonSet when backend supports it.');
- setSelectedItems(new Set());
+ const allItemKeys = useMemo(() => filteredItems.map(i => `${i.namespace}/${i.name}`), [filteredItems]);
+
+ const toggleSelection = (item: DaemonSet, event?: React.MouseEvent) => {
+ const key = `${item.namespace}/${item.name}`;
+ if (event?.shiftKey) { multiSelect.toggleRange(key, allItemKeys); } else { multiSelect.toggle(key); }
+ };
+ const toggleAll = () => {
+ if (multiSelect.isAllSelected(allItemKeys)) { multiSelect.clearSelection(); } else { multiSelect.selectAll(allItemKeys); }
  };
 
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkRestart = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchDaemonSet.mutateAsync({
+ name, namespace: ns,
+ patch: { spec: { template: { metadata: { annotations: { 'kubectl.kubernetes.io/restartedAt': new Date().toISOString() } } } } },
+ });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchDaemonSet.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allItemKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allItemKeys);
 
  return (
  <div className="space-y-6" role="main" aria-label="DaemonSets Resources">
@@ -378,7 +406,7 @@ spec:
  leftExtra={selectedItems.size > 0 ? (
  <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
  <span className="text-sm text-muted-foreground">{selectedItems.size} selected</span>
- <Button variant="ghost" size="sm" className="press-effect h-8" onClick={() => setSelectedItems(new Set())}>Clear</Button>
+ <Button variant="ghost" size="sm" className="press-effect h-8" onClick={() => multiSelect.clearSelection()}>Clear</Button>
  </div>
  ) : undefined}
  />
@@ -391,16 +419,15 @@ spec:
  <ListPageStatCard label="Node Coverage" value={stats.nodeCoverageAvg + '%'} icon={Gauge} iconColor="text-cyan-500" valueClassName="text-cyan-600" isLoading={isLoading} />
  </div>
 
- <BulkActionToolbar
+ <BulkActionBar
  selectedCount={selectedItems.size}
  resourceName="daemonset"
- onClearSelection={() => setSelectedItems(new Set())}
- >
- <Button variant="outline" size="sm" className="gap-2" onClick={handleBulkRestart}>
- <RotateCcw className="h-4 w-4" />
- Restart
- </Button>
- </BulkActionToolbar>
+ resourceType="daemonsets"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkRestart={handleBulkRestart}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  globalFilterBar={

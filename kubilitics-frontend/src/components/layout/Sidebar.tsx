@@ -921,6 +921,12 @@ export function Sidebar() {
           role="navigation"
           aria-label="Main navigation"
         >
+          {/* Logo icon — always visible in collapsed state */}
+          <NavLink to="/dashboard" className="mb-2 flex items-center justify-center" title="Kubilitics">
+            <img src="/brand/logo-mark-rounded.png" alt="Kubilitics" className="h-9 w-9 rounded-lg" draggable={false} />
+          </NavLink>
+          <div className="w-12 h-px bg-border/50 mb-1" />
+
           <NavItemIconOnly to="/dashboard" icon={LayoutDashboard} label="Dashboard" iconColor="text-blue-600 group-hover:text-blue-700" />
           <NavItemIconOnly to="/fleet" icon={Layers} label="Fleet" iconColor="text-indigo-600 group-hover:text-indigo-700" />
           <NavItemIconOnly to="/topology" icon={Network} label="Topology" iconColor="text-violet-600 group-hover:text-violet-700" />

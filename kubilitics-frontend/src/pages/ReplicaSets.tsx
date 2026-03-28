@@ -24,6 +24,8 @@ import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
 import { toast } from '@/components/ui/sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { ReplicaSetIcon } from '@/components/icons/KubernetesIcons';
+import { BulkActionBar, executeBulkOperation } from '@/components/resources';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface ReplicaSetResource extends KubernetesResource {
  spec: { 
@@ -119,7 +121,8 @@ export default function ReplicaSets() {
  const [scaleDialog, setScaleDialog] = useState<{ open: boolean; item: ReplicaSet | null }>({ open: false, item: null });
  const [listView, setListView] = useState<ListView>('flat');
  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
  const [showTableFilters, setShowTableFilters] = useState(false);
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [activeOnly, setActiveOnly] = useState(false);
@@ -261,7 +264,7 @@ export default function ReplicaSets() {
  if (n && ns) await deleteResource.mutateAsync({ name: n, namespace: ns });
  }
  toast.success(`Deleted ${selectedItems.size} replicaset(s)`);
- setSelectedItems(new Set());
+ multiSelect.clearSelection();
  } else if (deleteDialog.item) {
  await deleteResource.mutateAsync({ name: deleteDialog.item.name, namespace: deleteDialog.item.namespace });
  toast.success(`ReplicaSet ${deleteDialog.item.name} deleted`);
@@ -303,11 +306,38 @@ spec:
 `,
  };
 
- const toggleSelection = (item: ReplicaSet) => { const key = `${item.namespace}/${item.name}`; const newSel = new Set(selectedItems); if (newSel.has(key)) newSel.delete(key); else newSel.add(key); setSelectedItems(newSel); };
- const toggleAll = () => { if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set()); else setSelectedItems(new Set(itemsOnPage.map(i => `${i.namespace}/${i.name}`))); };
+ const allItemKeys = useMemo(() => filteredItems.map(i => `${i.namespace}/${i.name}`), [filteredItems]);
 
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+ const toggleSelection = (item: ReplicaSet, event?: React.MouseEvent) => {
+ const key = `${item.namespace}/${item.name}`;
+ if (event?.shiftKey) { multiSelect.toggleRange(key, allItemKeys); } else { multiSelect.toggle(key); }
+ };
+ const toggleAll = () => {
+ if (multiSelect.isAllSelected(allItemKeys)) { multiSelect.clearSelection(); } else { multiSelect.selectAll(allItemKeys); }
+ };
+
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkScale = async (replicas: number) => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchReplicaSet.mutateAsync({ name, namespace: ns, patch: { spec: { replicas } } });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchReplicaSet.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allItemKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allItemKeys);
 
  return (
  <div className="space-y-6" role="main" aria-label="ReplicaSets Resources">
@@ -340,12 +370,15 @@ spec:
  }
  />
 
- {selectedItems.size > 0 && (
- <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg">
- <div className="flex items-center gap-3"><Badge variant="secondary" className="gap-1.5"><CheckSquare className="h-3.5 w-3.5" />{selectedItems.size} selected</Badge><Button variant="ghost" size="sm" onClick={() => setSelectedItems(new Set())}>Clear</Button></div>
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}><Trash2 className="h-4 w-4" />Delete</Button>
- </div>
- )}
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="replicaset"
+ resourceType="replicasets"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkScale={handleBulkScale}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
  <ListPageStatCard label="Total ReplicaSets" value={stats.total} icon={ReplicaSetIcon} iconColor="text-primary" selected={!hasActiveFilters} onClick={clearAllFilters} className={cn(!hasActiveFilters && !isLoading && 'ring-2 ring-primary')} isLoading={isLoading} />

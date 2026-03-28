@@ -46,16 +46,17 @@ import { ResourceCommandBar, ResourceExportDropdown, ListViewSegmentedControl, L
 import { StorageIcon } from '@/components/icons/KubernetesIcons';
 import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
 import { useColumnVisibility } from '@/hooks/useColumnVisibility';
-import { usePaginatedResourceList, useDeleteK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { usePaginatedResourceList, useDeleteK8sResource, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
 import { getPVCConsumers } from '@/services/backendApiClient';
 import { useQueries } from '@tanstack/react-query';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
-import { DeleteConfirmDialog } from '@/components/resources';
+import { DeleteConfirmDialog, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui/sonner';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface PVC {
  name: string;
@@ -152,8 +153,11 @@ export default function PersistentVolumeClaims() {
  const { isConnected } = useConnectionStatus();
  const { data, isLoading, isError, refetch, pagination: hookPagination } = usePaginatedResourceList<K8sPVC>('persistentvolumeclaims');
  const deleteResource = useDeleteK8sResource('persistentvolumeclaims');
+ const patchPVCResource = usePatchK8sResource('persistentvolumeclaims');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: PVC | null; bulk?: boolean }>({ open: false, item: null });
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
+ const setSelectedItems = (s: Set<string>) => { if (s.size === 0) multiSelect.clearSelection(); else multiSelect.selectAll(Array.from(s)); };
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [searchQuery, setSearchQuery] = useState('');
  const [selectedNamespace, setSelectedNamespace] = useState<string>('all');
@@ -323,19 +327,38 @@ export default function PersistentVolumeClaims() {
  }
  };
 
- const toggleSelection = (pvc: PVC) => {
+ const allPVCKeys = useMemo(() => filteredItems.map(pvc => `${pvc.namespace}/${pvc.name}`), [filteredItems]);
+
+ const toggleSelection = (pvc: PVC, event?: React.MouseEvent) => {
  const key = `${pvc.namespace}/${pvc.name}`;
- const next = new Set(selectedItems);
- if (next.has(key)) next.delete(key);
- else next.add(key);
- setSelectedItems(next);
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(key, allPVCKeys);
+ } else {
+ multiSelect.toggle(key);
+ }
  };
+
  const toggleAll = () => {
- if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set());
- else setSelectedItems(new Set(itemsOnPage.map((p) => `${p.namespace}/${p.name}`)));
+ if (multiSelect.isAllSelected(allPVCKeys)) multiSelect.clearSelection();
+ else multiSelect.selectAll(allPVCKeys);
  };
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchPVCResource.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allPVCKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allPVCKeys);
 
  const handleAction = (action: string, item: PVC) => {
  if (action === 'Delete') setDeleteDialog({ open: true, item });
@@ -370,7 +393,7 @@ export default function PersistentVolumeClaims() {
  key={key}
  className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', selectedItems.has(key) && 'bg-primary/5')}
  >
- <TableCell><Checkbox checked={selectedItems.has(key)} onCheckedChange={() => toggleSelection(item)} aria-label={`Select ${item.name}`} /></TableCell>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(item, e); }}><Checkbox checked={selectedItems.has(key)} tabIndex={-1} aria-label={`Select ${item.name}`} /></TableCell>
  <ResizableTableCell columnId="name">
  <Link to={`/persistentvolumeclaims/${item.namespace}/${item.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate">
  <Database className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -480,25 +503,14 @@ export default function PersistentVolumeClaims() {
  <ListPageStatCard label="Expanding" value={stats.expanding} icon={Database} iconColor="text-blue-500" valueClassName="text-blue-500" selected={columnFilters.status?.size === 1 && columnFilters.status.has('Expanding')} onClick={() => setColumnFilter('status', new Set(['Expanding']))} className={cn(columnFilters.status?.size === 1 && columnFilters.status.has('Expanding') && 'ring-2 ring-blue-500')} isLoading={isLoading} />
  </div>
 
- {/* Bulk Actions Bar */}
- {selectedItems.size > 0 && (
- <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg">
- <Badge variant="secondary" className="gap-1.5">
- <CheckSquare className="h-3.5 w-3.5" />
- {selectedItems.size} selected
- </Badge>
- <div className="flex items-center gap-2">
- <ResourceExportDropdown items={filteredItems} selectedKeys={selectedItems} getKey={(pvc) => `${pvc.namespace}/${pvc.name}`} config={exportConfig} selectionLabel="Selected PVCs" onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))} triggerLabel={`Export (${selectedItems.size})`} />
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}>
- <Trash2 className="h-4 w-4" />
- Delete
- </Button>
- <Button variant="ghost" size="sm" onClick={() => setSelectedItems(new Set())}>
- Clear
- </Button>
- </div>
- </div>
- )}
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="persistent volume claim"
+ resourceType="persistentvolumeclaims"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  globalFilterBar={

@@ -3,7 +3,7 @@ import { useQueries } from '@tanstack/react-query';
 import { Server, Search, MoreHorizontal,
  Layers, Lock, Unlock, List, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { DeleteConfirmDialog, MetricBar } from '@/components/resources';
+import { DeleteConfirmDialog, MetricBar, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import { StatusPill, type StatusPillVariant } from '@/components/list';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,7 +30,7 @@ import {
  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
-import { usePaginatedResourceList, useDeleteK8sResource, useK8sResourceList, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { usePaginatedResourceList, useDeleteK8sResource, usePatchK8sResource, useK8sResourceList, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useClusterStore } from '@/stores/clusterStore';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
@@ -62,6 +62,7 @@ import { NodeIcon } from '@/components/icons/KubernetesIcons';
 import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
 import { useColumnVisibility } from '@/hooks/useColumnVisibility';
 import { getRowAnimationClass } from '@/hooks/useResourceLiveUpdates';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface NodeResource extends KubernetesResource {
  spec?: {
@@ -260,9 +261,12 @@ export default function Nodes() {
 
  const { data, refetch, isLoading, isError, pagination: hookPagination } = usePaginatedResourceList<NodeResource>('nodes');
  const deleteResource = useDeleteK8sResource('nodes');
+ const patchNodeResource = usePatchK8sResource('nodes');
 
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: Node | null; bulk?: boolean }>({ open: false, item: null });
- const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedNodes = multiSelect.selectedIds;
+ const setSelectedNodes = (s: Set<string>) => { if (s.size === 0) multiSelect.clearSelection(); else multiSelect.selectAll(Array.from(s)); };
  const [searchQuery, setSearchQuery] = useState('');
  const [showTableFilters, setShowTableFilters] = useState(false);
  const [pageSize, setPageSize] = useState(10);
@@ -438,7 +442,8 @@ export default function Nodes() {
  const handleDelete = async () => {
  if (deleteDialog.bulk && selectedNodes.size > 0) {
  if (isConnected) {
- for (const nodeName of selectedNodes) {
+ for (const key of selectedNodes) {
+ const nodeName = key.startsWith('_/') ? key.slice(2) : key;
  await deleteResource.mutateAsync({ name: nodeName });
  }
  setSelectedNodes(new Set());
@@ -456,25 +461,34 @@ export default function Nodes() {
  }
  };
 
- const toggleNodeSelection = (node: Node) => {
- const next = new Set(selectedNodes);
- if (next.has(node.name)) next.delete(node.name);
- else next.add(node.name);
- setSelectedNodes(next);
+ const allNodeKeys = useMemo(() => searchFiltered.map(n => `_/${n.name}`), [searchFiltered]);
+
+ const toggleNodeSelection = (node: Node, event?: React.MouseEvent) => {
+ const key = `_/${node.name}`;
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(key, allNodeKeys);
+ } else {
+ multiSelect.toggle(key);
+ }
  };
 
  const toggleAllNodesSelection = () => {
- const keys = searchFiltered.map((n) => n.name);
- const allSelected = keys.length > 0 && keys.every((k) => selectedNodes.has(k));
- if (allSelected) {
- const next = new Set(selectedNodes);
- keys.forEach((k) => next.delete(k));
- setSelectedNodes(next);
- } else {
- const next = new Set(selectedNodes);
- keys.forEach((k) => next.add(k));
- setSelectedNodes(next);
- }
+ if (multiSelect.isAllSelected(allNodeKeys)) multiSelect.clearSelection();
+ else multiSelect.selectAll(allNodeKeys);
+ };
+
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedNodes), async (_key, _ns, name) => {
+ await deleteResource.mutateAsync({ name });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedNodes), async (_key, _ns, name) => {
+ await patchNodeResource.mutateAsync({ name, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
  };
 
  const handleCordon = async (item: Node) => {
@@ -548,7 +562,8 @@ export default function Nodes() {
  <Button variant="outline" size="sm" className="press-effect gap-2" onClick={async () => {
  if (!isBackendConfigured() || !clusterId || !backendBaseUrl) { toast.error('Connect to a cluster to cordon nodes'); return; }
  let succeeded = 0;
- for (const nodeName of selectedNodes) {
+ for (const key of selectedNodes) {
+   const nodeName = key.startsWith('_/') ? key.slice(2) : key;
    try { await postNodeCordon(backendBaseUrl, clusterId, nodeName, true); succeeded++; } catch { toast.error(`Failed to cordon ${nodeName}`); }
  }
  if (succeeded > 0) toast.success(`Cordoned ${succeeded} node(s)`);
@@ -559,7 +574,8 @@ export default function Nodes() {
  <Button variant="outline" size="sm" className="press-effect gap-2" onClick={async () => {
  if (!isBackendConfigured() || !clusterId || !backendBaseUrl) { toast.error('Connect to a cluster to uncordon nodes'); return; }
  let succeeded = 0;
- for (const nodeName of selectedNodes) {
+ for (const key of selectedNodes) {
+   const nodeName = key.startsWith('_/') ? key.slice(2) : key;
    try { await postNodeCordon(backendBaseUrl, clusterId, nodeName, false); succeeded++; } catch { toast.error(`Failed to uncordon ${nodeName}`); }
  }
  if (succeeded > 0) toast.success(`Uncordoned ${succeeded} node(s)`);
@@ -573,7 +589,7 @@ export default function Nodes() {
  </Button>
  </>
  )}
- <ResourceExportDropdown items={searchFiltered} selectedKeys={selectedNodes} getKey={(n) => n.name} config={exportConfig} selectionLabel={selectedNodes.size > 0 ? `${selectedNodes.size} selected` : 'All visible'} onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))} />
+ <ResourceExportDropdown items={searchFiltered} selectedKeys={selectedNodes} getKey={(n) => `_/${n.name}`} config={exportConfig} selectionLabel={selectedNodes.size > 0 ? `${selectedNodes.size} selected` : 'All visible'} onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))} />
  </>
  }
  />
@@ -628,30 +644,14 @@ export default function Nodes() {
  isLoading={isLoading} />
  </div>
 
- <BulkActionToolbar
+ <BulkActionBar
  selectedCount={selectedNodes.size}
  resourceName="node"
- onClearSelection={() => setSelectedNodes(new Set())}
- >
- <Button variant="outline" size="sm" className="gap-2" onClick={() => {
- const names = Array.from(selectedNodes).join(', ');
- toast.info(`Cordon ${selectedNodes.size} node(s): ${names}`);
- }}>
- <Lock className="h-4 w-4" />
- Cordon
- </Button>
- <Button variant="outline" size="sm" className="gap-2" onClick={() => {
- const names = Array.from(selectedNodes).join(', ');
- toast.info(`Uncordon ${selectedNodes.size} node(s): ${names}`);
- }}>
- <Unlock className="h-4 w-4" />
- Uncordon
- </Button>
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}>
- <Trash2 className="h-4 w-4" />
- Delete
- </Button>
- </BulkActionToolbar>
+ resourceType="nodes"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  globalFilterBar={
@@ -699,7 +699,7 @@ export default function Nodes() {
  <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
  <TableHead className="w-12 px-2 text-center">
  <Checkbox
- checked={searchFiltered.length > 0 && searchFiltered.every((n) => selectedNodes.has(n.name))}
+ checked={searchFiltered.length > 0 && searchFiltered.every((n) => selectedNodes.has(`_/${n.name}`))}
  onCheckedChange={toggleAllNodesSelection}
  aria-label="Select all nodes"
  />
@@ -764,17 +764,17 @@ export default function Nodes() {
  }
 
  const node = item.data;
- const isSelected = selectedNodes.has(node.name);
+ const isSelected = selectedNodes.has(`_/${node.name}`);
 
  return (
  <tr
  key={node.name}
  className={cn(resourceTableRowClassName, getRowAnimationClass(node.uid), isSelected && 'bg-primary/5')}
  >
- <TableCell className="w-12 px-2 text-center">
+ <TableCell className="w-12 px-2 text-center" onClick={(e) => { e.stopPropagation(); toggleNodeSelection(node, e); }}>
  <Checkbox
  checked={isSelected}
- onCheckedChange={() => toggleNodeSelection(node)}
+ tabIndex={-1}
  aria-label={`Select ${node.name}`}
  />
  </TableCell>

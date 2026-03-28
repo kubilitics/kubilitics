@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { AlertTriangle, Search, RefreshCw, MoreHorizontal,
  WifiOff, Plus, ChevronDown, CheckSquare, Trash2 } from 'lucide-react';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,10 +28,10 @@ import {
  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
-import { usePaginatedResourceList, useDeleteK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { usePaginatedResourceList, useDeleteK8sResource, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
-import { DeleteConfirmDialog } from '@/components/resources';
+import { DeleteConfirmDialog, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import { toast } from '@/components/ui/sonner';
 import { cn } from '@/lib/utils';
 import {
@@ -120,7 +121,9 @@ export default function PriorityClasses() {
  const deleteResource = useDeleteK8sResource('priorityclasses');
 
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: PriorityClassRow | null; bulk?: boolean }>({ open: false, item: null });
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
+ const patchPC = usePatchK8sResource('priorityclasses');
  const [showCreator, setShowCreator] = useState(false);
  const [searchQuery, setSearchQuery] = useState('');
  const [showTableFilters, setShowTableFilters] = useState(false);
@@ -211,7 +214,7 @@ export default function PriorityClasses() {
  await deleteResource.mutateAsync({ name });
  }
  toast.success(`Deleted ${selectedItems.size} priority class(es)`);
- setSelectedItems(new Set());
+ multiSelect.clearSelection();
  } else if (deleteDialog.item) {
  await deleteResource.mutateAsync({ name: deleteDialog.item.name });
  toast.success(`Priority class ${deleteDialog.item.name} deleted`);
@@ -220,18 +223,35 @@ export default function PriorityClasses() {
  refetch();
  };
 
- const toggleSelection = (r: PriorityClassRow) => {
- const next = new Set(selectedItems);
- if (next.has(r.name)) next.delete(r.name);
- else next.add(r.name);
- setSelectedItems(next);
+ const allItemKeys = useMemo(() => itemsOnPage.map((r) => r.name), [itemsOnPage]);
+
+ const toggleSelection = (r: PriorityClassRow, event?: React.MouseEvent) => {
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(r.name, allItemKeys);
+ } else {
+ multiSelect.toggle(r.name);
+ }
  };
  const toggleAll = () => {
- if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set());
- else setSelectedItems(new Set(itemsOnPage.map((r) => r.name)));
+ if (multiSelect.isAllSelected(allItemKeys)) multiSelect.clearSelection();
+ else multiSelect.selectAll(allItemKeys);
  };
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+ const isAllSelected = multiSelect.isAllSelected(allItemKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allItemKeys);
+
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems).map((n) => `_/${n}`), async (_key, _ns, name) => {
+ await deleteResource.mutateAsync({ name });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems).map((n) => `_/${n}`), async (_key, _ns, name) => {
+ await patchPC.mutateAsync({ name, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
 
  const exportConfig = {
  filenamePrefix: 'priority-classes',
@@ -329,25 +349,14 @@ export default function PriorityClasses() {
  isLoading={isLoading} />
  </div>
 
- {/* Bulk Actions Bar */}
- {selectedItems.size > 0 && (
- <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg">
- <Badge variant="secondary" className="gap-1.5">
- <CheckSquare className="h-3.5 w-3.5" />
- {selectedItems.size} selected
- </Badge>
- <div className="flex items-center gap-2">
- <ResourceExportDropdown items={searchFiltered} selectedKeys={selectedItems} getKey={(r) => r.name} config={exportConfig} selectionLabel="Selected priority classes" onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))} triggerLabel={`Export (${selectedItems.size})`} />
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}>
- <Trash2 className="h-4 w-4" />
- Delete
- </Button>
- <Button variant="ghost" size="sm" onClick={() => setSelectedItems(new Set())}>
- Clear
- </Button>
- </div>
- </div>
- )}
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="priority class"
+ resourceType="priorityclasses"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  hasActiveFilters={hasActiveFilters}
@@ -444,7 +453,7 @@ export default function PriorityClasses() {
  ) : (
  itemsOnPage.map((r, idx) => (
  <tr key={r.name} className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', selectedItems.has(r.name) && 'bg-primary/5')}>
- <TableCell><Checkbox checked={selectedItems.has(r.name)} onCheckedChange={() => toggleSelection(r)} aria-label={`Select ${r.name}`} /></TableCell>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(r, e); }}><Checkbox checked={selectedItems.has(r.name)} tabIndex={-1} aria-label={`Select ${r.name}`} /></TableCell>
  <ResizableTableCell columnId="name">
  <Link to={`/priorityclasses/${r.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate">
  <AlertTriangle className="h-4 w-4 text-muted-foreground flex-shrink-0" />

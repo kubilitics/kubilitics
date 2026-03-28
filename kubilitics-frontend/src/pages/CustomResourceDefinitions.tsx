@@ -12,9 +12,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
-import { useK8sResourceList, useDeleteK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { useK8sResourceList, useDeleteK8sResource, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
-import { DeleteConfirmDialog } from '@/components/resources';
+import { DeleteConfirmDialog, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import {
  ResourceCommandBar, ClusterScopedScope, ResourceExportDropdown,
  StatusPill, resourceTableRowClassName, ROW_MOTION, ListPagination, ListPageStatCard,
@@ -149,7 +150,8 @@ export default function CustomResourceDefinitions() {
  const [searchQuery, setSearchQuery] = useState('');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: CustomResourceDefinition | null; bulk?: boolean }>({ open: false, item: null });
  const [showCreateWizard, setShowCreateWizard] = useState(false);
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
  const [showTableFilters, setShowTableFilters] = useState(false);
  const [pageSize, setPageSize] = useState(10);
  const [pageIndex, setPageIndex] = useState(0);
@@ -157,6 +159,7 @@ export default function CustomResourceDefinitions() {
  const { isConnected } = useConnectionStatus();
  const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<CRDResource>('customresourcedefinitions', undefined, { limit: 5000 });
  const deleteResource = useDeleteK8sResource('customresourcedefinitions');
+ const patchCRD = usePatchK8sResource('customresourcedefinitions');
 
  // eslint-disable-next-line react-hooks/exhaustive-deps
  const items: CustomResourceDefinition[] = isConnected && data
@@ -203,19 +206,23 @@ export default function CustomResourceDefinitions() {
  if (safePageIndex !== pageIndex) setPageIndex(safePageIndex);
  }, [safePageIndex, pageIndex]);
 
- const toggleSelection = (item: CustomResourceDefinition) => {
- const newSel = new Set(selectedItems);
- if (newSel.has(item.name)) newSel.delete(item.name); else newSel.add(item.name);
- setSelectedItems(newSel);
+ const allItemKeys = useMemo(() => itemsOnPage.map((i) => i.name), [itemsOnPage]);
+
+ const toggleSelection = (item: CustomResourceDefinition, event?: React.MouseEvent) => {
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(item.name, allItemKeys);
+ } else {
+ multiSelect.toggle(item.name);
+ }
  };
 
  const toggleAll = () => {
- if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set());
- else setSelectedItems(new Set(itemsOnPage.map((i) => i.name)));
+ if (multiSelect.isAllSelected(allItemKeys)) multiSelect.clearSelection();
+ else multiSelect.selectAll(allItemKeys);
  };
 
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+ const isAllSelected = multiSelect.isAllSelected(allItemKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allItemKeys);
 
  const handleDelete = async () => {
  if (!isConnected) { toast.error('Connect cluster to delete CRDs'); return; }
@@ -223,11 +230,25 @@ export default function CustomResourceDefinitions() {
  for (const name of selectedItems) {
  await deleteResource.mutateAsync({ name, namespace: '' });
  }
- setSelectedItems(new Set());
+ multiSelect.clearSelection();
  } else if (deleteDialog.item) {
  await deleteResource.mutateAsync({ name: deleteDialog.item.name, namespace: '' });
  }
  setDeleteDialog({ open: false, item: null });
+ };
+
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems).map((n) => `_/${n}`), async (_key, _ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: '' });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems).map((n) => `_/${n}`), async (_key, _ns, name) => {
+ await patchCRD.mutateAsync({ name, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
  };
 
  const exportConfig = {
@@ -271,7 +292,7 @@ spec:
  {selectedItems.size > 0 && (
  <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
  <span className="text-sm text-muted-foreground">{selectedItems.size} selected</span>
- <Button variant="ghost" size="sm" className="h-8" onClick={() => setSelectedItems(new Set())}>Clear</Button>
+ <Button variant="ghost" size="sm" className="h-8" onClick={() => multiSelect.clearSelection()}>Clear</Button>
  </div>
  )}
  </div>
@@ -312,6 +333,15 @@ spec:
  className={cn(columnFilters.hasCustomGroup?.size === 1 && columnFilters.hasCustomGroup.has('Yes') && 'ring-2 ring-amber-500')}
  isLoading={isLoading} />
  </div>
+
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="CRD"
+ resourceType="customresourcedefinitions"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  hasActiveFilters={hasActiveFilters}
@@ -412,7 +442,7 @@ spec:
  const isSelected = selectedItems.has(item.name);
  return (
  <tr key={item.name} className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', isSelected && 'bg-primary/5')}>
- <TableCell><Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(item)} /></TableCell>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(item, e); }}><Checkbox checked={isSelected} tabIndex={-1} /></TableCell>
  <ResizableTableCell columnId="name">
  <span className="font-medium flex items-center gap-2 truncate cursor-pointer text-primary hover:underline" onClick={() => navigate(`/customresourcedefinitions/${item.name}`)}>
  <FileCode className="h-4 w-4 text-muted-foreground flex-shrink-0" />

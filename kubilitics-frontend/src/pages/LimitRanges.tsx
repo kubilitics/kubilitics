@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Scale, Search, RefreshCw, MoreHorizontal,
  WifiOff, Plus, ChevronDown, Filter, List, Layers, CheckSquare, Trash2 } from 'lucide-react';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,10 +28,10 @@ import {
  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
-import { usePaginatedResourceList, useDeleteK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { usePaginatedResourceList, useDeleteK8sResource, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
-import { DeleteConfirmDialog } from '@/components/resources';
+import { DeleteConfirmDialog, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import { toast } from '@/components/ui/sonner';
 import { cn } from '@/lib/utils';
 import {
@@ -146,7 +147,9 @@ export default function LimitRanges() {
  const deleteResource = useDeleteK8sResource('limitranges');
 
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: LimitRangeRow | null; bulk?: boolean }>({ open: false, item: null });
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
+ const patchLR = usePatchK8sResource('limitranges');
  const [showCreator, setShowCreator] = useState(false);
  const [searchQuery, setSearchQuery] = useState('');
  const [selectedNamespace, setSelectedNamespace] = useState<string>('all');
@@ -229,7 +232,7 @@ export default function LimitRanges() {
  if (n && ns) await deleteResource.mutateAsync({ name: n, namespace: ns });
  }
  toast.success(`Deleted ${selectedItems.size} limit range(s)`);
- setSelectedItems(new Set());
+ multiSelect.clearSelection();
  } else if (deleteDialog.item) {
  await deleteResource.mutateAsync({ name: deleteDialog.item.name, namespace: deleteDialog.item.namespace });
  toast.success(`Limit range ${deleteDialog.item.name} deleted`);
@@ -238,19 +241,36 @@ export default function LimitRanges() {
  refetch();
  };
 
- const toggleSelection = (r: LimitRangeRow) => {
+ const allItemKeys = useMemo(() => itemsOnPage.map((r) => `${r.namespace}/${r.name}`), [itemsOnPage]);
+
+ const toggleSelection = (r: LimitRangeRow, event?: React.MouseEvent) => {
  const key = `${r.namespace}/${r.name}`;
- const next = new Set(selectedItems);
- if (next.has(key)) next.delete(key);
- else next.add(key);
- setSelectedItems(next);
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(key, allItemKeys);
+ } else {
+ multiSelect.toggle(key);
+ }
  };
  const toggleAll = () => {
- if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set());
- else setSelectedItems(new Set(itemsOnPage.map((r) => `${r.namespace}/${r.name}`)));
+ if (multiSelect.isAllSelected(allItemKeys)) multiSelect.clearSelection();
+ else multiSelect.selectAll(allItemKeys);
  };
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+ const isAllSelected = multiSelect.isAllSelected(allItemKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allItemKeys);
+
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchLR.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
 
  const exportConfig = {
  filenamePrefix: 'limit-ranges',
@@ -309,25 +329,14 @@ export default function LimitRanges() {
  <ListPageStatCard label="Pod Limits" value={stats.podLimits} icon={Scale} iconColor="text-amber-600" valueClassName="text-amber-600" selected={columnFilters.limitCategory?.size === 1 && columnFilters.limitCategory.has('Pod')} onClick={() => setColumnFilter('limitCategory', new Set(['Pod']))} className={cn(columnFilters.limitCategory?.size === 1 && columnFilters.limitCategory.has('Pod') && 'ring-2 ring-amber-500')} isLoading={isLoading} />
  </div>
 
- {/* Bulk Actions Bar */}
- {selectedItems.size > 0 && (
- <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg">
- <Badge variant="secondary" className="gap-1.5">
- <CheckSquare className="h-3.5 w-3.5" />
- {selectedItems.size} selected
- </Badge>
- <div className="flex items-center gap-2">
- <ResourceExportDropdown items={searchFiltered} selectedKeys={selectedItems} getKey={(r) => `${r.namespace}/${r.name}`} config={exportConfig} selectionLabel="Selected limit ranges" onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))} triggerLabel={`Export (${selectedItems.size})`} />
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}>
- <Trash2 className="h-4 w-4" />
- Delete
- </Button>
- <Button variant="ghost" size="sm" onClick={() => setSelectedItems(new Set())}>
- Clear
- </Button>
- </div>
- </div>
- )}
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="limit range"
+ resourceType="limitranges"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  hasActiveFilters={hasActiveFilters}
@@ -459,7 +468,7 @@ export default function LimitRanges() {
  ) : (
  itemsOnPage.map((r, idx) => (
  <tr key={`${r.namespace}/${r.name}`} className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', selectedItems.has(`${r.namespace}/${r.name}`) && 'bg-primary/5')}>
- <TableCell><Checkbox checked={selectedItems.has(`${r.namespace}/${r.name}`)} onCheckedChange={() => toggleSelection(r)} aria-label={`Select ${r.name}`} /></TableCell>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(r, e); }}><Checkbox checked={selectedItems.has(`${r.namespace}/${r.name}`)} tabIndex={-1} aria-label={`Select ${r.name}`} /></TableCell>
  <ResizableTableCell columnId="name">
  <Link to={`/limitranges/${r.namespace}/${r.name}`} className="font-medium text-primary hover:underline flex items-center gap-2 truncate">
  <Scale className="h-4 w-4 text-muted-foreground flex-shrink-0" />

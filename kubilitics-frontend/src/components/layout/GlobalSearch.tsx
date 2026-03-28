@@ -405,7 +405,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="overflow-hidden p-0 shadow-2xl border border-slate-200/60 dark:border-slate-700/60 max-w-[540px] rounded-2xl gap-0 bg-white dark:bg-slate-900">
         {/* Search input */}
-        <div className="flex items-center gap-3 px-4 border-b border-slate-100 dark:border-slate-700" onKeyDown={handleKeyDown>
+        <div className="flex items-center gap-3 px-4 border-b border-slate-100 dark:border-slate-700" onKeyDown={handleKeyDown}>
           <Search className="h-[18px] w-[18px] shrink-0 text-blue-500" />
           <input
             ref={inputRef}

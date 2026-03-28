@@ -26,6 +26,8 @@ import type { StatusPillVariant } from '@/components/list';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
 import { toast } from '@/components/ui/sonner';
 import { CronJobIcon } from '@/components/icons/KubernetesIcons';
+import { BulkActionBar, executeBulkOperation } from '@/components/resources';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface CronJobResource extends KubernetesResource {
  spec: {
@@ -194,7 +196,8 @@ export default function CronJobs() {
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [listView, setListView] = useState<ListView>('flat');
  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
  const [showTableFilters, setShowTableFilters] = useState(false);
  const [expandedRow, setExpandedRow] = useState<string | null>(null);
  const [pageSize, setPageSize] = useState(10);
@@ -341,7 +344,7 @@ export default function CronJobs() {
  if (n && ns) await deleteResource.mutateAsync({ name: n, namespace: ns });
  }
  toast.success(`Deleted ${selectedItems.size} cronjob(s)`);
- setSelectedItems(new Set());
+ multiSelect.clearSelection();
  } else if (deleteDialog.item) {
  await deleteResource.mutateAsync({ name: deleteDialog.item.name, namespace: deleteDialog.item.namespace });
  toast.success(`CronJob ${deleteDialog.item.name} deleted`);
@@ -379,8 +382,29 @@ spec:
 `,
  };
 
- const toggleSelection = (item: CronJob) => { const key = `${item.namespace}/${item.name}`; const newSel = new Set(selectedItems); if (newSel.has(key)) newSel.delete(key); else newSel.add(key); setSelectedItems(newSel); };
- const toggleAll = () => { if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set()); else setSelectedItems(new Set(itemsOnPage.map(i => `${i.namespace}/${i.name}`))); };
+ const allItemKeys = useMemo(() => filteredItems.map(i => `${i.namespace}/${i.name}`), [filteredItems]);
+
+ const toggleSelection = (item: CronJob, event?: React.MouseEvent) => {
+ const key = `${item.namespace}/${item.name}`;
+ if (event?.shiftKey) { multiSelect.toggleRange(key, allItemKeys); } else { multiSelect.toggle(key); }
+ };
+ const toggleAll = () => {
+ if (multiSelect.isAllSelected(allItemKeys)) { multiSelect.clearSelection(); } else { multiSelect.selectAll(allItemKeys); }
+ };
+
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchCronJob.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
  const handleTriggerNow = async (item: CronJob) => {
  if (!isConnected) { toast.error('Connect cluster to trigger CronJob'); return; }
  if (!isBackendConfigured()) {
@@ -417,8 +441,8 @@ spec:
  }
  };
 
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+ const isAllSelected = multiSelect.isAllSelected(allItemKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allItemKeys);
 
  return (
  <div className="space-y-6" role="main" aria-label="CronJobs Resources">
@@ -451,7 +475,7 @@ spec:
  leftExtra={selectedItems.size > 0 ? (
  <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
  <span className="text-sm text-muted-foreground">{selectedItems.size} selected</span>
- <Button variant="ghost" size="sm" className="press-effect h-8" onClick={() => setSelectedItems(new Set())}>Clear</Button>
+ <Button variant="ghost" size="sm" className="press-effect h-8" onClick={() => multiSelect.clearSelection()}>Clear</Button>
  </div>
  ) : undefined}
  />
@@ -464,6 +488,15 @@ spec:
  <ListPageStatCard label="Overdue" value={stats.overdue} icon={Timer} iconColor="text-muted-foreground" isLoading={isLoading} />
  <ListPageStatCard label="Success Rate (7d)" value={stats.successRate7d} icon={Gauge} iconColor="text-muted-foreground" isLoading={isLoading} />
  </div>
+
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="cronjob"
+ resourceType="cronjobs"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  globalFilterBar={

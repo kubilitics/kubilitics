@@ -36,15 +36,16 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
-import { useK8sResourceList, useDeleteK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { useK8sResourceList, useDeleteK8sResource, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { toast } from '@/components/ui/sonner';
 import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
 import { ResourceExportDropdown, ResourceCommandBar, ListPageStatCard, ListPageHeader, TableColumnHeaderWithFilterAndSort, TableFilterCell, ListPagination, PAGE_SIZE_OPTIONS, resourceTableRowClassName, ROW_MOTION, AgeCell, TableEmptyState, ListPageLoadingShell, TableErrorState, NamespaceBadge, ResourceListTableToolbar, StatusPill } from '@/components/list';
-import { DeleteConfirmDialog } from '@/components/resources';
+import { DeleteConfirmDialog, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import { ResizableTableProvider, ResizableTableHead, ResizableTableCell, type ResizableColumnConfig } from '@/components/ui/resizable-table';
 import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
 import { useColumnVisibility } from '@/hooks/useColumnVisibility';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface K8sEndpoint extends KubernetesResource {
  subsets?: Array<{
@@ -92,7 +93,9 @@ export default function Endpoints() {
  const navigate = useNavigate();
  const [searchQuery, setSearchQuery] = useState('');
  const [selectedNamespace, setSelectedNamespace] = useState<string>('all');
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
+ const setSelectedItems = (s: Set<string>) => { if (s.size === 0) multiSelect.clearSelection(); else multiSelect.selectAll(Array.from(s)); };
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: Endpoint | null; bulk?: boolean }>({ open: false, item: null });
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [pageSize, setPageSize] = useState(10);
@@ -102,6 +105,7 @@ export default function Endpoints() {
  const { isConnected } = useConnectionStatus();
  const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<K8sEndpoint>('endpoints', undefined, { limit: 5000 });
  const deleteResource = useDeleteK8sResource('endpoints');
+ const patchEndpointResource = usePatchK8sResource('endpoints');
 
  // eslint-disable-next-line react-hooks/exhaustive-deps
  const endpoints: Endpoint[] = isConnected && data?.items
@@ -206,27 +210,38 @@ subsets: []
 `,
  };
 
- const toggleSelection = (item: Endpoint) => {
+ const allEndpointKeys = useMemo(() => filteredEndpoints.map(e => `${e.namespace}/${e.name}`), [filteredEndpoints]);
+
+ const toggleSelection = (item: Endpoint, event?: React.MouseEvent) => {
  const key = `${item.namespace}/${item.name}`;
- const newSelection = new Set(selectedItems);
- if (newSelection.has(key)) {
- newSelection.delete(key);
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(key, allEndpointKeys);
  } else {
- newSelection.add(key);
+ multiSelect.toggle(key);
  }
- setSelectedItems(newSelection);
  };
 
  const toggleAllSelection = () => {
- if (selectedItems.size === filteredEndpoints.length) {
- setSelectedItems(new Set());
- } else {
- setSelectedItems(new Set(filteredEndpoints.map(e => `${e.namespace}/${e.name}`)));
- }
+ if (multiSelect.isAllSelected(allEndpointKeys)) multiSelect.clearSelection();
+ else multiSelect.selectAll(allEndpointKeys);
  };
 
- const isAllSelected = filteredEndpoints.length > 0 && selectedItems.size === filteredEndpoints.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < filteredEndpoints.length;
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchEndpointResource.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allEndpointKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allEndpointKeys);
 
  const handleDelete = async () => {
  try {
@@ -282,34 +297,14 @@ subsets: []
  }
  />
 
- {/* Bulk Actions Bar */}
- {selectedItems.size > 0 && (
- <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg"
- >
- <Badge variant="secondary" className="gap-1.5">
- <CheckSquare className="h-3.5 w-3.5" />
- {selectedItems.size} selected
- </Badge>
- <div className="flex items-center gap-2">
- <ResourceExportDropdown
- items={filteredEndpoints}
- selectedKeys={selectedItems}
- getKey={(e) => `${e.namespace}/${e.name}`}
- config={endpointExportConfig}
- selectionLabel={selectedItems.size > 0 ? 'Selected endpoints' : 'All visible endpoints'}
- onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
- triggerLabel={selectedItems.size > 0 ? `Export (${selectedItems.size})` : 'Export'}
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="endpoint"
+ resourceType="endpoints"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkLabel={handleBulkLabel}
  />
- <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}>
- <Trash2 className="h-4 w-4" />
- Delete
- </Button>
- <Button variant="ghost" size="sm" onClick={() => setSelectedItems(new Set())}>
- Clear
- </Button>
- </div>
- </div>
- )}
 
  {/* Stats Cards - Design 3.4: Total, Healthy, Degraded, Empty */}
  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -466,8 +461,8 @@ subsets: []
  key={`${ep.namespace}/${ep.name}`}
  className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', isSelected && 'bg-primary/5')}
  >
- <TableCell>
- <Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(ep)} aria-label={`Select ${ep.name}`} />
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(ep, e); }}>
+ <Checkbox checked={isSelected} tabIndex={-1} aria-label={`Select ${ep.name}`} />
  </TableCell>
  <ResizableTableCell columnId="name">
  <Link to={`/endpoints/${ep.namespace}/${ep.name}`} className="font-medium text-primary hover:underline truncate block">{ep.name}</Link>

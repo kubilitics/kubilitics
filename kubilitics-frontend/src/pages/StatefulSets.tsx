@@ -25,6 +25,8 @@ import { ResourceCreator, DEFAULT_YAMLS } from '@/components/editor';
 import { toast } from '@/components/ui/sonner';
 import { Progress } from '@/components/ui/progress';
 import { StatefulSetIcon } from '@/components/icons/KubernetesIcons';
+import { BulkActionBar, executeBulkOperation } from '@/components/resources';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface StatefulSetResource extends KubernetesResource {
  spec: {
@@ -154,7 +156,8 @@ export default function StatefulSets() {
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [listView, setListView] = useState<ListView>('flat');
  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
  const [showTableFilters, setShowTableFilters] = useState(false);
  const [pageSize, setPageSize] = useState(10);
  const [pageIndex, setPageIndex] = useState(0);
@@ -370,7 +373,7 @@ export default function StatefulSets() {
  if (n && ns) await deleteResource.mutateAsync({ name: n, namespace: ns });
  }
  toast.success(`Deleted ${selectedItems.size} statefulset(s)`);
- setSelectedItems(new Set());
+ multiSelect.clearSelection();
  } else if (deleteDialog.item) {
  await deleteResource.mutateAsync({ name: deleteDialog.item.name, namespace: deleteDialog.item.namespace });
  toast.success(`StatefulSet ${deleteDialog.item.name} deleted`);
@@ -415,21 +418,47 @@ spec:
 `,
  };
 
- const toggleSelection = (item: StatefulSet) => { const key = `${item.namespace}/${item.name}`; const newSel = new Set(selectedItems); if (newSel.has(key)) newSel.delete(key); else newSel.add(key); setSelectedItems(newSel); };
- const toggleAll = () => { if (selectedItems.size === itemsOnPage.length) setSelectedItems(new Set()); else setSelectedItems(new Set(itemsOnPage.map(i => `${i.namespace}/${i.name}`))); };
- const handleBulkRestart = () => {
- if (!isConnected) { toast.error('Connect cluster to restart statefulsets'); return; }
- toast.info('Bulk restart: trigger rollout restart for each selected StatefulSet when backend supports it.');
- setSelectedItems(new Set());
+ const allItemKeys = useMemo(() => filteredItems.map(i => `${i.namespace}/${i.name}`), [filteredItems]);
+
+ const toggleSelection = (item: StatefulSet, event?: React.MouseEvent) => {
+ const key = `${item.namespace}/${item.name}`;
+ if (event?.shiftKey) { multiSelect.toggleRange(key, allItemKeys); } else { multiSelect.toggle(key); }
+ };
+ const toggleAll = () => {
+ if (multiSelect.isAllSelected(allItemKeys)) { multiSelect.clearSelection(); } else { multiSelect.selectAll(allItemKeys); }
  };
 
- const handleBulkScale = () => {
- if (!isConnected) { toast.error('Connect cluster to scale statefulsets'); return; }
- toast.info(`Scale ${selectedItems.size} statefulset(s): use row-level scale for per-resource replica control.`);
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
  };
 
- const isAllSelected = itemsOnPage.length > 0 && selectedItems.size === itemsOnPage.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < itemsOnPage.length;
+ const handleBulkRestart = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchStatefulSet.mutateAsync({
+ name, namespace: ns,
+ patch: { spec: { template: { metadata: { annotations: { 'kubectl.kubernetes.io/restartedAt': new Date().toISOString() } } } } },
+ });
+ });
+ };
+
+ const handleBulkScale = async (replicas: number) => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchStatefulSet.mutateAsync({ name, namespace: ns, patch: { spec: { replicas } } });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchStatefulSet.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allItemKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allItemKeys);
 
  return (
  <div className="space-y-6" role="main" aria-label="StatefulSets Resources">
@@ -462,7 +491,7 @@ spec:
  leftExtra={selectedItems.size > 0 ? (
  <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
  <span className="text-sm text-muted-foreground">{selectedItems.size} selected</span>
- <Button variant="ghost" size="sm" className="press-effect h-8" onClick={() => setSelectedItems(new Set())}>Clear</Button>
+ <Button variant="ghost" size="sm" className="press-effect h-8" onClick={() => multiSelect.clearSelection()}>Clear</Button>
  </div>
  ) : undefined}
  />
@@ -475,20 +504,16 @@ spec:
  <ListPageStatCard label="PVC Bound" value={selectedNamespace === 'all' ? '—' : stats.pvcBound} icon={HardDrive} iconColor="text-cyan-500" valueClassName="text-cyan-600" isLoading={isLoading} />
  </div>
 
- <BulkActionToolbar
+ <BulkActionBar
  selectedCount={selectedItems.size}
  resourceName="statefulset"
- onClearSelection={() => setSelectedItems(new Set())}
- >
- <Button variant="outline" size="sm" className="gap-2" onClick={handleBulkRestart}>
- <RotateCcw className="h-4 w-4" />
- Restart
- </Button>
- <Button variant="outline" size="sm" className="gap-2" onClick={handleBulkScale}>
- <Scale className="h-4 w-4" />
- Scale
- </Button>
- </BulkActionToolbar>
+ resourceType="statefulsets"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkRestart={handleBulkRestart}
+ onBulkScale={handleBulkScale}
+ onBulkLabel={handleBulkLabel}
+ />
 
  <ResourceListTableToolbar
  globalFilterBar={

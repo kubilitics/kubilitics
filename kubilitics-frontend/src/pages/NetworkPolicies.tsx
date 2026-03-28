@@ -38,14 +38,15 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
-import { useK8sResourceList, useDeleteK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { useK8sResourceList, useDeleteK8sResource, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
-import { DeleteConfirmDialog } from '@/components/resources';
+import { DeleteConfirmDialog, BulkActionBar, executeBulkOperation } from '@/components/resources';
 import { NetworkPolicyWizard } from '@/components/wizards';
 import { ResourceExportDropdown, ResourceCommandBar, ListPageStatCard, ListPageHeader, TableColumnHeaderWithFilterAndSort, TableFilterCell, ListPagination, PAGE_SIZE_OPTIONS, resourceTableRowClassName, ROW_MOTION, AgeCell, TableEmptyState, ListPageLoadingShell, TableErrorState, CopyNameDropdownItem, NamespaceBadge, ResourceListTableToolbar, StatusPill } from '@/components/list';
 import { useTableFiltersAndSort, type ColumnConfig } from '@/hooks/useTableFiltersAndSort';
 import { useColumnVisibility } from '@/hooks/useColumnVisibility';
 import { toast } from '@/components/ui/sonner';
+import { useMultiSelect } from '@/hooks/useMultiSelect';
 
 interface K8sNetworkPolicy extends KubernetesResource {
  spec?: {
@@ -108,7 +109,9 @@ export default function NetworkPolicies() {
  const [searchQuery, setSearchQuery] = useState('');
  const [selectedNamespace, setSelectedNamespace] = useState<string>('all');
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: NetworkPolicy | null; bulk?: boolean }>({ open: false, item: null });
- const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+ const multiSelect = useMultiSelect();
+ const selectedItems = multiSelect.selectedIds;
+ const setSelectedItems = (s: Set<string>) => { if (s.size === 0) multiSelect.clearSelection(); else multiSelect.selectAll(Array.from(s)); };
  const [showCreateWizard, setShowCreateWizard] = useState(false);
  const [showTableFilters, setShowTableFilters] = useState(false);
  const [pageSize, setPageSize] = useState(10);
@@ -118,6 +121,7 @@ export default function NetworkPolicies() {
  const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<K8sNetworkPolicy>('networkpolicies', undefined, { limit: 5000 });
  const { data: podsData } = useK8sResourceList<KubernetesResource>('pods', undefined, { limit: 10000, enabled: isConnected });
  const deleteResource = useDeleteK8sResource('networkpolicies');
+ const patchNetworkPolicyResource = usePatchK8sResource('networkpolicies');
 
  const podsByNamespace = useMemo(() => {
  const map = new Map<string, Array<{ labels?: Record<string, string> }>>();
@@ -285,27 +289,38 @@ spec:
 `,
  };
 
- const toggleSelection = (item: NetworkPolicy) => {
+ const allPolicyKeys = useMemo(() => filteredPolicies.map(np => `${np.namespace}/${np.name}`), [filteredPolicies]);
+
+ const toggleSelection = (item: NetworkPolicy, event?: React.MouseEvent) => {
  const key = `${item.namespace}/${item.name}`;
- const newSelection = new Set(selectedItems);
- if (newSelection.has(key)) {
- newSelection.delete(key);
+ if (event?.shiftKey) {
+ multiSelect.toggleRange(key, allPolicyKeys);
  } else {
- newSelection.add(key);
+ multiSelect.toggle(key);
  }
- setSelectedItems(newSelection);
  };
 
  const toggleAllSelection = () => {
- if (selectedItems.size === filteredPolicies.length) {
- setSelectedItems(new Set());
- } else {
- setSelectedItems(new Set(filteredPolicies.map(np => `${np.namespace}/${np.name}`)));
- }
+ if (multiSelect.isAllSelected(allPolicyKeys)) multiSelect.clearSelection();
+ else multiSelect.selectAll(allPolicyKeys);
  };
 
- const isAllSelected = filteredPolicies.length > 0 && selectedItems.size === filteredPolicies.length;
- const isSomeSelected = selectedItems.size > 0 && selectedItems.size < filteredPolicies.length;
+ const handleBulkDelete = async () => {
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await deleteResource.mutateAsync({ name, namespace: ns });
+ });
+ };
+
+ const handleBulkLabel = async (label: string) => {
+ const [labelKey, ...rest] = label.split('=');
+ const labelValue = rest.join('=');
+ return executeBulkOperation(Array.from(selectedItems), async (_key, ns, name) => {
+ await patchNetworkPolicyResource.mutateAsync({ name, namespace: ns, patch: { metadata: { labels: { [labelKey]: labelValue } } } });
+ });
+ };
+
+ const isAllSelected = multiSelect.isAllSelected(allPolicyKeys);
+ const isSomeSelected = multiSelect.isSomeSelected(allPolicyKeys);
 
  const pagination = {
  rangeLabel: totalFiltered > 0 ? `Showing ${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered}` : 'No network policies',
@@ -353,39 +368,14 @@ spec:
  }
  />
 
- {/* Bulk Actions Bar */}
- {selectedItems.size > 0 && (
- <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg"
- >
- <Badge variant="secondary" className="gap-1.5">
- <CheckSquare className="h-3.5 w-3.5" />
- {selectedItems.size} selected
- </Badge>
- <div className="flex items-center gap-2">
- <ResourceExportDropdown
- items={filteredPolicies}
- selectedKeys={selectedItems}
- getKey={(np) => `${np.namespace}/${np.name}`}
- config={networkPolicyExportConfig}
- selectionLabel={selectedItems.size > 0 ? 'Selected network policies' : 'All visible network policies'}
- onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
- triggerLabel={selectedItems.size > 0 ? `Export (${selectedItems.size})` : 'Export'}
+ <BulkActionBar
+ selectedCount={selectedItems.size}
+ resourceName="network policy"
+ resourceType="networkpolicies"
+ onClearSelection={() => multiSelect.clearSelection()}
+ onBulkDelete={handleBulkDelete}
+ onBulkLabel={handleBulkLabel}
  />
- <Button 
- variant="destructive" 
- size="sm" 
- className="gap-1.5"
- onClick={() => setDeleteDialog({ open: true, item: null, bulk: true })}
- >
- <Trash2 className="h-4 w-4" />
- Delete Selected
- </Button>
- <Button variant="ghost" size="sm" onClick={() => setSelectedItems(new Set())}>
- Clear
- </Button>
- </div>
- </div>
- )}
 
  {/* Stats Cards - Design 3.6: Total, Ingress Rules, Egress Rules, Default Deny, Unprotected Pods */}
  <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
@@ -548,7 +538,7 @@ spec:
  key={`${np.namespace}/${np.name}`}
  className={cn(resourceTableRowClassName, idx % 2 === 1 && 'bg-muted/5', isSelected && 'bg-primary/5')}
  >
- <TableCell><Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(np)} aria-label={`Select ${np.name}`} /></TableCell>
+ <TableCell onClick={(e) => { e.stopPropagation(); toggleSelection(np, e); }}><Checkbox checked={isSelected} tabIndex={-1} aria-label={`Select ${np.name}`} /></TableCell>
  <ResizableTableCell columnId="name"><Link to={`/networkpolicies/${np.namespace}/${np.name}`} className="font-medium text-primary hover:underline truncate block">{np.name}</Link></ResizableTableCell>
  <ResizableTableCell columnId="namespace"><NamespaceBadge namespace={np.namespace} /></ResizableTableCell>
  <ResizableTableCell columnId="status">
