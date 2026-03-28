@@ -7,10 +7,14 @@ interface OnboardingState {
   hasCompletedWelcome: boolean;
   /** Whether the user has completed the dashboard tour */
   hasCompletedTour: boolean;
+  /** Whether the user has completed the first-run wizard (4-step guided setup) */
+  hasCompletedFirstRun: boolean;
   /** Mark the onboarding as completed */
   completeWelcome: () => void;
   /** Mark the dashboard tour as completed */
   completeTour: () => void;
+  /** Mark the first-run wizard as completed */
+  completeFirstRun: () => void;
   /** Reset onboarding state (for Settings → "Replay Tour") */
   resetOnboarding: () => void;
 }
@@ -20,9 +24,11 @@ export const useOnboardingStore = create<OnboardingState>()(
     (set) => ({
       hasCompletedWelcome: false,
       hasCompletedTour: false,
+      hasCompletedFirstRun: false,
       completeWelcome: () => set({ hasCompletedWelcome: true }),
       completeTour: () => set({ hasCompletedTour: true }),
-      resetOnboarding: () => set({ hasCompletedWelcome: false, hasCompletedTour: false }),
+      completeFirstRun: () => set({ hasCompletedFirstRun: true }),
+      resetOnboarding: () => set({ hasCompletedWelcome: false, hasCompletedTour: false, hasCompletedFirstRun: false }),
     }),
     { name: 'kubilitics-onboarding', storage: createJSONStorage(() => safeLocalStorage) }
   )

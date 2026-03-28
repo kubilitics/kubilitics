@@ -130,7 +130,7 @@ export default function CRDsOverview() {
 
           <div className="flex-1 space-y-3">
             <Button variant="outline" asChild className="w-full h-9 border-slate-200 text-slate-600 font-medium hover:bg-slate-50 rounded-lg justify-start">
-              <Link to="/custom-resource-definitions">Browse All CRDs</Link>
+              <Link to="/customresourcedefinitions">Browse All CRDs</Link>
             </Button>
             <Button variant="outline" asChild className="w-full h-9 border-slate-200 text-slate-600 font-medium hover:bg-slate-50 rounded-lg justify-start">
               <Link to="/custom-resources">View Custom Resources</Link>

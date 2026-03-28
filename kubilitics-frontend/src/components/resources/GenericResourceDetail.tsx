@@ -48,7 +48,9 @@ import { Breadcrumbs, useDetailBreadcrumbs } from '@/components/layout/Breadcrum
 import { downloadResourceJson } from '@/lib/exportUtils';
 import { toast } from '@/components/ui/sonner';
 import { normalizeError, notifyError, notifySuccess } from '@/lib/notificationFormatter';
-import { BackendApiError } from '@/services/backendApiClient';
+import { BackendApiError, getResource } from '@/services/backendApiClient';
+import { isConflictError } from '@/lib/conflictDetection';
+import yamlParser from 'js-yaml';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -218,10 +220,24 @@ export function GenericResourceDetail<T extends KubernetesResource>({
       notifySuccess({ action: 'update', resourceType, resourceName: name, namespace });
       refetch();
     } catch (e) {
-      notifyError(e, { action: 'update', resourceType, resourceName: name, namespace });
+      // Re-throw so the editor can detect 409 conflicts and show the conflict UI.
+      // Non-conflict errors are still reported here for structured formatting.
+      if (!isConflictError(e)) {
+        notifyError(e, { action: 'update', resourceType, resourceName: name, namespace });
+      }
       throw e;
     }
   };
+
+  /** Fetch the latest YAML from the server — used by the editor for conflict resolution. */
+  const handleFetchLatestYaml = useCallback(async (): Promise<string> => {
+    if (!name) throw new Error('Resource name is required');
+    if (isBackendConfiguredFn() && clusterId) {
+      const latest = await getResource(baseUrl, clusterId, resourceType, namespace || '', name);
+      return yamlParser.dump(latest, { lineWidth: -1, noRefs: true });
+    }
+    throw new Error('Cannot fetch latest: backend not configured');
+  }, [name, namespace, resourceType, clusterId, baseUrl, isBackendConfiguredFn]);
 
   const handleTabChange = useCallback((tabId: string) => {
     setActiveTab(tabId);
@@ -322,7 +338,7 @@ export function GenericResourceDetail<T extends KubernetesResource>({
       id: 'yaml',
       label: 'YAML',
       icon: FileCode,
-      content: <YamlViewer yaml={yaml} resourceName={ctx.name} editable onSave={handleSaveYaml} />,
+      content: <YamlViewer yaml={yaml} resourceName={ctx.name} editable onSave={handleSaveYaml} onFetchLatest={handleFetchLatestYaml} />,
     },
     {
       id: 'compare',

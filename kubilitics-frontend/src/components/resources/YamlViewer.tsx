@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Copy, Download, Edit3, CheckCircle2, AlertCircle, RotateCcw, Save, X, FileCode, Search, Loader2 } from 'lucide-react';
+import { Copy, Download, Edit3, CheckCircle2, AlertCircle, AlertTriangle, RotateCcw, RefreshCw, ShieldAlert, Save, X, FileCode, Search, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -9,6 +9,7 @@ import { CodeEditor } from '@/components/editor/CodeEditor';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/sonner';
 import yamlParser from 'js-yaml';
+import { isConflictError } from '@/lib/conflictDetection';
 
 export interface YamlValidationError {
   line: number;
@@ -20,6 +21,8 @@ export interface YamlViewerProps {
   resourceName: string;
   editable?: boolean;
   onSave?: (yaml: string) => Promise<void> | void;
+  /** Fetch the latest YAML from the server (used for conflict resolution). */
+  onFetchLatest?: () => Promise<string>;
   /** Optional warning or notice (e.g. Pod immutability) shown below the description */
   warning?: React.ReactNode;
 }
@@ -57,16 +60,20 @@ function validateYaml(yaml: string): YamlValidationError[] {
   return errors;
 }
 
-export function YamlViewer({ yaml, resourceName, editable = false, onSave, warning }: YamlViewerProps) {
+export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFetchLatest, warning }: YamlViewerProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedYaml, setEditedYaml] = useState(yaml);
   const [errors, setErrors] = useState<YamlValidationError[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [conflictDetected, setConflictDetected] = useState(false);
 
   useEffect(() => {
-    if (!isEditing) setEditedYaml(yaml);
+    if (!isEditing) {
+      setEditedYaml(yaml);
+      setConflictDetected(false);
+    }
   }, [yaml, isEditing]);
 
   const handleCopy = useCallback(() => {
@@ -121,12 +128,58 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, warni
     try {
       await onSave(editedYaml);
       setIsEditing(false);
+      setConflictDetected(false);
       toast.success('Changes applied successfully');
     } catch (error) {
       console.error('Save failed:', error);
-      toast.error('Failed to apply changes');
+      if (isConflictError(error)) {
+        setConflictDetected(true);
+        toast.warning('Conflict detected — the resource was modified by another user or controller');
+      } else {
+        toast.error('Failed to apply changes');
+      }
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  /** Force-save: update the resourceVersion in the user's YAML to the server's latest, then retry. */
+  const handleForceSave = async () => {
+    if (!onSave || !onFetchLatest) return;
+
+    setIsSaving(true);
+    try {
+      const latestYaml = await onFetchLatest();
+      const forcedYaml = replaceResourceVersion(editedYaml, latestYaml);
+      await onSave(forcedYaml);
+      setIsEditing(false);
+      setConflictDetected(false);
+      toast.success('Changes force-applied successfully');
+    } catch (error) {
+      console.error('Force save failed:', error);
+      if (isConflictError(error)) {
+        toast.error('Resource was modified again. Please reload and retry.');
+      } else {
+        toast.error(error instanceof Error ? error.message : 'Force save failed');
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  /** Reload the editor with the server's latest YAML, discarding the user's changes. */
+  const handleReloadLatest = async () => {
+    if (!onFetchLatest) return;
+
+    try {
+      const latestYaml = await onFetchLatest();
+      setEditedYaml(latestYaml);
+      setErrors(validateYaml(latestYaml));
+      setConflictDetected(false);
+      setEditorKey((k) => k + 1);
+      toast.success('Reloaded latest version from server');
+    } catch {
+      toast.error('Failed to fetch latest version');
     }
   };
 
@@ -249,6 +302,55 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, warni
         </div>
       )}
 
+      {/* ── Conflict banner ── */}
+      {conflictDetected && isEditing && (
+        <div className="px-4 py-3 bg-amber-500/5 border-b border-amber-500/30 flex items-start gap-3">
+          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-amber-800 dark:text-amber-400">
+              Conflict detected
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              This resource was modified since you started editing. Your save was rejected to prevent overwriting those changes.
+            </p>
+            <div className="flex items-center gap-2 mt-2">
+              {onFetchLatest && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-[11px] gap-1 px-2"
+                    onClick={handleReloadLatest}
+                    disabled={isSaving}
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Reload Latest
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-[11px] gap-1 px-2 text-amber-700 dark:text-amber-400 border-amber-500/40 hover:bg-amber-500/10"
+                    onClick={handleForceSave}
+                    disabled={isSaving}
+                  >
+                    <ShieldAlert className="h-3 w-3" />
+                    Force Save
+                  </Button>
+                </>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[11px] px-2"
+                onClick={() => setConflictDetected(false)}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Editor area ── */}
       {isEditing ? (
         <div className="flex">
@@ -302,4 +404,27 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, warni
       )}
     </div>
   );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Replace the resourceVersion in the user's YAML with the one from the server's
+ * latest YAML so a force-save can succeed.
+ */
+function replaceResourceVersion(userYaml: string, serverYaml: string): string {
+  try {
+    const userDoc = yamlParser.load(userYaml) as Record<string, unknown>;
+    const serverDoc = yamlParser.load(serverYaml) as Record<string, unknown>;
+    if (!userDoc || !serverDoc) return userYaml;
+
+    const serverMeta = serverDoc.metadata as Record<string, unknown> | undefined;
+    const userMeta = userDoc.metadata as Record<string, unknown> | undefined;
+    if (serverMeta?.resourceVersion && userMeta) {
+      userMeta.resourceVersion = serverMeta.resourceVersion;
+    }
+    return yamlParser.dump(userDoc, { lineWidth: -1, noRefs: true });
+  } catch {
+    return userYaml;
+  }
 }

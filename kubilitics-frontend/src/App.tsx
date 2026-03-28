@@ -357,11 +357,11 @@ import { BackendStatusBanner } from "@/components/layout/BackendStatusBanner";
 import { CircuitBreakerBanner } from "@/components/loading";
 import { BackendClusterValidator } from "@/components/BackendClusterValidator";
 import { useOverviewStream } from "@/hooks/useOverviewStream";
-import { isTauri } from "@/lib/tauri";
-import { invokeWithRetry } from "@/lib/tauri";
+import { isTauri, invokeWithRetry, openExternal } from "@/lib/tauri";
 import { ThemeProvider } from "@/providers/ThemeProvider";
 import { useOnboardingStore } from "@/stores/onboardingStore";
 import { WelcomeScreen } from "@/components/onboarding/WelcomeScreen";
+import { FirstRunWizard } from "@/components/onboarding/FirstRunWizard";
 
 // Error tracking is initialized in main.tsx (before React mounts).
 
@@ -440,6 +440,46 @@ function RouteErrorBoundaryWithReset({ children }: { children: React.ReactNode }
       {children}
     </RouteErrorBoundary>
   );
+}
+
+/**
+ * TauriMenuHandler -- listens for native menu events emitted by the Rust backend
+ * (menu-refresh, menu-docs, menu-about) and performs the corresponding actions.
+ * Must be inside AppRouter because it uses useNavigate for the "about" action.
+ */
+function TauriMenuHandler() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isTauri()) return;
+
+    let cancelled = false;
+    const unlisteners: Array<() => void> = [];
+
+    (async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      if (cancelled) return;
+
+      const u1 = await listen('menu-refresh', () => {
+        window.location.reload();
+      });
+      const u2 = await listen('menu-docs', () => {
+        openExternal('https://kubilitics.dev/docs');
+      });
+      const u3 = await listen('menu-about', () => {
+        navigate('/settings');
+      });
+
+      unlisteners.push(u1, u2, u3);
+    })();
+
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((u) => u());
+    };
+  }, [navigate]);
+
+  return null;
 }
 
 /** P2-6: Listens for auth-logout (e.g. 401 from backend). Navigates to / via React Router so MemoryRouter works in Tauri. */
@@ -569,24 +609,20 @@ function KubeconfigContextWrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Gate: unified onboarding flow for first-time users (Welcome → Features → Mode Selection).
- *  P0-002-T03: Streamlined onboarding gate.
- *  Desktop (Tauri): auto-sets mode and skips welcome screen entirely.
- *  In-cluster / browser: auto-sets mode and shows lightweight welcome on first visit only.
- *  All modes: if appMode is set, user proceeds directly. */
+/** Gate: unified onboarding flow for first-time users.
+ *  Desktop (Tauri): shows the 4-step FirstRunWizard on first launch.
+ *  Browser / in-cluster: shows the FirstRunWizard if not completed, falls back to WelcomeScreen.
+ *  All modes: if onboarding is complete, user proceeds directly. */
 function OnboardingGate({ children }: { children: React.ReactNode }) {
   const hasCompletedWelcome = useOnboardingStore((s) => s.hasCompletedWelcome);
-  const completeWelcome = useOnboardingStore((s) => s.completeWelcome);
-  const appMode = useClusterStore((s) => s.appMode);
+  const hasCompletedFirstRun = useOnboardingStore((s) => s.hasCompletedFirstRun);
 
-  // Desktop (Tauri): always skip welcome — go straight to cluster connect
-  if (isTauri()) {
-    if (!hasCompletedWelcome) completeWelcome();
-    return <>{children}</>;
-  }
+  // Show the FirstRunWizard if user hasn't completed it yet
+  if (!hasCompletedFirstRun) return <FirstRunWizard />;
 
-  // Browser / in-cluster: show welcome only on very first visit
+  // Legacy fallback: if somehow welcome wasn't marked but first-run was
   if (!hasCompletedWelcome) return <WelcomeScreen />;
+
   return <>{children}</>;
 }
 
@@ -617,6 +653,7 @@ const App = () => (
         <OnboardingGate>
         <AnalyticsConsentWrapper>
           <AppRouter>
+            <TauriMenuHandler />
             <AuthLogoutListener>
               {/* KubeconfigContextWrapper must be inside AppRouter because it calls
                   useNavigate() — hooks that use Router context cannot be rendered
@@ -676,7 +713,6 @@ const App = () => (
                         <Route path="/cronjobs/:namespace/:name" element={<CronJobDetail />} />
                         <Route path="/replicationcontrollers" element={<ReplicationControllers />} />
                         <Route path="/replicationcontrollers/:namespace/:name" element={<ReplicationControllerDetail />} />
-                        <Route path="/replication-controllers/:namespace/:name" element={<ReplicationControllerDetail />} />
                         <Route path="/podtemplates" element={<PodTemplates />} />
                         <Route path="/podtemplates/:namespace/:name" element={<PodTemplateDetail />} />
                         <Route path="/controllerrevisions" element={<ControllerRevisions />} />
@@ -685,8 +721,6 @@ const App = () => (
                         <Route path="/resourceslices/:name" element={<ResourceSliceDetail />} />
                         <Route path="/deviceclasses" element={<DeviceClasses />} />
                         <Route path="/deviceclasses/:name" element={<DeviceClassDetail />} />
-                        <Route path="/device-classes" element={<DeviceClasses />} />
-                        <Route path="/device-classes/:name" element={<DeviceClassDetail />} />
                         <Route path="/ipaddresspools" element={<IPAddressPools />} />
                         <Route path="/ipaddresspools/:namespace/:name" element={<IPAddressPoolDetail />} />
                         <Route path="/bgppeers" element={<BGPPeers />} />
@@ -723,16 +757,10 @@ const App = () => (
                         <Route path="/volumeattachments/:name" element={<VolumeAttachmentDetail />} />
                         <Route path="/volumesnapshots" element={<VolumeSnapshots />} />
                         <Route path="/volumesnapshots/:namespace/:name" element={<VolumeSnapshotDetail />} />
-                        <Route path="/volume-snapshots" element={<VolumeSnapshots />} />
-                        <Route path="/volume-snapshots/:namespace/:name" element={<VolumeSnapshotDetail />} />
                         <Route path="/volumesnapshotclasses" element={<VolumeSnapshotClasses />} />
                         <Route path="/volumesnapshotclasses/:name" element={<VolumeSnapshotClassDetail />} />
-                        <Route path="/volume-snapshot-classes" element={<VolumeSnapshotClasses />} />
-                        <Route path="/volume-snapshot-classes/:name" element={<VolumeSnapshotClassDetail />} />
                         <Route path="/volumesnapshotcontents" element={<VolumeSnapshotContents />} />
                         <Route path="/volumesnapshotcontents/:name" element={<VolumeSnapshotContentDetail />} />
-                        <Route path="/volume-snapshot-contents" element={<VolumeSnapshotContents />} />
-                        <Route path="/volume-snapshot-contents/:name" element={<VolumeSnapshotContentDetail />} />
 
                         {/* Cluster */}
                         <Route path="/cluster" element={<ClusterOverview />} />
@@ -745,14 +773,12 @@ const App = () => (
                         <Route path="/events/:namespace/:name" element={<EventDetail />} />
                         <Route path="/componentstatuses" element={<ComponentStatuses />} />
                         <Route path="/componentstatuses/:name" element={<ComponentStatusDetail />} />
-                        <Route path="/component-statuses/:name" element={<ComponentStatusDetail />} />
                         <Route path="/apiservices" element={<APIServices />} />
                         <Route path="/apiservices/:name" element={<APIServiceDetail />} />
                         <Route path="/leases" element={<Leases />} />
                         <Route path="/leases/:namespace/:name" element={<LeaseDetail />} />
                         <Route path="/runtimeclasses" element={<RuntimeClasses />} />
                         <Route path="/runtimeclasses/:name" element={<RuntimeClassDetail />} />
-                        <Route path="/runtime-classes/:name" element={<RuntimeClassDetail />} />
 
                         {/* RBAC / Security */}
                         <Route path="/serviceaccounts" element={<ServiceAccounts />} />
@@ -767,12 +793,9 @@ const App = () => (
                         <Route path="/clusterrolebindings/:name" element={<ClusterRoleBindingDetail />} />
                         <Route path="/podsecuritypolicies" element={<PodSecurityPolicies />} />
                         <Route path="/podsecuritypolicies/:name" element={<PodSecurityPolicyDetail />} />
-                        <Route path="/pod-security-policies/:name" element={<PodSecurityPolicyDetail />} />
 
                         {/* Autoscaling & Resource Management */}
                         <Route path="/resources" element={<ResourcesOverview />} />
-                        <Route path="/scaling" element={<ScalingOverview />} />
-                        <Route path="/horizontalpodautoscalers" element={<HorizontalPodAutoscalers />} />
                         <Route path="/scaling" element={<ScalingOverview />} />
                         <Route path="/horizontalpodautoscalers" element={<HorizontalPodAutoscalers />} />
                         <Route path="/horizontalpodautoscalers/:namespace/:name" element={<HorizontalPodAutoscalerDetail />} />
@@ -791,10 +814,7 @@ const App = () => (
                         <Route path="/crds" element={<CRDsOverview />} />
                         <Route path="/admission" element={<AdmissionOverview />} />
                         <Route path="/customresourcedefinitions" element={<CustomResourceDefinitions />} />
-                        <Route path="/admission" element={<AdmissionOverview />} />
-                        <Route path="/customresourcedefinitions" element={<CustomResourceDefinitions />} />
                         <Route path="/customresourcedefinitions/:name" element={<CustomResourceDefinitionDetail />} />
-                        <Route path="/custom-resource-definitions/:name" element={<CustomResourceDefinitionDetail />} />
                         <Route path="/customresources" element={<CustomResources />} />
                         <Route path="/mutatingwebhooks" element={<MutatingWebhooks />} />
                         <Route path="/mutatingwebhooks/:name" element={<MutatingWebhookDetail />} />

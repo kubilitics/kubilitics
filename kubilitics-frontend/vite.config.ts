@@ -2,6 +2,9 @@ import { defineConfig, createLogger, Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import { visualizer } from "rollup-plugin-visualizer";
 import path from "path";
+import { readFileSync } from "fs";
+
+const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 
 const isTauriBuild = process.env.TAURI_BUILD === 'true';
 // Tauri sets TAURI_ENV_PLATFORM during both `cargo tauri dev` and `cargo tauri build`.
@@ -73,6 +76,7 @@ export default defineConfig(({ mode }) => ({
     // Use this instead of isTauri() / import.meta.env.DEV for URL routing decisions so
     // the correct backend URL is always used, even before __TAURI_INTERNALS__ is injected.
     __VITE_IS_TAURI_BUILD__: JSON.stringify(isTauriBuild),
+    __VITE_APP_VERSION__: JSON.stringify(pkg.version),
   },
   test: {
     include: ['src/**/*.test.{ts,tsx}'],

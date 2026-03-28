@@ -22,3 +22,8 @@ declare module 'monaco-editor/esm/vs/editor/editor.worker?worker' {
  * this constant is baked into the JS bundle at build time and is always correct.
  */
 declare const __VITE_IS_TAURI_BUILD__: boolean;
+
+/**
+ * App version from package.json, injected by vite.config.ts `define`.
+ */
+declare const __VITE_APP_VERSION__: string;

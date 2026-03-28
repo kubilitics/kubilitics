@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, RotateCcw, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Download, Palette, Keyboard, Info, Sun, Moon, Monitor, Server, Trash2, Plus, FolderKanban, Focus, Settings as SettingsIcon } from 'lucide-react';
+import { Save, RotateCcw, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Download, Palette, Keyboard, Info, Sun, Moon, Monitor, Server, Trash2, Plus, FolderKanban, Focus, Settings as SettingsIcon, Bug, Copy, Check, ExternalLink } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
 
 import { Button } from '@/components/ui/button';
@@ -1033,6 +1033,57 @@ function KeyboardShortcutsSection() {
 
 function AboutSection() {
   const platformLabel = typeof __VITE_IS_TAURI_BUILD__ !== 'undefined' && __VITE_IS_TAURI_BUILD__ ? 'Desktop (Tauri)' : 'Browser';
+  const appVersion = typeof __VITE_APP_VERSION__ !== 'undefined' ? __VITE_APP_VERSION__ : '1.0.0';
+
+  const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
+
+  const getDiagnosticInfo = () => {
+    return [
+      '## Kubilitics Bug Report',
+      '',
+      `**App Version:** ${appVersion}`,
+      `**Platform:** ${platformLabel}`,
+      `**User Agent:** ${navigator.userAgent}`,
+      `**URL:** ${window.location.href}`,
+      `**Timestamp:** ${new Date().toISOString()}`,
+      '',
+      '### Description',
+      '<!-- Describe what happened -->',
+      '',
+      '### Steps to Reproduce',
+      '1. ',
+      '',
+      '### Expected Behavior',
+      '',
+      '### Actual Behavior',
+      '',
+    ].join('\n');
+  };
+
+  const handleReportBug = () => {
+    const body = encodeURIComponent(getDiagnosticInfo());
+    const title = encodeURIComponent(`[Bug] `);
+    const url = `https://github.com/kubilitics/kubilitics/issues/new?title=${title}&body=${body}&labels=bug`;
+    window.open(url, '_blank', 'noopener');
+  };
+
+  const handleCopyDiagnostics = async () => {
+    try {
+      await navigator.clipboard.writeText(getDiagnosticInfo());
+      setDiagnosticsCopied(true);
+      setTimeout(() => setDiagnosticsCopied(false), 2000);
+    } catch {
+      // Fallback
+      const textarea = document.createElement('textarea');
+      textarea.value = getDiagnosticInfo();
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setDiagnosticsCopied(true);
+      setTimeout(() => setDiagnosticsCopied(false), 2000);
+    }
+  };
 
   return (
     <Card className="rounded-2xl overflow-hidden shadow-md border-border/50 dark:bg-slate-900/60">
@@ -1059,7 +1110,7 @@ function AboutSection() {
               <h3 className="text-lg font-bold tracking-tight">Kubilitics</h3>
               <div className="flex items-center gap-2 mt-1">
                 <Badge className="bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/50 dark:text-indigo-300 dark:border-indigo-800 text-[10px] px-2 py-0.5 h-5 rounded-md font-bold">
-                  v1.0.0
+                  v{appVersion}
                 </Badge>
                 <Badge variant="outline" className="text-[10px] px-2 py-0.5 h-5 rounded-md">
                   {platformLabel}
@@ -1076,7 +1127,7 @@ function AboutSection() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-5">
           {[
             { label: 'Product', value: 'Kubilitics' },
-            { label: 'Version', value: '1.0.0' },
+            { label: 'Version', value: appVersion },
             { label: 'Platform', value: platformLabel },
             { label: 'License', value: 'Proprietary' },
           ].map(({ label, value }) => (
@@ -1085,6 +1136,33 @@ function AboutSection() {
               <p className="text-xs font-semibold mt-1 truncate">{value}</p>
             </div>
           ))}
+        </div>
+
+        {/* Report a Bug */}
+        <div className="mt-5 pt-4 border-t border-border/30">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Report a Bug</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button variant="outline" size="sm" onClick={handleReportBug} className="gap-2">
+              <Bug className="h-3.5 w-3.5" />
+              Open GitHub Issue
+              <ExternalLink className="h-3 w-3 opacity-50" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleCopyDiagnostics} className="gap-2">
+              {diagnosticsCopied ? (
+                <>
+                  <Check className="h-3.5 w-3.5" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy Diagnostics
+                </>
+              )}
+            </Button>
+          </div>
         </div>
 
         {/* Description footer */}

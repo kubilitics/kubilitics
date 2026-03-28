@@ -31,6 +31,28 @@ export interface ErrorEntry {
 /** Max errors retained in the in-memory ring buffer. */
 const RING_BUFFER_SIZE = 50;
 
+/** App version baked in at build time from package.json via vite.config.ts define. */
+function getAppVersion(): string {
+    try {
+        return typeof __VITE_APP_VERSION__ !== 'undefined' ? __VITE_APP_VERSION__ : 'unknown';
+    } catch {
+        return 'unknown';
+    }
+}
+
+/**
+ * Shape of a crash report that can be POSTed or copied to clipboard.
+ */
+export interface CrashReport {
+    appVersion: string;
+    platform: string;
+    userAgent: string;
+    url: string;
+    timestamp: string;
+    triggeringError: { name: string; message: string; stack?: string };
+    recentErrors: ReadonlyArray<ErrorEntry>;
+}
+
 /**
  * Singleton class for tracking frontend errors.
  *
@@ -194,6 +216,63 @@ class ErrorTrackerService {
      */
     public getRecentErrors(): ReadonlyArray<ErrorEntry> {
         return [...this.ringBuffer];
+    }
+
+    /**
+     * Return the app version baked in at build time.
+     */
+    public getAppVersion(): string {
+        return getAppVersion();
+    }
+
+    /**
+     * Whether a remote error-tracking endpoint is configured.
+     */
+    public hasRemoteEndpoint(): boolean {
+        return !!this.remoteUrl;
+    }
+
+    /**
+     * Build a crash report payload from the current state and a triggering error.
+     */
+    public buildCrashReport(error: Error): CrashReport {
+        const platformLabel =
+            typeof __VITE_IS_TAURI_BUILD__ !== 'undefined' && __VITE_IS_TAURI_BUILD__
+                ? 'Desktop (Tauri)'
+                : 'Browser';
+
+        return {
+            appVersion: getAppVersion(),
+            platform: platformLabel,
+            userAgent: navigator.userAgent,
+            url: window.location.href,
+            timestamp: new Date().toISOString(),
+            triggeringError: {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+            },
+            recentErrors: this.getRecentErrors(),
+        };
+    }
+
+    /**
+     * Submit a crash report to the remote endpoint.
+     * Returns true if the report was sent, false if no endpoint is configured.
+     */
+    public async submitCrashReport(report: CrashReport): Promise<boolean> {
+        if (!this.remoteUrl) return false;
+        try {
+            await fetch(this.remoteUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'crash_report', ...report }),
+                keepalive: true,
+            });
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     // ── Internal helpers ───────────────────────────────────────────────

@@ -14,6 +14,9 @@ import {
   Minus,
   Plus,
   GitCompare,
+  AlertTriangle,
+  RefreshCw,
+  ShieldAlert,
 } from 'lucide-react';
 import {
   Dialog,
@@ -31,6 +34,7 @@ import { CodeEditor } from '@/components/editor/CodeEditor';
 import { toast } from '@/components/ui/sonner';
 import yamlParser from 'js-yaml';
 import type * as monacoType from 'monaco-editor';
+import { isConflictError } from '@/lib/conflictDetection';
 
 import { type YamlValidationError } from './YamlViewer';
 
@@ -42,6 +46,16 @@ export interface YamlEditorDialogProps {
   namespace?: string;
   initialYaml: string;
   onSave: (yaml: string) => Promise<void> | void;
+  /** Fetch the latest YAML from the server (used for conflict diff view). */
+  onFetchLatest?: () => Promise<string>;
+}
+
+/** Conflict state tracked when a 409 is detected. */
+interface ConflictState {
+  /** The server's current YAML (fetched after conflict). */
+  serverYaml: string;
+  /** The user's YAML that failed to save. */
+  userYaml: string;
 }
 
 function validateYaml(yaml: string): YamlValidationError[] {
@@ -107,6 +121,7 @@ export function YamlEditorDialog({
   namespace,
   initialYaml,
   onSave,
+  onFetchLatest,
 }: YamlEditorDialogProps) {
   const [yaml, setYaml] = useState(initialYaml);
   const [errors, setErrors] = useState<YamlValidationError[]>([]);
@@ -115,6 +130,7 @@ export function YamlEditorDialog({
   const [showManagedFields, setShowManagedFields] = useState(false);
   const [fontSize, setFontSize] = useState<'small' | 'medium' | 'large'>('small');
   const [showDiff, setShowDiff] = useState(false);
+  const [conflict, setConflict] = useState<ConflictState | null>(null);
   const editorRef = useRef<monacoType.editor.IStandaloneCodeEditor | null>(null);
 
   // Strip managed fields once (not per-render) — avoids load/dump round-trip on every keystroke
@@ -127,6 +143,7 @@ export function YamlEditorDialog({
       setErrors([]);
       setHasChanges(false);
       setShowDiff(false);
+      setConflict(null);
     }
   }, [open, initialYaml, showManagedFields, strippedInitialYaml]);
 
@@ -146,13 +163,71 @@ export function YamlEditorDialog({
     setIsSaving(true);
     try {
       await onSave(yaml);
+      setConflict(null);
       onOpenChange(false);
       toast.success('Changes applied successfully');
     } catch (error) {
       console.error('Save failed:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to apply changes');
+
+      if (isConflictError(error)) {
+        // 409 Conflict — the resource was modified since the user started editing.
+        // Try to fetch the latest version to show a diff.
+        let serverYaml = '';
+        if (onFetchLatest) {
+          try {
+            serverYaml = await onFetchLatest();
+          } catch {
+            // If we can't fetch latest, still show the conflict banner without diff
+          }
+        }
+        setConflict({ serverYaml, userYaml: yaml });
+        toast.warning('Conflict detected — the resource was modified by another user or controller');
+      } else {
+        toast.error(error instanceof Error ? error.message : 'Failed to apply changes');
+      }
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  /** Force-save: update the resourceVersion in the user's YAML to the server's latest, then retry. */
+  const handleForceSave = async () => {
+    if (!conflict) return;
+
+    setIsSaving(true);
+    try {
+      // Replace the resourceVersion in the user's YAML with the server's latest
+      const forcedYaml = replaceResourceVersion(yaml, conflict.serverYaml);
+      await onSave(forcedYaml);
+      setConflict(null);
+      onOpenChange(false);
+      toast.success('Changes force-applied successfully');
+    } catch (error) {
+      console.error('Force save failed:', error);
+      if (isConflictError(error)) {
+        toast.error('Resource was modified again. Please reload and retry.');
+      } else {
+        toast.error(error instanceof Error ? error.message : 'Force save failed');
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  /** Reload the editor with the server's latest YAML, discarding the user's changes. */
+  const handleReloadLatest = async () => {
+    if (!onFetchLatest) return;
+
+    try {
+      const latestYaml = await onFetchLatest();
+      const processed = showManagedFields ? latestYaml : stripManagedFields(latestYaml);
+      setYaml(processed);
+      setHasChanges(false);
+      setErrors(validateYaml(processed));
+      setConflict(null);
+      toast.success('Reloaded latest version from server');
+    } catch (error) {
+      toast.error('Failed to fetch latest version');
     }
   };
 
@@ -336,10 +411,74 @@ export function YamlEditorDialog({
             </div>
           </div>
 
+          {/* Conflict Banner */}
+          {conflict && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-400">
+                  Conflict detected
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  This resource was modified since you started editing. Your save was rejected to prevent overwriting those changes.
+                </p>
+                <div className="flex items-center gap-2 mt-2">
+                  {conflict.serverYaml && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1.5"
+                      onClick={() => { setShowDiff(false); setConflict({ ...conflict }); }}
+                      disabled={!conflict.serverYaml}
+                    >
+                      <GitCompare className="h-3.5 w-3.5" />
+                      View Server Changes
+                    </Button>
+                  )}
+                  {onFetchLatest && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1.5"
+                      onClick={handleReloadLatest}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Reload Latest
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1.5 text-amber-700 dark:text-amber-400 border-amber-500/40 hover:bg-amber-500/10"
+                    onClick={handleForceSave}
+                    disabled={isSaving}
+                  >
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    Force Save
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setConflict(null)}
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Editor */}
           <div className="flex-1 flex gap-4 min-h-0">
             <div className="flex-1 min-h-0">
-              {showDiff ? (
+              {conflict?.serverYaml ? (
+                <ConflictDiffPanel
+                  serverYaml={stripManagedFields(conflict.serverYaml)}
+                  userYaml={conflict.userYaml}
+                  fontSize={fontSize}
+                />
+              ) : showDiff ? (
                 <YamlDiffPanel original={baseline} modified={yaml} fontSize={fontSize} />
               ) : (
                 <CodeEditor
@@ -354,7 +493,7 @@ export function YamlEditorDialog({
             </div>
 
             {/* Validation Panel */}
-            {errors.length > 0 && (
+            {errors.length > 0 && !conflict && (
               <div className="w-64 shrink-0">
                 <div className="h-full rounded-lg border border-border bg-muted/30 p-3">
                   <h4 className="font-medium text-sm mb-3 flex items-center gap-2">
@@ -386,7 +525,7 @@ export function YamlEditorDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!isValid || !hasChanges || isSaving}>
+          <Button onClick={handleSave} disabled={!isValid || !hasChanges || isSaving || !!conflict}>
             {isSaving ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -403,6 +542,29 @@ export function YamlEditorDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Replace the resourceVersion in the user's YAML with the one from the server's
+ * latest YAML so a force-save can succeed.
+ */
+function replaceResourceVersion(userYaml: string, serverYaml: string): string {
+  try {
+    const userDoc = yamlParser.load(userYaml) as Record<string, unknown>;
+    const serverDoc = yamlParser.load(serverYaml) as Record<string, unknown>;
+    if (!userDoc || !serverDoc) return userYaml;
+
+    const serverMeta = serverDoc.metadata as Record<string, unknown> | undefined;
+    const userMeta = userDoc.metadata as Record<string, unknown> | undefined;
+    if (serverMeta?.resourceVersion && userMeta) {
+      userMeta.resourceVersion = serverMeta.resourceVersion;
+    }
+    return yamlParser.dump(userDoc, { lineWidth: -1, noRefs: true });
+  } catch {
+    return userYaml;
+  }
 }
 
 // ── Diff Panel ────────────────────────────────────────────────────────────────
@@ -470,5 +632,80 @@ function YamlDiffPanel({
       ref={containerRef}
       className="h-full w-full rounded-lg border border-border overflow-hidden bg-background"
     />
+  );
+}
+
+// ── Conflict Diff Panel ──────────────────────────────────────────────────────
+
+/**
+ * Side-by-side diff showing the server's current version (left) vs the user's
+ * attempted changes (right). Used when a 409 conflict is detected.
+ */
+function ConflictDiffPanel({
+  serverYaml,
+  userYaml,
+  fontSize,
+}: {
+  serverYaml: string;
+  userYaml: string;
+  fontSize: 'small' | 'medium' | 'large';
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<monacoType.editor.IDiffEditor | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+
+    async function initDiff() {
+      const monaco = await import('monaco-editor');
+      if (disposed || !containerRef.current) return;
+
+      const editor = monaco.editor.createDiffEditor(containerRef.current, {
+        readOnly: true,
+        automaticLayout: true,
+        fontSize: diffFontSizeMap[fontSize],
+        fontFamily:
+          '"JetBrains Mono", "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        lineHeight: 22,
+        minimap: { enabled: false },
+        scrollBeyondLastLine: false,
+        renderSideBySide: true,
+        padding: { top: 12, bottom: 12 },
+        folding: true,
+        lineNumbers: 'on',
+        glyphMargin: false,
+        renderOverviewRuler: false,
+        originalEditable: false,
+      });
+
+      const originalModel = monaco.editor.createModel(serverYaml, 'yaml');
+      const modifiedModel = monaco.editor.createModel(userYaml, 'yaml');
+      editor.setModel({ original: originalModel, modified: modifiedModel });
+      editorRef.current = editor;
+    }
+
+    initDiff();
+
+    return () => {
+      disposed = true;
+      const model = editorRef.current?.getModel();
+      editorRef.current?.dispose();
+      model?.original?.dispose();
+      model?.modified?.dispose();
+      editorRef.current = null;
+    };
+  }, [serverYaml, userYaml, fontSize]);
+
+  return (
+    <div className="h-full flex flex-col gap-1">
+      <div className="flex items-center gap-4 px-2 text-xs text-muted-foreground">
+        <span className="flex-1 text-center font-medium">Server Version (current)</span>
+        <span className="flex-1 text-center font-medium">Your Changes (rejected)</span>
+      </div>
+      <div
+        ref={containerRef}
+        className="flex-1 rounded-lg border border-amber-500/30 overflow-hidden bg-background"
+      />
+    </div>
   );
 }

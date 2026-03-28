@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertCircle, RefreshCw, Home } from 'lucide-react';
 import { ErrorTracker } from '@/lib/errorTracker';
+import { CrashReportDialog } from '@/components/CrashReportDialog';
 
 interface Props {
     children: ReactNode;
@@ -54,46 +55,12 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     };
 
     render() {
-        if (this.state.hasError) {
+        if (this.state.hasError && this.state.error) {
             return (
-                <div className="min-h-screen w-full flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
-                    <Card className="w-full max-w-md shadow-lg border-red-200 dark:border-red-900">
-                        <CardHeader className="text-center pb-2">
-                            <div className="mx-auto w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mb-4">
-                                <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400" />
-                            </div>
-                            <CardTitle className="text-xl text-red-700 dark:text-red-400">
-                                Something went wrong
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="text-center space-y-4">
-                            <p className="text-muted-foreground text-sm">
-                                We encountered an unexpected error. Ideally, you shouldn't see this.
-                            </p>
-
-                            {this.state.error && (
-                                <div className="text-left bg-slate-100 dark:bg-slate-800 p-3 rounded-md overflow-auto max-h-48 text-xs font-mono text-red-900 dark:text-red-300 border border-slate-200 dark:border-slate-700 space-y-1">
-                                    <div className="font-bold">{this.state.error.name}: {this.state.error.message || '(no message)'}</div>
-                                    {this.state.error.stack && (
-                                        <div className="text-slate-600 dark:text-slate-400 text-[10px] whitespace-pre-wrap">{this.state.error.stack.split('\n').slice(1, 5).join('\n')}</div>
-                                    )}
-                                </div>
-                            )}
-
-                            {this.state.errorId && (
-                                <p className="text-xs text-slate-400">
-                                    Error ID: <span className="font-mono select-all">{this.state.errorId}</span>
-                                </p>
-                            )}
-                        </CardContent>
-                        <CardFooter className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
-                            <Button onClick={this.handleReload} variant="default" className="w-full sm:w-auto">
-                                <RefreshCw className="mr-2 h-4 w-4" />
-                                Reload App
-                            </Button>
-                        </CardFooter>
-                    </Card>
-                </div>
+                <CrashReportDialog
+                    error={this.state.error}
+                    errorId={this.state.errorId}
+                />
             );
         }
 

@@ -68,9 +68,12 @@ const LEVEL_PILLS: Array<{ key: string | null; label: string }> = [
   { key: 'debug', label: 'Debug' },
 ];
 
-const TAIL_OPTIONS = [50, 100, 250, 500, 1000, 2000];
+const TAIL_OPTIONS = [50, 100, 250, 500, 1000, 2000, 5000, 10000];
 const CONTEXT_OPTIONS = [0, 2, 3, 5, 10];
 const EMPTY_LOGS: LogEntry[] = [];
+
+/** Hard cap: keep only the last N parsed lines in memory to prevent OOM on huge pods. */
+const MAX_LOG_LINES = 10_000;
 
 // Exponential backoff config for auto-reconnect
 const RECONNECT_BASE_MS = 1000;
@@ -98,9 +101,13 @@ function getLevelPillClass(key: string | null, isActive: boolean, isDark: boolea
   return map[key] ?? (isDark ? 'bg-white/15 text-white border border-white/25' : 'bg-black/10 text-black border border-black/20');
 }
 
-function getLevelCount(logs: LogEntry[], key: string | null): number {
-  if (key === null) return logs.length;
-  return logs.filter(l => l.level === key).length;
+/** Pre-computed level counts to avoid O(n) scans per pill on every render. */
+function computeLevelCounts(logs: LogEntry[]): Record<string, number> {
+  const counts: Record<string, number> = { info: 0, warn: 0, error: 0, debug: 0 };
+  for (const l of logs) {
+    counts[l.level] = (counts[l.level] ?? 0) + 1;
+  }
+  return counts;
 }
 
 function formatTimestamp(ts: string): string {
@@ -590,16 +597,30 @@ export function LogViewer({
     };
   }, [error, isStreaming, reconnectAttempt, refetch]);
 
-  // ── Parsed logs ──────────────────────────────────────────────────────────
-  const parsedLogs = useMemo(() => {
-    if (!rawLogs) return EMPTY_LOGS;
-    return parseRawLogs(rawLogs);
+  // ── Parsed logs (capped to MAX_LOG_LINES to prevent OOM) ────────────────
+  const { parsedLogs, truncatedCount } = useMemo(() => {
+    if (!rawLogs) return { parsedLogs: EMPTY_LOGS, truncatedCount: 0 };
+    const all = parseRawLogs(rawLogs);
+    if (all.length > MAX_LOG_LINES) {
+      return {
+        parsedLogs: all.slice(all.length - MAX_LOG_LINES),
+        truncatedCount: all.length - MAX_LOG_LINES,
+      };
+    }
+    return { parsedLogs: all, truncatedCount: 0 };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawLogs, dataUpdatedAt]);
 
   const isLive = isConnected && !!podName && !!namespace;
-  const displayLogs = isLive ? parsedLogs : (propLogs ?? EMPTY_LOGS);
-  const hasJsonLogs = displayLogs.some(l => l.isJson);
+  const displayLogs = useMemo(() => {
+    if (!isLive) return propLogs ?? EMPTY_LOGS;
+    return parsedLogs;
+  }, [isLive, parsedLogs, propLogs]);
+
+  const hasJsonLogs = useMemo(() => displayLogs.some(l => l.isJson), [displayLogs]);
+
+  // ── Pre-computed level counts (single pass, avoids O(n) per pill) ────────
+  const levelCounts = useMemo(() => computeLevelCounts(displayLogs), [displayLogs]);
 
   // ── Filtered container list (hide terminated) ────────────────────────────
   const visibleContainers = useMemo(() => {
@@ -636,9 +657,19 @@ export function LogViewer({
     return expandWithContext(matchSet, displayLogs.length, contextLines);
   }, [displayLogs, selectedLevel, searchRegex, searchQuery, regexError, inverseFilter, contextLines]);
 
-  const filteredLogs = useMemo(() => {
-    if (!searchQuery.trim() && !selectedLevel) return displayLogs;
-    return displayLogs.filter((_, i) => filteredIndices.has(i));
+  const { filteredLogs, filteredOriginalIndices } = useMemo(() => {
+    if (!searchQuery.trim() && !selectedLevel) {
+      return { filteredLogs: displayLogs, filteredOriginalIndices: null };
+    }
+    const logs: LogEntry[] = [];
+    const origIndices: number[] = [];
+    displayLogs.forEach((log, i) => {
+      if (filteredIndices.has(i)) {
+        logs.push(log);
+        origIndices.push(i);
+      }
+    });
+    return { filteredLogs: logs, filteredOriginalIndices: origIndices };
   }, [displayLogs, filteredIndices, searchQuery, selectedLevel]);
 
   // Context lines: track which indices are context (not a direct match)
@@ -852,9 +883,9 @@ export function LogViewer({
               )}
             >
               {label}
-              {key !== null && getLevelCount(displayLogs, key) > 0 && (
+              {key !== null && (levelCounts[key] ?? 0) > 0 && (
                 <span className="ml-1 opacity-50 tabular-nums text-[10px]">
-                  {getLevelCount(displayLogs, key)}
+                  {levelCounts[key]}
                 </span>
               )}
             </button>
@@ -951,8 +982,10 @@ export function LogViewer({
           >
             {virtualizer.getVirtualItems().map((virtualRow) => {
               const log = filteredLogs[virtualRow.index];
-              // Find the original index in displayLogs to determine if context row
-              const originalIndex = displayLogs.indexOf(log);
+              // Use pre-computed original index (O(1)) instead of indexOf (O(n))
+              const originalIndex = filteredOriginalIndices
+                ? filteredOriginalIndices[virtualRow.index]
+                : virtualRow.index;
               const isContext = contextLines > 0 && searchQuery.trim()
                 ? !directMatchIndices.has(originalIndex)
                 : false;
@@ -1016,6 +1049,9 @@ export function LogViewer({
           {filteredLogs.length !== displayLogs.length
             ? `${filteredLogs.length} of ${displayLogs.length} lines`
             : `${displayLogs.length} lines`}
+          {truncatedCount > 0 && (
+            <span className="text-amber-400"> ({truncatedCount.toLocaleString()} older lines dropped)</span>
+          )}
           {` \u00B7 tail ${tailLines}`}
         </span>
       </div>
