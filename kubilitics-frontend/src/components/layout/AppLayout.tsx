@@ -20,6 +20,7 @@ import { useMemoryMonitor } from '@/hooks/useMemoryMonitor';
 import { ProductionBanner } from './ProductionBanner';
 import { KeyboardShortcutsOverlay } from '@/components/KeyboardShortcutsOverlay';
 import { useKeyboardShortcuts, type KeyboardShortcut } from '@/hooks/useKeyboardShortcuts';
+import { UpdateChecker } from '@/components/UpdateChecker';
 
 export function AppLayout() {
   useRecentlyVisited();
@@ -82,6 +83,7 @@ export function AppLayout() {
         Skip to main content
       </a>
       <RouteAnnouncer />
+      <UpdateChecker />
       <ProductionBanner />
       <Header />
       {isDemo && (

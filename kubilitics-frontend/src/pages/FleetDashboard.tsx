@@ -7,6 +7,7 @@
  * Shows all connected clusters as cards in a responsive grid with
  * aggregate metrics, health-coded status badges, and click-to-navigate.
  */
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -20,16 +21,37 @@ import {
   ArrowRight,
   Unplug,
   Globe,
+  Star,
+  Tag,
+  MoreVertical,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/ui/status-badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useFleetOverview } from '@/hooks/useFleetOverview';
 import type { FleetCluster, FleetAggregates } from '@/hooks/useFleetOverview';
 import { useBackendConfigStore } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
+import {
+  useClusterOrganizationStore,
+  ENV_DOT_COLORS,
+  ENV_LABELS,
+  ENV_BADGE_CLASSES,
+  GROUP_COLORS,
+  type EnvironmentTag,
+} from '@/stores/clusterOrganizationStore';
 import { useQueryClient } from '@tanstack/react-query';
 
 // ─── Animation variants ──────────────────────────────────────────────────────
@@ -171,6 +193,19 @@ const statusConfig = {
 
 function ClusterCard({ cluster, onClick }: { cluster: FleetCluster; onClick: () => void }) {
   const cfg = statusConfig[cluster.status];
+  const favorites = useClusterOrganizationStore((s) => s.favorites);
+  const envTags = useClusterOrganizationStore((s) => s.envTags);
+  const groups = useClusterOrganizationStore((s) => s.groups);
+  const toggleFavorite = useClusterOrganizationStore((s) => s.toggleFavorite);
+  const setEnvTag = useClusterOrganizationStore((s) => s.setEnvTag);
+  const addToGroup = useClusterOrganizationStore((s) => s.addToGroup);
+  const removeFromGroup = useClusterOrganizationStore((s) => s.removeFromGroup);
+
+  const isFav = favorites.includes(cluster.id);
+  const envTag = envTags[cluster.id] as EnvironmentTag | undefined;
+
+  // Find which groups this cluster belongs to
+  const memberGroups = Object.entries(groups).filter(([, g]) => g.clusterIds.includes(cluster.id));
 
   return (
     <Card
@@ -192,17 +227,130 @@ function ClusterCard({ cluster, onClick }: { cluster: FleetCluster; onClick: () 
       }}
     >
       <CardContent className="p-5">
-        {/* Header: Name + Status */}
+        {/* Header: Name + Status + Actions */}
         <div className="flex items-start justify-between gap-2 mb-4">
           <div className="min-w-0 flex-1">
-            <h3 className="font-semibold text-foreground truncate text-sm">
-              {cluster.name}
-            </h3>
-            <p className="text-xs text-muted-foreground truncate mt-0.5">
-              {cluster.context}
-            </p>
+            <div className="flex items-center gap-2">
+              {envTag && (
+                <span className="block w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: ENV_DOT_COLORS[envTag] }} />
+              )}
+              <h3 className="font-semibold text-foreground truncate text-sm">
+                {cluster.name}
+              </h3>
+            </div>
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              <p className="text-xs text-muted-foreground truncate">
+                {cluster.context}
+              </p>
+              {envTag && (
+                <span className={cn('text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border', ENV_BADGE_CLASSES[envTag])}>
+                  {ENV_LABELS[envTag]}
+                </span>
+              )}
+              {memberGroups.map(([gid, g]) => (
+                <span key={gid} className="text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-current/20" style={{ color: g.color, backgroundColor: `${g.color}15` }}>
+                  {g.name}
+                </span>
+              ))}
+            </div>
           </div>
-          <StatusBadge variant={cfg.variant} label={cfg.label} size="sm" dot />
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Favorite star */}
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleFavorite(cluster.id); }}
+              className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              aria-label={isFav ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <Star className={cn('h-4 w-4', isFav ? 'fill-amber-400 text-amber-400' : 'text-slate-300 dark:text-slate-600 hover:text-amber-400')} />
+            </button>
+            {/* Context menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  onClick={(e) => e.stopPropagation()}
+                  className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  aria-label="Cluster actions"
+                >
+                  <MoreVertical className="h-4 w-4 text-slate-400" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                {/* Environment tagging */}
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="gap-2">
+                    <Tag className="h-3.5 w-3.5" />
+                    <span>Environment</span>
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {(['production', 'staging', 'development', 'testing'] as EnvironmentTag[]).map((env) => (
+                      <DropdownMenuItem
+                        key={env}
+                        onClick={(e) => { e.stopPropagation(); setEnvTag(cluster.id, envTag === env ? null : env); }}
+                        className="gap-2"
+                      >
+                        <span className="block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: ENV_DOT_COLORS[env] }} />
+                        <span className="flex-1">{ENV_LABELS[env]}</span>
+                        {envTag === env && <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
+                      </DropdownMenuItem>
+                    ))}
+                    {envTag && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={(e) => { e.stopPropagation(); setEnvTag(cluster.id, null); }}
+                          className="gap-2 text-muted-foreground"
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                          <span>Clear tag</span>
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+
+                {/* Group assignment */}
+                {Object.keys(groups).length > 0 && (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="gap-2">
+                      <Layers className="h-3.5 w-3.5" />
+                      <span>Groups</span>
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {Object.entries(groups).map(([gid, g]) => {
+                        const isMember = g.clusterIds.includes(cluster.id);
+                        return (
+                          <DropdownMenuItem
+                            key={gid}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isMember) removeFromGroup(gid, cluster.id);
+                              else addToGroup(gid, cluster.id);
+                            }}
+                            className="gap-2"
+                          >
+                            <span className="block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: g.color }} />
+                            <span className="flex-1">{g.name}</span>
+                            {isMember && <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                )}
+
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={(e) => { e.stopPropagation(); toggleFavorite(cluster.id); }}
+                  className="gap-2"
+                >
+                  <Star className={cn('h-3.5 w-3.5', isFav ? 'fill-amber-400 text-amber-400' : '')} />
+                  <span>{isFav ? 'Remove from favorites' : 'Add to favorites'}</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <StatusBadge variant={cfg.variant} label={cfg.label} size="sm" dot />
+          </div>
         </div>
 
         {/* Metrics Grid */}
@@ -309,6 +457,19 @@ export default function FleetDashboard() {
   const setCurrentClusterId = useBackendConfigStore((s) => s.setCurrentClusterId);
   const { setActiveCluster, clusters: storeClusters } = useClusterStore();
   const { clusters, aggregates, isLoading, isError, error } = useFleetOverview();
+  const [newGroupName, setNewGroupName] = useState('');
+  const [showGroupForm, setShowGroupForm] = useState(false);
+  const addGroup = useClusterOrganizationStore((s) => s.addGroup);
+  const groups = useClusterOrganizationStore((s) => s.groups);
+
+  const handleCreateGroup = () => {
+    if (!newGroupName.trim()) return;
+    const id = `group-${Date.now()}`;
+    const colorIndex = Object.keys(groups).length % GROUP_COLORS.length;
+    addGroup(id, newGroupName.trim(), GROUP_COLORS[colorIndex]);
+    setNewGroupName('');
+    setShowGroupForm(false);
+  };
 
   function handleClusterClick(cluster: FleetCluster) {
     // Update BOTH stores so header, topology exports, and all downstream
@@ -351,14 +512,40 @@ export default function FleetDashboard() {
               </p>
             </div>
           </div>
-          <div
-            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/40"
-            role="status"
-            aria-label="Auto-refreshing every 30 seconds"
-            aria-live="polite"
-          >
-            <Activity className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" aria-hidden />
-            <span className="text-xs font-medium text-blue-700 dark:text-blue-400">Auto-refresh</span>
+          <div className="flex items-center gap-2">
+            {showGroupForm ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreateGroup(); if (e.key === 'Escape') setShowGroupForm(false); }}
+                  placeholder="Group name..."
+                  className="h-8 px-3 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  autoFocus
+                />
+                <Button size="sm" variant="default" onClick={handleCreateGroup} disabled={!newGroupName.trim()}>
+                  Create
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setShowGroupForm(false)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button size="sm" variant="outline" onClick={() => setShowGroupForm(true)} className="gap-1.5">
+                <Layers className="h-3.5 w-3.5" />
+                New Group
+              </Button>
+            )}
+            <div
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/40"
+              role="status"
+              aria-label="Auto-refreshing every 30 seconds"
+              aria-live="polite"
+            >
+              <Activity className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" aria-hidden />
+              <span className="text-xs font-medium text-blue-700 dark:text-blue-400">Auto-refresh</span>
+            </div>
           </div>
         </motion.div>
 

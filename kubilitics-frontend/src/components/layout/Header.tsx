@@ -6,7 +6,7 @@
  * - Search resources: always-visible trigger in header (core feature)
  * - All controls sized for clarity; labels visible; Notifications and Profile are real controls
  */
-import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -18,11 +18,21 @@ import {
   LogOut,
   Plus,
   Unplug,
+  Star,
+  Layers,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/BrandLogo';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { isTauri } from '@/lib/tauri';
 import { useClusterStore, getClusterAppearance, getEnvBadgeLabel, getEnvBadgeClasses } from '@/stores/clusterStore';
+import {
+  useClusterOrganizationStore,
+  fuzzyMatch,
+  ENV_DOT_COLORS,
+  ENV_LABELS,
+  ENV_BADGE_CLASSES,
+  type EnvironmentTag,
+} from '@/stores/clusterOrganizationStore';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
@@ -130,7 +140,16 @@ export function Header() {
   const [wizardOpen, setWizardOpen] = useState<'deployment' | 'service' | 'configmap' | 'secret' | null>(null);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [prodConfirmCluster, setProdConfirmCluster] = useState<import('@/stores/clusterStore').Cluster | null>(null);
+  const [clusterSearch, setClusterSearch] = useState('');
+  const clusterSearchRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
+
+  // Cluster organization
+  const orgFavorites = useClusterOrganizationStore((s) => s.favorites);
+  const orgEnvTags = useClusterOrganizationStore((s) => s.envTags);
+  const orgGroups = useClusterOrganizationStore((s) => s.groups);
+  const toggleFavorite = useClusterOrganizationStore((s) => s.toggleFavorite);
 
   // Week 7: Cluster appearance — re-read on change events
   const [appearanceTick, setAppearanceTick] = useState(0);
@@ -145,6 +164,68 @@ export function Header() {
   const activeDisplayName = activeAppearance?.alias || activeCluster?.name;
   const activeEnvLabel = activeAppearance ? getEnvBadgeLabel(activeAppearance.environment) : null;
   const activeEnvClasses = activeAppearance ? getEnvBadgeClasses(activeAppearance.environment) : '';
+
+  // ─── Cluster switching with production confirmation ──────────────────
+  const doSwitchCluster = useCallback((cluster: import('@/stores/clusterStore').Cluster) => {
+    const isSwitching = cluster.id !== (currentClusterId ?? activeCluster?.id);
+    setActiveCluster(cluster);
+    if (!isDemo) setCurrentClusterId(cluster.id);
+    if (isSwitching) {
+      queryClient.removeQueries({ queryKey: ['k8s'] });
+      queryClient.removeQueries({ queryKey: ['backend', 'resources'] });
+      queryClient.removeQueries({ queryKey: ['backend', 'resource'] });
+      queryClient.removeQueries({ queryKey: ['backend', 'events'] });
+      navigate('/dashboard');
+    }
+  }, [currentClusterId, activeCluster?.id, setActiveCluster, isDemo, setCurrentClusterId, queryClient, navigate]);
+
+  const handleClusterSelect = useCallback((cluster: import('@/stores/clusterStore').Cluster) => {
+    const env = orgEnvTags[cluster.id];
+    if (env === 'production' && cluster.id !== activeCluster?.id) {
+      setProdConfirmCluster(cluster);
+    } else {
+      doSwitchCluster(cluster);
+    }
+  }, [orgEnvTags, activeCluster?.id, doSwitchCluster]);
+
+  // ─── Filtered + grouped clusters for dropdown ───────────────────────
+  const organizedClusters = useMemo(() => {
+    // Filter by search
+    let filtered = clusters;
+    if (clusterSearch.trim()) {
+      filtered = clusters
+        .map((c) => {
+          const appearance = getClusterAppearance(c.id);
+          const displayName = appearance.alias || c.name;
+          const env = orgEnvTags[c.id] || '';
+          const target = `${displayName} ${c.region} ${c.provider} ${env}`;
+          const result = fuzzyMatch(clusterSearch.trim(), target);
+          return { cluster: c, ...result };
+        })
+        .filter((r) => r.matches)
+        .sort((a, b) => b.score - a.score)
+        .map((r) => r.cluster);
+    }
+
+    const favoriteSet = new Set(orgFavorites);
+    const favoriteClusters = filtered.filter((c) => favoriteSet.has(c.id));
+    const nonFavorites = filtered.filter((c) => !favoriteSet.has(c.id));
+
+    // Group non-favorites by environment tag
+    const byEnv: Record<string, typeof clusters> = {};
+    const ungrouped: typeof clusters = [];
+
+    for (const c of nonFavorites) {
+      const env = orgEnvTags[c.id];
+      if (env) {
+        (byEnv[env] ??= []).push(c);
+      } else {
+        ungrouped.push(c);
+      }
+    }
+
+    return { favoriteClusters, byEnv, ungrouped, total: filtered.length };
+  }, [clusters, clusterSearch, orgFavorites, orgEnvTags]);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -291,9 +372,9 @@ export function Header() {
             {/* Right group: pushed to the edge with even spacing between items */}
             <div className="flex items-center gap-2 lg:gap-4 shrink-0 ml-auto">
 
-                {/* Cluster selector — single status dot (unified cluster + backend) */}
+                {/* Cluster selector — with favorites, env badges, fuzzy search, production confirmation */}
                 {activeCluster && (
-                  <DropdownMenu>
+                  <DropdownMenu onOpenChange={(open) => { if (open) { setClusterSearch(''); setTimeout(() => clusterSearchRef.current?.focus(), 50); } }}>
                     <DropdownMenuTrigger asChild>
                       <button className={cn(BTN, 'shrink-0 max-w-[160px] lg:max-w-[300px] group press-effect')} aria-label="Select cluster">
                         <span
@@ -301,81 +382,220 @@ export function Header() {
                           style={{
                             backgroundColor: backendStatus === 'error' ? '#ef4444' :
                               backendStatus === 'warning' ? '#f59e0b' :
+                              orgEnvTags[activeCluster.id] ? ENV_DOT_COLORS[orgEnvTags[activeCluster.id]] :
                               (activeAppearance?.color ?? undefined),
                           }}
                         />
                         <span className="truncate text-base font-bold tracking-tight">{activeDisplayName}</span>
-                        {activeEnvLabel && (
-                          <span className={cn('text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border shrink-0', activeEnvClasses)}>
-                            {activeEnvLabel}
+                        {(orgEnvTags[activeCluster.id] || activeEnvLabel) && (
+                          <span className={cn(
+                            'text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border shrink-0',
+                            orgEnvTags[activeCluster.id]
+                              ? ENV_BADGE_CLASSES[orgEnvTags[activeCluster.id]]
+                              : activeEnvClasses
+                          )}>
+                            {orgEnvTags[activeCluster.id] ? ENV_LABELS[orgEnvTags[activeCluster.id]] : activeEnvLabel}
                           </span>
                         )}
                         <ChevronDown className="h-5 w-5 text-slate-400 group-hover:text-slate-600 transition-colors shrink-0" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-[320px] rounded-[2.5rem] p-4 border-none shadow-2xl mt-2 animate-in fade-in zoom-in-95 duration-200 elevation-2">
-                      <div className="px-4 py-3 mb-3">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Compute Context</p>
+                    <DropdownMenuContent align="end" className="w-[360px] rounded-[2.5rem] p-4 border-none shadow-2xl mt-2 animate-in fade-in zoom-in-95 duration-200 elevation-2 max-h-[70vh] overflow-hidden flex flex-col">
+                      {/* Search input */}
+                      <div className="px-2 pb-3">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                          <input
+                            ref={clusterSearchRef}
+                            type="text"
+                            value={clusterSearch}
+                            onChange={(e) => setClusterSearch(e.target.value)}
+                            placeholder="Search clusters..."
+                            className="w-full h-9 pl-9 pr-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                            onKeyDown={(e) => e.stopPropagation()}
+                          />
+                        </div>
                       </div>
-                      {clusters.map((cluster) => {
-                        const clusterAppearance = getClusterAppearance(cluster.id);
-                        const clusterEnvLabel = getEnvBadgeLabel(clusterAppearance.environment);
-                        const clusterEnvClasses = getEnvBadgeClasses(clusterAppearance.environment);
-                        const clusterDisplayName = clusterAppearance.alias || cluster.name;
-                        return (
-                        <DropdownMenuItem
-                          key={cluster.id}
-                          onClick={() => {
-                            const isSwitching = cluster.id !== (currentClusterId ?? activeCluster?.id);
-                            setActiveCluster(cluster);
-                            if (!isDemo) setCurrentClusterId(cluster.id);
-                            // When switching clusters: clear stale queries and navigate to
-                            // dashboard so we don't stay on a detail page referencing the
-                            // old cluster's resources (which would 404).
-                            if (isSwitching) {
-                              queryClient.removeQueries({ queryKey: ['k8s'] });
-                              queryClient.removeQueries({ queryKey: ['backend', 'resources'] });
-                              queryClient.removeQueries({ queryKey: ['backend', 'resource'] });
-                              queryClient.removeQueries({ queryKey: ['backend', 'events'] });
-                              navigate('/dashboard');
-                            }
-                          }}
-                          className="flex items-center gap-4 py-4 px-4 cursor-pointer rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group"
-                        >
-                          <div className="relative shrink-0">
-                            <div className="absolute inset-0 blur-[4px] opacity-40 rounded-full" style={{ backgroundColor: clusterAppearance.color }} />
-                            <div className="relative w-3 h-3 rounded-full border-2 border-white" style={{ backgroundColor: clusterAppearance.color }} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-bold text-slate-800 dark:text-slate-200 tracking-tight flex items-center gap-2 flex-wrap">
-                              {clusterDisplayName}
-                              {clusterEnvLabel && (
-                                <span className={cn('text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border', clusterEnvClasses)}>
-                                  {clusterEnvLabel}
-                                </span>
-                              )}
-                              {cluster.provider && (
-                                <span className="text-[9px] px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-black uppercase tracking-widest rounded-full">
-                                  {cluster.provider.replace(/-/g, ' ')}
-                                </span>
-                              )}
+
+                      <div className="overflow-y-auto flex-1 min-h-0">
+                        {/* Favorites section */}
+                        {organizedClusters.favoriteClusters.length > 0 && (
+                          <>
+                            <div className="px-4 py-2">
+                              <p className="text-[10px] font-black text-amber-500 uppercase tracking-[0.2em] flex items-center gap-1.5">
+                                <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                                Favorites
+                              </p>
                             </div>
-                            <div className="text-[11px] font-bold text-slate-400 dark:text-slate-500 mt-0.5">{cluster.region} · {cluster.version}</div>
-                          </div>
-                          {cluster.id === activeCluster.id && (
-                            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
-                              <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                            {organizedClusters.favoriteClusters.map((cluster) => {
+                              const ca = getClusterAppearance(cluster.id);
+                              const envTag = orgEnvTags[cluster.id];
+                              const displayName = ca.alias || cluster.name;
+                              return (
+                                <DropdownMenuItem
+                                  key={cluster.id}
+                                  onClick={() => handleClusterSelect(cluster)}
+                                  className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group"
+                                >
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); toggleFavorite(cluster.id); }}
+                                    className="shrink-0 p-0.5 hover:scale-110 transition-transform"
+                                    aria-label="Remove from favorites"
+                                  >
+                                    <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                                  </button>
+                                  <span
+                                    className="block w-2.5 h-2.5 rounded-full shrink-0"
+                                    style={{ backgroundColor: envTag ? ENV_DOT_COLORS[envTag] : ca.color }}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-bold text-slate-800 dark:text-slate-200 tracking-tight flex items-center gap-2 flex-wrap">
+                                      {displayName}
+                                      {envTag && (
+                                        <span className={cn('text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border', ENV_BADGE_CLASSES[envTag])}>
+                                          {ENV_LABELS[envTag]}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[11px] font-bold text-slate-400 dark:text-slate-500 mt-0.5">{cluster.region} · {cluster.provider}</div>
+                                  </div>
+                                  {cluster.id === activeCluster.id && (
+                                    <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
+                                      <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                                    </div>
+                                  )}
+                                </DropdownMenuItem>
+                              );
+                            })}
+                            <DropdownMenuSeparator className="my-2 bg-slate-100/60 dark:bg-slate-700/60" />
+                          </>
+                        )}
+
+                        {/* Environment-grouped sections */}
+                        {(['production', 'staging', 'development', 'testing'] as EnvironmentTag[]).map((env) => {
+                          const envClusters = organizedClusters.byEnv[env];
+                          if (!envClusters?.length) return null;
+                          return (
+                            <div key={env}>
+                              <div className="px-4 py-2">
+                                <p className="text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-1.5" style={{ color: ENV_DOT_COLORS[env] }}>
+                                  <span className="block w-2 h-2 rounded-full" style={{ backgroundColor: ENV_DOT_COLORS[env] }} />
+                                  {ENV_LABELS[env]}
+                                </p>
+                              </div>
+                              {envClusters.map((cluster) => {
+                                const ca = getClusterAppearance(cluster.id);
+                                const displayName = ca.alias || cluster.name;
+                                const isFav = orgFavorites.includes(cluster.id);
+                                return (
+                                  <DropdownMenuItem
+                                    key={cluster.id}
+                                    onClick={() => handleClusterSelect(cluster)}
+                                    className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group"
+                                  >
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); toggleFavorite(cluster.id); }}
+                                      className="shrink-0 p-0.5 hover:scale-110 transition-transform"
+                                      aria-label={isFav ? 'Remove from favorites' : 'Add to favorites'}
+                                    >
+                                      <Star className={cn('h-3.5 w-3.5', isFav ? 'fill-amber-400 text-amber-400' : 'text-slate-300 dark:text-slate-600 hover:text-amber-400')} />
+                                    </button>
+                                    <span
+                                      className="block w-2.5 h-2.5 rounded-full shrink-0"
+                                      style={{ backgroundColor: ENV_DOT_COLORS[env] }}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-sm font-bold text-slate-800 dark:text-slate-200 tracking-tight flex items-center gap-2 flex-wrap">
+                                        {displayName}
+                                        <span className={cn('text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border', ENV_BADGE_CLASSES[env])}>
+                                          {ENV_LABELS[env]}
+                                        </span>
+                                      </div>
+                                      <div className="text-[11px] font-bold text-slate-400 dark:text-slate-500 mt-0.5">{cluster.region} · {cluster.provider}</div>
+                                    </div>
+                                    {cluster.id === activeCluster.id && (
+                                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
+                                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                                      </div>
+                                    )}
+                                  </DropdownMenuItem>
+                                );
+                              })}
                             </div>
-                          )}
-                        </DropdownMenuItem>
-                        );
-                      })}
+                          );
+                        })}
+
+                        {/* Ungrouped clusters */}
+                        {organizedClusters.ungrouped.length > 0 && (
+                          <>
+                            {Object.keys(organizedClusters.byEnv).length > 0 && (
+                              <div className="px-4 py-2">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Other Clusters</p>
+                              </div>
+                            )}
+                            {organizedClusters.ungrouped.map((cluster) => {
+                              const ca = getClusterAppearance(cluster.id);
+                              const displayName = ca.alias || cluster.name;
+                              const isFav = orgFavorites.includes(cluster.id);
+                              return (
+                                <DropdownMenuItem
+                                  key={cluster.id}
+                                  onClick={() => handleClusterSelect(cluster)}
+                                  className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group"
+                                >
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); toggleFavorite(cluster.id); }}
+                                    className="shrink-0 p-0.5 hover:scale-110 transition-transform"
+                                    aria-label={isFav ? 'Remove from favorites' : 'Add to favorites'}
+                                  >
+                                    <Star className={cn('h-3.5 w-3.5', isFav ? 'fill-amber-400 text-amber-400' : 'text-slate-300 dark:text-slate-600 hover:text-amber-400')} />
+                                  </button>
+                                  <div className="relative shrink-0">
+                                    <div className="relative w-2.5 h-2.5 rounded-full" style={{ backgroundColor: ca.color }} />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-bold text-slate-800 dark:text-slate-200 tracking-tight flex items-center gap-2 flex-wrap">
+                                      {displayName}
+                                      {cluster.provider && (
+                                        <span className="text-[9px] px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-black uppercase tracking-widest rounded-full">
+                                          {cluster.provider.replace(/-/g, ' ')}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[11px] font-bold text-slate-400 dark:text-slate-500 mt-0.5">{cluster.region} · {cluster.version}</div>
+                                  </div>
+                                  {cluster.id === activeCluster.id && (
+                                    <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
+                                      <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                                    </div>
+                                  )}
+                                </DropdownMenuItem>
+                              );
+                            })}
+                          </>
+                        )}
+
+                        {/* No results */}
+                        {organizedClusters.total === 0 && clusterSearch.trim() && (
+                          <div className="px-4 py-6 text-center">
+                            <p className="text-sm text-slate-400 dark:text-slate-500">No clusters match "{clusterSearch}"</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Footer actions */}
                       <DropdownMenuSeparator className="my-2 bg-slate-100/60 dark:bg-slate-700/60" />
-                      <DropdownMenuItem onClick={() => navigate('/connect?addCluster=true')} className="gap-3 cursor-pointer py-4 px-4 rounded-2xl text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                        <div className="h-9 w-9 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                          <Plus className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                      <DropdownMenuItem onClick={() => navigate('/connect?addCluster=true')} className="gap-3 cursor-pointer py-3 px-4 rounded-2xl text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                        <div className="h-8 w-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                          <Plus className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                         </div>
                         <span className="text-sm font-bold tracking-tight">Add Cluster</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate('/fleet')} className="gap-3 cursor-pointer py-3 px-4 rounded-2xl text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                        <div className="h-8 w-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                          <Layers className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
+                        </div>
+                        <span className="text-sm font-bold tracking-tight">Manage Clusters</span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -513,6 +733,33 @@ export function Header() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {isLoggingOut ? 'Signing out...' : 'Sign Out'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Production cluster confirmation dialog */}
+      <AlertDialog open={!!prodConfirmCluster} onOpenChange={(open) => { if (!open) setProdConfirmCluster(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <span className="block w-3 h-3 rounded-full bg-red-500" />
+              Production Cluster
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You are switching to <span className="font-semibold text-foreground">{prodConfirmCluster?.name}</span>, which is tagged as a <span className="font-semibold text-red-600 dark:text-red-400">production</span> cluster. Continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (prodConfirmCluster) doSwitchCluster(prodConfirmCluster);
+                setProdConfirmCluster(null);
+              }}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              Switch to Production
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
