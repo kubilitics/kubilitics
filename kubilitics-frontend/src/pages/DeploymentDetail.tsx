@@ -516,6 +516,7 @@ export default function DeploymentDetail() {
       id: 'pods',
       label: 'Pods',
       icon: Box,
+      badge: (ctx) => ctx.resource?.status?.readyReplicas ?? ctx.resource?.spec?.replicas ?? undefined,
       render: (ctx) => {
         const deployment = ctx.resource;
         const deploymentName = deployment?.metadata?.name ?? name;

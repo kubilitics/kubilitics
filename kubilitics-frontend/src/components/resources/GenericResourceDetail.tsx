@@ -78,7 +78,7 @@ export interface CustomTab {
   id: string;
   label: string;
   icon?: LucideIcon;
-  badge?: number | string;
+  badge?: number | string | ((ctx: ResourceContext<any>) => number | string | undefined);
   /**
    * Render function receiving the loaded resource and helpers so the
    * consumer can build kind-specific UI without re-fetching anything.
@@ -528,6 +528,7 @@ export function GenericResourceDetail<T extends KubernetesResource>({
       id: 'events',
       label: 'Events',
       icon: Clock,
+      badge: events?.length || undefined,
       content: <EventsSection events={events} />,
     },
     {
@@ -601,7 +602,7 @@ export function GenericResourceDetail<T extends KubernetesResource>({
     id: ct.id,
     label: ct.label,
     icon: ct.icon,
-    badge: ct.badge,
+    badge: typeof ct.badge === 'function' ? ct.badge(ctx) : ct.badge,
     content: ct.render(ctx),
   }));
 

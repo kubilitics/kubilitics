@@ -489,6 +489,7 @@ export default function PodDetail() {
       id: 'containers',
       label: 'Containers',
       icon: Box,
+      badge: (ctx) => ctx.resource?.spec?.containers?.length || undefined,
       render: (ctx) => {
         const pod = ctx.resource;
         const podMetrics = (() => {
