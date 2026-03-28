@@ -536,7 +536,11 @@ function usePodLogStream(
     (async () => {
       try {
         const response = await fetch(url, { signal: controller.signal, headers });
-        if (!response.ok || !response.body) return;
+        if (!response.ok) {
+          console.warn(`[MultiPodLogViewer] Log fetch failed for ${pod.name}: ${response.status} ${response.statusText}`);
+          return;
+        }
+        if (!response.body) return;
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -583,7 +587,7 @@ function usePodLogStream(
         }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
-        // Silently handle stream errors — pod may have terminated
+        console.warn(`[MultiPodLogViewer] Stream error for ${pod.name}/${container}:`, err);
       }
     })();
 
@@ -592,7 +596,7 @@ function usePodLogStream(
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, clusterId, pod.name, pod.namespace, container, tailLines, follow]);
+  }, [enabled, useBackend, clusterId, config.isConnected, config.apiUrl, pod.name, pod.namespace, container, tailLines, follow]);
 }
 
 // ─── MultiPodLogViewer ─────────────────────────────────────────────────────────
