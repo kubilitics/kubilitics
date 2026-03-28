@@ -504,6 +504,7 @@ function usePodLogStream(
   const activeRef = useRef(false);
 
   useEffect(() => {
+    console.log('[MultiPodLog]', { enabled, useBackend, isConnected, clusterId, backendBaseUrl, podName: pod.name, podNs: pod.namespace, container });
     if (!enabled || !pod.name || !pod.namespace) return;
     // Need either backend or direct K8s connection
     if (!useBackend && !isConnected) return;
@@ -524,6 +525,7 @@ function usePodLogStream(
         })
       : `${backendBaseUrl}/api/v1/clusters/${clusterId || 'default'}/pods/${pod.namespace}/${pod.name}/logs?container=${container || ''}&tail=${tailLines}&follow=${follow}`;
 
+    console.log('[MultiPodLog] Fetching:', url);
     (async () => {
       try {
         const response = await fetch(url, { signal: controller.signal });
