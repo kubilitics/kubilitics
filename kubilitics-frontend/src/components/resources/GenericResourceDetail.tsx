@@ -413,22 +413,6 @@ export function GenericResourceDetail<T extends KubernetesResource>({
   // --- Header actions ---
   const defaultHeaderActions: ResourceAction[] = [
     { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml, className: 'press-effect' },
-    {
-      label: 'Edit',
-      icon: Edit,
-      variant: 'outline',
-      onClick: () => {
-        handleTabChange('yaml');
-        // Signal the YAML viewer to enter edit mode via URL param
-        setSearchParams((prev) => {
-          const next = new URLSearchParams(prev);
-          next.set('tab', 'yaml');
-          next.set('edit', '1');
-          return next;
-        });
-      },
-      className: 'press-effect',
-    },
     { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true), className: 'press-effect' },
   ];
 
