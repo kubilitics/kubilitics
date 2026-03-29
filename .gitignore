@@ -43,6 +43,24 @@ dist/
 !.env.example
 !.env.template
 
+# ── Internal / Sensitive documents (NEVER commit) ──────────────────────────
+# Strategy, investor decks, pricing, competitive analysis
+docs/enterprise-plans/
+docs/internal/
+*-STRATEGY.md
+*-UNICORN*.md
+*ENHANCEMENT-PLAN*.md
+Lightning-Talk*.md
+TASKS.md
+*READINESS_REPORT*.md
+*GAP_ANALYSIS*.md
+*COMPLETION_REPORT*.md
+
+# Confidential design documents
+DESIGN_SYSTEM.md
+DESIGN_CRITIQUE.md
+DESIGN_SYSTEM_*.md
+
 # ── Credentials and secrets (NEVER commit) ─────────────────────────────────
 *.pem
 *.key
