@@ -22,7 +22,7 @@ env:
   KCLI_VERSION: 'v0.1.0'
   # Use pre-built tauri-cli from GitHub releases instead of compiling from source.
   # This saves 8-11 minutes per desktop runner.
-  TAURI_CLI_VERSION: '2.5.0'
+  TAURI_CLI_VERSION: '2.10.1'
 
 jobs:
   # ── Gate: version consistency + CI status ────────────────────────────────
@@ -185,15 +185,31 @@ jobs:
           workspaces: kubilitics-desktop/src-tauri -> target
           cache-on-failure: true
 
-      # ── Tauri CLI: use cargo-binstall for pre-built binary ─────────────
-      # `cargo install tauri-cli` compiles from source (8-11 min cold cache).
-      # `cargo binstall` downloads pre-built binary from crate's GitHub releases (<30s).
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
+      # ── Tauri CLI: download pre-built binary directly ──────────────────
+      # `cargo install tauri-cli` compiles from source (8-11 min).
+      # Direct download from Tauri GitHub release: <10 seconds.
       - name: Install Tauri CLI (pre-built)
         shell: bash
-        run: cargo binstall tauri-cli --version "^2.0" --no-confirm --log-level info
+        run: |
+          TAG="tauri-cli-v${{ env.TAURI_CLI_VERSION }}"
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            ASSET="cargo-tauri-aarch64-apple-darwin.zip"
+          elif [ "${{ matrix.os }}" == "windows-latest" ]; then
+            ASSET="cargo-tauri-x86_64-pc-windows-msvc.zip"
+          else
+            ASSET="cargo-tauri-x86_64-unknown-linux-gnu.tgz"
+          fi
+          echo "Downloading $ASSET from $TAG..."
+          URL="https://github.com/tauri-apps/tauri/releases/download/${TAG}/${ASSET}"
+          curl -fsSL "$URL" -o /tmp/tauri-cli-archive
+          if [[ "$ASSET" == *.zip ]]; then
+            unzip -o /tmp/tauri-cli-archive -d /tmp/tauri-cli
+            cp /tmp/tauri-cli/cargo-tauri* "$HOME/.cargo/bin/"
+          else
+            tar xzf /tmp/tauri-cli-archive -C "$HOME/.cargo/bin/"
+          fi
+          chmod +x "$HOME/.cargo/bin/cargo-tauri"*
+          cargo tauri --version
 
       # ── Linux system deps ───────────────────────────────────────────────
       - name: Install GTK / WebKit deps (Ubuntu only)
