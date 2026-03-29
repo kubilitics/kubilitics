@@ -344,7 +344,7 @@ jobs:
       - name: Notarize macOS DMG
         if: matrix.os == 'macos-latest'
         continue-on-error: true
-        timeout-minutes: 15
+        timeout-minutes: 25
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -355,7 +355,7 @@ jobs:
             echo "Notarizing $DMG..."
             xcrun notarytool submit "$DMG" \
               --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" \
-              --wait --timeout 10m
+              --wait --timeout 20m
             xcrun stapler staple "$DMG"
             echo "Notarization and stapling complete"
           else
