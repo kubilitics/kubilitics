@@ -71,12 +71,20 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 // canonical Kubernetes kind (singular, PascalCase).
 func normalizeKind(kind string) string {
 	switch kind {
+	case "Pod", "pod", "pods":
+		return "Pod"
 	case "Deployment", "deployment", "deployments":
 		return "Deployment"
+	case "ReplicaSet", "replicaset", "replicasets":
+		return "ReplicaSet"
 	case "StatefulSet", "statefulset", "statefulsets":
 		return "StatefulSet"
 	case "DaemonSet", "daemonset", "daemonsets":
 		return "DaemonSet"
+	case "Job", "job", "jobs":
+		return "Job"
+	case "CronJob", "cronjob", "cronjobs":
+		return "CronJob"
 	case "Service", "service", "services":
 		return "Service"
 	case "ConfigMap", "configmap", "configmaps":
@@ -89,6 +97,16 @@ func normalizeKind(kind string) string {
 		return "NetworkPolicy"
 	case "PersistentVolumeClaim", "persistentvolumeclaim", "persistentvolumeclaims", "pvc":
 		return "PersistentVolumeClaim"
+	case "PersistentVolume", "persistentvolume", "persistentvolumes", "pv":
+		return "PersistentVolume"
+	case "Node", "node", "nodes":
+		return "Node"
+	case "Namespace", "namespace", "namespaces":
+		return "Namespace"
+	case "ServiceAccount", "serviceaccount", "serviceaccounts":
+		return "ServiceAccount"
+	case "HorizontalPodAutoscaler", "horizontalpodautoscaler", "horizontalpodautoscalers", "hpa":
+		return "HorizontalPodAutoscaler"
 	default:
 		return ""
 	}

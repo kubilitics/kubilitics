@@ -329,6 +329,10 @@ jobs:
         working-directory: kubilitics-desktop/src-tauri
         env:
           TAURI_SKIP_DEVSERVER_CHECK: "true"
+          # Tauri uses these for automatic notarization during build
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
         run: |
           [ -d "../dist" ] && [ -n "$(ls -A ../dist)" ] || { echo "❌ dist missing"; exit 1; }
@@ -339,21 +343,22 @@ jobs:
           fi
           CI=true cargo tauri build --target universal-apple-darwin --bundles app,dmg --config "$CONFIG"
 
-      - name: Notarize macOS app
-        if: matrix.os == 'macos-latest'
+      - name: Notarize macOS DMG
+        if: matrix.os == 'macos-latest' && secrets.APPLE_ID != ''
         continue-on-error: true
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ]; then
-            xcrun notarytool submit \
-              kubilitics-desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Kubilitics.app \
+          DMG=$(find kubilitics-desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg -name "*.dmg" | head -1)
+          if [ -n "$DMG" ] && [ -n "$APPLE_ID" ]; then
+            echo "Notarizing $DMG..."
+            xcrun notarytool submit "$DMG" \
               --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" \
-              --wait || echo "Notarization skipped or failed"
-            xcrun stapler staple \
-              kubilitics-desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Kubilitics.app || true
+              --wait
+            xcrun stapler staple "$DMG"
+            echo "Notarization complete"
           fi
 
       - name: Build Tauri app (Windows)
