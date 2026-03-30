@@ -14,8 +14,8 @@ export interface SimulationControlsProps {
   onFitView: () => void;
   onExport: () => void;
   isSimulating: boolean;
-  currentWave: number;
-  totalWaves: number;
+  /** Number of resources affected so far */
+  affectedCount: number;
 }
 
 const btnSecondary = cn(
@@ -33,10 +33,8 @@ export function SimulationControls({
   onFitView,
   onExport,
   isSimulating,
-  currentWave,
-  totalWaves,
+  affectedCount,
 }: SimulationControlsProps) {
-  const progress = totalWaves > 0 ? ((currentWave + 1) / totalWaves) * 100 : 0;
 
   return (
     <motion.div
@@ -63,20 +61,10 @@ export function SimulationControls({
           </button>
         ) : (
           <>
-            {/* Progress bar + wave counter */}
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-              <div className="flex-1 max-w-xs">
-                <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
-                  <motion.div
-                    className="h-full rounded-full bg-red-500"
-                    initial={{ width: 0 }}
-                    animate={{ width: `${progress}%` }}
-                    transition={{ duration: 0.4, ease: 'easeOut' }}
-                  />
-                </div>
-              </div>
-              <span className="text-sm font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap tabular-nums">
-                Wave {currentWave + 1} of {totalWaves}
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-600 dark:text-red-400">
+                <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                {affectedCount} resource{affectedCount !== 1 ? 's' : ''} affected
               </span>
             </div>
             <button

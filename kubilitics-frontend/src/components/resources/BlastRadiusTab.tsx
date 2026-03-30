@@ -324,8 +324,7 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
         onFitView={handleFitView}
         onExport={handleExport}
         isSimulating={isSimulating}
-        currentWave={currentWave}
-        totalWaves={totalWaves}
+        affectedCount={simulationAffectedNodes ? simulationAffectedNodes.size - 1 : 0}
       />
 
       {/* 4. Topology Canvas */}
