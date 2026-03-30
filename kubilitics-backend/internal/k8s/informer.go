@@ -531,7 +531,7 @@ func (im *InformerManager) setupPersistentVolumeInformer() {
 func (im *InformerManager) setupPersistentVolumeClaimInformer() {
 	informer := im.factory.Core().V1().PersistentVolumeClaims().Informer()
 	im.stores["PersistentVolumeClaim"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["PersistentVolumeClaim"]; ok {
 				handler("ADDED", obj)
@@ -554,7 +554,7 @@ func (im *InformerManager) setupPersistentVolumeClaimInformer() {
 func (im *InformerManager) setupServiceAccountInformer() {
 	informer := im.factory.Core().V1().ServiceAccounts().Informer()
 	im.stores["ServiceAccount"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["ServiceAccount"]; ok {
 				handler("ADDED", obj)
@@ -577,7 +577,7 @@ func (im *InformerManager) setupServiceAccountInformer() {
 func (im *InformerManager) setupEndpointsInformer() {
 	informer := im.factory.Core().V1().Endpoints().Informer()
 	im.stores["Endpoints"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Endpoints"]; ok {
 				handler("ADDED", obj)
@@ -600,7 +600,7 @@ func (im *InformerManager) setupEndpointsInformer() {
 func (im *InformerManager) setupEventInformer() {
 	informer := im.factory.Core().V1().Events().Informer()
 	im.stores["Event"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Event"]; ok {
 				handler("ADDED", obj)
@@ -623,7 +623,7 @@ func (im *InformerManager) setupEventInformer() {
 func (im *InformerManager) setupIngressInformer() {
 	informer := im.factory.Networking().V1().Ingresses().Informer()
 	im.stores["Ingress"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Ingress"]; ok {
 				handler("ADDED", obj)
@@ -646,7 +646,7 @@ func (im *InformerManager) setupIngressInformer() {
 func (im *InformerManager) setupIngressClassInformer() {
 	informer := im.factory.Networking().V1().IngressClasses().Informer()
 	im.stores["IngressClass"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["IngressClass"]; ok {
 				handler("ADDED", obj)
@@ -669,7 +669,7 @@ func (im *InformerManager) setupIngressClassInformer() {
 func (im *InformerManager) setupNetworkPolicyInformer() {
 	informer := im.factory.Networking().V1().NetworkPolicies().Informer()
 	im.stores["NetworkPolicy"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["NetworkPolicy"]; ok {
 				handler("ADDED", obj)
@@ -692,7 +692,7 @@ func (im *InformerManager) setupNetworkPolicyInformer() {
 func (im *InformerManager) setupRoleInformer() {
 	informer := im.factory.Rbac().V1().Roles().Informer()
 	im.stores["Role"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Role"]; ok {
 				handler("ADDED", obj)
@@ -715,7 +715,7 @@ func (im *InformerManager) setupRoleInformer() {
 func (im *InformerManager) setupRoleBindingInformer() {
 	informer := im.factory.Rbac().V1().RoleBindings().Informer()
 	im.stores["RoleBinding"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["RoleBinding"]; ok {
 				handler("ADDED", obj)
@@ -738,7 +738,7 @@ func (im *InformerManager) setupRoleBindingInformer() {
 func (im *InformerManager) setupClusterRoleInformer() {
 	informer := im.factory.Rbac().V1().ClusterRoles().Informer()
 	im.stores["ClusterRole"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["ClusterRole"]; ok {
 				handler("ADDED", obj)
@@ -761,7 +761,7 @@ func (im *InformerManager) setupClusterRoleInformer() {
 func (im *InformerManager) setupClusterRoleBindingInformer() {
 	informer := im.factory.Rbac().V1().ClusterRoleBindings().Informer()
 	im.stores["ClusterRoleBinding"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["ClusterRoleBinding"]; ok {
 				handler("ADDED", obj)
@@ -784,7 +784,7 @@ func (im *InformerManager) setupClusterRoleBindingInformer() {
 func (im *InformerManager) setupStorageClassInformer() {
 	informer := im.factory.Storage().V1().StorageClasses().Informer()
 	im.stores["StorageClass"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["StorageClass"]; ok {
 				handler("ADDED", obj)
@@ -807,7 +807,7 @@ func (im *InformerManager) setupStorageClassInformer() {
 func (im *InformerManager) setupHorizontalPodAutoscalerInformer() {
 	informer := im.factory.Autoscaling().V2().HorizontalPodAutoscalers().Informer()
 	im.stores["HorizontalPodAutoscaler"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["HorizontalPodAutoscaler"]; ok {
 				handler("ADDED", obj)
@@ -830,7 +830,7 @@ func (im *InformerManager) setupHorizontalPodAutoscalerInformer() {
 func (im *InformerManager) setupPodDisruptionBudgetInformer() {
 	informer := im.factory.Policy().V1().PodDisruptionBudgets().Informer()
 	im.stores["PodDisruptionBudget"] = informer.GetStore()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["PodDisruptionBudget"]; ok {
 				handler("ADDED", obj)
