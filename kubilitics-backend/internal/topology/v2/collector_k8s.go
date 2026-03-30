@@ -3,6 +3,7 @@ package v2
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,6 +23,13 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 		nsOpts = metav1.NamespaceAll
 	}
 	bundle := &ResourceBundle{}
+	var failMu sync.Mutex
+	recordFailure := func(resourceType string, err error) {
+		slog.Warn("topology v2 collect "+resourceType, "error", err)
+		failMu.Lock()
+		bundle.FailedResources = append(bundle.FailedResources, resourceType)
+		failMu.Unlock()
+	}
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
@@ -30,7 +38,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 			listOpts := metav1.ListOptions{Limit: 500, Continue: continueToken}
 			list, err := cs.CoreV1().Pods(nsOpts).List(gctx, listOpts)
 			if err != nil {
-				slog.Warn("topology v2 collect pods", "error", err)
+				recordFailure("pods", err)
 				return nil
 			}
 			bundle.Pods = append(bundle.Pods, list.Items...)
@@ -44,7 +52,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.AppsV1().Deployments(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect deployments", "error", err)
+			recordFailure("deployments", err)
 			return nil
 		}
 		bundle.Deployments = list.Items
@@ -53,7 +61,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.AppsV1().ReplicaSets(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect replicasets", "error", err)
+			recordFailure("replicasets", err)
 			return nil
 		}
 		bundle.ReplicaSets = list.Items
@@ -62,7 +70,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.AppsV1().StatefulSets(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect statefulsets", "error", err)
+			recordFailure("statefulsets", err)
 			return nil
 		}
 		bundle.StatefulSets = list.Items
@@ -71,7 +79,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.AppsV1().DaemonSets(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect daemonsets", "error", err)
+			recordFailure("daemonsets", err)
 			return nil
 		}
 		bundle.DaemonSets = list.Items
@@ -80,7 +88,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.BatchV1().Jobs(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect jobs", "error", err)
+			recordFailure("jobs", err)
 			return nil
 		}
 		bundle.Jobs = list.Items
@@ -89,7 +97,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.BatchV1().CronJobs(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect cronjobs", "error", err)
+			recordFailure("cronjobs", err)
 			return nil
 		}
 		bundle.CronJobs = list.Items
@@ -98,7 +106,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.CoreV1().Services(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect services", "error", err)
+			recordFailure("services", err)
 			return nil
 		}
 		bundle.Services = list.Items
@@ -107,7 +115,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.CoreV1().Endpoints(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect endpoints", "error", err)
+			recordFailure("endpoints", err)
 			return nil
 		}
 		bundle.Endpoints = list.Items
@@ -116,7 +124,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.DiscoveryV1().EndpointSlices(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect endpointslices", "error", err)
+			recordFailure("endpointslices", err)
 			return nil
 		}
 		bundle.EndpointSlices = list.Items
@@ -125,7 +133,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.NetworkingV1().Ingresses(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect ingresses", "error", err)
+			recordFailure("ingresses", err)
 			return nil
 		}
 		bundle.Ingresses = list.Items
@@ -134,7 +142,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.NetworkingV1().IngressClasses().List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect ingressclasses", "error", err)
+			recordFailure("ingressclasses", err)
 			return nil
 		}
 		bundle.IngressClasses = list.Items
@@ -143,7 +151,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.CoreV1().ConfigMaps(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect configmaps", "error", err)
+			recordFailure("configmaps", err)
 			return nil
 		}
 		bundle.ConfigMaps = list.Items
@@ -152,7 +160,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.CoreV1().Secrets(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect secrets", "error", err)
+			recordFailure("secrets", err)
 			return nil
 		}
 		bundle.Secrets = list.Items
@@ -161,7 +169,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.CoreV1().PersistentVolumeClaims(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect pvcs", "error", err)
+			recordFailure("pvcs", err)
 			return nil
 		}
 		bundle.PVCs = list.Items
@@ -170,7 +178,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.CoreV1().PersistentVolumes().List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect pvs", "error", err)
+			recordFailure("pvs", err)
 			return nil
 		}
 		bundle.PVs = list.Items
@@ -179,7 +187,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.StorageV1().StorageClasses().List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect storageclasses", "error", err)
+			recordFailure("storageclasses", err)
 			return nil
 		}
 		bundle.StorageClasses = list.Items
@@ -188,7 +196,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.CoreV1().Nodes().List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect nodes", "error", err)
+			recordFailure("nodes", err)
 			return nil
 		}
 		bundle.Nodes = list.Items
@@ -197,7 +205,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.CoreV1().Namespaces().List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect namespaces", "error", err)
+			recordFailure("namespaces", err)
 			return nil
 		}
 		bundle.Namespaces = list.Items
@@ -206,7 +214,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.CoreV1().ServiceAccounts(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect serviceaccounts", "error", err)
+			recordFailure("serviceaccounts", err)
 			return nil
 		}
 		bundle.ServiceAccounts = list.Items
@@ -215,7 +223,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.RbacV1().Roles(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect roles", "error", err)
+			recordFailure("roles", err)
 			return nil
 		}
 		bundle.Roles = list.Items
@@ -224,7 +232,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.RbacV1().RoleBindings(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect rolebindings", "error", err)
+			recordFailure("rolebindings", err)
 			return nil
 		}
 		bundle.RoleBindings = list.Items
@@ -233,7 +241,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.RbacV1().ClusterRoles().List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect clusterroles", "error", err)
+			recordFailure("clusterroles", err)
 			return nil
 		}
 		bundle.ClusterRoles = list.Items
@@ -242,7 +250,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.RbacV1().ClusterRoleBindings().List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect clusterrolebindings", "error", err)
+			recordFailure("clusterrolebindings", err)
 			return nil
 		}
 		bundle.ClusterRoleBindings = list.Items
@@ -251,7 +259,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.AutoscalingV2().HorizontalPodAutoscalers(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect hpas", "error", err)
+			recordFailure("hpas", err)
 			return nil
 		}
 		bundle.HPAs = list.Items
@@ -260,7 +268,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.PolicyV1().PodDisruptionBudgets(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect pdbs", "error", err)
+			recordFailure("pdbs", err)
 			return nil
 		}
 		bundle.PDBs = list.Items
@@ -269,7 +277,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.NetworkingV1().NetworkPolicies(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect networkpolicies", "error", err)
+			recordFailure("networkpolicies", err)
 			return nil
 		}
 		bundle.NetworkPolicies = list.Items
@@ -278,7 +286,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.SchedulingV1().PriorityClasses().List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect priorityclasses", "error", err)
+			recordFailure("priorityclasses", err)
 			return nil
 		}
 		bundle.PriorityClasses = list.Items
@@ -287,7 +295,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.NodeV1().RuntimeClasses().List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect runtimeclasses", "error", err)
+			recordFailure("runtimeclasses", err)
 			return nil
 		}
 		bundle.RuntimeClasses = list.Items
@@ -296,7 +304,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.AdmissionregistrationV1().MutatingWebhookConfigurations().List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect mutatingwebhooks", "error", err)
+			recordFailure("mutatingwebhooks", err)
 			return nil
 		}
 		bundle.MutatingWebhooks = list.Items
@@ -305,7 +313,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.AdmissionregistrationV1().ValidatingWebhookConfigurations().List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect validatingwebhooks", "error", err)
+			recordFailure("validatingwebhooks", err)
 			return nil
 		}
 		bundle.ValidatingWebhooks = list.Items
@@ -318,7 +326,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 			listOpts := metav1.ListOptions{Limit: 500, Continue: continueToken}
 			list, err := cs.CoreV1().Events(nsOpts).List(gctx, listOpts)
 			if err != nil {
-				slog.Warn("topology v2 collect events", "error", err)
+				recordFailure("events", err)
 				return nil
 			}
 			bundle.Events = append(bundle.Events, list.Items...)
@@ -332,7 +340,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.CoreV1().ResourceQuotas(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect resourcequotas", "error", err)
+			recordFailure("resourcequotas", err)
 			return nil
 		}
 		bundle.ResourceQuotas = list.Items
@@ -341,7 +349,7 @@ func CollectFromClient(ctx context.Context, client *k8s.Client, namespace string
 	g.Go(func() error {
 		list, err := cs.CoreV1().LimitRanges(nsOpts).List(gctx, opts)
 		if err != nil {
-			slog.Warn("topology v2 collect limitranges", "error", err)
+			recordFailure("limitranges", err)
 			return nil
 		}
 		bundle.LimitRanges = list.Items

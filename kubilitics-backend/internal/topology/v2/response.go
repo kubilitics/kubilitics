@@ -29,5 +29,8 @@ type TopologyMetadata struct {
 	// Truncation fields (set when node count exceeds MaxTopologyNodes)
 	Truncated      bool   `json:"truncated,omitempty"`
 	TruncateReason string `json:"truncateReason,omitempty"`
+
+	// FailedResources lists resource types that could not be fetched from the API.
+	FailedResources []string `json:"failed_resources,omitempty"`
 }
 

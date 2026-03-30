@@ -40,14 +40,15 @@ func BuildGraph(ctx context.Context, opts v2.Options, bundle *v2.ResourceBundle)
 	}
 	return &v2.TopologyResponse{
 		Metadata: v2.TopologyMetadata{
-			ClusterID:     opts.ClusterID,
-			ClusterName:   clusterName,
-			Mode:          opts.Mode,
-			Namespace:     opts.Namespace,
-			FocusResource: opts.Resource,
-			ResourceCount: len(nodes),
-			EdgeCount:     len(edges),
-			BuildTimeMs:   buildMs,
+			ClusterID:       opts.ClusterID,
+			ClusterName:     clusterName,
+			Mode:            opts.Mode,
+			Namespace:       opts.Namespace,
+			FocusResource:   opts.Resource,
+			ResourceCount:   len(nodes),
+			EdgeCount:       len(edges),
+			BuildTimeMs:     buildMs,
+			FailedResources: bundle.FailedResources,
 		},
 		Nodes:  nodes,
 		Edges:  edges,

@@ -53,6 +53,10 @@ type ResourceBundle struct {
 	Events                []corev1.Event
 	ResourceQuotas        []corev1.ResourceQuota
 	LimitRanges           []corev1.LimitRange
+
+	// FailedResources records resource types that could not be fetched.
+	// Populated by the collector when individual API calls fail.
+	FailedResources []string
 }
 
 // Collector defines the interface for collecting resources from a cluster.
