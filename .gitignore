@@ -193,3 +193,6 @@ kcli-sdk/
 .buildcache/
 kubilitics-backend/server
 kubilitics-backend/server_new
+.superpowers/
+docs/superpowers/
+kubilitics-backend/test_output.txt
