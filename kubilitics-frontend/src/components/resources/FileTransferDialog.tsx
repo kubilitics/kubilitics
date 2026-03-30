@@ -148,7 +148,7 @@ export function FileTransferDialog({
     loadDirectory('/' + parts.slice(0, index + 1).join('/'));
   };
 
-  const handleDownload = (entry: ContainerFileEntry) => {
+  const handleDownload = async (entry: ContainerFileEntry) => {
     if (effectiveBaseUrl == null || !effectiveClusterId) return;
     const filePath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`;
     const url = getContainerFileDownloadUrl(
@@ -159,8 +159,17 @@ export function FileTransferDialog({
       filePath,
       selectedContainer
     );
-    window.open(url, '_blank');
-    toast.success(`Downloading ${entry.name}`);
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Download failed: ${resp.statusText}`);
+      const blob = await resp.blob();
+      const { downloadFile } = await import('@/topology/graph/utils/exportUtils');
+      await downloadFile(blob, entry.name);
+      toast.success(`Downloaded ${entry.name}`, { description: 'File saved successfully' });
+    } catch {
+      window.open(url, '_blank');
+      toast.info(`Downloading ${entry.name}`);
+    }
   };
 
   const handleUploadFiles = async (files: FileList | File[]) => {

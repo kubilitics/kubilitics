@@ -138,12 +138,27 @@ export function InlineFileBrowser({
     loadDirectory('/' + parts.slice(0, index + 1).join('/'));
   };
 
-  const handleDownload = (entry: ContainerFileEntry) => {
+  const handleDownload = async (entry: ContainerFileEntry) => {
     if (!hasBackend || !clusterId) return;
     const filePath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`;
     const url = getContainerFileDownloadUrl(baseUrl, clusterId, namespace, podName, filePath, containerName);
-    window.open(url, '_blank');
-    toast.success(`Downloading ${entry.name}`);
+
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Download failed: ${resp.statusText}`);
+      const blob = await resp.blob();
+
+      // Use Tauri save dialog if available, otherwise anchor-click download
+      const { downloadFile } = await import('@/topology/graph/utils/exportUtils');
+      await downloadFile(blob, entry.name);
+      toast.success(`Downloaded ${entry.name}`, {
+        description: 'File saved successfully',
+      });
+    } catch (e) {
+      // Fallback: open URL directly (works in browser, may not in Tauri)
+      window.open(url, '_blank');
+      toast.info(`Downloading ${entry.name}`);
+    }
   };
 
   const handleUploadFiles = async (files: FileList | File[]) => {
