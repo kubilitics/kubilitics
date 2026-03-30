@@ -59,6 +59,79 @@ import { useTrackRecentResource } from '@/hooks/useTrackRecentResource';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { cn } from '@/lib/utils';
 
+/**
+ * TerminalAndFiles — two centered toggle buttons inside the Terminal tab.
+ * Terminal button shows the terminal, File Explorer shows the file browser.
+ */
+function TerminalAndFiles({
+  podName,
+  namespace,
+  containerName,
+  containers,
+  onContainerChange,
+}: {
+  podName: string;
+  namespace: string;
+  containerName: string;
+  containers: string[];
+  onContainerChange?: (c: string) => void;
+}) {
+  const [mode, setMode] = useState<'terminal' | 'files'>('terminal');
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
+      {/* Two centered toggle buttons */}
+      <div className="flex justify-center">
+        <div className="inline-flex items-center bg-muted/60 dark:bg-slate-800/60 rounded-lg p-1 gap-0.5">
+          <button
+            onClick={() => setMode('terminal')}
+            className={cn(
+              'flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-all',
+              mode === 'terminal'
+                ? 'bg-white dark:bg-slate-700 text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <Terminal className="h-4 w-4" />
+            Terminal
+          </button>
+          <button
+            onClick={() => setMode('files')}
+            className={cn(
+              'flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-all',
+              mode === 'files'
+                ? 'bg-white dark:bg-slate-700 text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <FolderOpen className="h-4 w-4" />
+            File Explorer
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      {mode === 'terminal' ? (
+        <PodTerminal
+          podName={podName}
+          namespace={namespace}
+          containerName={containerName}
+          containers={containers}
+          onContainerChange={onContainerChange}
+        />
+      ) : (
+        <div className="flex-1 min-h-0 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden">
+          <InlineFileBrowser
+            podName={podName}
+            namespace={namespace}
+            containerName={containerName}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function parseCPUToMillicores(s: string): number {
   if (!s || s === '-') return 0;
   const v = parseFloat(s.replace(/[nmuµ]$/i, '').trim());
@@ -585,33 +658,12 @@ export default function PodDetail() {
           ...(pod.spec?.ephemeralContainers || []).map(c => c.name),
         ];
         return (
-          <PodTerminal
+          <TerminalAndFiles
             podName={name || ''}
             namespace={namespace || ''}
             containerName={selectedTerminalContainer || allContainers[0]}
             containers={allContainers}
             onContainerChange={setSelectedTerminalContainer}
-          />
-        );
-      },
-    },
-    {
-      id: 'files',
-      label: 'File Explorer',
-      icon: FolderOpen,
-      render: (ctx) => {
-        const pod = ctx.resource;
-        const allContainers = [
-          ...(pod.spec?.containers || []).map(c => c.name),
-          ...(pod.spec?.ephemeralContainers || []).map(c => c.name),
-        ];
-        return (
-          <InlineFileBrowser
-            podName={name || ''}
-            namespace={namespace || ''}
-            containerName={selectedTerminalContainer || allContainers[0]}
-            baseUrl={backendBaseUrl ?? ''}
-            clusterId={clusterId ?? ''}
           />
         );
       },

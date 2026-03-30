@@ -30,13 +30,17 @@ import {
   uploadContainerFile,
   type ContainerFileEntry,
 } from '@/services/backendApiClient';
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
+import { useClusterStore } from '@/stores/clusterStore';
 
 interface InlineFileBrowserProps {
   podName: string;
   namespace: string;
   containerName: string;
-  baseUrl: string;
-  clusterId: string;
+  /** Optional — falls back to stores if not provided */
+  baseUrl?: string;
+  /** Optional — falls back to stores if not provided */
+  clusterId?: string;
   className?: string;
 }
 
@@ -63,10 +67,14 @@ export function InlineFileBrowser({
   podName,
   namespace,
   containerName,
-  baseUrl,
-  clusterId,
+  baseUrl: baseUrlProp,
+  clusterId: clusterIdProp,
   className,
 }: InlineFileBrowserProps) {
+  const storedUrl = useBackendConfigStore((s) => s.backendBaseUrl);
+  const storedClusterId = useClusterStore((s) => s.activeCluster?.id);
+  const baseUrl = baseUrlProp || getEffectiveBackendBaseUrl(storedUrl) || '';
+  const clusterId = clusterIdProp || storedClusterId || '';
   const [currentPath, setCurrentPath] = useState('/');
   const [entries, setEntries] = useState<ContainerFileEntry[]>([]);
   const [loading, setLoading] = useState(false);
