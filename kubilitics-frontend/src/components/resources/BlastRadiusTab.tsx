@@ -106,6 +106,7 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [simulationAffectedNodes, setSimulationAffectedNodes] = useState<Set<string> | null>(null);
   const [simulatedFailureNodeId, setSimulatedFailureNodeId] = useState<string | null>(null);
+  const [simulationWaveDepths, setSimulationWaveDepths] = useState<Map<string, number> | null>(null);
   const [currentWave, setCurrentWave] = useState(-1);
   const [isSimulating, setIsSimulating] = useState(false);
 
@@ -183,6 +184,9 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
     setIsSimulating(true);
     setCurrentWave(-1);
 
+    // Track which wave each node was first affected in (wave depth = wave index + 1)
+    const waveDepthMap = new Map<string, number>();
+
     engine.onWave((wave, affected) => {
       setCurrentWave(wave);
       // Build canvas-compatible node IDs: match topology node IDs
@@ -197,10 +201,17 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
           const match = topology?.nodes.find(
             (n) => n.kind === rKind && n.namespace === rNs && n.name === rName,
           );
-          if (match) canvasAffected.add(match.id);
+          if (match) {
+            canvasAffected.add(match.id);
+            // Record wave depth (1-indexed) — only first time seen
+            if (!waveDepthMap.has(match.id)) {
+              waveDepthMap.set(match.id, wave + 1);
+            }
+          }
         }
       }
       setSimulationAffectedNodes(canvasAffected);
+      setSimulationWaveDepths(new Map(waveDepthMap));
     });
 
     engine.onComplete(() => {
@@ -215,6 +226,7 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
     engineRef.current = null;
     setSimulatedFailureNodeId(null);
     setSimulationAffectedNodes(null);
+    setSimulationWaveDepths(null);
     setIsSimulating(false);
     setCurrentWave(-1);
   }, []);
@@ -349,6 +361,9 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
           centerOnNodeRef={centerOnNodeRef}
           simulationAffectedNodes={simulationAffectedNodes}
           simulatedFailureNodeId={simulatedFailureNodeId}
+          simulationWaveDepths={simulationWaveDepths}
+          simulationCurrentWave={currentWave}
+          simulationTotalWaves={totalWaves}
         />
       </div>
 
