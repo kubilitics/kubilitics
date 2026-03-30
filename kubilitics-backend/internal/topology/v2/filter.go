@@ -98,9 +98,14 @@ var leafOnlyCategories = map[string]bool{
 	"scheduling":  true,
 }
 
-// dynamicHubThreshold — any non-workload node with more than this many connections
-// in the full graph is treated as a dynamic hub (included but not expanded).
-const dynamicHubThreshold = 15
+// dynamicHubFraction — a non-workload node becomes a dynamic hub if its total
+// connections exceed this fraction of the graph size. This scales with the
+// cluster: a 100-node graph allows 5 connections before hub-ing; a 5000-node
+// graph allows 250. This prevents explosion through shared infrastructure
+// (kube-root-ca.crt, default ServiceAccount) without a fragile fixed threshold.
+// Floor of 10 ensures small graphs don't hub everything.
+const dynamicHubFraction = 0.05 // 5% of total graph nodes
+const dynamicHubFloor = 10     // minimum connections before hub-ing
 
 // filterResource builds a resource-centric view using edge-type-aware, hub-aware
 // BFS traversal. This is the core USP topology per the final specification.
@@ -272,8 +277,10 @@ func buildDirectedTypedAdjacency(edges []TopologyEdge) (map[string][]adjacencyEn
 	return outgoing, incoming
 }
 
-// computeDynamicHubs identifies non-workload, non-static-hub nodes with fan-out
-// exceeding dynamicHubThreshold. These are treated as hubs at runtime.
+// computeDynamicHubs identifies non-workload, non-static-hub nodes whose
+// connection count exceeds a scaling threshold (5% of graph size, floor of 10).
+// These are treated as hubs at runtime to prevent graph explosion through
+// shared infrastructure (e.g., kube-root-ca.crt mounted by every Pod).
 func computeDynamicHubs(outgoingAdj, incomingAdj map[string][]adjacencyEntry, nodeKind map[string]string) map[string]bool {
 	// Workload kinds are never dynamic hubs — they are core dependency chain members.
 	neverDynamicHub := map[string]bool{
@@ -287,13 +294,21 @@ func computeDynamicHubs(outgoingAdj, incomingAdj map[string][]adjacencyEntry, no
 		"Ingress": true, "NetworkPolicy": true,
 	}
 
+	// Scaling threshold: 5% of graph size, minimum 10.
+	// 200-node graph → threshold 10; 1000-node → 50; 5000-node → 250.
+	graphSize := len(nodeKind)
+	threshold := int(float64(graphSize) * dynamicHubFraction)
+	if threshold < dynamicHubFloor {
+		threshold = dynamicHubFloor
+	}
+
 	hubs := make(map[string]bool)
 	for nodeID, kind := range nodeKind {
 		if staticHubKinds[kind] || neverDynamicHub[kind] {
 			continue
 		}
 		neighborCount := len(outgoingAdj[nodeID]) + len(incomingAdj[nodeID])
-		if neighborCount > dynamicHubThreshold {
+		if neighborCount > threshold {
 			hubs[nodeID] = true
 		}
 	}
