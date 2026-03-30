@@ -22,7 +22,6 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/graph"
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
-	"github.com/kubilitics/kubilitics-backend/internal/pkg/drawio"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
@@ -304,8 +303,6 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 	router.Handle("/clusters/{clusterId}/topology/criticality", h.wrapWithRBAC(h.GetCriticality, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/topology/resource/{kind}/{namespace}/{name}", h.wrapWithRBAC(h.GetResourceTopology, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/topology/export", h.wrapWithRBAC(h.ExportTopology, auth.RoleOperator)).Methods("POST")
-	router.Handle("/clusters/{clusterId}/topology/export/drawio", h.wrapWithRBAC(h.GetTopologyExportDrawio, auth.RoleViewer)).Methods("GET")
-
 	// Blast radius analysis (USP #2): dependency inference + criticality scoring
 	router.Handle("/clusters/{clusterId}/blast-radius/summary",
 		h.wrapWithRBAC(h.GetBlastRadiusSummary, auth.RoleViewer)).Methods("GET")
@@ -1662,7 +1659,7 @@ func (h *Handler) GetCriticality(w http.ResponseWriter, r *http.Request) {
 }
 
 // ExportTopology handles POST /clusters/{clusterId}/topology/export (BE-FUNC-001).
-// Format via query param ?format=json|svg|drawio|png or JSON body {"format": "..."}. Default: json.
+// Format via query param ?format=json|svg|png or JSON body {"format": "..."}. Default: json.
 func (h *Handler) ExportTopology(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	clusterID := vars["clusterId"]
@@ -1731,9 +1728,6 @@ func (h *Handler) ExportTopology(w http.ResponseWriter, r *http.Request) {
 	case "svg":
 		contentType = "image/svg+xml"
 		filename = "topology.svg"
-	case "drawio":
-		contentType = "application/xml"
-		filename = "topology.drawio.xml"
 	case "png":
 		contentType = "image/png"
 		filename = "topology.png"
@@ -1744,53 +1738,6 @@ func (h *Handler) ExportTopology(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	w.Write(data)
-}
-
-// GetTopologyExportDrawio handles GET /clusters/{clusterId}/topology/export/drawio
-// Returns { url, mermaid } for opening the topology in draw.io.
-func (h *Handler) GetTopologyExportDrawio(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	clusterID := vars["clusterId"]
-	if !validate.ClusterID(clusterID) {
-		respondError(w, http.StatusBadRequest, "Invalid clusterId")
-		return
-	}
-	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
-	if err != nil {
-		requestID := logger.FromContext(r.Context())
-		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
-		return
-	}
-
-	format := r.URL.Query().Get("format")
-	if format == "" {
-		format = "mermaid"
-	}
-	if format != "mermaid" && format != "xml" {
-		respondError(w, http.StatusBadRequest, "format must be mermaid or xml")
-		return
-	}
-
-	topology, err := h.topologyService.GetTopologyWithClient(r.Context(), client, clusterID, models.TopologyFilters{}, 0, false)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	mermaid := drawio.TopologyGraphToMermaid(topology)
-	drawioURL, err := drawio.GenerateDrawioURL(mermaid)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, "Failed to generate draw.io URL: "+err.Error())
-		return
-	}
-
-	resp := map[string]interface{}{
-		"url": drawioURL,
-	}
-	if format == "mermaid" {
-		resp["mermaid"] = mermaid
-	}
-	respondJSON(w, http.StatusOK, resp)
 }
 
 // pathVarsKey is the context key for path params set by rollout path-intercept middleware.

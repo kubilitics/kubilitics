@@ -143,7 +143,7 @@ func (h *Handler) GetShellStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rcfile := tmpFile.Name()
-	defer os.Remove(rcfile)
+	defer func() { _ = os.Remove(rcfile) }()
 	if _, err := tmpFile.Write([]byte(sb.String())); err != nil {
 		tmpFile.Close()
 		log.Printf("Terminal: failed to write rcfile: %v", err)

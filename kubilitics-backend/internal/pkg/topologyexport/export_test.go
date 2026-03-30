@@ -118,38 +118,6 @@ func TestGraphToSVG_WithNodes(t *testing.T) {
 	}
 }
 
-func TestGraphToDrawioXML_NilGraph(t *testing.T) {
-	data, err := GraphToDrawioXML(nil)
-	if err != nil {
-		t.Fatalf("Expected no error, got: %v", err)
-	}
-	if !strings.Contains(string(data), "mxfile") {
-		t.Error("Expected mxfile element")
-	}
-}
-
-func TestGraphToDrawioXML_WithNodes(t *testing.T) {
-	graph := &models.TopologyGraph{
-		SchemaVersion: "1.0",
-		Nodes: []models.TopologyNode{
-			{ID: "node-1", Kind: "Pod", Name: "pod-1", Namespace: "default"},
-		},
-		Edges:    []models.TopologyEdge{},
-		Metadata: models.TopologyGraphMetadata{},
-	}
-	data, err := GraphToDrawioXML(graph)
-	if err != nil {
-		t.Fatalf("Expected no error, got: %v", err)
-	}
-	xml := string(data)
-	if !strings.Contains(xml, "mxfile") {
-		t.Error("Expected mxfile element")
-	}
-	if !strings.Contains(xml, "mxGraphModel") {
-		t.Error("Expected mxGraphModel element")
-	}
-}
-
 func TestGraphToPNG_NilGraph(t *testing.T) {
 	data, err := GraphToPNG(nil)
 	if err != nil {

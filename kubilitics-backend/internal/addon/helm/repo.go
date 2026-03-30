@@ -128,7 +128,7 @@ func (c *helmClientImpl) resolveChartRef(ctx context.Context, repoURL, chartName
 		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("create chart temp dir: %w", err)
 	}
-	defer os.RemoveAll(destDir)
+	defer func() { _ = os.RemoveAll(destDir) }()
 
 	var chartPath string
 	if IsOCIRef(repoURL) {

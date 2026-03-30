@@ -24,7 +24,6 @@ var ErrExportNotImplemented = errors.New("topology export not yet implemented")
 const (
 	ExportFormatJSON         = "json"
 	ExportFormatSVG          = "svg"
-	ExportFormatDrawio       = "drawio"
 	ExportFormatPNG          = "png"
 	ExportFormatArchitecture = "architecture"
 )
@@ -186,8 +185,6 @@ func (s *topologyService) ExportTopologyWithClient(ctx context.Context, client *
 		return topologyexport.GraphToJSON(graph)
 	case ExportFormatSVG:
 		return topologyexport.GraphToSVG(graph)
-	case ExportFormatDrawio:
-		return topologyexport.GraphToDrawioXML(graph)
 	case ExportFormatPNG:
 		return topologyexport.GraphToPNG(graph)
 	default:

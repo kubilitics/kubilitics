@@ -97,7 +97,7 @@ func (k *KubescapeAdapter) Scan(ctx context.Context, target scanner.ScanTarget) 
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 	outputFile := filepath.Join(tmpDir, "results.sarif")
 
 	var args []string
@@ -109,7 +109,7 @@ func (k *KubescapeAdapter) Scan(ctx context.Context, target scanner.ScanTarget) 
 
 	cmd := exec.CommandContext(ctx, "kubescape", args...) //nolint:gosec // binary is hardcoded
 	// Kubescape exits non-zero when findings exist; ignore exit code if output file was produced
-	cmd.Run()
+	_ = cmd.Run()
 
 	out, err := os.ReadFile(outputFile)
 	if err != nil {
@@ -180,7 +180,7 @@ func mapSARIFLevel(level, secSeverity string) scanner.Severity {
 	// Fall back to level-based mapping if not present.
 	if secSeverity != "" {
 		var score float64
-		fmt.Sscanf(secSeverity, "%f", &score)
+		_, _ = fmt.Sscanf(secSeverity, "%f", &score)
 		switch {
 		case score >= 9.0:
 			return scanner.SeverityCritical
