@@ -82,24 +82,37 @@ jobs:
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
 
       - name: Build and push backend image
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v7
         with:
           context: ./kubilitics-backend
           file: ./kubilitics-backend/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta-backend.outputs.tags }}
           labels: ${{ steps.meta-backend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: ${{ env.PLATFORMS }}
           provenance: false
-          # Docker Buildx automatically provides TARGETOS and TARGETARCH for multi-platform builds
+
+      - name: Build backend image for PR scan
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: ./kubilitics-backend
+          file: ./kubilitics-backend/Dockerfile
+          push: false
+          load: true
+          tags: kubilitics-backend:pr-scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
 
       - name: Trivy scan backend image
         if: github.event_name == 'pull_request'
         uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.BACKEND_IMAGE }}:pr-${{ github.event.pull_request.number }}
+          image-ref: kubilitics-backend:pr-scan
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '0'
