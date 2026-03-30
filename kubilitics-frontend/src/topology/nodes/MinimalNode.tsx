@@ -1,0 +1,44 @@
+import { memo } from "react";
+import type { NodeProps } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
+import type { BaseNodeData } from "./BaseNode";
+import { getCategoryColor, STATUS_COLORS, mapStatusKey, A11Y } from "../constants/designTokens";
+
+/**
+ * MinimalNode: Displayed at extreme zoom-out (<0.08x).
+ * Category-colored dot with status ring + tiny label.
+ */
+function MinimalNodeInner({ data }: NodeProps<BaseNodeData>) {
+  const fill = getCategoryColor(data.category).accent;
+  const ring = STATUS_COLORS[mapStatusKey(data.status)];
+
+  return (
+    <div
+      className={`flex flex-col items-center ${A11Y.focusRing}`}
+      role="treeitem"
+      aria-roledescription="topology node"
+      aria-label={`${data.kind}: ${data.name}, status ${data.status}`}
+      tabIndex={0}
+    >
+      <Handle type="target" position={Position.Left} className="!w-1 !h-1 !bg-transparent !border-0" />
+      <div
+        className={`h-8 w-8 rounded-full shadow-sm ${A11Y.transition} hover:scale-125 ring-[2.5px] ring-white dark:ring-slate-900`}
+        style={{
+          backgroundColor: fill,
+          boxShadow: `0 0 0 4px ${ring}`,
+        }}
+        title={`${data.kind}: ${data.name}`}
+        aria-hidden="true"
+      />
+      <div
+        className="mt-1.5 max-w-[80px] truncate text-center text-[10px] font-semibold text-gray-700 dark:text-gray-300"
+        aria-hidden="true"
+      >
+        {data.name}
+      </div>
+      <Handle type="source" position={Position.Right} className="!w-1 !h-1 !bg-transparent !border-0" />
+    </div>
+  );
+}
+
+export const MinimalNode = memo(MinimalNodeInner);

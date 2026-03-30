@@ -1,0 +1,38 @@
+# winget manifest for Kubilitics Desktop App
+# Submit to: https://github.com/microsoft/winget-pkgs
+# NOTE: Version and SHA256 are auto-updated by post-release.yml after each release.
+PackageIdentifier: Kubilitics.Kubilitics
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: Kubilitics
+PublisherUrl: https://kubilitics.com
+PublisherSupportUrl: https://github.com/kubilitics/kubilitics/issues
+PackageName: Kubilitics
+PackageUrl: https://kubilitics.com
+License: Apache-2.0
+LicenseUrl: https://github.com/kubilitics/kubilitics/blob/main/LICENSE
+ShortDescription: Kubernetes management platform with real-time dashboard and AI-powered CLI
+Description: |
+  Kubilitics is a production-grade Kubernetes management platform.
+  Features include real-time dashboards, dependency intelligence,
+  multi-cluster management, Helm add-on platform, AI-powered CLI (kcli),
+  and in-browser terminal access.
+
+  Deploy as a desktop app or inside your Kubernetes cluster.
+Tags:
+  - kubernetes
+  - k8s
+  - devops
+  - containers
+  - dashboard
+  - kubectl
+  - helm
+  - cloud-native
+Installers:
+  - Architecture: x64
+    InstallerType: nsis
+    InstallerUrl: https://github.com/kubilitics/kubilitics/releases/download/v0.1.0/Kubilitics_0.1.0_x64-setup.exe
+    InstallerSha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    UpgradeBehavior: install
+ManifestType: singleton
+ManifestVersion: 1.6.0

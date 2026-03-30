@@ -1,0 +1,446 @@
+# Release automation: build and publish artifacts on version tag
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+  checks: read
+
+# Never cancel a release mid-flight — let it complete
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: '1.25.8'
+  PLATFORMS: linux/amd64,linux/arm64
+  KCLI_VERSION: 'v0.1.0'
+  # Use pre-built tauri-cli from GitHub releases instead of compiling from source.
+  # This saves 8-11 minutes per desktop runner.
+  TAURI_CLI_VERSION: '2.10.1'
+
+jobs:
+  # ── Gate: version consistency + CI status ────────────────────────────────
+  version-check:
+    name: Version Consistency Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify all version files match
+        id: version
+        run: |
+          set -euo pipefail
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$TAG_VERSION" >> $GITHUB_OUTPUT
+
+          VERSIONS=(
+            "$(jq -r '.version' kubilitics-frontend/package.json)"
+            "$(jq -r '.version' kubilitics-desktop/src-tauri/tauri.conf.json)"
+            "$(grep '^version' kubilitics-desktop/src-tauri/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+            "$(grep '^version:' deploy/helm/kubilitics/Chart.yaml | awk '{print $2}')"
+            "$(grep '^appVersion:' deploy/helm/kubilitics/Chart.yaml | sed 's/appVersion: *"\(.*\)"/\1/')"
+            "$(grep '  tag:' deploy/helm/kubilitics/values.yaml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+          )
+
+          ERRORS=0
+          for V in "${VERSIONS[@]}"; do
+            if [ "$V" != "$TAG_VERSION" ]; then
+              echo "MISMATCH: expected $TAG_VERSION, got $V"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          [ $ERRORS -eq 0 ] && echo "All 6 version files match v$TAG_VERSION" || exit 1
+
+      - name: Verify CI passed on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMIT_SHA=$(git rev-parse HEAD)
+          RELEASE_JOBS="Version Consistency Check|Backend Docker Image|Frontend Dist|Desktop|Create GitHub Release"
+
+          RESPONSE=$(gh api repos/${{ github.repository }}/commits/${COMMIT_SHA}/check-runs \
+            --jq "{
+              total: [.check_runs[] | select(.name | test(\"$RELEASE_JOBS\") | not)] | length,
+              failed: [.check_runs[] | select(.name | test(\"$RELEASE_JOBS\") | not) | select(.conclusion == \"failure\" or .conclusion == \"cancelled\")] | length,
+              failed_names: [.check_runs[] | select(.name | test(\"$RELEASE_JOBS\") | not) | select(.conclusion == \"failure\" or .conclusion == \"cancelled\") | .name]
+            }")
+
+          FAILED=$(echo "$RESPONSE" | jq -r '.failed')
+          TOTAL=$(echo "$RESPONSE" | jq -r '.total')
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "FAIL: $FAILED CI check(s) failed."
+            echo "$RESPONSE" | jq -r '.failed_names[]'
+            exit 1
+          fi
+          [ "$TOTAL" -eq 0 ] && echo "WARNING: No CI runs found. Proceeding." || echo "All $TOTAL CI checks passed."
+
+  # ── Frontend dist: build once, share across 3 desktop runners ───────────
+  # Scanning happens in CI (on PR) and weekly deep scans — not at release time.
+  # Release pipeline is build + sign + ship. Fast and reliable.
+  frontend-dist:
+    name: Frontend Dist (Tauri)
+    needs: [version-check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: kubilitics-frontend/package-lock.json
+      - run: npm ci
+        working-directory: kubilitics-frontend
+      - run: npm run build
+        working-directory: kubilitics-frontend
+        env:
+          TAURI_BUILD: "true"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist-tauri-${{ github.ref_name }}
+          path: kubilitics-frontend/dist/
+          retention-days: 1
+          compression-level: 1
+
+  # ── Docker: build + push backend image (runs parallel with desktop) ─────
+  docker-backend:
+    name: Backend Docker Image
+    needs: [version-check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ./kubilitics-backend
+          file: ./kubilitics-backend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/kubilitics-backend:${{ needs.version-check.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/kubilitics-backend:latest
+          build-args: |
+            APP_VERSION=${{ needs.version-check.outputs.version }}
+          platforms: ${{ env.PLATFORMS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+  # ── Desktop: 3 platforms in parallel ────────────────────────────────────
+  # Key optimizations:
+  #   1. Pre-built tauri-cli binary (saves 8-11 min per runner)
+  #   2. Frontend dist shared via artifact (saves 5 min per runner)
+  #   3. Go sidecars built in parallel with `& wait`
+  #   4. Swatinem/rust-cache for Rust build cache
+  #   5. Go module cache via setup-go
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    timeout-minutes: 45
+    needs: [frontend-dist]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: macos
+          - os: windows-latest
+            name: windows
+          - os: ubuntu-latest
+            name: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Clean stale build artifacts
+        shell: bash
+        run: |
+          rm -rf kubilitics-desktop/src-tauri/binaries
+          mkdir -p kubilitics-desktop/src-tauri/binaries
+          rm -rf kubilitics-desktop/src-tauri/target/release
+          rm -rf kubilitics-desktop/src-tauri/target/universal-apple-darwin
+
+      # ── Rust toolchain ──────────────────────────────────────────────────
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kubilitics-desktop/src-tauri -> target
+          cache-on-failure: true
+
+      # ── Tauri CLI: download pre-built binary directly ──────────────────
+      # `cargo install tauri-cli` compiles from source (8-11 min).
+      # Direct download from Tauri GitHub release: <10 seconds.
+      - name: Install Tauri CLI (pre-built)
+        shell: bash
+        run: |
+          TAG="tauri-cli-v${{ env.TAURI_CLI_VERSION }}"
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            ASSET="cargo-tauri-aarch64-apple-darwin.zip"
+          elif [ "${{ matrix.os }}" == "windows-latest" ]; then
+            ASSET="cargo-tauri-x86_64-pc-windows-msvc.zip"
+          else
+            ASSET="cargo-tauri-x86_64-unknown-linux-gnu.tgz"
+          fi
+          echo "Downloading $ASSET from $TAG..."
+          URL="https://github.com/tauri-apps/tauri/releases/download/${TAG}/${ASSET}"
+          curl -fsSL "$URL" -o /tmp/tauri-cli-archive
+          if [[ "$ASSET" == *.zip ]]; then
+            unzip -o /tmp/tauri-cli-archive -d /tmp/tauri-cli
+            cp /tmp/tauri-cli/cargo-tauri* "$HOME/.cargo/bin/"
+          else
+            tar xzf /tmp/tauri-cli-archive -C "$HOME/.cargo/bin/"
+          fi
+          chmod +x "$HOME/.cargo/bin/cargo-tauri"*
+          cargo tauri --version
+
+      # ── Linux system deps ───────────────────────────────────────────────
+      - name: Install GTK / WebKit deps (Ubuntu only)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      # ── Frontend dist (pre-built) ──────────────────────────────────────
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist-tauri-${{ github.ref_name }}
+          path: kubilitics-frontend/dist/
+      - name: Copy frontend dist into Tauri working dir
+        shell: bash
+        run: |
+          [ -n "$(ls -A kubilitics-frontend/dist 2>/dev/null)" ] || { echo "❌ dist empty"; exit 1; }
+          mkdir -p kubilitics-desktop/dist
+          cp -r kubilitics-frontend/dist/. kubilitics-desktop/dist/
+
+      # ── Go toolchain ────────────────────────────────────────────────────
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: kubilitics-backend/go.sum
+
+      - name: Clone kcli repo
+        run: git clone --depth 1 --branch ${{ env.KCLI_VERSION }} https://github.com/kubilitics/kubilitics-kcli.git kcli
+
+      # ── Windows version resources ───────────────────────────────────────
+      - name: Embed Windows version resources
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          go install github.com/tc-hib/go-winres@latest
+          bash scripts/embed-winres.sh "${{ github.ref_name }}"
+
+      # ── Build Go sidecar binaries IN PARALLEL ──────────────────────────
+      - name: Build Go sidecars (parallel)
+        shell: bash
+        run: |
+          BINS="kubilitics-desktop/src-tauri/binaries"
+          mkdir -p "$BINS"
+          VERSION=${GITHUB_REF#refs/tags/v}
+          BACKEND_LDFLAGS="-s -w -X github.com/kubilitics/kubilitics-backend/internal/version.Version=${VERSION}"
+
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            (cd kubilitics-backend && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$BACKEND_LDFLAGS" -o "../$BINS/kubilitics-backend-x86_64-apple-darwin"   ./cmd/server) &
+            (cd kubilitics-backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$BACKEND_LDFLAGS" -o "../$BINS/kubilitics-backend-aarch64-apple-darwin"  ./cmd/server) &
+            (cd kcli              && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o "../$BINS/kcli-x86_64-apple-darwin"                  ./cmd/kcli) &
+            (cd kcli              && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o "../$BINS/kcli-aarch64-apple-darwin"                 ./cmd/kcli) &
+            wait
+            lipo -create "$BINS/kubilitics-backend-x86_64-apple-darwin" \
+                         "$BINS/kubilitics-backend-aarch64-apple-darwin" \
+                 -output "$BINS/kubilitics-backend-universal-apple-darwin"
+            lipo -create "$BINS/kcli-x86_64-apple-darwin" \
+                         "$BINS/kcli-aarch64-apple-darwin" \
+                 -output "$BINS/kcli-universal-apple-darwin"
+            chmod +x "$BINS/kubilitics-backend-"* "$BINS/kcli-"*
+
+          elif [ "${{ matrix.os }}" == "windows-latest" ]; then
+            cd kubilitics-backend
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+              -ldflags="-X github.com/kubilitics/kubilitics-backend/internal/version.Version=${VERSION}" \
+              -o "../$BINS/kubilitics-backend-x86_64-pc-windows-msvc.exe" ./cmd/server
+            cd ../kcli
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+              -o "../$BINS/kcli-x86_64-pc-windows-msvc.exe" ./cmd/kcli
+
+          else
+            (cd kubilitics-backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$BACKEND_LDFLAGS" -o "../$BINS/kubilitics-backend-x86_64-unknown-linux-gnu"   ./cmd/server) &
+            (cd kubilitics-backend && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$BACKEND_LDFLAGS" -o "../$BINS/kubilitics-backend-aarch64-unknown-linux-gnu"  ./cmd/server) &
+            (cd kcli              && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o "../$BINS/kcli-x86_64-unknown-linux-gnu"                  ./cmd/kcli) &
+            (cd kcli              && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o "../$BINS/kcli-aarch64-unknown-linux-gnu"                 ./cmd/kcli) &
+            wait
+            chmod +x "$BINS/kubilitics-backend-"* "$BINS/kcli-"*
+          fi
+
+      - name: Verify all required binaries exist
+        shell: bash
+        run: |
+          BINS="kubilitics-desktop/src-tauri/binaries"
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            REQUIRED=("kubilitics-backend-universal-apple-darwin" "kcli-universal-apple-darwin")
+          elif [ "${{ matrix.os }}" == "windows-latest" ]; then
+            REQUIRED=("kubilitics-backend-x86_64-pc-windows-msvc.exe" "kcli-x86_64-pc-windows-msvc.exe")
+          else
+            REQUIRED=("kubilitics-backend-x86_64-unknown-linux-gnu" "kcli-x86_64-unknown-linux-gnu")
+          fi
+          for bin in "${REQUIRED[@]}"; do
+            [ -f "$BINS/$bin" ] && echo "✅ $bin" || { echo "❌ Missing: $bin"; exit 1; }
+          done
+
+      # ── macOS code signing ──────────────────────────────────────────────
+      - name: Setup macOS code signing
+        if: matrix.os == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+            security create-keychain -p "" build.keychain || true
+            security default-keychain -s build.keychain
+            security unlock-keychain -p "" build.keychain
+            security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign || true
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          fi
+
+      # ── Tauri builds ───────────────────────────────────────────────────
+      - name: Build Tauri app (macOS universal)
+        if: matrix.os == 'macos-latest'
+        working-directory: kubilitics-desktop/src-tauri
+        env:
+          TAURI_SKIP_DEVSERVER_CHECK: "true"
+          # Do NOT set APPLE_ID/APPLE_PASSWORD here — Tauri's built-in
+          # notarization times out. We sign here, notarize separately below.
+        shell: bash
+        run: |
+          [ -d "../dist" ] && [ -n "$(ls -A ../dist)" ] || { echo "❌ dist missing"; exit 1; }
+          if [ -n "${{ secrets.APPLE_CERTIFICATE }}" ]; then
+            CONFIG='{"bundle":{"macOS":{"signingIdentity":"${{ secrets.APPLE_SIGNING_IDENTITY }}"}}}'
+          else
+            CONFIG='{"bundle":{"macOS":{"signingIdentity":null}}}'
+          fi
+          CI=true cargo tauri build --target universal-apple-darwin --bundles app,dmg --config "$CONFIG"
+
+      - name: Notarize macOS DMG
+        if: matrix.os == 'macos-latest'
+        continue-on-error: true
+        timeout-minutes: 25
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          DMG=$(find kubilitics-desktop/src-tauri/target/universal-apple-darwin/release/bundle -name "*.dmg" | head -1)
+          if [ -n "$DMG" ] && [ -n "$APPLE_ID" ]; then
+            echo "Notarizing $DMG..."
+            xcrun notarytool submit "$DMG" \
+              --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+              --wait --timeout 20m
+            xcrun stapler staple "$DMG"
+            echo "Notarization and stapling complete"
+          else
+            echo "Skipping notarization — no DMG found or APPLE_ID not set"
+          fi
+
+      - name: Build Tauri app (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: kubilitics-desktop/src-tauri
+        shell: bash
+        env:
+          TAURI_SKIP_DEVSERVER_CHECK: "true"
+        run: |
+          [ -d "../dist" ] && [ -n "$(ls -A ../dist)" ] || { echo "❌ dist missing"; exit 1; }
+          cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+      - name: Build Tauri app (Linux AppImage + DEB + RPM)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: kubilitics-desktop/src-tauri
+        env:
+          TAURI_SKIP_DEVSERVER_CHECK: "true"
+        run: |
+          [ -d "../dist" ] && [ -n "$(ls -A ../dist)" ] || { echo "❌ dist missing"; exit 1; }
+          cargo tauri build --target x86_64-unknown-linux-gnu --bundles appimage,deb,rpm
+
+      # ── Upload artifacts ────────────────────────────────────────────────
+      - name: Upload desktop artifacts (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: kubilitics-desktop-${{ matrix.name }}-${{ github.ref_name }}
+          path: kubilitics-desktop/src-tauri/target/universal-apple-darwin/release/bundle/
+          compression-level: 1
+
+      - name: Upload desktop artifacts (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: kubilitics-desktop-${{ matrix.name }}-${{ github.ref_name }}
+          path: kubilitics-desktop/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/
+          compression-level: 1
+
+      - name: Upload desktop artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: kubilitics-desktop-${{ matrix.name }}-${{ github.ref_name }}
+          path: kubilitics-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/
+          compression-level: 1
+
+  # ── Create GitHub Release ──────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [desktop, docker-backend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts for release upload
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( \
+            -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" \
+            -o -name "*.rpm" -o -name "*-setup.exe" -o -name "*.msi" \
+            -o -name "*.nsis.zip" \
+          \) -exec cp {} release-assets/ \;
+          echo "Release assets:"
+          ls -lh release-assets/
+          echo "Total: $(ls release-assets/ | wc -l) files"
+
+      - name: Generate checksums
+        working-directory: release-assets
+        run: |
+          [ -n "$(ls -A .)" ] || { echo "No assets — skipping"; exit 0; }
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref, '-') }}
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
