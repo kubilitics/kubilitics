@@ -49,6 +49,12 @@ export interface TopologyCanvasProps {
   simulationAffectedNodes?: Set<string> | null;
   /** The node being simulated as failed */
   simulatedFailureNodeId?: string | null;
+  /** Maps nodeId → wave depth (1=direct, 2+=transitive). Passed from BlastRadiusTab during simulation. */
+  simulationWaveDepths?: Map<string, number> | null;
+  /** Current wave number (0-indexed) for progress overlay */
+  simulationCurrentWave?: number;
+  /** Total number of waves for progress overlay */
+  simulationTotalWaves?: number;
 }
 
 // Traffic-related relationship types — highlighted in traffic view mode
@@ -79,6 +85,9 @@ function TopologyCanvasInner({
   onRequestSimplify,
   simulationAffectedNodes,
   simulatedFailureNodeId,
+  simulationWaveDepths,
+  simulationCurrentWave,
+  simulationTotalWaves,
 }: TopologyCanvasProps) {
   const [currentZoom, setCurrentZoom] = useState(0.5);
 
@@ -312,22 +321,41 @@ function TopologyCanvasInner({
       const isDimmed = hasDimming && !dimmedNodeIds.has(n.id);
       const isInErrorChain = hasErrorChain && errorChainNodeIds.has(n.id) && !isSelected;
 
-      // Blast radius simulation styling (takes priority)
+      // Blast radius simulation styling (takes priority) — wave-depth-aware coloring
       if (hasSimulation) {
         const isFailureOrigin = n.id === simulatedFailureNodeId;
         const isAffected = simulationAffectedNodes.has(n.id);
+        const waveDepth = simulationWaveDepths?.get(n.id) ?? 0;
+
+        let className: string;
+        let extraStyle: React.CSSProperties;
+
+        if (isFailureOrigin) {
+          // Origin node: red ring with pulsing glow
+          className = "ring-[3px] ring-red-600 dark:ring-red-500 rounded-lg shadow-[0_0_20px_rgba(239,68,68,0.6)] animate-pulse";
+          extraStyle = { zIndex: 100, transition: "opacity 0.15s" };
+        } else if (isAffected && waveDepth === 1) {
+          // Wave 1 (direct dependencies)
+          className = "ring-2 ring-red-500 dark:ring-red-400 rounded-lg shadow-[0_0_12px_rgba(239,68,68,0.4)]";
+          extraStyle = { transition: "opacity 0.15s" };
+        } else if (isAffected && waveDepth > 1) {
+          // Wave 2+ (transitive dependencies)
+          className = "ring-2 ring-orange-500 dark:ring-orange-400 rounded-lg shadow-[0_0_10px_rgba(249,115,22,0.3)]";
+          extraStyle = { transition: "opacity 0.15s" };
+        } else if (isAffected) {
+          // Affected but no wave depth info (fallback)
+          className = "ring-2 ring-orange-500 ring-offset-1 rounded-lg";
+          extraStyle = { transition: "opacity 0.15s" };
+        } else {
+          // Unaffected nodes: faded out
+          className = "rounded-lg";
+          extraStyle = { opacity: 0.15, filter: "saturate(0.2)", transition: "opacity 0.15s" };
+        }
+
         return {
           ...n,
-          className: isFailureOrigin
-            ? "ring-[3px] ring-red-600 ring-offset-2 rounded-lg shadow-[0_0_20px_rgba(220,38,38,0.5)]"
-            : isAffected
-              ? "ring-2 ring-orange-500 ring-offset-1 rounded-lg animate-pulse"
-              : "rounded-lg",
-          style: {
-            ...n.style,
-            ...(isFailureOrigin ? { zIndex: 100 } : {}),
-            ...(!isAffected && !isFailureOrigin ? { opacity: 0.15, filter: "saturate(0.2)", transition: "opacity 0.15s" } : { transition: "opacity 0.15s" }),
-          },
+          className,
+          style: { ...n.style, ...extraStyle },
         };
       }
 
@@ -348,7 +376,7 @@ function TopologyCanvasInner({
         },
       };
     });
-  }, [nodes, selectedNodeId, highlightNodeIds, dimmedNodeIds, errorChainNodeIds, simulationAffectedNodes, simulatedFailureNodeId]);
+  }, [nodes, selectedNodeId, highlightNodeIds, dimmedNodeIds, errorChainNodeIds, simulationAffectedNodes, simulatedFailureNodeId, simulationWaveDepths]);
 
   // Edge styling — ALWAYS show edges, just hide labels at low zoom
   const styledEdges = useMemo(() => {
@@ -513,6 +541,24 @@ function TopologyCanvasInner({
                 Try simpler view
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Simulation progress overlay — bottom-right corner */}
+      {simulatedFailureNodeId && simulationAffectedNodes && simulationAffectedNodes.size > 0 && (
+        <div
+          className="absolute bottom-4 right-4 z-20 bg-slate-900/80 dark:bg-slate-950/80 text-white rounded-lg px-4 py-2 text-sm pointer-events-none"
+          role="status"
+          aria-live="polite"
+        >
+          {simulationCurrentWave != null && simulationTotalWaves != null && simulationTotalWaves > 0 && (
+            <div className="font-medium">
+              Wave {simulationCurrentWave + 1} of {simulationTotalWaves}
+            </div>
+          )}
+          <div className="text-slate-300">
+            {simulationAffectedNodes.size} resource{simulationAffectedNodes.size !== 1 ? 's' : ''} affected
           </div>
         </div>
       )}

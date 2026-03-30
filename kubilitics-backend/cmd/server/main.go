@@ -29,6 +29,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/addon/scanner"
 	"github.com/kubilitics/kubilitics-backend/internal/auth"
 	"github.com/kubilitics/kubilitics-backend/internal/config"
+	"github.com/kubilitics/kubilitics-backend/internal/graph"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/metrics"
@@ -118,7 +119,7 @@ func main() {
 		log.Error("Failed to initialize database", "error", err)
 		os.Exit(1)
 	}
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
 	// Run migrations from embedded FS in lexicographic order.
 	// Using ReadDir instead of a hardcoded list so newly added migration files
@@ -207,6 +208,56 @@ func main() {
 		topologyCache = topologycache.New(0)
 	}
 	topologyService := service.NewTopologyService(clusterService, topologyCache)
+
+	// Initialize blast radius graph engines (non-blocking — runs in background after server starts).
+	// Engines are started lazily: we verify API server connectivity before spinning up informers
+	// to avoid flooding the process with retry loops for unreachable clusters.
+	graphEngines := make(map[string]*graph.ClusterGraphEngine)
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+		clusters, listErr := clusterService.ListClusters(ctx)
+		if listErr != nil {
+			log.Warn("Failed to list clusters for graph engines", "error", listErr)
+			return
+		}
+		for _, cluster := range clusters {
+			client, clientErr := clusterService.GetClient(cluster.ID)
+			if clientErr != nil {
+				log.Warn("Skipping graph engine — cannot get client", "cluster", cluster.ID, "error", clientErr)
+				continue
+			}
+			// Quick connectivity check — skip clusters with unreachable API servers
+			// Quick connectivity check: try to reach the API server
+			type result struct {
+				err error
+			}
+			ch := make(chan result, 1)
+			go func() {
+				_, e := client.Clientset.Discovery().ServerVersion()
+				ch <- result{err: e}
+			}()
+			var err error
+			select {
+			case r := <-ch:
+				err = r.err
+			case <-time.After(5 * time.Second):
+				err = fmt.Errorf("timeout connecting to API server")
+			}
+			if err != nil {
+				log.Warn("Skipping graph engine — API server unreachable", "cluster", cluster.ID, "error", err)
+				continue
+			}
+			engine := graph.NewClusterGraphEngine(cluster.ID, client.Clientset, log)
+			engine.Start(ctx)
+			graphEngines[cluster.ID] = engine
+			log.Info("Started blast radius graph engine", "cluster", cluster.ID)
+		}
+	}()
+
 	logsService := service.NewLogsService(clusterService)
 	eventsService := service.NewEventsServiceWithRepo(clusterService, repo)
 	metricsService := service.NewMetricsService(clusterService)
@@ -331,7 +382,7 @@ func main() {
 	}
 	router := mux.NewRouter()
 	router.UseEncodedPath()
-	handler := rest.NewHandler(clusterService, topologyService, cfg, logsService, eventsService, metricsService, unifiedMetricsService, projectService, addonSvc, repo)
+	handler := rest.NewHandler(clusterService, topologyService, cfg, logsService, eventsService, metricsService, unifiedMetricsService, projectService, addonSvc, repo, graphEngines)
 	authHandler := rest.NewAuthHandler(repo, cfg)
 	
 	// OIDC handler (Phase 2: Enterprise Authentication)
@@ -507,7 +558,7 @@ func main() {
 		os.Exit(1)
 	}
 	actualPort = cfg.Port
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	srv := &http.Server{
 		Handler:      handlerWithCORS,
@@ -636,9 +687,6 @@ func recoveryMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 func rolloutPathInterceptor(restHandler *rest.Handler, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		if strings.Contains(path, "shell/stream") {
-			// Logged via StructuredLog middleware
-		}
 		if path == "" {
 			path = "/"
 		}

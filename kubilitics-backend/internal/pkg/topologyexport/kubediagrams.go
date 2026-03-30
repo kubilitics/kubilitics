@@ -45,7 +45,7 @@ func GraphToArchitecturePNG(ctx context.Context, kubeconfigPath, namespace, kube
 
 	// Generate unique output path
 	outputPath := filepath.Join(os.TempDir(), fmt.Sprintf("kubilitics-arch-%s.png", uuid.New().String()))
-	defer os.Remove(outputPath)
+	defer func() { _ = os.Remove(outputPath) }()
 
 	// For namespace-scoped exports: fetch only namespace-scoped resources (keeps diagram compact).
 	// For cluster-wide: include cluster-scoped resources too.

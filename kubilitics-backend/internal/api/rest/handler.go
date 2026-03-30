@@ -19,9 +19,9 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/api/middleware"
 	"github.com/kubilitics/kubilitics-backend/internal/auth"
 	"github.com/kubilitics/kubilitics-backend/internal/config"
+	"github.com/kubilitics/kubilitics-backend/internal/graph"
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
-	"github.com/kubilitics/kubilitics-backend/internal/pkg/drawio"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
@@ -80,37 +80,6 @@ func topologyCacheSet(key string, data *topologyv2.TopologyResponse) {
 	})
 }
 
-// expandableCategories defines edge categories that represent meaningful
-// resource relationships. Direct/Extended modes ONLY expand through these.
-var expandableCategories = map[string]bool{
-	"ownership":     true,
-	"networking":    true,
-	"configuration": true,
-	"storage":       true,
-	"rbac":          true,
-	"policy":        true,
-	"scaling":       true,
-	// "cluster" (Events) intentionally excluded — operational telemetry, not infrastructure
-}
-
-// hubKinds are shared infrastructure nodes that fan out to many unrelated
-// resources. They are included as leaf nodes but never expanded through.
-var hubKinds = map[string]bool{
-	"Namespace":                        true,
-	"Node":                             true,
-	"LimitRange":                       true,
-	"ResourceQuota":                    true,
-	"PriorityClass":                    true,
-	"RuntimeClass":                     true,
-	"IngressClass":                     true,
-	"StorageClass":                     true,
-	"MutatingWebhookConfiguration":     true,
-	"ValidatingWebhookConfiguration":   true,
-	"NetworkPolicy":                    true,
-	"ServiceAccount":                   true,
-	"Ingress":                          true,
-}
-
 // Handler manages HTTP request handlers
 type Handler struct {
 	clusterService        service.ClusterService
@@ -130,10 +99,11 @@ type Handler struct {
 	k8sClientCache        *expirable.LRU[string, *k8s.Client] // Cache for stateless requests
 	wsConnMu              sync.Mutex
 	wsConns               map[string]int // "clusterId:userIdentity" -> active WS connection count
+	graphEngines          map[string]*graph.ClusterGraphEngine // clusterId -> engine
 }
 
 // NewHandler creates a new HTTP handler. unifiedMetricsService can be nil; then metrics summary uses legacy per-resource endpoints. projSvc can be nil; then project routes return 501. addonService can be nil; then addon routes return 404 or 501. repo can be nil if auth is disabled.
-func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *config.Config, logsService service.LogsService, eventsService service.EventsService, metricsService service.MetricsService, unifiedMetricsService *service.UnifiedMetricsService, projSvc service.ProjectService, addonService service.AddOnService, repo *repository.SQLiteRepository) *Handler {
+func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *config.Config, logsService service.LogsService, eventsService service.EventsService, metricsService service.MetricsService, unifiedMetricsService *service.UnifiedMetricsService, projSvc service.ProjectService, addonService service.AddOnService, repo *repository.SQLiteRepository, graphEngines map[string]*graph.ClusterGraphEngine) *Handler {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
@@ -152,6 +122,7 @@ func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *conf
 		kcliStreamActive:      map[string]int{},
 		k8sClientCache:        expirable.NewLRU[string, *k8s.Client](100, nil, time.Minute*10),
 		wsConns:               map[string]int{},
+		graphEngines:          graphEngines,
 	}
 }
 
@@ -301,9 +272,11 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 	router.Handle("/clusters/{clusterId}/topology/criticality", h.wrapWithRBAC(h.GetCriticality, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/topology/resource/{kind}/{namespace}/{name}", h.wrapWithRBAC(h.GetResourceTopology, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/topology/export", h.wrapWithRBAC(h.ExportTopology, auth.RoleOperator)).Methods("POST")
-	router.Handle("/clusters/{clusterId}/topology/export/drawio", h.wrapWithRBAC(h.GetTopologyExportDrawio, auth.RoleViewer)).Methods("GET")
-
 	// Blast radius analysis (USP #2): dependency inference + criticality scoring
+	router.Handle("/clusters/{clusterId}/blast-radius/summary",
+		h.wrapWithRBAC(h.GetBlastRadiusSummary, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/blast-radius/graph-status",
+		h.wrapWithRBAC(h.GetGraphStatus, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/blast-radius/{namespace}/{kind}/{name}", h.wrapWithRBAC(h.GetBlastRadius, auth.RoleViewer)).Methods("GET")
 
 	// Global search (command palette): GET /clusters/{clusterId}/search?q=...&limit=25
@@ -1655,7 +1628,7 @@ func (h *Handler) GetCriticality(w http.ResponseWriter, r *http.Request) {
 }
 
 // ExportTopology handles POST /clusters/{clusterId}/topology/export (BE-FUNC-001).
-// Format via query param ?format=json|svg|drawio|png or JSON body {"format": "..."}. Default: json.
+// Format via query param ?format=json|svg|png or JSON body {"format": "..."}. Default: json.
 func (h *Handler) ExportTopology(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	clusterID := vars["clusterId"]
@@ -1724,9 +1697,6 @@ func (h *Handler) ExportTopology(w http.ResponseWriter, r *http.Request) {
 	case "svg":
 		contentType = "image/svg+xml"
 		filename = "topology.svg"
-	case "drawio":
-		contentType = "application/xml"
-		filename = "topology.drawio.xml"
 	case "png":
 		contentType = "image/png"
 		filename = "topology.png"
@@ -1737,53 +1707,6 @@ func (h *Handler) ExportTopology(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	w.Write(data)
-}
-
-// GetTopologyExportDrawio handles GET /clusters/{clusterId}/topology/export/drawio
-// Returns { url, mermaid } for opening the topology in draw.io.
-func (h *Handler) GetTopologyExportDrawio(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	clusterID := vars["clusterId"]
-	if !validate.ClusterID(clusterID) {
-		respondError(w, http.StatusBadRequest, "Invalid clusterId")
-		return
-	}
-	client, err := h.getClientFromRequest(r.Context(), r, clusterID, h.cfg)
-	if err != nil {
-		requestID := logger.FromContext(r.Context())
-		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
-		return
-	}
-
-	format := r.URL.Query().Get("format")
-	if format == "" {
-		format = "mermaid"
-	}
-	if format != "mermaid" && format != "xml" {
-		respondError(w, http.StatusBadRequest, "format must be mermaid or xml")
-		return
-	}
-
-	topology, err := h.topologyService.GetTopologyWithClient(r.Context(), client, clusterID, models.TopologyFilters{}, 0, false)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	mermaid := drawio.TopologyGraphToMermaid(topology)
-	drawioURL, err := drawio.GenerateDrawioURL(mermaid)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, "Failed to generate draw.io URL: "+err.Error())
-		return
-	}
-
-	resp := map[string]interface{}{
-		"url": drawioURL,
-	}
-	if format == "mermaid" {
-		resp["mermaid"] = mermaid
-	}
-	respondJSON(w, http.StatusOK, resp)
 }
 
 // pathVarsKey is the context key for path params set by rollout path-intercept middleware.
