@@ -209,10 +209,11 @@ func main() {
 	}
 	topologyService := service.NewTopologyService(clusterService, topologyCache)
 
-	// Initialize blast radius graph engines (non-blocking — runs in background after server starts)
+	// Initialize blast radius graph engines (non-blocking — runs in background after server starts).
+	// Engines are started lazily: we verify API server connectivity before spinning up informers
+	// to avoid flooding the process with retry loops for unreachable clusters.
 	graphEngines := make(map[string]*graph.ClusterGraphEngine)
 	go func() {
-		// Wait a moment for the server to be ready before starting heavy informer watches
 		select {
 		case <-ctx.Done():
 			return
@@ -226,7 +227,28 @@ func main() {
 		for _, cluster := range clusters {
 			client, clientErr := clusterService.GetClient(cluster.ID)
 			if clientErr != nil {
-				log.Warn("Failed to get client for graph engine", "cluster", cluster.ID, "error", clientErr)
+				log.Warn("Skipping graph engine — cannot get client", "cluster", cluster.ID, "error", clientErr)
+				continue
+			}
+			// Quick connectivity check — skip clusters with unreachable API servers
+			// Quick connectivity check: try to reach the API server
+			type result struct {
+				err error
+			}
+			ch := make(chan result, 1)
+			go func() {
+				_, e := client.Clientset.Discovery().ServerVersion()
+				ch <- result{err: e}
+			}()
+			var err error
+			select {
+			case r := <-ch:
+				err = r.err
+			case <-time.After(5 * time.Second):
+				err = fmt.Errorf("timeout connecting to API server")
+			}
+			if err != nil {
+				log.Warn("Skipping graph engine — API server unreachable", "cluster", cluster.ID, "error", err)
 				continue
 			}
 			engine := graph.NewClusterGraphEngine(cluster.ID, client.Clientset, log)
