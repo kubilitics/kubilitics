@@ -209,9 +209,20 @@ func main() {
 	}
 	topologyService := service.NewTopologyService(clusterService, topologyCache)
 
-	// Initialize blast radius graph engines
+	// Initialize blast radius graph engines (non-blocking — runs in background after server starts)
 	graphEngines := make(map[string]*graph.ClusterGraphEngine)
-	if clusters, err := clusterService.ListClusters(ctx); err == nil {
+	go func() {
+		// Wait a moment for the server to be ready before starting heavy informer watches
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+		clusters, listErr := clusterService.ListClusters(ctx)
+		if listErr != nil {
+			log.Warn("Failed to list clusters for graph engines", "error", listErr)
+			return
+		}
 		for _, cluster := range clusters {
 			client, clientErr := clusterService.GetClient(cluster.ID)
 			if clientErr != nil {
@@ -223,7 +234,7 @@ func main() {
 			graphEngines[cluster.ID] = engine
 			log.Info("Started blast radius graph engine", "cluster", cluster.ID)
 		}
-	}
+	}()
 
 	logsService := service.NewLogsService(clusterService)
 	eventsService := service.NewEventsServiceWithRepo(clusterService, repo)
