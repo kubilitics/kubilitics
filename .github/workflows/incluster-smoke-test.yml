@@ -1,0 +1,140 @@
+name: In-Cluster Smoke Test
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deploy/**'
+      - 'kubilitics-backend/**'
+      - 'kubilitics-frontend/**'
+      - '.github/workflows/incluster-smoke-test.yml'
+      - 'scripts/incluster-e2e-test.sh'
+  workflow_dispatch:
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    name: Kind Cluster Smoke Test
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./kubilitics-backend
+          push: false
+          load: true
+          tags: kubilitics-backend:local
+          cache-from: type=gha,scope=smoke-backend
+          cache-to: type=gha,mode=max,scope=smoke-backend
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./kubilitics-frontend
+          push: false
+          load: true
+          tags: kubilitics-frontend:local
+          cache-from: type=gha,scope=smoke-frontend
+          cache-to: type=gha,mode=max,scope=smoke-frontend
+
+      - name: Write Kind config
+        run: |
+          cat > /tmp/kind-config.yaml << 'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+          - role: control-plane
+            image: kindest/node:v1.30.0
+          EOF
+          sed -i 's/^          //' /tmp/kind-config.yaml
+          echo "--- Kind config ---"
+          cat /tmp/kind-config.yaml
+
+      - name: Set up Kind cluster
+        uses: helm/kind-action@v1.9.0
+        with:
+          version: v0.20.0
+          config: /tmp/kind-config.yaml
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4.3.0
+
+      - name: Load images into Kind
+        run: |
+          kind load docker-image kubilitics-backend:local --name chart-testing
+          kind load docker-image kubilitics-frontend:local --name chart-testing
+
+      - name: Deploy with Helm
+        run: |
+          kubectl create namespace kubilitics
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm dependency build ./deploy/helm/kubilitics/
+          helm install kubilitics ./deploy/helm/kubilitics \
+            --namespace kubilitics \
+            -f ./deploy/helm/kubilitics/values-ci.yaml \
+            --wait --timeout 5m
+
+      - name: Wait for backend pods
+        run: |
+          # Use Helm-generated labels (app.kubernetes.io/name + app.kubernetes.io/instance)
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/name=kubilitics,app.kubernetes.io/instance=kubilitics \
+            -n kubilitics --timeout=120s || true
+          echo "=== All pods ==="
+          kubectl get pods -n kubilitics -o wide
+
+      - name: Port forward and health check
+        run: |
+          kubectl port-forward svc/kubilitics 8080:8190 -n kubilitics &
+          sleep 5
+          curl -sf http://localhost:8080/health && echo " ✓ Backend healthy" || echo " ✗ Backend not ready"
+
+      - name: Run E2E smoke tests
+        run: |
+          chmod +x ./scripts/incluster-e2e-test.sh
+          ./scripts/incluster-e2e-test.sh \
+            --base-url "http://localhost:8080" \
+            --admin-user "admin" \
+            --admin-pass "test-admin-password-123"
+        timeout-minutes: 5
+
+      - name: Helm test
+        if: always()
+        run: helm test kubilitics -n kubilitics --timeout 60s || true
+
+      - name: Collect logs
+        if: always()
+        run: |
+          echo "=== Pods ==="
+          kubectl get pods -n kubilitics -o wide
+          echo ""
+          echo "=== Backend Logs ==="
+          # Use Helm standard labels; backend pods do NOT have app.kubernetes.io/component
+          kubectl logs -n kubilitics -l app.kubernetes.io/name=kubilitics,app.kubernetes.io/instance=kubilitics \
+            -c backend --tail=100 2>/dev/null || \
+            kubectl logs -n kubilitics -l app.kubernetes.io/name=kubilitics --tail=100 2>/dev/null || \
+            echo "(no backend logs found)"
+          echo ""
+          echo "=== Frontend Logs ==="
+          kubectl logs -n kubilitics -l app.kubernetes.io/component=frontend --tail=100 2>/dev/null || \
+            echo "(no frontend logs found)"
+          echo ""
+          echo "=== Events ==="
+          kubectl get events -n kubilitics --sort-by='.lastTimestamp' 2>/dev/null || true
+          echo ""
+          echo "=== Describe failing pods ==="
+          kubectl get pods -n kubilitics --field-selector=status.phase!=Running -o name 2>/dev/null | \
+            xargs -I{} kubectl describe {} -n kubilitics 2>/dev/null || true
+
+      - name: Cleanup
+        if: always()
+        run: pkill -f "kubectl port-forward" || true

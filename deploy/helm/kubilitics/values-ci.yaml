@@ -1,0 +1,98 @@
+# Kubilitics Helm Chart — CI / Kind cluster values
+# Usage: helm install kubilitics ./deploy/helm/kubilitics -f values-ci.yaml
+#
+# This file overrides values.yaml with minimal settings for automated testing.
+# Backend: SQLite, auth disabled, permissive CORS
+# Frontend: enabled, pointing to backend service
+
+replicaCount: 1
+
+image:
+  repository: kubilitics-backend
+  tag: "local"
+  pullPolicy: Never  # Kind uses pre-loaded images
+
+# Service port (must be >1024 — container runs as non-root)
+service:
+  port: 8190
+
+# Backend config
+config:
+  port: 8190
+  databasePath: "/data/kubilitics.db"
+  logLevel: "info"
+  authMode: "disabled"  # No auth for CI smoke tests
+  allowedOrigins: "*"
+  requestTimeoutSec: 30
+  shutdownTimeoutSec: 10
+  maxClusters: 10
+  k8sTimeoutSec: 15
+
+# SQLite for CI (simple, no external deps)
+database:
+  type: sqlite
+  sqlite:
+    path: /data/kubilitics.db
+
+# Disable PostgreSQL subchart — CI uses SQLite only
+postgresql:
+  enabled: false
+
+# Use emptyDir instead of PVC for CI (no StorageClass binding delays in Kind)
+persistence:
+  enabled: false
+
+# Frontend enabled for full-stack testing
+frontend:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: kubilitics-frontend
+    tag: "local"
+    pullPolicy: Never
+  service:
+    port: 8080
+  config:
+    backendService: "kubilitics"
+    backendPort: 8190
+    authRequired: "false"
+  resources:
+    limits:
+      cpu: 200m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+# Minimal resources for CI
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# RBAC required for in-cluster K8s access
+rbac:
+  enabled: true
+
+# No ingress in Kind
+ingress:
+  enabled: false
+
+# No network policies in Kind (calico not installed)
+networkPolicy:
+  enabled: false
+
+# No autoscaling in CI
+autoscaling:
+  enabled: false
+
+# No monitoring stack in CI
+serviceMonitor:
+  enabled: false
+
+grafana:
+  dashboard:
+    enabled: false
