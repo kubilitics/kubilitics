@@ -177,6 +177,29 @@ function CloneToNamespaceDialog({
     if (!open || !resource) return;
     // Deep-clone and strip server-managed metadata
     const cleaned = JSON.parse(JSON.stringify(resource));
+
+    // Ensure apiVersion and kind are present (informer cache may omit them)
+    if (!cleaned.apiVersion) {
+      const apiVersionMap: Record<string, string> = {
+        Pod: 'v1', Service: 'v1', ConfigMap: 'v1', Secret: 'v1',
+        Namespace: 'v1', Node: 'v1', PersistentVolume: 'v1',
+        PersistentVolumeClaim: 'v1', ServiceAccount: 'v1',
+        Deployment: 'apps/v1', ReplicaSet: 'apps/v1',
+        StatefulSet: 'apps/v1', DaemonSet: 'apps/v1',
+        Job: 'batch/v1', CronJob: 'batch/v1',
+        Ingress: 'networking.k8s.io/v1', NetworkPolicy: 'networking.k8s.io/v1',
+        HorizontalPodAutoscaler: 'autoscaling/v2',
+        PodDisruptionBudget: 'policy/v1',
+        Role: 'rbac.authorization.k8s.io/v1', ClusterRole: 'rbac.authorization.k8s.io/v1',
+        RoleBinding: 'rbac.authorization.k8s.io/v1', ClusterRoleBinding: 'rbac.authorization.k8s.io/v1',
+        StorageClass: 'storage.k8s.io/v1',
+      };
+      cleaned.apiVersion = apiVersionMap[kind] || 'v1';
+    }
+    if (!cleaned.kind) {
+      cleaned.kind = kind;
+    }
+
     if (cleaned.metadata) {
       delete cleaned.metadata.uid;
       delete cleaned.metadata.resourceVersion;
@@ -189,10 +212,23 @@ function CloneToNamespaceDialog({
     }
     // Remove status block — K8s will regenerate it
     delete cleaned.status;
+
+    // Strip Pod-specific fields that prevent cloning
+    if (kind === 'Pod' && cleaned.spec) {
+      delete cleaned.spec.nodeName;           // Scheduler will reassign
+      delete cleaned.spec.serviceAccountName; // May not exist in target namespace — let default apply
+      // Remove auto-generated volume mounts and volumes (service account tokens, projected)
+      if (Array.isArray(cleaned.spec.volumes)) {
+        cleaned.spec.volumes = cleaned.spec.volumes.filter(
+          (v: Record<string, unknown>) => !v.projected && !(v.secret && typeof v.secret === 'object' && (v.secret as Record<string, unknown>).secretName?.toString().includes('-token-'))
+        );
+      }
+    }
+
     const yaml = yamlParser.dump(cleaned, { lineWidth: -1, noRefs: true });
     setCloneYaml(yaml);
     setTargetNamespace('');
-  }, [open, resource]);
+  }, [open, resource, kind]);
 
   const handleApply = useCallback(async () => {
     if (!clusterId || !isBackendConfigured) {

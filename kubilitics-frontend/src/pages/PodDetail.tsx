@@ -579,7 +579,10 @@ export default function PodDetail() {
       icon: Terminal,
       render: (ctx) => {
         const pod = ctx.resource;
-        const containers = (pod.spec?.containers || []).map(c => c.name);
+        const containers = [
+          ...(pod.spec?.containers || []).map(c => c.name),
+          ...(pod.spec?.ephemeralContainers || []).map(c => c.name),
+        ];
         return (
           <PodTerminal
             podName={name}
@@ -685,7 +688,10 @@ export default function PodDetail() {
               namespace={pod.metadata?.namespace || ''}
               baseUrl={backendBaseUrl ?? ''}
               clusterId={clusterId ?? ''}
-              containers={(pod.spec?.containers || []).map(c => c.name)}
+              containers={[
+                ...(pod.spec?.containers || []).map(c => c.name),
+                ...(pod.spec?.ephemeralContainers || []).map(c => c.name),
+              ]}
               onCreated={() => switchToTab('terminal')}
             />
           </>
