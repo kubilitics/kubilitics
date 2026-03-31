@@ -4,16 +4,7 @@ Use this checklist before pushing and when validating the application end-to-end
 
 ---
 
-## 1. Pending tasks (TASKS.md)
-
-- **Required roadmap:** All phased tasks (A through W, MO1.1) are marked complete in `TASKS.md`.
-- **Optional (later):** MO1.2–MO1.5 (mobile API client, push spec, biometric, Tauri mobile build) remain optional.
-
-No required tasks are pending.
-
----
-
-## 2. Local builds
+## 1. Local builds
 
 From repo root:
 
@@ -24,7 +15,7 @@ From repo root:
 
 ---
 
-## 3. Local tests
+## 2. Local tests
 
 | Suite | Command | Expected |
 |-------|---------|----------|
@@ -44,7 +35,7 @@ make test-all      # test + e2e (full local verification)
 
 ---
 
-## 4. Before you push
+## 3. Before you push
 
 - [ ] `make backend` succeeds  
 - [ ] `make frontend` succeeds  
@@ -55,14 +46,14 @@ make test-all      # test + e2e (full local verification)
 
 ---
 
-## 5. Run app locally (for laptop testing)
+## 4. Run app locally (for laptop testing)
 
 From repo root, start backend and frontend:
 
 ```bash
 # Terminal 1: backend (or run in background)
 cd kubilitics-backend && go run ./cmd/server
-# Backend: http://localhost:819  (health: /health, API: /api/v1)
+# Backend: http://localhost:8190  (health: /health, API: /api/v1)
 
 # Terminal 2: frontend (after backend is up)
 cd kubilitics-frontend && npm run dev
@@ -75,11 +66,11 @@ Or one command (backend in background, then frontend in foreground):
 make dev
 ```
 
-**To test:** Open the frontend URL in your browser. In Settings, set Backend URL to `http://localhost:819` if needed. Add a cluster (kubeconfig path or in-cluster) and check cluster list, topology, resources.
+**To test:** Open the frontend URL in your browser. In Settings, set Backend URL to `http://localhost:8190` if needed. Add a cluster (kubeconfig path or in-cluster) and check cluster list, topology, resources.
 
 ---
 
-## 6. Live application E2E (after push)
+## 5. Live application E2E (after push)
 
 After pushing, validate the real app end-to-end:
 
@@ -87,7 +78,7 @@ After pushing, validate the real app end-to-end:
    - Start backend: `make backend-dev` or `cd kubilitics-backend && go run ./cmd/server`.  
    - Start frontend: `make frontend-dev` or `cd kubilitics-frontend && npm run dev`.  
    - Open browser: frontend URL (e.g. http://localhost:5173).  
-   - Configure backend URL in Settings (e.g. http://localhost:819) if not default.  
+   - Configure backend URL in Settings (e.g. http://localhost:8190) if not default.  
    - Add a cluster (kubeconfig or in-cluster).  
    - **Check:** Cluster list, topology view, resource list/detail, logs/events/metrics (or 501), error states (backend unreachable, no clusters).
 
@@ -107,7 +98,7 @@ After pushing, validate the real app end-to-end:
 
 ---
 
-## 7. CI (after push)
+## 6. CI (after push)
 
 - Backend CI: tests and build.  
 - Frontend CI: tests and build.  

@@ -56,4 +56,4 @@ When backend is configured, the UI handles these error cases with clear messages
 
 ---
 
-*Single execution roadmap (TASKS.md). Verify completion against the repo.*
+*Verify completion against the repo.*

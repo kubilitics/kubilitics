@@ -18,7 +18,7 @@ Each service has its own set of environment variables for configuration.
 
 | Variable | Default | Description | Required |
 |----------|---------|-------------|----------|
-| `KUBILITICS_PORT` | `819` | HTTP server port | No (uses default) |
+| `KUBILITICS_PORT` | `8190` | HTTP server port | No (uses default) |
 | `KUBECONFIG` | `~/.kube/config` | Path to kubeconfig file | No (uses in-cluster config if available) |
 
 ### Optional Environment Variables
@@ -28,7 +28,7 @@ Each service has its own set of environment variables for configuration.
 | `KUBILITICS_DATABASE_PATH` | `./kubilitics.db` | SQLite database file path |
 | `KUBILITICS_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `KUBILITICS_LOG_FORMAT` | `json` | Log format: `json` or `text` |
-| `KUBILITICS_ALLOWED_ORIGINS` | `localhost:5173,localhost:819` | Comma-separated CORS origins |
+| `KUBILITICS_ALLOWED_ORIGINS` | `localhost:5173,localhost:8190` | Comma-separated CORS origins |
 | `KUBILITICS_REQUEST_TIMEOUT_SEC` | `30` | HTTP request timeout in seconds |
 | `KUBILITICS_TOPOLOGY_TIMEOUT_SEC` | `30` | Topology generation timeout |
 | `KUBILITICS_MAX_CLUSTERS` | `100` | Maximum number of clusters |
@@ -45,7 +45,7 @@ Each service has its own set of environment variables for configuration.
 ### Production Example
 
 ```bash
-export KUBILITICS_PORT=819
+export KUBILITICS_PORT=8190
 export KUBILITICS_DATABASE_PATH=/data/kubilitics.db
 export KUBILITICS_LOG_LEVEL=info
 export KUBILITICS_LOG_FORMAT=json
@@ -64,7 +64,7 @@ export KUBILITICS_TLS_KEY_PATH=/etc/tls/tls.key
 | Variable | Default | Description | Required |
 |----------|---------|-------------|----------|
 | `KUBILITICS_HTTP_PORT` | `8081` | HTTP server port | No (uses default) |
-| `KUBILITICS_BACKEND_URL` | `http://localhost:819` | Backend HTTP URL for MCP server calls | No (uses default) |
+| `KUBILITICS_BACKEND_URL` | `http://localhost:8190` | Backend HTTP URL for MCP server calls | No (uses default) |
 | `KUBILITICS_BACKEND_ADDRESS` | `localhost:50051` | Backend gRPC address | No (uses default) |
 | `KUBILITICS_LLM_PROVIDER` | `openai` | LLM provider: `openai`, `anthropic`, `ollama`, `custom` | Yes (if using LLM features) |
 | `OPENAI_API_KEY` | `""` | OpenAI API key | Yes (if provider is `openai`) |
@@ -93,7 +93,7 @@ export KUBILITICS_TLS_KEY_PATH=/etc/tls/tls.key
 
 ```bash
 export KUBILITICS_HTTP_PORT=8081
-export KUBILITICS_BACKEND_URL=http://kubilitics-backend:819
+export KUBILITICS_BACKEND_URL=http://kubilitics-backend:8190
 export KUBILITICS_BACKEND_ADDRESS=kubilitics-backend:50051
 export KUBILITICS_LLM_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-api03-...
@@ -110,7 +110,7 @@ export KUBILITICS_WS_ALLOWED_ORIGINS="https://kubilitics.example.com"
 
 | Variable | Default | Description | Required |
 |----------|---------|-------------|----------|
-| `VITE_BACKEND_URL` | `http://localhost:819` | Backend API base URL | Yes (production) |
+| `VITE_BACKEND_URL` | `http://localhost:8190` | Backend API base URL | Yes (production) |
 | `VITE_AI_BACKEND_URL` | `http://localhost:8081` | AI backend API base URL | No (if AI features disabled) |
 | `VITE_AI_WS_URL` | `ws://localhost:8081` | AI backend WebSocket URL | No (if AI features disabled) |
 
@@ -118,7 +118,7 @@ export KUBILITICS_WS_ALLOWED_ORIGINS="https://kubilitics.example.com"
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VITE_BACKEND_PORT` | `819` | Backend port (for Vite proxy in dev) |
+| `VITE_BACKEND_PORT` | `8190` | Backend port (for Vite proxy in dev) |
 | `VITE_API_BASE` | `""` | Alternative backend URL (overrides VITE_BACKEND_URL) |
 | `VITE_PORT` | `5173` | Vite dev server port |
 
@@ -143,7 +143,7 @@ When deploying via Helm chart, environment variables are set through `values.yam
 
 | Helm Value | Environment Variable | Default |
 |------------|---------------------|---------|
-| `config.port` | `KUBILITICS_PORT` | `819` |
+| `config.port` | `KUBILITICS_PORT` | `8190` |
 | `config.databasePath` | `KUBILITICS_DATABASE_PATH` | `/data/kubilitics.db` |
 | `config.logLevel` | `KUBILITICS_LOG_LEVEL` | `info` |
 | `config.allowedOrigins` | `KUBILITICS_ALLOWED_ORIGINS` | `https://your-domain.com` |
@@ -154,7 +154,7 @@ When deploying via Helm chart, environment variables are set through `values.yam
 | Helm Value | Environment Variable | Default |
 |------------|---------------------|---------|
 | `ai.config.serverPort` | `KUBILITICS_HTTP_PORT` | `8081` |
-| `ai.config.backendHttpUrl` | `KUBILITICS_BACKEND_URL` | `http://kubilitics:819` |
+| `ai.config.backendHttpUrl` | `KUBILITICS_BACKEND_URL` | `http://kubilitics:8190` |
 | `ai.config.backendAddress` | `KUBILITICS_BACKEND_ADDRESS` | `kubilitics:50051` |
 | `ai.config.llmProvider` | `KUBILITICS_LLM_PROVIDER` | `anthropic` |
 | `ai.secret.anthropicApiKey` | `ANTHROPIC_API_KEY` | (from Secret) |
@@ -167,7 +167,7 @@ Frontend environment variables are set via ConfigMap and injected as build-time 
 | Helm Value | Environment Variable | Default |
 |------------|---------------------|---------|
 | `frontend.config.backendService` | `BACKEND_SERVICE` | `kubilitics` |
-| `frontend.config.backendPort` | `BACKEND_PORT` | `819` |
+| `frontend.config.backendPort` | `BACKEND_PORT` | `8190` |
 | `frontend.config.aiBackendService` | `AI_BACKEND_SERVICE` | `kubilitics-ai` |
 | `frontend.config.aiBackendPort` | `AI_BACKEND_PORT` | `8081` |
 
@@ -189,10 +189,10 @@ spec:
     spec:
       containers:
       - name: backend
-        image: ghcr.io/kubilitics/kubilitics-backend:1.0.0
+        image: ghcr.io/kubilitics/kubilitics-backend:0.1.0
         env:
         - name: KUBILITICS_PORT
-          value: "819"
+          value: "8190"
         - name: KUBILITICS_DATABASE_PATH
           value: "/data/kubilitics.db"
         - name: KUBILITICS_LOG_LEVEL
@@ -213,12 +213,12 @@ spec:
     spec:
       containers:
       - name: ai-backend
-        image: ghcr.io/kubilitics/kubilitics-ai:1.0.0
+        image: ghcr.io/kubilitics/kubilitics-ai:0.1.0
         env:
         - name: KUBILITICS_HTTP_PORT
           value: "8081"
         - name: KUBILITICS_BACKEND_URL
-          value: "http://kubilitics-backend:819"
+          value: "http://kubilitics-backend:8190"
         - name: KUBILITICS_BACKEND_ADDRESS
           value: "kubilitics-backend:50051"
         - name: KUBILITICS_LLM_PROVIDER
@@ -238,19 +238,19 @@ spec:
 version: '3.8'
 services:
   backend:
-    image: ghcr.io/kubilitics/kubilitics-backend:1.0.0
+    image: ghcr.io/kubilitics/kubilitics-backend:0.1.0
     environment:
-      KUBILITICS_PORT: 819
+      KUBILITICS_PORT: 8190
       KUBILITICS_DATABASE_PATH: /data/kubilitics.db
       KUBILITICS_LOG_LEVEL: info
     ports:
-      - "819:819"
+      - "8190:8190"
   
   ai-backend:
-    image: ghcr.io/kubilitics/kubilitics-ai:1.0.0
+    image: ghcr.io/kubilitics/kubilitics-ai:0.1.0
     environment:
       KUBILITICS_HTTP_PORT: 8081
-      KUBILITICS_BACKEND_URL: http://backend:819
+      KUBILITICS_BACKEND_URL: http://backend:8190
       KUBILITICS_BACKEND_ADDRESS: backend:50051
       KUBILITICS_LLM_PROVIDER: anthropic
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
@@ -263,7 +263,7 @@ services:
     build:
       context: ./kubilitics-frontend
       args:
-        VITE_BACKEND_URL: http://localhost:819
+        VITE_BACKEND_URL: http://localhost:8190
         VITE_AI_BACKEND_URL: http://localhost:8081
     ports:
       - "5173:80"
@@ -318,7 +318,7 @@ Environment variables override configuration file values in the following order 
 - [ ] Database path uses persistent volume (`/data/kubilitics.db`)
 - [ ] Log level set to `info` or `warn` (not `debug`)
 - [ ] Log format set to `json` for log aggregation
-- [ ] Backend URL uses service name in Kubernetes (`http://kubilitics-backend:819`)
+- [ ] Backend URL uses service name in Kubernetes (`http://kubilitics-backend:8190`)
 - [ ] AI backend URL uses service name (`http://kubilitics-ai:8081`)
 
 ---
@@ -329,7 +329,7 @@ Environment variables override configuration file values in the following order 
 
 ```bash
 # Check if port is already in use
-lsof -i :819
+lsof -i :8190
 
 # Check environment variables
 env | grep KUBILITICS
@@ -342,10 +342,10 @@ kubectl logs -l app.kubernetes.io/component=backend
 
 ```bash
 # Verify backend URL is correct
-echo $KUBILITICS_BACKEND_URL  # Should be http://kubilitics-backend:819 in K8s
+echo $KUBILITICS_BACKEND_URL  # Should be http://kubilitics-backend:8190 in K8s
 
 # Test connectivity from AI pod
-kubectl exec -it <ai-pod> -- curl http://kubilitics-backend:819/health
+kubectl exec -it <ai-pod> -- curl http://kubilitics-backend:8190/health
 
 # Check DNS resolution
 kubectl exec -it <ai-pod> -- nslookup kubilitics-backend
@@ -372,17 +372,17 @@ curl https://api.kubilitics.example.com/health
 
 ```bash
 # Backend
-export KUBILITICS_PORT=819
+export KUBILITICS_PORT=8190
 cd kubilitics-backend && go run ./cmd/server
 
 # AI Backend
 export KUBILITICS_HTTP_PORT=8081
-export KUBILITICS_BACKEND_URL=http://localhost:819
+export KUBILITICS_BACKEND_URL=http://localhost:8190
 export ANTHROPIC_API_KEY=sk-ant-api03-...
 cd kubilitics-ai && go run ./cmd/server
 
 # Frontend
-export VITE_BACKEND_URL=http://localhost:819
+export VITE_BACKEND_URL=http://localhost:8190
 export VITE_AI_BACKEND_URL=http://localhost:8081
 cd kubilitics-frontend && npm run dev
 ```
@@ -392,10 +392,10 @@ cd kubilitics-frontend && npm run dev
 ```bash
 # Install via Helm
 helm install kubilitics ./deploy/helm/kubilitics \
-  --set config.port=819 \
+  --set config.port=8190 \
   --set config.allowedOrigins="https://kubilitics.example.com" \
   --set ai.enabled=true \
-  --set ai.config.backendHttpUrl=http://kubilitics:819 \
+  --set ai.config.backendHttpUrl=http://kubilitics:8190 \
   --set ai.secret.enabled=true \
   --set ai.secret.anthropicApiKey=<your-key>
 ```
@@ -404,7 +404,5 @@ helm install kubilitics ./deploy/helm/kubilitics \
 
 ## Related Documentation
 
-- [Integration Ports Reference](INTEGRATION_PORTS.md) - Port configuration details
 - [Helm Chart README](../deploy/helm/kubilitics/README.md) - Helm deployment guide
 - [Backend Configuration](../kubilitics-backend/CONFIGURATION.md) - Backend configuration reference
-- [AI Backend README](../kubilitics-ai/README.md) - AI backend configuration

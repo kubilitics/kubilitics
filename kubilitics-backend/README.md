@@ -17,7 +17,7 @@ Kubilitics backend is a production-grade Kubernetes management platform built in
 ```
 ┌─────────────────────────────────────────┐
 │          API LAYER                      │
-│  REST API  │  WebSocket  │  GraphQL     │
+│  REST API  │  WebSocket                 │
 ├─────────────────────────────────────────┤
 │         SERVICE LAYER                   │
 │  Cluster │ Topology │ Resource │ Events │
@@ -40,7 +40,7 @@ Kubilitics backend is a production-grade Kubernetes management platform built in
 ```bash
 # Clone repository
 git clone <repository-url>
-cd kubilitics-os-emergent/kubilitics-backend
+cd kubilitics/kubilitics-backend
 
 # Install dependencies
 go mod download
@@ -106,7 +106,7 @@ go run cmd/server/main.go
 curl http://localhost:8190/health
 
 # Expected response:
-# {"status":"healthy","service":"kubilitics-backend","version":"1.0.0"}
+# {"status":"healthy","service":"kubilitics-backend","version":"0.1.0"}
 
 # List clusters (if auth disabled)
 curl http://localhost:8190/api/v1/clusters

@@ -131,7 +131,7 @@ helm search repo kubilitics --versions
 If using the chart from the git repository:
 
 ```bash
-cd /path/to/kubilitics-os-emergent
+cd /path/to/kubilitics
 git fetch origin
 git checkout "v${TARGET_VERSION}"
 ```

@@ -1,7 +1,7 @@
 # Frontend Test Plan
 
 **Audience:** Frontend engineers, QA engineers
-**Applies to:** Kubilitics Frontend v1.0.0+
+**Applies to:** Kubilitics Frontend v0.1.0+
 **Last updated:** 2026-03-16
 
 ---
