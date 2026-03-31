@@ -291,6 +291,18 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
     exportRef.current?.('png', exportName);
   }, [kind, name]);
 
+  const handleExportCSV = useCallback(async () => {
+    if (!topology) return;
+    const { exportTopologyCSV } = await import('@/topology/export/exportCSV');
+    const baseUrl = (await import('@/stores/backendConfigStore')).getEffectiveBackendBaseUrl(
+      (await import('@/stores/backendConfigStore')).useBackendConfigStore.getState().backendBaseUrl
+    );
+    await exportTopologyCSV(topology, baseUrl, clusterId ?? '', {
+      resourceKind: kind,
+      resourceName: name,
+    });
+  }, [topology, clusterId, kind, name]);
+
   const handleResourceClick = useCallback(
     (resourceKind: string, resourceNamespace: string, resourceName: string) => {
       navigate(buildResourceDetailPath(resourceKind, resourceName, resourceNamespace));
@@ -366,6 +378,7 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
         onClear={handleClearSimulation}
         onFitView={handleFitView}
         onExport={handleExport}
+        onExportCSV={handleExportCSV}
         isSimulating={isSimulating}
         affectedCount={simulationAffectedNodes ? simulationAffectedNodes.size - 1 : 0}
       />

@@ -13,6 +13,7 @@ export interface SimulationControlsProps {
   onClear: () => void;
   onFitView: () => void;
   onExport: () => void;
+  onExportCSV?: () => void;
   isSimulating: boolean;
   /** Number of resources affected so far */
   affectedCount: number;
@@ -32,6 +33,7 @@ export function SimulationControls({
   onClear,
   onFitView,
   onExport,
+  onExportCSV,
   isSimulating,
   affectedCount,
 }: SimulationControlsProps) {
@@ -92,8 +94,14 @@ export function SimulationControls({
         </button>
         <button type="button" onClick={onExport} className={btnSecondary} title="Export PNG">
           <Download className="h-3.5 w-3.5" />
-          Export PNG
+          PNG
         </button>
+        {onExportCSV && (
+          <button type="button" onClick={onExportCSV} className={btnSecondary} title="Export CSV with resource details">
+            <Download className="h-3.5 w-3.5" />
+            CSV
+          </button>
+        )}
       </div>
     </motion.div>
   );
