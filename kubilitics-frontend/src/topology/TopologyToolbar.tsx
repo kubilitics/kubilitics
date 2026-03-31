@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useMemo } from "react";
 import {
-  Search, Download, Maximize, ChevronDown, FileJson, FileImage, FileType,
+  Search, Download, Maximize, ChevronDown, FileJson, FileImage, FileType, FileSpreadsheet,
   Filter, X, Layers, GitBranch, Check, Monitor, RefreshCw, Network,
   Box, Route, LayoutDashboard, Settings,
 } from "lucide-react";
@@ -28,6 +28,7 @@ import {
 } from "./export/exportTopology";
 import type { ExportFormat } from "./TopologyCanvas";
 import { exportTopologyPDF } from "./export/exportPDF";
+import { exportTopologyCSV } from "./export/exportCSV";
 import type { SearchResult } from "./hooks/useTopologySearch";
 import { K8sIcon } from "./icons/K8sIcon";
 import { toast } from "sonner";
@@ -746,6 +747,15 @@ export function TopologyToolbar({
                       <div>
                         <div className="text-xs font-semibold">JSON</div>
                         <div className="text-[10px] text-gray-600 dark:text-gray-400">Raw topology data</div>
+                      </div>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="rounded-lg gap-2.5 py-2" onClick={() => exportTopologyCSV(topology ?? null, effectiveBaseUrl, clusterId ?? '', ctx)}>
+                      <div className="flex items-center justify-center h-7 w-7 rounded-md bg-teal-50">
+                        <FileSpreadsheet className="h-3.5 w-3.5 text-teal-600" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold">CSV</div>
+                        <div className="text-[10px] text-gray-600 dark:text-gray-400">Enriched data with resource details (NFS paths, capacity, etc.)</div>
                       </div>
                     </DropdownMenuItem>
                   </>
