@@ -334,11 +334,9 @@ jobs:
         shell: bash
         run: |
           [ -d "../dist" ] && [ -n "$(ls -A ../dist)" ] || { echo "❌ dist missing"; exit 1; }
-          if [ -n "${{ secrets.APPLE_CERTIFICATE }}" ]; then
-            CONFIG='{"bundle":{"macOS":{"signingIdentity":"${{ secrets.APPLE_SIGNING_IDENTITY }}"}}}'
-          else
-            CONFIG='{"bundle":{"macOS":{"signingIdentity":null}}}'
-          fi
+          # Skip Apple code signing for now (codesign hangs in CI).
+          # Users right-click → Open on first launch. Tauri update signing still works.
+          CONFIG='{"bundle":{"macOS":{"signingIdentity":null}}}'
           TAURI_SIGNING_PRIVATE_KEY="${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" CI=true cargo tauri build --target universal-apple-darwin --bundles app,dmg --config "$CONFIG"
 
       - name: Notarize macOS DMG
