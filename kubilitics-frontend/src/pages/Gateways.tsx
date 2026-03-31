@@ -9,6 +9,7 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
+import { ResourceExportDropdown, type ResourceExportConfig } from '@/components/list/ResourceExportDropdown';
 import {
   Search, RefreshCw, MoreHorizontal, Loader2, WifiOff, Plus,
   ChevronDown, ChevronLeft, ChevronRight, Trash2,
@@ -318,6 +319,149 @@ export default function Gateways() {
     });
   }, [selectedItems, patchGateway]);
 
+  // ── Export Configs ───────────────────────────────────────────────────────
+
+  const gatewayExportConfig: ResourceExportConfig<GatewayResource> = useMemo(() => ({
+    filenamePrefix: 'gateways',
+    resourceLabel: 'gateways',
+    getExportData: (gw: GatewayResource) => ({
+      name: gw.metadata.name,
+      namespace: gw.metadata.namespace ?? '',
+      gatewayClassName: gw.spec.gatewayClassName ?? '',
+      status: getGatewayStatusLabel(gw),
+      listeners: gw.spec.listeners?.map((l) => `${l.name}:${l.port}/${l.protocol}`).join(', ') ?? '',
+      attachedRoutes: totalAttachedRoutes(gw),
+      addresses: gw.status?.addresses?.map((a) => a.value).join(', ') ?? '',
+      age: calculateAge(gw.metadata.creationTimestamp),
+    }),
+    csvColumns: [
+      { label: 'Name', getValue: (gw: GatewayResource) => gw.metadata.name },
+      { label: 'Namespace', getValue: (gw: GatewayResource) => gw.metadata.namespace ?? '' },
+      { label: 'Class', getValue: (gw: GatewayResource) => gw.spec.gatewayClassName ?? '' },
+      { label: 'Status', getValue: (gw: GatewayResource) => getGatewayStatusLabel(gw) },
+      { label: 'Listeners', getValue: (gw: GatewayResource) => gw.spec.listeners?.map((l) => `${l.name}:${l.port}/${l.protocol}`).join(', ') ?? '' },
+      { label: 'Routes', getValue: (gw: GatewayResource) => totalAttachedRoutes(gw) },
+      { label: 'Addresses', getValue: (gw: GatewayResource) => gw.status?.addresses?.map((a) => a.value).join(', ') ?? '' },
+      { label: 'Age', getValue: (gw: GatewayResource) => calculateAge(gw.metadata.creationTimestamp) },
+    ],
+  }), []);
+
+  const gatewayClassExportConfig: ResourceExportConfig<GatewayClassResource> = useMemo(() => ({
+    filenamePrefix: 'gateway-classes',
+    resourceLabel: 'gateway classes',
+    getExportData: (cls: GatewayClassResource) => ({
+      name: cls.metadata.name,
+      controller: cls.spec.controllerName,
+      status: cls.status?.conditions?.find((c) => c.type === 'Accepted')?.status === 'True' ? 'Accepted' : 'Not Accepted',
+      description: cls.spec.description ?? '',
+      age: calculateAge(cls.metadata.creationTimestamp),
+    }),
+    csvColumns: [
+      { label: 'Name', getValue: (cls: GatewayClassResource) => cls.metadata.name },
+      { label: 'Controller', getValue: (cls: GatewayClassResource) => cls.spec.controllerName },
+      { label: 'Status', getValue: (cls: GatewayClassResource) => cls.status?.conditions?.find((c) => c.type === 'Accepted')?.status === 'True' ? 'Accepted' : 'Not Accepted' },
+      { label: 'Description', getValue: (cls: GatewayClassResource) => cls.spec.description ?? '' },
+      { label: 'Age', getValue: (cls: GatewayClassResource) => calculateAge(cls.metadata.creationTimestamp) },
+    ],
+  }), []);
+
+  const httpRouteExportConfig: ResourceExportConfig<HTTPRouteResource> = useMemo(() => ({
+    filenamePrefix: 'http-routes',
+    resourceLabel: 'HTTP routes',
+    getExportData: (route: HTTPRouteResource) => ({
+      name: route.metadata.name,
+      namespace: route.metadata.namespace ?? '',
+      parentGateways: route.spec.parentRefs?.map((ref) => `${ref.namespace ? ref.namespace + '/' : ''}${ref.name}`).join(', ') ?? '',
+      hostnames: route.spec.hostnames?.join(', ') ?? '*',
+      status: getRouteStatus(route) === 'healthy' ? 'Accepted' : 'Pending',
+      rules: route.spec.rules?.length ?? 0,
+      age: calculateAge(route.metadata.creationTimestamp),
+    }),
+    csvColumns: [
+      { label: 'Name', getValue: (route: HTTPRouteResource) => route.metadata.name },
+      { label: 'Namespace', getValue: (route: HTTPRouteResource) => route.metadata.namespace ?? '' },
+      { label: 'Parent Gateways', getValue: (route: HTTPRouteResource) => route.spec.parentRefs?.map((ref) => `${ref.namespace ? ref.namespace + '/' : ''}${ref.name}`).join(', ') ?? '' },
+      { label: 'Hostnames', getValue: (route: HTTPRouteResource) => route.spec.hostnames?.join(', ') ?? '*' },
+      { label: 'Status', getValue: (route: HTTPRouteResource) => getRouteStatus(route) === 'healthy' ? 'Accepted' : 'Pending' },
+      { label: 'Rules', getValue: (route: HTTPRouteResource) => route.spec.rules?.length ?? 0 },
+      { label: 'Age', getValue: (route: HTTPRouteResource) => calculateAge(route.metadata.creationTimestamp) },
+    ],
+  }), []);
+
+  const grpcRouteExportConfig: ResourceExportConfig<GRPCRouteResource> = useMemo(() => ({
+    filenamePrefix: 'grpc-routes',
+    resourceLabel: 'gRPC routes',
+    getExportData: (route: GRPCRouteResource) => ({
+      name: route.metadata.name,
+      namespace: route.metadata.namespace ?? '',
+      parentGateways: route.spec.parentRefs?.map((ref) => `${ref.namespace ? ref.namespace + '/' : ''}${ref.name}`).join(', ') ?? '',
+      hostnames: route.spec.hostnames?.join(', ') ?? '*',
+      status: getRouteStatus(route) === 'healthy' ? 'Accepted' : 'Pending',
+      rules: route.spec.rules?.length ?? 0,
+      age: calculateAge(route.metadata.creationTimestamp),
+    }),
+    csvColumns: [
+      { label: 'Name', getValue: (route: GRPCRouteResource) => route.metadata.name },
+      { label: 'Namespace', getValue: (route: GRPCRouteResource) => route.metadata.namespace ?? '' },
+      { label: 'Parent Gateways', getValue: (route: GRPCRouteResource) => route.spec.parentRefs?.map((ref) => `${ref.namespace ? ref.namespace + '/' : ''}${ref.name}`).join(', ') ?? '' },
+      { label: 'Hostnames', getValue: (route: GRPCRouteResource) => route.spec.hostnames?.join(', ') ?? '*' },
+      { label: 'Status', getValue: (route: GRPCRouteResource) => getRouteStatus(route) === 'healthy' ? 'Accepted' : 'Pending' },
+      { label: 'Rules', getValue: (route: GRPCRouteResource) => route.spec.rules?.length ?? 0 },
+      { label: 'Age', getValue: (route: GRPCRouteResource) => calculateAge(route.metadata.creationTimestamp) },
+    ],
+  }), []);
+
+  // ── Active tab export helper ────────────────────────────────────────────
+
+  const activeExportDropdown = useMemo(() => {
+    if (activeTab === 'gateways') {
+      return (
+        <ResourceExportDropdown
+          items={filteredGateways}
+          selectedKeys={selectedItems}
+          getKey={(gw) => `${gw.metadata.namespace ?? ''}/${gw.metadata.name}`}
+          config={gatewayExportConfig}
+          selectionLabel={selectedItems.size > 0 ? 'Selected gateways' : 'All visible gateways'}
+          onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
+        />
+      );
+    }
+    if (activeTab === 'gatewayclasses') {
+      return (
+        <ResourceExportDropdown
+          items={filteredClasses}
+          selectedKeys={new Set<string>()}
+          getKey={(cls) => cls.metadata.name}
+          config={gatewayClassExportConfig}
+          selectionLabel="All visible gateway classes"
+          onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
+        />
+      );
+    }
+    if (activeTab === 'httproutes') {
+      return (
+        <ResourceExportDropdown
+          items={filteredHttpRoutes}
+          selectedKeys={new Set<string>()}
+          getKey={(route) => `${route.metadata.namespace ?? ''}/${route.metadata.name}`}
+          config={httpRouteExportConfig}
+          selectionLabel="All visible HTTP routes"
+          onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
+        />
+      );
+    }
+    return (
+      <ResourceExportDropdown
+        items={filteredGrpcRoutes}
+        selectedKeys={new Set<string>()}
+        getKey={(route) => `${route.metadata.namespace ?? ''}/${route.metadata.name}`}
+        config={grpcRouteExportConfig}
+        selectionLabel="All visible gRPC routes"
+        onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
+      />
+    );
+  }, [activeTab, filteredGateways, filteredClasses, filteredHttpRoutes, filteredGrpcRoutes, selectedItems, gatewayExportConfig, gatewayClassExportConfig, httpRouteExportConfig, grpcRouteExportConfig]);
+
   // ── Pagination ───────────────────────────────────────────────────────────
 
   function paginate<T>(items: T[]): T[] {
@@ -346,6 +490,7 @@ export default function Gateways() {
           {!isOnline && <WifiOff className="h-4 w-4 text-amber-500" />}
         </div>
         <div className="flex items-center gap-2">
+          {activeExportDropdown}
           <Button variant="outline" size="sm" onClick={() => {
             gatewaysQuery.refetch();
             classesQuery.refetch();

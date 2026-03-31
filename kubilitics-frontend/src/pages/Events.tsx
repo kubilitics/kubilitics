@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { ResourceExportDropdown, type ResourceExportConfig } from '@/components/list/ResourceExportDropdown';
 import { useQuery } from '@tanstack/react-query';
 import { Bell, Search, RefreshCw, MoreHorizontal, Loader2, WifiOff, ChevronDown, CheckCircle2, AlertTriangle, XCircle, ExternalLink, CalendarClock } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -247,6 +248,35 @@ export default function Events() {
 
  const tableContainerRef = useRef<HTMLDivElement>(null);
  const isLoading = eventsQuery.isLoading;
+
+ const eventExportConfig: ResourceExportConfig<EventRow> = useMemo(() => ({
+   filenamePrefix: 'events',
+   resourceLabel: 'events',
+   getExportData: (e: EventRow) => ({
+     type: e.type,
+     reason: e.reason,
+     objectKind: e.objectKind,
+     objectName: e.objectName,
+     namespace: e.eventNamespace,
+     message: e.message,
+     count: e.count,
+     firstSeen: e.firstSeen,
+     lastSeen: e.lastSeen,
+     source: e.source,
+   }),
+   csvColumns: [
+     { label: 'Type', getValue: (e: EventRow) => e.type },
+     { label: 'Reason', getValue: (e: EventRow) => e.reason },
+     { label: 'Object Kind', getValue: (e: EventRow) => e.objectKind },
+     { label: 'Object Name', getValue: (e: EventRow) => e.objectName },
+     { label: 'Namespace', getValue: (e: EventRow) => e.eventNamespace },
+     { label: 'Message', getValue: (e: EventRow) => e.message },
+     { label: 'Count', getValue: (e: EventRow) => e.count },
+     { label: 'First Seen', getValue: (e: EventRow) => e.firstSeen },
+     { label: 'Last Seen', getValue: (e: EventRow) => e.lastSeen },
+     { label: 'Source', getValue: (e: EventRow) => e.source },
+   ],
+ }), []);
  const isError = eventsQuery.isError;
 
  return (
@@ -278,6 +308,14 @@ export default function Events() {
  <RefreshCw className={cn('h-4 w-4', autoRefresh && 'animate-spin')} />
  {autoRefresh ? 'Live (10s)' : 'Live Updates'}
  </Button>
+ <ResourceExportDropdown
+   items={filteredRows}
+   selectedKeys={new Set<string>()}
+   getKey={(e) => e.id}
+   config={eventExportConfig}
+   selectionLabel="All visible events"
+   onToast={(msg, type) => (type === 'info' ? toast.info(msg) : toast.success(msg))}
+ />
  <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => eventsQuery.refetch()} disabled={eventsQuery.isLoading}>
  {eventsQuery.isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
  </Button>
