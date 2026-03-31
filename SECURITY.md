@@ -1,6 +1,6 @@
 # Security Policy
 
-For the project roadmap and task list (including security-related tasks), see **[TASKS.md](TASKS.md)**. For secure defaults, RBAC, and secrets handling, see **docs/** (e.g. [SECURE-DEFAULTS.md](docs/SECURE-DEFAULTS.md), [SECURITY-RBAC.md](docs/SECURITY-RBAC.md), [SECURITY-SECRETS.md](docs/SECURITY-SECRETS.md)).
+For secure defaults, RBAC, and secrets handling, see **docs/** (e.g. [SECURE-DEFAULTS.md](docs/SECURE-DEFAULTS.md), [SECURITY-RBAC.md](docs/SECURITY-RBAC.md), [SECURITY-SECRETS.md](docs/SECURITY-SECRETS.md)).
 
 ## Supported Versions
 
@@ -8,8 +8,8 @@ We release patches for security vulnerabilities in the following versions:
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.x.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| 0.1.x   | :white_check_mark: |
+| < 0.1.0 | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -84,13 +84,6 @@ Currently, we do not have a formal bug bounty program. However:
 - No authentication (local use only)
 - File system access limited to kubeconfig
 - WebView sandboxed
-
-### Mobile Application
-
-- HTTPS required for all connections
-- Biometric authentication required
-- Keychain/Keystore for sensitive data
-- Certificate pinning recommended
 
 ### Backend
 

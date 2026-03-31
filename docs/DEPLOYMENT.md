@@ -1,6 +1,6 @@
 # Kubilitics Deployment Guide
 
-Step-by-step instructions for deploying Kubilitics v1.0.0 across all supported modes.
+Step-by-step instructions for deploying Kubilitics v0.1.0 across all supported modes.
 
 ---
 
@@ -22,7 +22,7 @@ Step-by-step instructions for deploying Kubilitics v1.0.0 across all supported m
 
 | Tool | Minimum Version | Purpose |
 |------|----------------|---------|
-| Go | 1.25.0+ | Build backend and kcli |
+| Go | 1.24+ | Build backend and kcli |
 | Node.js | 18+ | Build frontend |
 | npm | 9+ | Frontend dependencies |
 | kubectl | 1.28+ | Kubernetes CLI |
@@ -44,25 +44,21 @@ Step-by-step instructions for deploying Kubilitics v1.0.0 across all supported m
                     +---------v---------+
                     |  kubilitics-backend   |
                     |  Go REST + WebSocket  |
-                    |  Port: 819            |
+                    |  Port: 8190            |
                     |  SQLite database      |
                     +---------+---------+
                               |
-              +---------------+---------------+
-              |                               |
-    +---------v---------+           +---------v---------+
-    |  Kubernetes API    |           |  kubilitics-ai     |
-    |  (your cluster)    |           |  AI backend         |
-    |                    |           |  Port: 8081         |
-    +--------------------+           +--------------------+
+                    +---------v---------+
+                    |  Kubernetes API    |
+                    |  (your cluster)    |
+                    +--------------------+
 ```
 
 **Services:**
 
 | Service | Port | Description |
 |---------|------|-------------|
-| kubilitics-backend | 819 | Core API, WebSocket streams, SQLite storage |
-| kubilitics-ai | 8081 | AI analysis, cost estimation (optional) |
+| kubilitics-backend | 8190 | Core API, WebSocket streams, SQLite storage |
 | kubilitics-frontend | 5173 | React SPA (dev server) |
 | kcli | N/A | CLI binary, embedded in backend streams |
 
@@ -108,8 +104,7 @@ The built app is at `kubilitics-desktop/src-tauri/target/release/bundle/`.
 
 Open `Kubilitics.app` (macOS) or run the binary directly. The app:
 - Auto-detects `~/.kube/config`
-- Starts backend sidecar on port 819
-- Starts AI sidecar on port 8081
+- Starts backend sidecar on port 8190
 - Opens the frontend in a native window
 
 ---
@@ -126,11 +121,11 @@ go build -o bin/kubilitics-backend ./cmd/server
 ./bin/kubilitics-backend
 ```
 
-Verify: `curl http://127.0.0.1:819/health`
+Verify: `curl http://127.0.0.1:8190/health`
 
 Expected response:
 ```json
-{"status": "healthy", "service": "kubilitics-backend", "port": 819}
+{"status": "healthy", "service": "kubilitics-backend", "port": 8190}
 ```
 
 ### Step 2: Build kcli (required for shell/TUI features)
@@ -142,16 +137,7 @@ go build -o bin/kcli ./cmd/kcli
 
 The backend auto-discovers kcli at `../kcli/bin/kcli` relative to its working directory.
 
-### Step 3: Start the AI backend (optional)
-
-```bash
-cd kubilitics-ai
-go run ./cmd/server
-```
-
-Verify: `curl http://127.0.0.1:8081/health`
-
-### Step 4: Start the frontend dev server
+### Step 3: Start the frontend dev server
 
 ```bash
 cd kubilitics-frontend
@@ -161,14 +147,14 @@ npm run dev
 
 Open `http://localhost:5173` in your browser.
 
-### Step 5: Connect a cluster
+### Step 4: Connect a cluster
 
 1. Open the app at `http://localhost:5173`
 2. Click **Launch Desktop** on the welcome screen
 3. Click **Auto-Detect** or select a cluster from the list
 4. Click the cluster's **Connect** button
 
-### Step 6: Verify the shell
+### Step 5: Verify the shell
 
 1. Click the **Shell** button in the header bar
 2. The kcli Bubble Tea TUI should appear with your pods
@@ -202,13 +188,13 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/kubilitics/kubilitics-backend
-  tag: "1.0.0"
+  tag: "0.1.0"
   pullPolicy: IfNotPresent
 
 # Service configuration
 service:
   type: ClusterIP
-  port: 819
+  port: 8190
 
 # Ingress (optional - for external access)
 ingress:
@@ -229,13 +215,6 @@ env:
   KUBILITICS_LOG_LEVEL: info
   KUBILITICS_LOG_FORMAT: json
   KUBILITICS_ALLOWED_ORIGINS: "https://kubilitics.example.com"
-
-# AI backend (optional)
-ai:
-  enabled: false
-  image:
-    repository: ghcr.io/kubilitics/kubilitics-ai
-    tag: "1.0.0"
 
 # PostgreSQL (optional - defaults to SQLite)
 postgresql:
@@ -261,10 +240,10 @@ kubectl get pods -n kubilitics
 kubectl get svc -n kubilitics
 
 # Port-forward to test locally
-kubectl port-forward -n kubilitics svc/kubilitics 819:819
+kubectl port-forward -n kubilitics svc/kubilitics 8190:8190
 
 # Health check
-curl http://127.0.0.1:819/health
+curl http://127.0.0.1:8190/health
 ```
 
 ### Step 5: Access
@@ -276,7 +255,7 @@ https://kubilitics.example.com
 
 If using port-forward:
 ```
-http://127.0.0.1:819
+http://127.0.0.1:8190
 ```
 
 ### Upgrade
@@ -303,13 +282,10 @@ For running outside Kubernetes with Docker.
 
 ```bash
 # Backend
-docker build -t kubilitics-backend:1.0.0 -f kubilitics-backend/Dockerfile .
-
-# AI backend (optional)
-docker build -t kubilitics-ai:1.0.0 -f kubilitics-ai/Dockerfile .
+docker build -t kubilitics-backend:0.1.0 -f kubilitics-backend/Dockerfile .
 
 # Frontend
-docker build -t kubilitics-frontend:1.0.0 -f kubilitics-frontend/Dockerfile .
+docker build -t kubilitics-frontend:0.1.0 -f kubilitics-frontend/Dockerfile .
 ```
 
 ### Step 2: Run
@@ -317,11 +293,11 @@ docker build -t kubilitics-frontend:1.0.0 -f kubilitics-frontend/Dockerfile .
 ```bash
 docker run -d \
   --name kubilitics-backend \
-  -p 819:819 \
+  -p 8190:8190 \
   -v $HOME/.kube/config:/root/.kube/config:ro \
-  -e KUBILITICS_PORT=819 \
+  -e KUBILITICS_PORT=8190 \
   -e KUBILITICS_LOG_LEVEL=info \
-  kubilitics-backend:1.0.0
+  kubilitics-backend:0.1.0
 ```
 
 ---
@@ -332,12 +308,12 @@ docker run -d \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KUBILITICS_PORT` | `819` | HTTP server port |
+| `KUBILITICS_PORT` | `8190` | HTTP server port |
 | `KUBECONFIG` | `~/.kube/config` | Path to kubeconfig |
 | `KUBILITICS_DATABASE_PATH` | `./kubilitics.db` | SQLite database path |
 | `KUBILITICS_LOG_LEVEL` | `info` | Log level: debug, info, warn, error |
 | `KUBILITICS_LOG_FORMAT` | `json` | Log format: json or text |
-| `KUBILITICS_ALLOWED_ORIGINS` | `localhost:5173,localhost:819` | CORS allowed origins |
+| `KUBILITICS_ALLOWED_ORIGINS` | `localhost:5173,localhost:8190` | CORS allowed origins |
 | `KUBILITICS_TLS_ENABLED` | `false` | Enable HTTPS |
 | `KUBILITICS_TLS_CERT_PATH` | `""` | TLS certificate path |
 | `KUBILITICS_TLS_KEY_PATH` | `""` | TLS private key path |
@@ -346,23 +322,11 @@ docker run -d \
 | `KUBILITICS_KCLI_STREAM_MAX_CONNS` | `4` | Max concurrent kcli streams per cluster |
 | `KUBILITICS_K8S_TIMEOUT_SEC` | `15` | Kubernetes API call timeout |
 
-### AI Backend Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `KUBILITICS_HTTP_PORT` | `8081` | AI service HTTP port |
-| `KUBILITICS_BACKEND_URL` | `http://localhost:819` | Backend URL for API calls |
-| `AI_PROVIDER` | `""` | AI provider: openai, anthropic, ollama, custom |
-| `AI_MODEL` | `""` | Model name (e.g., gpt-4, claude-sonnet-4-20250514) |
-| `AI_API_KEY` | `""` | AI provider API key |
-
 ### Port Summary
 
 | Service | Port | Protocol |
 |---------|------|----------|
-| Backend HTTP | 819 | HTTP/WS |
-| Backend gRPC | 50051 | gRPC |
-| AI Backend HTTP | 8081 | HTTP/WS |
+| Backend HTTP | 8190 | HTTP/WS |
 | Frontend Dev | 5173 | HTTP |
 
 ---
@@ -374,14 +338,14 @@ After deployment, verify each component:
 ### 1. Backend Health
 
 ```bash
-curl -s http://HOST:819/health | jq .
+curl -s http://HOST:8190/health | jq .
 # Expected: {"status": "healthy", ...}
 ```
 
 ### 2. Cluster Discovery
 
 ```bash
-curl -s http://HOST:819/api/v1/clusters | jq '.[].name'
+curl -s http://HOST:8190/api/v1/clusters | jq '.[].name'
 # Expected: list of cluster names from kubeconfig
 ```
 
@@ -389,7 +353,7 @@ curl -s http://HOST:819/api/v1/clusters | jq '.[].name'
 
 ```bash
 # Replace CLUSTER_ID with actual ID from step 2
-curl -s http://HOST:819/api/v1/clusters/CLUSTER_ID/resources/pods | jq '.items | length'
+curl -s http://HOST:8190/api/v1/clusters/CLUSTER_ID/resources/pods | jq '.items | length'
 # Expected: number > 0
 ```
 
@@ -409,13 +373,6 @@ In the kcli TUI:
 3. Pods should reload for the selected namespace
 4. Header should show the new namespace
 
-### 6. AI Backend (if enabled)
-
-```bash
-curl -s http://HOST:8081/health | jq .
-# Expected: {"status": "healthy"}
-```
-
 ---
 
 ## Troubleshooting
@@ -423,11 +380,11 @@ curl -s http://HOST:8081/health | jq .
 ### Backend won't start
 
 ```bash
-# Check if port 819 is in use
-lsof -ti :819
+# Check if port 8190 is in use
+lsof -ti :8190
 
 # Kill existing process
-lsof -ti :819 | xargs kill -9
+lsof -ti :8190 | xargs kill -9
 
 # Check logs
 ./bin/kubilitics-backend 2>&1 | head -50
@@ -441,14 +398,14 @@ lsof -ti :819 | xargs kill -9
 
 ### Shell panel shows "disconnected"
 
-1. Verify backend is running: `curl http://127.0.0.1:819/health`
+1. Verify backend is running: `curl http://127.0.0.1:8190/health`
 2. Verify kcli binary exists: `ls -la kcli/bin/kcli`
 3. Check backend logs for kcli binary resolution errors
 4. Set `KCLI_BIN` env var to the absolute path of the kcli binary
 
 ### Namespace switching doesn't work
 
-1. Ensure you're using kcli v1.0.0 (rebuild: `cd kcli && go build -o bin/kcli ./cmd/kcli`)
+1. Ensure you're using the latest kcli (rebuild: `cd kcli && go build -o bin/kcli ./cmd/kcli`)
 2. Restart the backend after rebuilding kcli
 3. Close and reopen the shell panel
 
@@ -477,13 +434,10 @@ rm kubilitics.db kubilitics.db-shm kubilitics.db-wal
 
 | Version | Date | Notes |
 |---------|------|-------|
-| 1.0.0 | 2026-03-02 | Production release: namespace switching, shell stability, UI hardening |
+| 0.1.0 | 2026-03-28 | Initial release: namespace switching, shell stability, UI hardening |
 
 ---
 
 For additional documentation see:
-- [Architecture](ARCHITECTURE.md)
 - [Production Environment Variables](PRODUCTION_ENV_VARS.md)
-- [Integration Ports](INTEGRATION_PORTS.md)
 - [Release Standards](RELEASE-STANDARDS.md)
-- [Troubleshooting kcli](TROUBLESHOOTING_KCLI.md)
