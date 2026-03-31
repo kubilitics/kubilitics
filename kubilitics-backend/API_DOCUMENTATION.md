@@ -779,27 +779,12 @@ Export topology in various formats. Requires `operator` role.
 }
 ```
 
-**Supported Formats**: `json`, `svg`, `drawio`, `png`
+**Supported Formats**: `json`, `svg`, `png`
 
 **Response** (200 OK):
-- `Content-Type`: `image/png` (for PNG), `image/svg+xml` (for SVG), `application/json` (for JSON), `application/xml` (for draw.io)
+- `Content-Type`: `image/png` (for PNG), `image/svg+xml` (for SVG), `application/json` (for JSON)
 - `Content-Disposition`: `attachment; filename="topology.{format}"`
 - Body: Binary content (PNG/SVG) or JSON/XML
-
-#### GET /api/v1/clusters/{clusterId}/topology/export/drawio
-
-Export topology as draw.io XML. Requires `viewer` role.
-
-**Query Parameters**:
-- `namespace` (optional): Filter by namespace
-
-**Response** (200 OK):
-```
-Content-Type: application/xml
-Content-Disposition: attachment; filename="topology.drawio"
-
-<mxfile>...</mxfile>
-```
 
 ---
 

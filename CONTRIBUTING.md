@@ -15,8 +15,6 @@ Thank you for your interest in contributing to Kubilitics! This document provide
 9. [Release Process](#release-process)
 10. [Community](#community)
 
-**Roadmap and tasks:** The single execution roadmap and task list (phases A–R, O, W, etc.) is in **[TASKS.md](TASKS.md)**. Use it to see what’s in scope, definition of done, and verification steps.
-
 ---
 
 ## Code of Conduct
@@ -105,36 +103,17 @@ cd ../kubilitics-desktop
 cargo tauri dev
 ```
 
-### Mobile
-
-```bash
-cd kubilitics-mobile
-
-# Install dependencies
-npm install
-
-# iOS
-cargo tauri ios init
-cargo tauri ios dev
-
-# Android
-cargo tauri android init
-cargo tauri android dev
-```
-
 ---
 
 ## Project Structure
 
 ```
-Kubilitics/
+kubilitics/
 ├── kubilitics-backend/       Go backend services
+├── kubilitics-frontend/      React frontend SPA
 ├── kubilitics-desktop/       Tauri desktop app
-├── kubilitics-frontend/      React frontend (separate repo)
-├── kubilitics-mobile/        Tauri mobile app
-├── kubilitics-website/       Marketing website
+├── deploy/helm/kubilitics/   Helm chart for in-cluster deployment
 ├── docs/                     Documentation
-├── tests/                    E2E and integration tests
 ├── scripts/                  Build and utility scripts
 └── .github/                  CI/CD workflows
 ```
@@ -142,10 +121,8 @@ Kubilitics/
 ### Component Responsibilities
 
 - **kubilitics-backend**: Core Kubernetes integration, topology engine, REST API
+- **kubilitics-frontend**: React + TypeScript + Vite SPA
 - **kubilitics-desktop**: Native desktop app (macOS, Windows, Linux)
-- **kubilitics-frontend**: Shared React UI components
-- **kubilitics-mobile**: Native mobile app (iOS, Android)
-- **kubilitics-website**: Marketing and documentation site
 
 ---
 
@@ -484,7 +461,7 @@ We follow [Semantic Versioning](https://semver.org/):
 
 - **GitHub Discussions**: General questions and discussions
 - **GitHub Issues**: Bug reports and feature requests
-- **Discord**: Real-time chat (link TBD)
+- **Discord**: Real-time chat
 - **Twitter**: @kubilitics (announcements)
 
 ### Getting Help

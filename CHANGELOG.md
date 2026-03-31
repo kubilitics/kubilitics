@@ -68,7 +68,7 @@ Kubilitics
 ├── kubilitics-desktop  (Tauri 2.0 host, Rust)
 ├── kubilitics-frontend (React + TypeScript + Vite SPA)
 ├── kubilitics-backend  (Go REST API + WebSocket, SQLite/PostgreSQL, port 8190)
-└── kcli                (kubectl wrapper CLI, Go — separate repo)
+└── kcli                (kubectl wrapper CLI, Go)
 ```
 
 ---
