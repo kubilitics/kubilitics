@@ -179,7 +179,7 @@ function HighlightedText({
     <>
       {parts.map((p, i) =>
         p.match ? (
-          <mark key={i} className="bg-amber-400/30 text-amber-200 rounded-sm not-italic">
+          <mark key={i} className="bg-orange-500/40 text-white rounded-sm not-italic font-medium">
             {p.text}
           </mark>
         ) : (
@@ -835,7 +835,7 @@ export function LogViewer({
         <button onClick={toggleInverseFilter} className={cn('h-8 flex items-center gap-1.5 px-2.5 rounded-lg text-xs font-medium shrink-0 transition-colors', inverseFilter ? (isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-50 text-red-600 border border-red-200') : btnCls)} title="Exclude"><FlipHorizontal className="h-4 w-4" /> Exclude</button>
 
         <select value={contextLines} onChange={e => setContextLines(Number(e.target.value))} className={cn('h-8 border rounded-lg px-2 text-xs font-medium outline-none cursor-pointer shrink-0', inputCls, contextLines > 0 ? (isDark ? 'border-blue-500/40 text-blue-300' : 'border-blue-500/40 text-blue-600') : '')} title="Context lines">
-          {CONTEXT_OPTIONS.map(n => (<option key={n} value={n} style={{ background: isDark ? 'hsl(221,39%,11%)' : 'white' }}>{n === 0 ? 'No ctx' : `\u00B1${n} ctx`}</option>))}
+          {CONTEXT_OPTIONS.map(n => (<option key={n} value={n} style={{ background: isDark ? 'hsl(221,39%,11%)' : 'white' }}>{n === 0 ? 'No context' : `±${n} lines`}</option>))}
         </select>
 
         <button onClick={() => setHistoryOpen(v => !v)} className={cn('h-8 flex items-center gap-1.5 px-2.5 rounded-lg text-xs font-medium shrink-0 transition-colors', historyOpen ? activeBtnCls : btnCls)} title="History">
