@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>The Kubernetes Operating System</strong><br />
-  Multi-cluster management, real-time topology, AI-powered operations — all from one platform.
+  Multi-cluster management, real-time topology, powerful CLI operations — all from one platform.
 </p>
 
 <p align="center">
@@ -28,14 +28,6 @@
 
 ---
 
-<!--
-  📸 SCREENSHOT PLACEHOLDER
-  Replace this with an actual screenshot of the Kubilitics dashboard.
-  Recommended: 1920x1080 PNG showing multi-cluster dashboard with 3 clusters connected.
-
-  ![Kubilitics Dashboard](docs/images/dashboard-hero.png)
--->
-
 ## Why Kubilitics?
 
 | Problem | Kubilitics Solution |
@@ -43,8 +35,8 @@
 | kubectl is powerful but opaque | **Visual resource intelligence** — see every resource, relationship, and status at a glance |
 | Lens is deprecated / desktop-only | **Web + Desktop + In-Cluster** — deploy anywhere, access from any browser |
 | Headlamp lacks multi-cluster | **True multi-cluster** — switch between Docker Desktop, EKS, AKS, GKE in one click |
-| No AI in existing tools | **AI-powered operations** — kcli (AI kubectl), blast radius analysis, incident investigation |
-| Topology is afterthought | **Topology-first** — 5 view modes, semantic zoom, relationship inference, export to PNG/SVG/Draw.io |
+| CLI is disconnected | **Integrated CLI** — kcli (kubectl wrapper) with cluster context management and blast radius analysis |
+| Topology is afterthought | **Topology-first** — 5 view modes, semantic zoom, relationship inference, export to PNG, SVG, JSON, CSV |
 
 ---
 
@@ -56,7 +48,7 @@
 # 1. Start the backend
 cd kubilitics-backend
 go run ./cmd/server
-# Backend running at http://localhost:819
+# Backend running at http://localhost:8190
 
 # 2. Start the frontend (in a new terminal)
 cd kubilitics-frontend
@@ -100,11 +92,6 @@ Connect and switch between clusters instantly. Tested with:
 | Minikube | ✅ | Auto-detected |
 | Rancher / RKE2 | ✅ | Via kubeconfig |
 
-<!--
-  📸 SCREENSHOT PLACEHOLDER: Multi-cluster switcher showing 3 connected clusters
-  ![Multi-Cluster](docs/images/multi-cluster-switcher.png)
--->
-
 ### Resource Intelligence (70+ Resource Types)
 
 Every Kubernetes resource type with real-time status, metrics, and drill-down:
@@ -117,11 +104,6 @@ Every Kubernetes resource type with real-time status, metrics, and drill-down:
 **CRDs** — Custom Resource Definitions with automatic discovery
 **Cluster** — Nodes, Namespaces, Events, Leases, PriorityClasses, RuntimeClasses
 
-<!--
-  📸 SCREENSHOT PLACEHOLDER: Resource list page showing Deployments with status badges
-  ![Resources](docs/images/resource-list.png)
--->
-
 ### Topology Engine (5 View Modes)
 
 Interactive cluster topology powered by React Flow + ELK layout:
@@ -132,19 +114,13 @@ Interactive cluster topology powered by React Flow + ELK layout:
 - **Resource-Centric** — BFS traversal from any resource with configurable depth
 - **RBAC View** — ServiceAccount → Role → RoleBinding permission graph
 
-Export: PNG, SVG, JSON, CSV, Draw.io
+Export: PNG, SVG, JSON, CSV
 
-<!--
-  📸 SCREENSHOT PLACEHOLDER: Topology view showing resource relationships
-  ![Topology](docs/images/topology-view.png)
--->
+### CLI & Operations
 
-### AI-Powered Operations
-
-- **kcli** — AI-powered kubectl replacement with natural language commands
+- **kcli** — Integrated kubectl with cluster context management
 - **Blast Radius Calculator** — Predict impact before making changes
-- **AI Investigation** — Root cause analysis for failing resources
-- **Safety Guard** — AI actions require human approval (configurable autonomy levels 1-5)
+- **In-browser terminal** — Shell access with tab completion and context switching
 
 ### Dashboard & Monitoring
 
@@ -153,38 +129,15 @@ Export: PNG, SVG, JSON, CSV, Draw.io
 - Fleet dashboard for multi-cluster overview
 - Event stream with severity filtering
 
-### Enterprise Features
+### Security & Auth
 
-- SSO / OIDC authentication
-- RBAC management and audit logging
-- Cost dashboard and SLO monitoring
-- Backup/restore for cluster state
-- Compliance dashboard
-- Network policy templates
+- SSO / OIDC / SAML authentication
+- RBAC management (Admin / Operator / Viewer) with per-cluster permissions
+- Audit logging with CSV export
+- API key authentication for programmatic access
+- MFA / TOTP support
 
 ---
-
-## 🎬 Multi-Cluster Demo
-
-<!--
-  🎥 VIDEO PLACEHOLDER
-  Record a 3-5 minute demo showing:
-  1. Mode Selection (Personal vs Team Server)
-  2. Connect Docker Desktop cluster (auto-detected)
-  3. Dashboard with health metrics
-  4. Switch to EKS cluster — show workloads, pods, topology
-  5. Switch to AKS cluster — show namespaces, services
-  6. Fleet Dashboard showing all 3 clusters
-  7. Resource drill-down: Deployment → ReplicaSet → Pod → Containers → Logs
-  8. Topology view with relationship graph
-  9. kcli AI command demo
-
-  Upload to YouTube and replace the link below:
-
-  [![Kubilitics Demo](https://img.youtube.com/vi/VIDEO_ID/maxresdefault.jpg)](https://www.youtube.com/watch?v=VIDEO_ID)
--->
-
-> **Demo video coming soon** — Multi-cluster walkthrough with Docker Desktop, AWS EKS, and Azure AKS.
 
 ---
 
@@ -206,7 +159,7 @@ Deploy Kubilitics to your Kubernetes cluster for team-wide access.
 # Install from OCI registry (recommended)
 helm install kubilitics \
   oci://ghcr.io/kubilitics/charts/kubilitics \
-  --version 1.0.0 \
+  --version 0.1.0 \
   --namespace kubilitics --create-namespace
 ```
 
@@ -227,8 +180,8 @@ kubectl get svc -n kubilitics
 ### Access (port-forward for local testing)
 
 ```bash
-kubectl port-forward -n kubilitics svc/kubilitics 819:819
-# Open http://localhost:5173 and set backend URL to http://localhost:819
+kubectl port-forward -n kubilitics svc/kubilitics 8190:8190
+# Open http://localhost:5173 and set backend URL to http://localhost:8190
 ```
 
 ### Production (with Ingress)
@@ -236,29 +189,17 @@ kubectl port-forward -n kubilitics svc/kubilitics 819:819
 ```bash
 helm install kubilitics \
   oci://ghcr.io/kubilitics/charts/kubilitics \
-  --version 1.0.0 \
+  --version 0.1.0 \
   --namespace kubilitics --create-namespace \
   --set ingress.enabled=true \
   --set ingress.hosts[0].host=kubilitics.example.com \
   --set config.allowedOrigins="https://kubilitics.example.com"
 ```
 
-### With AI Backend
-
-```bash
-helm install kubilitics \
-  oci://ghcr.io/kubilitics/charts/kubilitics \
-  --version 1.0.0 \
-  --namespace kubilitics --create-namespace \
-  --set ai.enabled=true \
-  --set ai.secret.enabled=true \
-  --set ai.secret.anthropicApiKey="sk-ant-..."
-```
-
 ### Full Configuration Reference
 
 ```bash
-helm show values oci://ghcr.io/kubilitics/charts/kubilitics --version 1.0.0
+helm show values oci://ghcr.io/kubilitics/charts/kubilitics --version 0.1.0
 ```
 
 Key configuration options:
@@ -266,7 +207,7 @@ Key configuration options:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `image.tag` | `0.1.2` | Backend image version |
-| `service.port` | `819` | Backend service port |
+| `service.port` | `8190` | Backend service port |
 | `database.type` | `sqlite` | `sqlite` or `postgresql` |
 | `ingress.enabled` | `false` | Enable Ingress |
 | `rbac.enabled` | `true` | Create RBAC resources |
@@ -281,7 +222,7 @@ Key configuration options:
 Native desktop application built with Tauri 2.0 (Rust + WebView):
 
 - **Auto-discovery** — detects `~/.kube/config` on launch
-- **Sidecar backend** — Go backend + AI + kcli bundled as child processes
+- **Sidecar backend** — Go backend + kcli bundled as child processes
 - **Offline-first** — works without internet for local clusters
 - **Cross-platform** — macOS (.dmg), Windows (.msi), Linux (.deb/.AppImage)
 
@@ -317,7 +258,7 @@ cargo tauri build
 │                             │                                      │
 │                    ┌────────▼────────┐                             │
 │                    │   Go Backend    │  REST API + WebSocket       │
-│                    │   Port 819     │  SQLite / PostgreSQL        │
+│                    │   Port 8190    │  SQLite / PostgreSQL        │
 │                    └────────┬────────┘                             │
 │                             │                                      │
 │              ┌──────────────┼──────────────┐                      │
@@ -343,7 +284,7 @@ cargo tauri build
 ```
 kubilitics/
 ├── kubilitics-backend/        # Go REST API + WebSocket + Topology Engine
-│   ├── cmd/server/            # Entry point (port 819)
+│   ├── cmd/server/            # Entry point (port 8190)
 │   ├── internal/
 │   │   ├── api/               # REST handlers, WebSocket hub
 │   │   ├── k8s/               # Kubernetes client (client-go)
@@ -359,15 +300,12 @@ kubilitics/
 │   ├── src/stores/            # Zustand state management
 │   └── package.json
 │
-├── kcli/                      # AI-powered kubectl replacement (Go)
-│   └── cmd/kcli/             # CLI entry point
-│
 ├── kubilitics-desktop/        # Tauri 2.0 desktop app (Rust)
 │   ├── src-tauri/             # Rust sidecar manager
 │   └── src/                   # Shared frontend
 │
 ├── deploy/helm/kubilitics/    # Helm chart for in-cluster deployment
-│   ├── Chart.yaml             # v1.0.0
+│   ├── Chart.yaml             # v0.1.0
 │   ├── values.yaml            # All configurable values
 │   └── templates/             # K8s resource templates
 │
@@ -381,9 +319,9 @@ kubilitics/
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS, Framer Motion |
 | State | Zustand, TanStack Query (React Query) |
 | Topology | React Flow, ELK.js (layered layout) |
-| Backend | Go 1.25, Gorilla Mux, client-go, SQLite/PostgreSQL |
+| Backend | Go 1.24, Gorilla Mux, client-go, SQLite/PostgreSQL |
 | Desktop | Tauri 2.0 (Rust), WebView2/WKWebView |
-| AI | Claude (Anthropic), OpenAI, Ollama (self-hosted) |
+| CLI | kcli (kubectl wrapper with shell integration) |
 | CI/CD | GitHub Actions, Helm OCI (ghcr.io) |
 | Charts | OCI artifacts at `oci://ghcr.io/kubilitics/charts` |
 
@@ -393,7 +331,7 @@ kubilitics/
 
 ### Prerequisites
 
-- **Go** 1.25+ (backend, kcli)
+- **Go** 1.24+ (backend)
 - **Node.js** 20+ (frontend)
 - **Rust** 1.75+ (desktop only)
 - **Kubernetes cluster** (any — Docker Desktop works)
@@ -408,7 +346,7 @@ cd kubilitics-backend && go run ./cmd/server
 cd kubilitics-frontend && npm install && npm run dev
 ```
 
-Backend: http://localhost:819 • Frontend: http://localhost:5173 • Metrics: http://localhost:819/metrics
+Backend: http://localhost:8190 • Frontend: http://localhost:5173 • Metrics: http://localhost:8190/metrics
 
 ### Tests
 
@@ -432,8 +370,8 @@ cd kubilitics-backend && go build -o bin/kubilitics-backend ./cmd/server
 # Frontend production build
 cd kubilitics-frontend && npm run build
 
-# kcli
-cd kcli && go build -o bin/kcli ./cmd/kcli
+# Desktop
+cd kubilitics-desktop && npm install && cargo tauri build
 ```
 
 ---
@@ -464,7 +402,7 @@ cd kcli && go build -o bin/kcli ./cmd/kcli
 | Web access | ✅ Browser + Desktop | ❌ Desktop only | ✅ Web | ❌ Terminal |
 | In-cluster deploy | ✅ Helm | ❌ | ✅ Helm | ❌ |
 | Topology visualization | ✅ 5 modes + export | ❌ | ❌ | ❌ |
-| AI operations | ✅ kcli + investigation | ❌ | ❌ | ❌ |
+| Integrated CLI | ✅ kcli + shell | ❌ | ❌ | ❌ |
 | 70+ resource types | ✅ | ✅ | ⚠️ ~30 | ✅ |
 | Dark mode | ✅ System + manual | ✅ | ✅ | ✅ |
 | Open source | ✅ Apache 2.0 | ❌ Proprietary | ✅ Apache 2.0 | ✅ Apache 2.0 |
