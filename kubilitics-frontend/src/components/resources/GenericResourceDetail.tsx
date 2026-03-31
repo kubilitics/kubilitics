@@ -213,16 +213,46 @@ function CloneToNamespaceDialog({
     // Remove status block — K8s will regenerate it
     delete cleaned.status;
 
-    // Strip Pod-specific fields that prevent cloning
+    // Strip Pod-specific fields that prevent cloning.
+    // K8s auto-injects volumes, volumeMounts, env vars, and other fields
+    // that are invalid or conflicting when creating a new Pod.
     if (kind === 'Pod' && cleaned.spec) {
-      delete cleaned.spec.nodeName;           // Scheduler will reassign
-      delete cleaned.spec.serviceAccountName; // May not exist in target namespace — let default apply
-      // Remove auto-generated volume mounts and volumes (service account tokens, projected)
+      delete cleaned.spec.nodeName;
+      delete cleaned.spec.serviceAccountName;
+      delete cleaned.spec.ephemeralContainers;
+      delete cleaned.spec.preemptionPolicy;
+      delete cleaned.spec.priority;
+      delete cleaned.spec.priorityClassName;
+
+      // Collect names of auto-generated volumes to also strip their volumeMounts
+      const autoVolumeNames = new Set<string>();
       if (Array.isArray(cleaned.spec.volumes)) {
-        cleaned.spec.volumes = cleaned.spec.volumes.filter(
-          (v: Record<string, unknown>) => !v.projected && !(v.secret && typeof v.secret === 'object' && (v.secret as Record<string, unknown>).secretName?.toString().includes('-token-'))
-        );
+        cleaned.spec.volumes = cleaned.spec.volumes.filter((v: Record<string, unknown>) => {
+          const name = String(v.name || '');
+          // Remove kube-api-access-* (projected SA token), *-token-* (legacy SA secret)
+          if (name.startsWith('kube-api-access-') || v.projected ||
+              (v.secret && typeof v.secret === 'object' && String((v.secret as Record<string, unknown>).secretName || '').includes('-token-'))) {
+            autoVolumeNames.add(name);
+            return false;
+          }
+          return true;
+        });
       }
+
+      // Strip volumeMounts referencing removed volumes from ALL containers
+      const stripMounts = (containers: Array<Record<string, unknown>> | undefined) => {
+        if (!Array.isArray(containers)) return;
+        for (const c of containers) {
+          if (Array.isArray(c.volumeMounts)) {
+            c.volumeMounts = (c.volumeMounts as Array<Record<string, unknown>>).filter(
+              (m) => !autoVolumeNames.has(String(m.name || ''))
+            );
+            if ((c.volumeMounts as unknown[]).length === 0) delete c.volumeMounts;
+          }
+        }
+      };
+      stripMounts(cleaned.spec.containers);
+      stripMounts(cleaned.spec.initContainers);
     }
 
     const yaml = yamlParser.dump(cleaned, { lineWidth: -1, noRefs: true });
