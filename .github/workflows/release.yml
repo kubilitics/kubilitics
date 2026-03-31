@@ -337,7 +337,7 @@ jobs:
         env:
           TAURI_SKIP_DEVSERVER_CHECK: "true"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "kubilitics-signing"
         shell: bash
         run: |
           [ -d "../dist" ] && [ -n "$(ls -A ../dist)" ] || { echo "❌ dist missing"; exit 1; }
@@ -376,7 +376,7 @@ jobs:
         env:
           TAURI_SKIP_DEVSERVER_CHECK: "true"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "kubilitics-signing"
         run: |
           [ -d "../dist" ] && [ -n "$(ls -A ../dist)" ] || { echo "❌ dist missing"; exit 1; }
           cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
@@ -387,7 +387,7 @@ jobs:
         env:
           TAURI_SKIP_DEVSERVER_CHECK: "true"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "kubilitics-signing"
         run: |
           [ -d "../dist" ] && [ -n "$(ls -A ../dist)" ] || { echo "❌ dist missing"; exit 1; }
           cargo tauri build --target x86_64-unknown-linux-gnu --bundles appimage,deb,rpm
