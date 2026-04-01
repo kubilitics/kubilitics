@@ -544,8 +544,8 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      {/* ━━━ Connection Endpoints ━━━ */}
-      <Card className="rounded-2xl overflow-hidden shadow-md border-border/50 dark:bg-slate-900/60">
+      {/* ━━━ Connection Endpoints — hidden in desktop (sidecar manages backend) ━━━ */}
+      {!isDesktop && <Card className="rounded-2xl overflow-hidden shadow-md border-border/50 dark:bg-slate-900/60">
         <div className="h-1 bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500" />
         <CardHeader className="pb-4 bg-gradient-to-r from-amber-50/50 to-transparent dark:from-amber-950/15">
           <div className="flex items-center gap-3">
@@ -640,7 +640,7 @@ export default function Settings() {
             </form>
           </Form>
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* ━━━ Appearance ━━━ */}
       <AppearanceSection />
