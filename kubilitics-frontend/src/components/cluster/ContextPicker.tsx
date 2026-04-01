@@ -255,7 +255,7 @@ export function ContextPicker({
               size="lg"
               variant="outline"
               onClick={onCancel}
-              className="min-w-[200px] rounded-xl h-12 text-sm font-semibold"
+              className="px-6 rounded-lg h-9 text-sm font-medium border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30"
             >
               Cancel
             </Button>
@@ -265,7 +265,7 @@ export function ContextPicker({
             disabled={!selectedContext || isConnecting}
             onClick={onConnect}
             className={cn(
-              'min-w-[200px] bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-12 text-sm font-semibold',
+              'px-8 bg-blue-600 hover:bg-blue-700 text-white rounded-lg h-9 text-sm font-medium',
               'transition-all duration-300 shadow-md shadow-blue-600/20 hover:shadow-lg hover:shadow-blue-600/30',
               'disabled:opacity-50 disabled:cursor-not-allowed border-0',
             )}
