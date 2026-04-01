@@ -821,17 +821,50 @@ export default function FleetDashboard() {
             </div>
           ) : clusters.length === 0 ? (
             <EmptyState />
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {clusters.map((cluster) => (
-                <ClusterCard
-                  key={cluster.id}
-                  cluster={cluster}
-                  onClick={() => handleClusterClick(cluster)}
-                />
-              ))}
-            </div>
-          )}
+          ) : (() => {
+            // Group clusters visually by their assigned groups
+            const groupEntries = Object.entries(groups);
+            const groupedClusterIds = new Set(groupEntries.flatMap(([, g]) => g.clusterIds));
+            const ungrouped = clusters.filter((c) => !groupedClusterIds.has(c.id));
+
+            return (
+              <div className="space-y-6">
+                {/* Ungrouped clusters */}
+                {ungrouped.length > 0 && (
+                  <div>
+                    {groupEntries.length > 0 && (
+                      <h3 className="text-sm font-semibold text-muted-foreground mb-3">All Clusters</h3>
+                    )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {ungrouped.map((cluster) => (
+                        <ClusterCard key={cluster.id} cluster={cluster} onClick={() => handleClusterClick(cluster)} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Grouped clusters */}
+                {groupEntries.map(([gid, g]) => {
+                  const groupClusters = clusters.filter((c) => g.clusterIds.includes(c.id));
+                  if (groupClusters.length === 0) return null;
+                  return (
+                    <div key={gid}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="h-3 w-3 rounded-full" style={{ backgroundColor: g.color || '#6366f1' }} />
+                        <h3 className="text-sm font-semibold text-foreground">{g.name}</h3>
+                        <span className="text-xs text-muted-foreground">{groupClusters.length} cluster{groupClusters.length !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pl-5 border-l-2" style={{ borderColor: g.color || '#6366f1' }}>
+                        {groupClusters.map((cluster) => (
+                          <ClusterCard key={cluster.id} cluster={cluster} onClick={() => handleClusterClick(cluster)} />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </motion.div>
       </motion.div>
     </div>
