@@ -29,8 +29,10 @@ import {
   Rocket,
   Clock,
   X,
+  Check,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from '@/components/ui/sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -692,16 +694,35 @@ export default function FleetDashboard() {
   const isLoading = fleetData.isLoading && !hasData.current;
   const [newGroupName, setNewGroupName] = useState('');
   const [showGroupForm, setShowGroupForm] = useState(false);
+  const [selectedClusterIds, setSelectedClusterIds] = useState<Set<string>>(new Set());
   const addGroup = useClusterOrganizationStore((s) => s.addGroup);
+  const removeGroup = useClusterOrganizationStore((s) => s.removeGroup);
+  const addClusterToGroup = useClusterOrganizationStore((s) => s.addClusterToGroup);
   const groups = useClusterOrganizationStore((s) => s.groups);
 
   const handleCreateGroup = () => {
-    if (!newGroupName.trim()) return;
+    if (!newGroupName.trim() || selectedClusterIds.size === 0) return;
     const id = `group-${Date.now()}`;
     const colorIndex = Object.keys(groups).length % GROUP_COLORS.length;
     addGroup(id, newGroupName.trim(), GROUP_COLORS[colorIndex]);
+    selectedClusterIds.forEach((cid) => addClusterToGroup(id, cid));
     setNewGroupName('');
+    setSelectedClusterIds(new Set());
     setShowGroupForm(false);
+    toast.success(`Group "${newGroupName.trim()}" created with ${selectedClusterIds.size} cluster(s)`);
+  };
+
+  const handleDeleteGroup = (gid: string, gname: string) => {
+    removeGroup(gid);
+    toast.success(`Group "${gname}" deleted`);
+  };
+
+  const toggleClusterSelection = (cid: string) => {
+    setSelectedClusterIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(cid)) next.delete(cid); else next.add(cid);
+      return next;
+    });
   };
 
   function handleClusterClick(cluster: FleetCluster) {
@@ -746,30 +767,10 @@ export default function FleetDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {showGroupForm ? (
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={newGroupName}
-                  onChange={(e) => setNewGroupName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreateGroup(); if (e.key === 'Escape') setShowGroupForm(false); }}
-                  placeholder="Group name..."
-                  className="h-8 px-3 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  autoFocus
-                />
-                <Button size="sm" variant="default" onClick={handleCreateGroup} disabled={!newGroupName.trim()}>
-                  Create
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setShowGroupForm(false)}>
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <Button size="sm" variant="outline" onClick={() => setShowGroupForm(true)} className="gap-1.5">
-                <Layers className="h-3.5 w-3.5" />
-                New Group
-              </Button>
-            )}
+            <Button size="sm" variant="outline" onClick={() => { setShowGroupForm(true); setSelectedClusterIds(new Set()); setNewGroupName(''); }} className="gap-1.5">
+              <Layers className="h-3.5 w-3.5" />
+              New Group
+            </Button>
             <div
               className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/40"
               role="status"
@@ -853,6 +854,13 @@ export default function FleetDashboard() {
                         <div className="h-3 w-3 rounded-full" style={{ backgroundColor: g.color || '#6366f1' }} />
                         <h3 className="text-sm font-semibold text-foreground">{g.name}</h3>
                         <span className="text-xs text-muted-foreground">{groupClusters.length} cluster{groupClusters.length !== 1 ? 's' : ''}</span>
+                        <button
+                          onClick={() => handleDeleteGroup(gid, g.name)}
+                          className="ml-auto text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors"
+                          title={`Delete group "${g.name}"`}
+                        >
+                          Delete
+                        </button>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pl-5 border-l-2" style={{ borderColor: g.color || '#6366f1' }}>
                         {groupClusters.map((cluster) => (
@@ -867,6 +875,76 @@ export default function FleetDashboard() {
           })()}
         </motion.div>
       </motion.div>
+
+      {/* Create Group Dialog */}
+      {showGroupForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md mx-4 overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800">
+              <h2 className="text-base font-semibold text-foreground">Create Group</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Select clusters to organize into a group</p>
+            </div>
+
+            <div className="px-5 py-4 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Group Name</label>
+                <input
+                  type="text"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  placeholder="e.g. Production, Staging, US-East"
+                  className="w-full h-9 px-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Select Clusters ({selectedClusterIds.size} selected)</label>
+                <div className="space-y-1 max-h-[200px] overflow-y-auto">
+                  {clusters.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => toggleClusterSelection(c.id)}
+                      className={cn(
+                        'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all text-sm',
+                        selectedClusterIds.has(c.id)
+                          ? 'bg-blue-50 dark:bg-blue-950/30 border border-blue-300 dark:border-blue-700'
+                          : 'bg-slate-50 dark:bg-slate-800/50 border border-transparent hover:bg-slate-100 dark:hover:bg-slate-800',
+                      )}
+                    >
+                      <div className={cn(
+                        'h-4 w-4 rounded border-2 flex items-center justify-center shrink-0',
+                        selectedClusterIds.has(c.id)
+                          ? 'bg-blue-600 border-blue-600'
+                          : 'border-slate-300 dark:border-slate-600',
+                      )}>
+                        {selectedClusterIds.has(c.id) && <Check className="h-3 w-3 text-white" />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium truncate">{c.name}</div>
+                        <div className="text-xs text-muted-foreground">{c.provider || 'Unknown'} · {c.status}</div>
+                      </div>
+                      <div className={cn(
+                        'h-2 w-2 rounded-full shrink-0',
+                        c.status === 'healthy' ? 'bg-green-500' : c.status === 'warning' ? 'bg-amber-500' : 'bg-red-500',
+                      )} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={() => setShowGroupForm(false)}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleCreateGroup} disabled={!newGroupName.trim() || selectedClusterIds.size === 0}>
+                Create Group
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
