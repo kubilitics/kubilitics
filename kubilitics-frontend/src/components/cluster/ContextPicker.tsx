@@ -210,10 +210,10 @@ export function ContextPicker({
           </p>
         </motion.div>
 
-        {/* Split layout: contexts left, add-cluster right */}
-        <motion.div variants={item} className="flex flex-col lg:flex-row gap-5 mb-6">
+        {/* Split layout: contexts left, add-cluster right — equal halves */}
+        <motion.div variants={item} className="flex flex-col lg:flex-row gap-6 mb-6">
           {/* Left: detected contexts */}
-          <div className="flex-1 min-w-0">
+          <div className="w-full lg:w-1/2 min-w-0">
             <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2.5 px-0.5">
               Detected Contexts
             </p>
@@ -294,7 +294,7 @@ export function ContextPicker({
           </div>
 
           {/* Right: add cluster from different kubeconfig */}
-          <div className="w-full lg:w-[320px] shrink-0">
+          <div className="w-full lg:w-1/2">
             <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2.5 px-0.5">
               Add from kubeconfig
             </p>
