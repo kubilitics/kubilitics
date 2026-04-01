@@ -631,7 +631,7 @@ spec:
  <DropdownMenuContent align="end" className="w-48">
  <DropdownMenuItem onClick={() => setScaleDialog({ open: true, item })} className="gap-2"><Scale className="h-4 w-4" />Scale</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/replicasets/${item.namespace}/${item.name}?tab=yaml`)} className="gap-2"><FileText className="h-4 w-4" />View YAML</DropdownMenuItem>
- <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item })}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item })}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>
@@ -679,7 +679,7 @@ spec:
  <DropdownMenuContent align="end" className="w-48">
  <DropdownMenuItem onClick={() => setScaleDialog({ open: true, item })} className="gap-2"><Scale className="h-4 w-4" />Scale</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/replicasets/${item.namespace}/${item.name}?tab=yaml`)} className="gap-2"><FileText className="h-4 w-4" />View YAML</DropdownMenuItem>
- <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item })}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item })}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>

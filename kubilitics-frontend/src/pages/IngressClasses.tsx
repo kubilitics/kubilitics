@@ -532,7 +532,7 @@ spec:
  {!ic.isDefault && <DropdownMenuItem onClick={() => toast.info('Set as Default: requires cluster-admin or patch IngressClass')} className="gap-2"><Star className="h-4 w-4" />Set as Default</DropdownMenuItem>}
  <DropdownMenuItem onClick={() => navigate(`/ingressclasses/${ic.name}?tab=yaml`)} className="gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
  <DropdownMenuSeparator />
- <DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item: ic })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item: ic })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>
@@ -574,7 +574,7 @@ spec:
  {!ic.isDefault && <DropdownMenuItem onClick={() => toast.info('Set as Default: requires cluster-admin or patch IngressClass')} className="gap-2"><Star className="h-4 w-4" />Set as Default</DropdownMenuItem>}
  <DropdownMenuItem onClick={() => navigate(`/ingressclasses/${ic.name}?tab=yaml`)} className="gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
  <DropdownMenuSeparator />
- <DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item: ic })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item: ic })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>

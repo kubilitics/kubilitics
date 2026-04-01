@@ -667,7 +667,7 @@ spec:
  <DropdownMenuItem onClick={() => { const u = ing.address !== '<pending>' ? `https://${ing.hosts.split(',')[0]?.trim() || ing.address}` : null; if (u) void openExternal(u); else toast.info('No address yet'); }} className="gap-2"><ExternalLink className="h-4 w-4" />Open in Browser</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/ingresses/${ing.namespace}/${ing.name}?tab=yaml`)} className="gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
  <DropdownMenuSeparator />
- <DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item: ing })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item: ing })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>
@@ -734,7 +734,7 @@ spec:
  <DropdownMenuItem onClick={() => { const u = ing.address !== '<pending>' ? `https://${ing.hosts.split(',')[0]?.trim() || ing.address}` : null; if (u) void openExternal(u); else toast.info('No address yet'); }} className="gap-2"><ExternalLink className="h-4 w-4" />Open in Browser</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/ingresses/${ing.namespace}/${ing.name}?tab=yaml`)} className="gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
  <DropdownMenuSeparator />
- <DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item: ing })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item: ing })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>

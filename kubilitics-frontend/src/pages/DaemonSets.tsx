@@ -666,7 +666,7 @@ spec:
  <DropdownMenuItem onClick={() => navigate(`/pods?namespace=${item.namespace}`)} className="press-effect gap-2">View Pods</DropdownMenuItem>
  <DropdownMenuItem onClick={() => setRolloutDialog({ open: true, item })} className="gap-2" disabled={!isConnected}><RotateCcw className="h-4 w-4" />Restart</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/daemonsets/${item.namespace}/${item.name}?tab=yaml`)} className="press-effect gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
- <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>
@@ -727,7 +727,7 @@ spec:
  <DropdownMenuItem onClick={() => navigate(`/pods?namespace=${item.namespace}`)} className="press-effect gap-2">View Pods</DropdownMenuItem>
  <DropdownMenuItem onClick={() => setRolloutDialog({ open: true, item })} className="gap-2" disabled={!isConnected}><RotateCcw className="h-4 w-4" />Restart</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/daemonsets/${item.namespace}/${item.name}?tab=yaml`)} className="press-effect gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
- <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>

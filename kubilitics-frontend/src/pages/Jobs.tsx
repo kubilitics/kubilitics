@@ -723,7 +723,7 @@ spec:
  <DropdownMenuItem onClick={() => navigate(`/jobs/${item.namespace}/${item.name}?tab=logs`)} className="press-effect gap-2"><FileText className="h-4 w-4" />View Logs</DropdownMenuItem>
  <DropdownMenuItem onClick={() => handleRetry(item)} className="gap-2" disabled={!isConnected}><RotateCw className="h-4 w-4" />Retry</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/jobs/${item.namespace}/${item.name}?tab=yaml`)} className="press-effect gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
- <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>
@@ -793,7 +793,7 @@ spec:
  <DropdownMenuItem onClick={() => navigate(`/jobs/${item.namespace}/${item.name}?tab=logs`)} className="press-effect gap-2"><FileText className="h-4 w-4" />View Logs</DropdownMenuItem>
  <DropdownMenuItem onClick={() => handleRetry(item)} className="gap-2" disabled={!isConnected}><RotateCw className="h-4 w-4" />Retry</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/jobs/${item.namespace}/${item.name}?tab=yaml`)} className="press-effect gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
- <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>
