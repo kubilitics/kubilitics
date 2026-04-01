@@ -48,7 +48,7 @@ import { GlobalSearch } from './GlobalSearch';
 const ClusterShellPanel = lazy(() =>
   import('@/components/shell/ClusterShellPanel').then(m => ({ default: m.ClusterShellPanel }))
 );
-import { DeploymentWizard, ServiceWizard, ConfigMapWizard, SecretWizard } from '@/components/wizards';
+// Wizards removed — resource creation handled by ResourceCreator in list pages
 import { NotificationCenter } from '@/components/notifications/NotificationCenter';
 import { ActivePortForwardsIndicator } from '@/components/resources/ActivePortForwards';
 import { getClusterKubeconfig } from '@/services/backendApiClient';
@@ -137,7 +137,7 @@ export function Header() {
     _setShellOpen(open);
     setShellOpenStore(open);
   }, [setShellOpenStore]);
-  const [wizardOpen, setWizardOpen] = useState<'deployment' | 'service' | 'configmap' | 'secret' | null>(null);
+  // Wizards removed — resource creation handled by ResourceCreator in list pages
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [prodConfirmCluster, setProdConfirmCluster] = useState<import('@/stores/clusterStore').Cluster | null>(null);
@@ -265,10 +265,7 @@ export function Header() {
     !isBackendConfigured ? null :
       backendReachable ? 'healthy' : 'error';
 
-  const handleWizardSubmit = (_yaml: string) => {
-    toast.success('Resource YAML generated successfully!');
-    setWizardOpen(null);
-  };
+  // handleWizardSubmit removed — wizards deleted, creation in list pages
 
   const storedBackendUrl = useBackendConfigStore((s) => s.backendBaseUrl);
   const backendBaseUrl = getEffectiveBackendBaseUrl(storedBackendUrl);
@@ -777,10 +774,7 @@ export function Header() {
         </Suspense>
       )}
 
-      {wizardOpen === 'deployment' && <DeploymentWizard onClose={() => setWizardOpen(null)} onSubmit={handleWizardSubmit} />}
-      {wizardOpen === 'service' && <ServiceWizard onClose={() => setWizardOpen(null)} onSubmit={handleWizardSubmit} />}
-      {wizardOpen === 'configmap' && <ConfigMapWizard onClose={() => setWizardOpen(null)} onSubmit={handleWizardSubmit} />}
-      {wizardOpen === 'secret' && <SecretWizard onClose={() => setWizardOpen(null)} onSubmit={handleWizardSubmit} />}
+      {/* Wizards removed — resource creation handled by ResourceCreator in list pages */}
 
     </>
   );
