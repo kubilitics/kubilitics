@@ -300,9 +300,10 @@ export function PortForwardDialog({
             <div className="space-y-2">
               <Label>Local Port</Label>
               <Input
-                type="text"
+                type="number"
                 inputMode="numeric"
-                pattern="[0-9]*"
+                min={1}
+                max={65535}
                 placeholder="8080"
                 value={localPort}
                 onChange={(e) => {
@@ -406,7 +407,7 @@ export function PortForwardDialog({
               </Button>
               <Button
                 onClick={handleStartForwarding}
-                disabled={!selectedPort || !localPort || isStarting}
+                disabled={!selectedPort || !localPort || isNaN(Number(localPort)) || Number(localPort) < 1 || Number(localPort) > 65535 || isStarting}
               >
                 {isStarting ? (
                   <>
