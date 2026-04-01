@@ -734,7 +734,7 @@ spec:
  <DropdownMenuItem onClick={() => navigate(`/jobs?namespace=${item.namespace}`)} className="press-effect gap-2"><Box className="h-4 w-4" />View Jobs</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/cronjobs/${item.namespace}/${item.name}?tab=logs`)} className="press-effect gap-2"><FileText className="h-4 w-4" />View Last Job Logs</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/cronjobs/${item.namespace}/${item.name}?tab=yaml`)} className="press-effect gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
- <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>
@@ -839,7 +839,7 @@ spec:
  <DropdownMenuItem onClick={() => navigate(`/jobs?namespace=${item.namespace}`)} className="press-effect gap-2"><Box className="h-4 w-4" />View Jobs</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/cronjobs/${item.namespace}/${item.name}?tab=logs`)} className="press-effect gap-2"><FileText className="h-4 w-4" />View Last Job Logs</DropdownMenuItem>
  <DropdownMenuItem onClick={() => navigate(`/cronjobs/${item.namespace}/${item.name}?tab=yaml`)} className="press-effect gap-2"><FileText className="h-4 w-4" />Download YAML</DropdownMenuItem>
- <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-rose-600" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
+ <DropdownMenuSeparator /><DropdownMenuItem className="gap-2 text-destructive" onClick={() => setDeleteDialog({ open: true, item })} disabled={!isConnected}><Trash2 className="h-4 w-4" />Delete</DropdownMenuItem>
  </DropdownMenuContent>
  </DropdownMenu>
  </TableCell>
