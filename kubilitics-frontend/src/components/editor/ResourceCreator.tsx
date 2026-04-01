@@ -346,128 +346,231 @@ export function ResourceCreator({
   );
 }
 
+// ---------------------------------------------------------------------------
 // Default YAML templates for different resource types
+// Each template is production-ready with real names, images, and best practices
+// ---------------------------------------------------------------------------
 export const DEFAULT_YAMLS: Record<string, string> = {
   Pod: `apiVersion: v1
 kind: Pod
 metadata:
-  name: ''
-  namespace: ''
+  name: my-web-app
+  namespace: default
   labels:
-    app: kubilitics
+    app: my-web-app
+    env: production
 spec:
   containers:
-    - name: ''
-      image: ''
+    - name: web
+      image: nginx:1.27-alpine
       ports:
         - containerPort: 80
-      imagePullPolicy: Always
-  nodeName: ''`,
+          name: http
+      # Resource requests and limits ensure fair scheduling and prevent OOM kills
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "128Mi"
+          cpu: "250m"
+      # Readiness probe: traffic is routed only after this succeeds
+      readinessProbe:
+        httpGet:
+          path: /
+          port: 80
+        initialDelaySeconds: 5
+        periodSeconds: 10
+      # Liveness probe: container is restarted if this fails
+      livenessProbe:
+        httpGet:
+          path: /
+          port: 80
+        initialDelaySeconds: 15
+        periodSeconds: 20
+      imagePullPolicy: IfNotPresent
+  restartPolicy: Always`,
 
   Deployment: `apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ''
-  namespace: ''
+  name: my-web-app
+  namespace: default
   labels:
-    app: kubilitics
+    app: my-web-app
+    env: production
 spec:
-  replicas: 1
+  replicas: 3
+  # Rolling update strategy for zero-downtime deployments
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
-      app: kubilitics
+      app: my-web-app
   template:
     metadata:
       labels:
-        app: kubilitics
+        app: my-web-app
+        env: production
     spec:
       containers:
-        - name: ''
-          image: ''
+        - name: web
+          image: nginx:1.27-alpine
           ports:
             - containerPort: 80
+              name: http
           resources:
             requests:
               memory: "64Mi"
-              cpu: "250m"
+              cpu: "100m"
             limits:
               memory: "128Mi"
-              cpu: "500m"`,
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20`,
 
   Service: `apiVersion: v1
 kind: Service
 metadata:
-  name: ''
-  namespace: ''
+  name: my-web-app
+  namespace: default
+  labels:
+    app: my-web-app
 spec:
+  # Types: ClusterIP (internal), NodePort (node access), LoadBalancer (cloud LB)
   type: ClusterIP
   selector:
-    app: kubilitics
+    app: my-web-app
   ports:
-    - protocol: TCP
+    - name: http
+      protocol: TCP
       port: 80
       targetPort: 80`,
 
   ConfigMap: `apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: ''
-  namespace: ''
+  name: app-config
+  namespace: default
 data:
-  key: value`,
+  # Simple key-value pairs
+  APP_ENV: production
+  LOG_LEVEL: info
+  # Multi-line config file
+  nginx.conf: |
+    server {
+      listen 80;
+      server_name localhost;
+      location / {
+        root /usr/share/nginx/html;
+      }
+    }`,
 
   Secret: `apiVersion: v1
 kind: Secret
 metadata:
-  name: ''
-  namespace: ''
+  name: app-secrets
+  namespace: default
+  labels:
+    app: my-web-app
+# Type: Opaque (generic), kubernetes.io/tls (TLS cert), kubernetes.io/dockerconfigjson (registry)
 type: Opaque
+# Use stringData for plain text (auto-encoded to base64 by Kubernetes)
 stringData:
-  key: value`,
+  DB_PASSWORD: changeme-use-a-real-password
+  API_KEY: your-api-key-here
+# Or use data with base64-encoded values:
+# data:
+#   DB_PASSWORD: Y2hhbmdlbWU=    # echo -n "changeme" | base64`,
 
   StatefulSet: `apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: ''
-  namespace: ''
+  name: postgres
+  namespace: default
   labels:
-    app: kubilitics
+    app: postgres
 spec:
-  serviceName: statefulset-service
-  replicas: 1
+  # serviceName must match a headless Service for stable DNS names
+  # Each pod gets: postgres-0.postgres-headless.default.svc.cluster.local
+  serviceName: postgres-headless
+  replicas: 3
   selector:
     matchLabels:
-      app: kubilitics
+      app: postgres
   template:
     metadata:
       labels:
-        app: kubilitics
+        app: postgres
     spec:
       containers:
-        - name: ''
-          image: ''
+        - name: postgres
+          image: postgres:16-alpine
           ports:
-            - containerPort: 80
-  # Optional: add volumeClaimTemplates for persistent storage per pod
-  # volumeClaimTemplates:
-  #   - metadata:
-  #       name: data
-  #     spec:
-  #       accessModes: ["ReadWriteOnce"]
-  #       storageClassName: standard
-  #       resources:
-  #         requests:
-  #           storage: 1Gi`,
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: mydb
+            - name: POSTGRES_USER
+              value: admin
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: password
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "1"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "admin"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  # Each replica gets its own PVC for stable persistent storage
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 10Gi`,
 
   DaemonSet: `apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: ''
-  namespace: ''
+  name: log-collector
+  namespace: kube-system
+  labels:
+    app: log-collector
 spec:
   selector:
     matchLabels:
-      app: kubilitics
+      app: log-collector
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -475,179 +578,357 @@ spec:
   template:
     metadata:
       labels:
-        app: kubilitics
+        app: log-collector
     spec:
-      # nodeSelector: {}
-      # tolerations: []
+      # Tolerations allow scheduling on control-plane and tainted nodes
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
       containers:
-        - name: ''
-          image: ''`,
+        - name: log-collector
+          image: busybox:1.36
+          command: ["sh", "-c", "tail -f /var/log/syslog || tail -f /dev/null"]
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "50m"
+            limits:
+              memory: "64Mi"
+              cpu: "100m"
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+      volumes:
+        - name: varlog
+          hostPath:
+            path: /var/log`,
 
   Job: `apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ''
-  namespace: ''
+  name: db-migration
+  namespace: default
+  labels:
+    app: db-migration
 spec:
+  # Number of successful completions required
   completions: 1
+  # How many pods to run in parallel
   parallelism: 1
-  backoffLimit: 6
+  # Number of retries before marking the Job as failed
+  backoffLimit: 3
+  # Automatically clean up after 1 hour (seconds)
+  ttlSecondsAfterFinished: 3600
   template:
+    metadata:
+      labels:
+        app: db-migration
     spec:
       containers:
-        - name: ''
-          image: ''
-          command: []
-      restartPolicy: Never
-`,
+        - name: migrate
+          image: busybox:1.36
+          command: ["sh", "-c", "echo 'Running database migration...' && sleep 5 && echo 'Migration complete!'"]
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "250m"
+      restartPolicy: Never`,
 
   CronJob: `apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: ''
-  namespace: ''
+  name: nightly-backup
+  namespace: default
+  labels:
+    app: nightly-backup
 spec:
-  schedule: "*/5 * * * *"
-  concurrencyPolicy: Allow
+  # Schedule format: minute hour day-of-month month day-of-week
+  # Examples: "0 2 * * *" (daily 2am), "*/15 * * * *" (every 15 min), "0 0 * * 0" (weekly Sun)
+  schedule: "0 2 * * *"
+  # Forbid: skip if previous still running; Replace: stop previous and start new
+  concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
+  # Optional: deadline to start the job (seconds). Missed if not started in time.
+  startingDeadlineSeconds: 600
   jobTemplate:
     spec:
+      backoffLimit: 2
       template:
+        metadata:
+          labels:
+            app: nightly-backup
         spec:
           containers:
-            - name: ''
-              image: ''
-              command: []
-          restartPolicy: OnFailure
-`,
+            - name: backup
+              image: busybox:1.36
+              command: ["sh", "-c", "echo 'Starting backup at $(date)' && sleep 10 && echo 'Backup completed'"]
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "256Mi"
+                  cpu: "500m"
+          restartPolicy: OnFailure`,
 
   Ingress: `apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: ''
-  namespace: ''
+  name: my-web-app-ingress
+  namespace: default
+  labels:
+    app: my-web-app
+  annotations:
+    # Uncomment for nginx ingress controller options:
+    # nginx.ingress.kubernetes.io/rewrite-target: /
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/proxy-body-size: "10m"
 spec:
+  # Uncomment ingressClassName if you have multiple ingress controllers
+  # ingressClassName: nginx
+  # TLS configuration — uncomment to enable HTTPS
+  # tls:
+  #   - hosts:
+  #       - app.example.com
+  #     secretName: app-tls-secret
   rules:
-    - host: ''
+    - host: app.example.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: ''
+                name: my-web-app
                 port:
-                  number: 80`,
+                  number: 80
+          # Additional path example:
+          # - path: /api
+          #   pathType: Prefix
+          #   backend:
+          #     service:
+          #       name: backend-api
+          #       port:
+          #         number: 8080`,
 
   PersistentVolumeClaim: `apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: ''
-  namespace: ''
+  name: app-data
+  namespace: default
+  labels:
+    app: my-web-app
 spec:
+  # Access modes: ReadWriteOnce (single node), ReadOnlyMany (multi read), ReadWriteMany (multi r/w)
   accessModes:
     - ReadWriteOnce
+  # Omit storageClassName for cluster default, or specify explicitly
+  storageClassName: standard
   resources:
     requests:
-      storage: 1Gi`,
+      storage: 5Gi`,
 
   Namespace: `apiVersion: v1
 kind: Namespace
 metadata:
-  name: ''
+  name: my-namespace
   labels:
-    name: ''`,
+    name: my-namespace
+    env: production`,
 
   ServiceAccount: `apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ''
-  namespace: ''`,
+  name: app-service-account
+  namespace: default
+  labels:
+    app: my-web-app
+  annotations:
+    # AWS IAM Role for Service Accounts (IRSA):
+    # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/my-role
+    #
+    # GCP Workload Identity:
+    # iam.gke.io/gcp-service-account: my-sa@my-project.iam.gserviceaccount.com
+automountServiceAccountToken: true`,
 
   Role: `apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: ''
-  namespace: ''
+  name: pod-reader
+  namespace: default
+  labels:
+    app: my-web-app
+# Each rule grants access to specific API resources
 rules:
+  # Read-only access to pods
   - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]`,
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  # Read-only access to configmaps and secrets
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list"]
+  # Full access to deployments in the apps API group
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]`,
 
   ClusterRole: `apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: ''
+  name: cluster-monitoring
+  labels:
+    app: monitoring
+# ClusterRoles are not namespaced - they apply cluster-wide
 rules:
+  # Read-only access to all pods and services across all namespaces
   - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]`,
+    resources: ["pods", "services", "endpoints", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  # Read-only access to deployments, statefulsets, daemonsets
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  # Read node metrics
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]`,
 
   RoleBinding: `apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: ''
-  namespace: ''
+  name: pod-reader-binding
+  namespace: default
+  labels:
+    app: my-web-app
+# Subjects: who gets access (ServiceAccount, User, or Group)
 subjects:
   - kind: ServiceAccount
-    name: ''
-    namespace: ''
+    name: app-service-account
+    namespace: default
+  # Uncomment to bind to a user or group:
+  # - kind: User
+  #   name: jane@example.com
+  #   apiGroup: rbac.authorization.k8s.io
+# roleRef: which Role or ClusterRole to bind
 roleRef:
   kind: Role
-  name: ''
+  name: pod-reader
   apiGroup: rbac.authorization.k8s.io`,
 
   NetworkPolicy: `apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: ''
-  namespace: ''
+  name: backend-network-policy
+  namespace: default
+  labels:
+    app: backend-service
 spec:
+  # Selects which pods this policy applies to
   podSelector:
     matchLabels:
-      app: kubilitics
+      app: backend-service
   policyTypes:
     - Ingress
-    - Egress`,
+    - Egress
+  # Allow incoming traffic only from frontend pods on port 8080
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+        # Uncomment to also restrict by namespace:
+        # - namespaceSelector:
+        #     matchLabels:
+        #       env: production
+      ports:
+        - protocol: TCP
+          port: 8080
+  # Allow outgoing traffic to database and DNS
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Allow DNS resolution (required for most workloads)
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53`,
 
   HorizontalPodAutoscaler: `apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: ''
-  namespace: ''
+  name: my-web-app-hpa
+  namespace: default
+  labels:
+    app: my-web-app
 spec:
+  # Target the Deployment to scale
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: ''
-  minReplicas: 1
+    name: my-web-app
+  minReplicas: 2
   maxReplicas: 10
   metrics:
+    # Scale based on CPU utilization
     - type: Resource
       resource:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: 50`,
+          averageUtilization: 70
+    # Scale based on memory utilization
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+    scaleUp:
+      stabilizationWindowSeconds: 60`,
 
   ClusterRoleBinding: `apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ''
+  name: cluster-monitoring-binding
+  labels:
+    app: monitoring
 subjects:
   - kind: ServiceAccount
-    name: ''
-    namespace: ''
+    name: monitoring-service-account
+    namespace: monitoring
+  # Uncomment for group binding:
+  # - kind: Group
+  #   name: platform-team
+  #   apiGroup: rbac.authorization.k8s.io
 roleRef:
   kind: ClusterRole
-  name: ''
+  name: cluster-monitoring
   apiGroup: rbac.authorization.k8s.io`,
 
   PersistentVolume: `apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: ''
+  name: pv-data
 spec:
   capacity:
     storage: 10Gi
@@ -660,45 +941,45 @@ spec:
   StorageClass: `apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: ''
+  name: fast-ssd
 provisioner: kubernetes.io/no-provisioner
 volumeBindingMode: WaitForFirstConsumer`,
 
   VolumeSnapshot: `apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
 metadata:
-  name: ''
+  name: data-snapshot
   namespace: default
 spec:
   source:
-    persistentVolumeClaimName: ''
-  volumeSnapshotClassName: ''`,
+    persistentVolumeClaimName: app-data
+  volumeSnapshotClassName: default-snapclass`,
 
   VolumeSnapshotClass: `apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshotClass
 metadata:
-  name: ''
-driver: ''
+  name: default-snapclass
+driver: disk.csi.cloud.com
 deletionPolicy: Delete`,
 
   ResourceQuota: `apiVersion: v1
 kind: ResourceQuota
 metadata:
-  name: ''
-  namespace: ''
+  name: team-quota
+  namespace: default
 spec:
   hard:
-    requests.cpu: "1"
-    requests.memory: 1Gi
-    limits.cpu: "2"
-    limits.memory: 2Gi
-    pods: "10"`,
+    requests.cpu: "4"
+    requests.memory: 4Gi
+    limits.cpu: "8"
+    limits.memory: 8Gi
+    pods: "20"`,
 
   LimitRange: `apiVersion: v1
 kind: LimitRange
 metadata:
-  name: ''
-  namespace: ''
+  name: default-limits
+  namespace: default
 spec:
   limits:
     - default:
@@ -712,61 +993,67 @@ spec:
   PodDisruptionBudget: `apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: ''
-  namespace: ''
+  name: my-web-app-pdb
+  namespace: default
+  labels:
+    app: my-web-app
 spec:
-  minAvailable: 1
+  # Ensure at least 2 pods remain available during voluntary disruptions
+  # (node drains, cluster upgrades, etc.)
+  # Use minAvailable OR maxUnavailable, not both
+  minAvailable: 2
+  # Alternative: maxUnavailable: 1
   selector:
     matchLabels:
-      app: kubilitics`,
+      app: my-web-app`,
 
   PriorityClass: `apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: ''
+  name: high-priority
 value: 1000000
 globalDefault: false
-description: ''`,
+description: High priority for production workloads`,
 
   ReplicaSet: `apiVersion: apps/v1
 kind: ReplicaSet
 metadata:
-  name: ''
-  namespace: ''
+  name: my-web-app-rs
+  namespace: default
   labels:
-    app: kubilitics
+    app: my-web-app
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: kubilitics
+      app: my-web-app
   template:
     metadata:
       labels:
-        app: kubilitics
+        app: my-web-app
     spec:
       containers:
-        - name: ''
-          image: ''`,
+        - name: web
+          image: nginx:1.27-alpine`,
 
   Endpoints: `apiVersion: v1
 kind: Endpoints
 metadata:
-  name: ''
-  namespace: ''
+  name: external-db
+  namespace: default
 subsets:
   - addresses:
       - ip: 10.0.0.1
     ports:
-      - port: 80`,
+      - port: 5432`,
 
   EndpointSlice: `apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice
 metadata:
-  name: ''
-  namespace: ''
+  name: my-web-app-slice
+  namespace: default
   labels:
-    kubernetes.io/service-name: ''
+    kubernetes.io/service-name: my-web-app
 addressType: IPv4
 ports:
   - port: 80
@@ -777,66 +1064,66 @@ endpoints:
   IngressClass: `apiVersion: networking.k8s.io/v1
 kind: IngressClass
 metadata:
-  name: ''
+  name: nginx
 spec:
   controller: nginx.org/ingress-controller`,
 
   VolumeAttachment: `apiVersion: storage.k8s.io/v1
 kind: VolumeAttachment
 metadata:
-  name: ''
+  name: csi-vol-attach
 spec:
   attacher: kubernetes.io/csi
-  nodeName: ''
+  nodeName: worker-node-1
   source:
-    persistentVolumeName: ''`,
+    persistentVolumeName: pv-data`,
 
   Lease: `apiVersion: coordination.k8s.io/v1
 kind: Lease
 metadata:
-  name: ''
-  namespace: ''
+  name: leader-election
+  namespace: default
 spec:
-  holderIdentity: ''
+  holderIdentity: controller-pod-xyz
   leaseDurationSeconds: 40`,
 
   VerticalPodAutoscaler: `apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
 metadata:
-  name: ''
-  namespace: ''
+  name: my-web-app-vpa
+  namespace: default
 spec:
   targetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: ''
+    name: my-web-app
   updatePolicy:
     updateMode: "Auto"`,
 
   ReplicationController: `apiVersion: v1
 kind: ReplicationController
 metadata:
-  name: ''
-  namespace: ''
+  name: my-web-app-rc
+  namespace: default
 spec:
   replicas: 3
   selector:
-    app: kubilitics
+    app: my-web-app
   template:
     metadata:
       labels:
-        app: kubilitics
+        app: my-web-app
     spec:
       containers:
-        - name: ''
-          image: ''`,
+        - name: web
+          image: nginx:1.27-alpine`,
 
   CustomResourceDefinition: `apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: ''
+  name: widgets.example.com
 spec:
-  group: ''
+  group: example.com
   versions:
     - name: v1
       served: true
@@ -846,26 +1133,26 @@ spec:
           type: object
   scope: Namespaced
   names:
-    plural: ''
-    singular: ''
-    kind: ''`,
+    plural: widgets
+    singular: widget
+    kind: Widget`,
 
   RuntimeClass: `apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
-  name: ''
-handler: ''`,
+  name: gvisor
+handler: runsc`,
 
   ValidatingWebhookConfiguration: `apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: ''
+  name: pod-validation
 webhooks:
-  - name: ''
+  - name: validate.pods.example.com
     clientConfig:
       service:
-        name: ''
-        namespace: ''
+        name: webhook-service
+        namespace: webhook-system
         port: 443
     rules:
       - apiGroups: [""]
@@ -879,13 +1166,13 @@ webhooks:
   MutatingWebhookConfiguration: `apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: ''
+  name: pod-mutation
 webhooks:
-  - name: ''
+  - name: mutate.pods.example.com
     clientConfig:
       service:
-        name: ''
-        namespace: ''
+        name: webhook-service
+        namespace: webhook-system
         port: 443
     rules:
       - apiGroups: [""]
@@ -899,34 +1186,34 @@ webhooks:
   APIService: `apiVersion: apiregistration.k8s.io/v1
 kind: APIService
 metadata:
-  name: ''
+  name: v1beta1.metrics.k8s.io
 spec:
   service:
-    namespace: ''
-    name: ''
-  group: ''
-  version: ''
+    namespace: kube-system
+    name: metrics-server
+  group: metrics.k8s.io
+  version: v1beta1
   insecureSkipTLSVerify: false`,
 
   PodTemplate: `apiVersion: v1
 kind: PodTemplate
 metadata:
-  name: ''
-  namespace: ''
+  name: web-template
+  namespace: default
 template:
   metadata:
     labels:
-      app: kubilitics
+      app: my-web-app
   spec:
     containers:
-      - name: container-1
-        image: nginx`,
+      - name: web
+        image: nginx:1.27-alpine`,
 
   ControllerRevision: `apiVersion: apps/v1
 kind: ControllerRevision
 metadata:
-  name: ''
-  namespace: ''
+  name: my-app-revision-1
+  namespace: default
 revision: 1
 data:
   # Managed by StatefulSet or DaemonSet
@@ -936,20 +1223,702 @@ data:
   ResourceSlice: `apiVersion: resource.k8s.io/v1alpha3
 kind: ResourceSlice
 metadata:
-  name: ''
+  name: gpu-slice-0
 spec:
-  driverName: ''
+  driverName: gpu.example.com
   pool:
-    name: ''
+    name: gpu-pool
     generation: 0
     resourceSliceCount: 1`,
 
   DeviceClass: `apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:
-  name: ''
+  name: gpu-class
 spec:
   selectors:
     - cel:
         expression: "device.driver == 'example.com/driver'"`
+};
+
+// ---------------------------------------------------------------------------
+// Example YAML templates — multiple real-world patterns per resource type
+// ---------------------------------------------------------------------------
+export const EXAMPLE_YAMLS: Record<string, { title: string; yaml: string }[]> = {
+  Pod: [
+    {
+      title: 'Single Container',
+      yaml: `apiVersion: v1
+kind: Pod
+metadata:
+  name: my-web-app
+  namespace: default
+  labels:
+    app: my-web-app
+spec:
+  containers:
+    - name: web
+      image: nginx:1.27-alpine
+      ports:
+        - containerPort: 80
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "128Mi"
+          cpu: "250m"
+      readinessProbe:
+        httpGet:
+          path: /
+          port: 80
+        initialDelaySeconds: 5
+        periodSeconds: 10
+      livenessProbe:
+        httpGet:
+          path: /
+          port: 80
+        initialDelaySeconds: 15
+        periodSeconds: 20`,
+    },
+    {
+      title: 'Multi Container (Sidecar)',
+      yaml: `apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-sidecar
+  namespace: default
+  labels:
+    app: app-with-sidecar
+spec:
+  containers:
+    # Main application container
+    - name: app
+      image: nginx:1.27-alpine
+      ports:
+        - containerPort: 80
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "128Mi"
+          cpu: "250m"
+      volumeMounts:
+        - name: shared-logs
+          mountPath: /var/log/nginx
+    # Sidecar: ships logs to a central logging system
+    - name: log-shipper
+      image: busybox:1.36
+      command: ["sh", "-c", "tail -F /var/log/nginx/access.log"]
+      resources:
+        requests:
+          memory: "32Mi"
+          cpu: "50m"
+        limits:
+          memory: "64Mi"
+          cpu: "100m"
+      volumeMounts:
+        - name: shared-logs
+          mountPath: /var/log/nginx
+          readOnly: true
+  volumes:
+    - name: shared-logs
+      emptyDir: {}`,
+    },
+    {
+      title: 'Init Container',
+      yaml: `apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-init
+  namespace: default
+  labels:
+    app: app-with-init
+spec:
+  # Init containers run before main containers and must succeed first
+  initContainers:
+    - name: wait-for-db
+      image: busybox:1.36
+      command: ["sh", "-c", "until nc -z postgres-headless 5432; do echo waiting for db; sleep 2; done"]
+      resources:
+        requests:
+          memory: "32Mi"
+          cpu: "50m"
+        limits:
+          memory: "64Mi"
+          cpu: "100m"
+  containers:
+    - name: app
+      image: nginx:1.27-alpine
+      ports:
+        - containerPort: 80
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "128Mi"
+          cpu: "250m"`,
+    },
+  ],
+
+  Deployment: [
+    {
+      title: 'Basic Web App',
+      yaml: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-web-app
+  namespace: default
+  labels:
+    app: my-web-app
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: my-web-app
+  template:
+    metadata:
+      labels:
+        app: my-web-app
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20`,
+    },
+    {
+      title: 'With ConfigMap & Secret Mounts',
+      yaml: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-service
+  namespace: default
+  labels:
+    app: backend-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend-service
+  template:
+    metadata:
+      labels:
+        app: backend-service
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 8080
+          # Environment variables from ConfigMap and Secret
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          # Mount config files from ConfigMap
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/app/config
+              readOnly: true
+            - name: secret-volume
+              mountPath: /etc/app/secrets
+              readOnly: true
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+      volumes:
+        - name: config-volume
+          configMap:
+            name: app-config
+        - name: secret-volume
+          secret:
+            secretName: app-secrets`,
+    },
+    {
+      title: 'Blue-Green Deployment',
+      yaml: `# Blue-Green pattern: deploy "green" alongside "blue", then switch Service selector
+# Step 1: Deploy green version with a distinct label
+# Step 2: Test green independently
+# Step 3: Update Service selector from version: blue -> version: green
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-web-app-green
+  namespace: default
+  labels:
+    app: my-web-app
+    version: green
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-web-app
+      version: green
+  template:
+    metadata:
+      labels:
+        app: my-web-app
+        version: green
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5`,
+    },
+  ],
+
+  Service: [
+    {
+      title: 'ClusterIP (Internal)',
+      yaml: `apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: backend-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080`,
+    },
+    {
+      title: 'NodePort (External via Node)',
+      yaml: `apiVersion: v1
+kind: Service
+metadata:
+  name: my-web-app-nodeport
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app: my-web-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      # nodePort range: 30000-32767 (omit for auto-assign)
+      nodePort: 30080`,
+    },
+    {
+      title: 'LoadBalancer (Cloud)',
+      yaml: `apiVersion: v1
+kind: Service
+metadata:
+  name: my-web-app-lb
+  namespace: default
+  annotations:
+    # AWS NLB example:
+    # service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    # GCP internal LB example:
+    # networking.gke.io/load-balancer-type: Internal
+spec:
+  type: LoadBalancer
+  selector:
+    app: my-web-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+    - name: https
+      port: 443
+      targetPort: 443`,
+    },
+    {
+      title: 'Headless Service (StatefulSet DNS)',
+      yaml: `# Headless Service: no ClusterIP, DNS returns pod IPs directly
+# Required for StatefulSets to give each pod a stable DNS name
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: default
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432`,
+    },
+  ],
+
+  StatefulSet: [
+    {
+      title: 'PostgreSQL Cluster',
+      yaml: `apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  serviceName: postgres-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: mydb
+            - name: POSTGRES_USER
+              value: admin
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: password
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "1"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "admin"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 10Gi`,
+    },
+    {
+      title: 'Redis Cluster',
+      yaml: `apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: default
+spec:
+  serviceName: redis-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+              name: redis
+          command: ["redis-server", "--appendonly", "yes"]
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi`,
+    },
+  ],
+
+  Job: [
+    {
+      title: 'Database Migration',
+      yaml: `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migration
+  namespace: default
+spec:
+  completions: 1
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      containers:
+        - name: migrate
+          image: busybox:1.36
+          command: ["sh", "-c", "echo 'Running migration...' && sleep 5 && echo 'Done'"]
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "250m"
+      restartPolicy: Never`,
+    },
+    {
+      title: 'Parallel Batch Processing',
+      yaml: `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch-processor
+  namespace: default
+spec:
+  # Process 10 items total, 3 at a time
+  completions: 10
+  parallelism: 3
+  backoffLimit: 5
+  template:
+    spec:
+      containers:
+        - name: worker
+          image: busybox:1.36
+          command: ["sh", "-c", "echo Processing item... && sleep 10 && echo Done"]
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+      restartPolicy: Never`,
+    },
+  ],
+
+  CronJob: [
+    {
+      title: 'Nightly Backup',
+      yaml: `apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-backup
+  namespace: default
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          containers:
+            - name: backup
+              image: busybox:1.36
+              command: ["sh", "-c", "echo 'Backup started' && sleep 10 && echo 'Backup complete'"]
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "256Mi"
+                  cpu: "500m"
+          restartPolicy: OnFailure`,
+    },
+    {
+      title: 'Cache Warmer (Every 15 Minutes)',
+      yaml: `apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cache-warmer
+  namespace: default
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Replace
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: warmer
+              image: busybox:1.36
+              command: ["sh", "-c", "echo 'Warming cache...' && sleep 5 && echo 'Done'"]
+              resources:
+                requests:
+                  memory: "32Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "64Mi"
+                  cpu: "100m"
+          restartPolicy: OnFailure`,
+    },
+  ],
+
+  Ingress: [
+    {
+      title: 'Simple Host-Based Routing',
+      yaml: `apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  namespace: default
+spec:
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-web-app
+                port:
+                  number: 80`,
+    },
+    {
+      title: 'TLS with Path-Based Routing',
+      yaml: `apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress-tls
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - app.example.com
+      secretName: app-tls-secret
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-api
+                port:
+                  number: 8080`,
+    },
+    {
+      title: 'Multi-Host (Fanout)',
+      yaml: `apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: multi-host-ingress
+  namespace: default
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-api
+                port:
+                  number: 8080
+    - host: admin.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: admin-panel
+                port:
+                  number: 3000`,
+    },
+  ],
 };
