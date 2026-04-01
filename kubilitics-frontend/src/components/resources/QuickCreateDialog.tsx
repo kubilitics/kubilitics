@@ -645,13 +645,13 @@ export function QuickCreateDialog({ open, onOpenChange, kind, onSuccess }: Quick
           </DialogHeader>
           <div className="flex items-center gap-2">
             {/* Mode toggle */}
-            <div className="flex items-center gap-0.5 bg-muted/60 rounded-lg p-0.5">
+            <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700">
               <button
                 onClick={() => handleModeSwitch('form')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
                   mode === 'form'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
+                    ? 'bg-white dark:bg-slate-700 text-foreground shadow-sm border border-slate-200 dark:border-slate-600'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-foreground hover:bg-slate-50 dark:hover:bg-slate-700/50'
                 }`}
               >
                 <Eye className="h-3.5 w-3.5" />
@@ -661,8 +661,8 @@ export function QuickCreateDialog({ open, onOpenChange, kind, onSuccess }: Quick
                 onClick={() => handleModeSwitch('yaml')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
                   mode === 'yaml'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
+                    ? 'bg-white dark:bg-slate-700 text-foreground shadow-sm border border-slate-200 dark:border-slate-600'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-foreground hover:bg-slate-50 dark:hover:bg-slate-700/50'
                 }`}
               >
                 <Code className="h-3.5 w-3.5" />

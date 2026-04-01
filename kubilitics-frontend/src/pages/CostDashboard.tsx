@@ -460,11 +460,13 @@ export default function CostDashboard() {
 
       {/* View Toggle + Search */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
+        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700">
           <button
             className={cn(
               'px-3 py-1 rounded-md text-xs font-medium transition-colors',
-              view === 'namespace' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'text-muted-foreground',
+              view === 'namespace'
+                ? 'bg-white dark:bg-slate-700 text-foreground shadow-sm border border-slate-200 dark:border-slate-600'
+                : 'text-slate-600 dark:text-slate-400 hover:text-foreground hover:bg-slate-50 dark:hover:bg-slate-700/50',
             )}
             onClick={() => setView('namespace')}
           >
@@ -473,7 +475,9 @@ export default function CostDashboard() {
           <button
             className={cn(
               'px-3 py-1 rounded-md text-xs font-medium transition-colors',
-              view === 'workload' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'text-muted-foreground',
+              view === 'workload'
+                ? 'bg-white dark:bg-slate-700 text-foreground shadow-sm border border-slate-200 dark:border-slate-600'
+                : 'text-slate-600 dark:text-slate-400 hover:text-foreground hover:bg-slate-50 dark:hover:bg-slate-700/50',
             )}
             onClick={() => setView('workload')}
           >

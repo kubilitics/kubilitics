@@ -947,7 +947,7 @@ export function ResourceComparisonView({
             <div>
                 {/* Tab bar */}
                 <div className="px-6 py-2 border-b bg-background">
-                    <div className="inline-flex h-11 items-center justify-center rounded-xl bg-muted/60 p-1 text-muted-foreground gap-0.5">
+                    <div className="inline-flex h-11 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-1 gap-0.5">
                       {[
                         { id: 'yaml', label: 'YAML', icon: FileText, show: true },
                         { id: 'metrics', label: 'Metrics', icon: Activity, show: hasMetrics },
@@ -959,8 +959,8 @@ export function ResourceComparisonView({
                           className={cn(
                             'inline-flex items-center justify-center whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200',
                             activeTab === t.id
-                              ? 'bg-background text-foreground shadow-sm font-semibold'
-                              : 'text-muted-foreground hover:text-foreground/80',
+                              ? 'bg-white dark:bg-slate-700 text-foreground shadow-sm font-semibold border border-slate-200 dark:border-slate-600'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-foreground hover:bg-slate-50 dark:hover:bg-slate-700/50',
                           )}
                         >
                           <t.icon className="h-4 w-4 mr-2" /> {t.label}

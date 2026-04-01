@@ -36,7 +36,7 @@ export function ListViewSegmentedControl({
       <div
         role="group"
         aria-label={ariaLabel}
-        className="inline-flex h-10 items-stretch rounded-lg border border-border bg-muted/40 p-1 shadow-sm ring-1 ring-black/5"
+        className="inline-flex h-10 items-stretch rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-1 shadow-sm"
       >
         {options.map((opt) => {
           const Icon = opt.icon;

@@ -619,7 +619,7 @@ export default function ClusterConnect() {
 
           <motion.div variants={item}>
             <Tabs value={tabMode} onValueChange={(v) => setTabMode(v as typeof tabMode)} className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-8 bg-muted border-border p-1">
+              <TabsList className="grid w-full grid-cols-2 mb-8 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-1">
                 <TabsTrigger value="auto" className="gap-2 text-muted-foreground data-[state=active]:bg-blue-600 data-[state=active]:text-white">
                   <Zap className="h-4 w-4" />
                   Auto-Detect
