@@ -27,7 +27,7 @@ export function ResourceTabs({ tabs, activeTab, onTabChange, className }: Resour
     <div className={cn('space-y-6 w-full', className)}>
       {/* Tab bar — sticky so it stays visible while scrolling through content */}
       <div className="sticky top-0 z-30 -mx-1 px-1 pt-1 pb-2 bg-background/95 backdrop-blur-sm">
-        <div className="w-full rounded-xl bg-muted/40 dark:bg-slate-800/40 p-1 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <div className="w-full rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-1 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <nav className="flex items-center gap-0.5" aria-label="Tabs">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
@@ -42,14 +42,14 @@ export function ResourceTabs({ tabs, activeTab, onTabChange, className }: Resour
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                   isActive
                     ? 'text-foreground font-semibold'
-                    : 'text-foreground/60 hover:text-foreground/90'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-foreground hover:bg-slate-50 dark:hover:bg-slate-700/50'
                 )}
               >
                 {/* Animated background pill for active tab */}
                 {isActive && (
                   <motion.div
                     layoutId={`tab-pill-${instanceId}`}
-                    className="absolute inset-0 bg-white dark:bg-slate-700 rounded-lg shadow-sm border-b-2 border-primary"
+                    className="absolute inset-0 bg-white dark:bg-slate-700 rounded-lg shadow-sm border border-slate-200 dark:border-slate-600 border-b-2 border-b-primary"
                     transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                     style={{ zIndex: 0 }}
                   />

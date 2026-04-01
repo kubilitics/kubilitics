@@ -363,13 +363,13 @@ export function AuditLogExport({ className }: { className?: string }) {
           {/* Format Selection + Export Button */}
           <div className="flex items-center gap-3">
             {/* Format Toggle */}
-            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700">
               <button
                 className={cn(
                   'flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
                   format === 'json'
-                    ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-slate-100'
-                    : 'text-muted-foreground',
+                    ? 'bg-white dark:bg-slate-700 shadow-sm text-foreground border border-slate-200 dark:border-slate-600'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-foreground hover:bg-slate-50 dark:hover:bg-slate-700/50',
                 )}
                 onClick={() => setFormat('json')}
               >
@@ -380,8 +380,8 @@ export function AuditLogExport({ className }: { className?: string }) {
                 className={cn(
                   'flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
                   format === 'csv'
-                    ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-slate-100'
-                    : 'text-muted-foreground',
+                    ? 'bg-white dark:bg-slate-700 shadow-sm text-foreground border border-slate-200 dark:border-slate-600'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-foreground hover:bg-slate-50 dark:hover:bg-slate-700/50',
                 )}
                 onClick={() => setFormat('csv')}
               >

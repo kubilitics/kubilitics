@@ -329,7 +329,7 @@ export function ResourceTopologyV2View({
           {/* View Level */}
           <div className="flex items-center gap-2">
             <GitBranch className="h-3.5 w-3.5 text-gray-500 dark:text-gray-400" />
-            <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
+            <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700">
               {(['direct', 'extended', 'full'] as const).map((level) => (
                 <button
                   key={level}
@@ -337,8 +337,8 @@ export function ResourceTopologyV2View({
                   onClick={() => setViewLevel(level)}
                   className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-all ${
                     viewLevel === level
-                      ? 'bg-white text-gray-900 shadow-sm dark:bg-slate-700 dark:text-white'
-                      : 'text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200'
+                      ? 'bg-white dark:bg-slate-700 text-foreground shadow-sm border border-slate-200 dark:border-slate-600'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-foreground hover:bg-slate-50 dark:hover:bg-slate-700/50'
                   }`}
                 >
                   {level === 'direct' ? 'Direct' : level === 'extended' ? 'Extended' : 'Full'}

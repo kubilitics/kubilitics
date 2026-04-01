@@ -64,8 +64,7 @@ export function TableDensityToggle({ className }: TableDensityToggleProps) {
       role="radiogroup"
       aria-label="Table density"
       className={cn(
-        'inline-flex items-center rounded-md border border-border bg-muted/50 p-0.5',
-        'dark:border-border dark:bg-muted/30',
+        'inline-flex items-center rounded-md border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5',
         className
       )}
     >
@@ -82,15 +81,13 @@ export function TableDensityToggle({ className }: TableDensityToggleProps) {
             onClick={() => setDensity(option.value)}
             className={cn(
               'inline-flex items-center justify-center rounded-[5px] px-2 py-1.5',
-              'text-muted-foreground transition-all duration-150',
-              'hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+              'transition-all duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
               isActive && [
-                'bg-background text-foreground shadow-sm',
-                'dark:bg-background dark:text-foreground',
+                'bg-white dark:bg-slate-700 text-foreground shadow-sm border border-slate-200 dark:border-slate-600',
               ],
               !isActive && [
-                'hover:bg-muted/80',
-                'dark:hover:bg-muted/50',
+                'text-slate-600 dark:text-slate-400 hover:text-foreground hover:bg-slate-50 dark:hover:bg-slate-700/50',
               ]
             )}
           >
