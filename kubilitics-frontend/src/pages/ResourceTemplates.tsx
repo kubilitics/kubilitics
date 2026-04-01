@@ -6,6 +6,7 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
+import yaml from 'js-yaml';
 import {
   LayoutTemplate,
   Rocket,
@@ -532,14 +533,14 @@ function TemplateEditorDialog({
   const [selectedNamespace, setSelectedNamespace] = useState('default');
   const [isApplying, setIsApplying] = useState(false);
 
-  // Reset editor content when template changes
-  const currentTemplateId = template?.id;
-  const [lastTemplateId, setLastTemplateId] = useState<string | null>(null);
-  if (currentTemplateId && currentTemplateId !== lastTemplateId) {
-    setLastTemplateId(currentTemplateId);
-    setYamlContent(template?.yaml ?? '');
+  // Reset editor content whenever the dialog opens (not just when template changes).
+  // This fixes stale YAML when re-opening the same template after editing.
+  const [lastOpen, setLastOpen] = useState(false);
+  if (open && !lastOpen && template) {
+    setYamlContent(template.yaml);
     setSelectedNamespace('default');
   }
+  if (open !== lastOpen) setLastOpen(open);
 
   const handleApply = useCallback(async () => {
     if (!clusterId || !isBackendConfigured) {
@@ -554,20 +555,23 @@ function TemplateEditorDialog({
       return;
     }
 
-    // Inject namespace into the YAML if the template is namespaced
+    // Inject namespace into metadata using YAML parsing to avoid regex
+    // false-matches (e.g. "namespace:" inside a ConfigMap data section).
     let finalYaml = yamlContent;
     const isClusterScoped = template?.id === 'namespace';
     if (!isClusterScoped && selectedNamespace) {
-      // Replace or add namespace in metadata
-      if (finalYaml.match(/^(\s*)namespace:\s*.*/m)) {
+      try {
+        const doc = yaml.load(finalYaml) as Record<string, unknown> | null;
+        if (doc && typeof doc === 'object') {
+          const meta = (doc.metadata ?? {}) as Record<string, unknown>;
+          meta.namespace = selectedNamespace;
+          doc.metadata = meta;
+          finalYaml = yaml.dump(doc, { lineWidth: -1, noRefs: true, quotingType: '"' });
+        }
+      } catch {
+        // YAML parse failed — fall back to inserting after metadata.name
         finalYaml = finalYaml.replace(
-          /^(\s*)namespace:\s*.*/m,
-          `$1namespace: ${selectedNamespace}`,
-        );
-      } else {
-        // Insert namespace after metadata.name
-        finalYaml = finalYaml.replace(
-          /^(\s*name:\s*.+)$/m,
+          /^(  name:\s*.+)$/m,
           `$1\n  namespace: ${selectedNamespace}`,
         );
       }
