@@ -70,12 +70,17 @@ func (c *Client) applyOne(ctx context.Context, obj *unstructured.Unstructured) (
 		obj.SetNamespace(namespace)
 	}
 
-	gv, err := schema.ParseGroupVersion(apiVersion)
-	if err != nil {
-		return "", fmt.Errorf("invalid apiVersion %q: %w", apiVersion, err)
-	}
+	// Use ResolveGVR for proper API discovery (handles CRDs, version negotiation)
 	resource := NormalizeKindToResource(kind)
-	gvr := gv.WithResource(resource)
+	gvr, err := c.ResolveGVR(ctx, resource)
+	if err != nil {
+		// Fallback: construct GVR from apiVersion if discovery fails
+		gv, parseErr := schema.ParseGroupVersion(apiVersion)
+		if parseErr != nil {
+			return "", fmt.Errorf("invalid apiVersion %q: %w", apiVersion, parseErr)
+		}
+		gvr = gv.WithResource(resource)
+	}
 
 	// Remove read-only fields that would cause conflicts
 	objCopy := obj.DeepCopy()

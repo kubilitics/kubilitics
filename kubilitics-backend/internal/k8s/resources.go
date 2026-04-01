@@ -21,14 +21,37 @@ func NormalizeKindToResource(kind string) string {
 	if s == "" {
 		return s
 	}
-	// GetGVRForType expects plural lowercase: pods, services, etc.
+	// Try exact match first (handles already-plural input like "pods", "deployments")
 	if _, err := GetGVRForType(s); err == nil {
 		return s
 	}
-	if !strings.HasSuffix(s, "s") {
+	// Pluralize and try again
+	plural := pluralizeKind(s)
+	if _, err := GetGVRForType(plural); err == nil {
+		return plural
+	}
+	// Fallback: return the pluralized form and let K8s API reject if wrong
+	return plural
+}
+
+// pluralizeKind applies English pluralization rules for Kubernetes resource kinds.
+func pluralizeKind(s string) string {
+	switch {
+	case strings.HasSuffix(s, "ss") || strings.HasSuffix(s, "ch") ||
+		strings.HasSuffix(s, "sh") || strings.HasSuffix(s, "x"):
+		// ingress → ingresses, ingressclass → ingressclasses
+		return s + "es"
+	case strings.HasSuffix(s, "cy") || strings.HasSuffix(s, "ry") ||
+		strings.HasSuffix(s, "ty") || strings.HasSuffix(s, "gy") ||
+		strings.HasSuffix(s, "ly") || strings.HasSuffix(s, "py"):
+		// networkpolicy → networkpolicies, priorityclass handled by "ss" rule
+		return s[:len(s)-1] + "ies"
+	case strings.HasSuffix(s, "s"):
+		// Already plural or ends in s (e.g., "endpoints" → keep as-is)
+		return s
+	default:
 		return s + "s"
 	}
-	return s
 }
 
 // ListResources lists resources of the given kind in the cluster (optionally filtered by namespace).
