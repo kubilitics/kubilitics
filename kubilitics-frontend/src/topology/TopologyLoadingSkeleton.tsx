@@ -86,7 +86,7 @@ export function TopologyLoadingSkeleton({
           Building your topology map
         </div>
         {progress != null && (
-          <div className="mt-3 h-1.5 w-56 overflow-hidden rounded-full bg-gray-200 mx-auto" role="progressbar" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}>
+          <div className="mt-3 h-1.5 w-56 overflow-hidden rounded-full bg-gray-200 dark:bg-slate-700 mx-auto" role="progressbar" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}>
             <div
               className="h-full rounded-full bg-blue-500 transition-all duration-300"
               style={{ width: `${progress}%` }}

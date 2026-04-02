@@ -127,7 +127,7 @@ const statusConfig: Record<string, { icon: LucideIcon; color: string; bg: string
  Pending: { icon: Clock, color: 'text-amber-600', bg: 'bg-amber-500/10' },
  Succeeded: { icon: CheckCircle2, color: 'text-blue-500', bg: 'bg-blue-500/10' },
  Failed: { icon: XCircle, color: 'text-rose-600', bg: 'bg-rose-500/10' },
- Unknown: { icon: Loader2, color: 'text-gray-500', bg: 'bg-gray-500/10' },
+ Unknown: { icon: Loader2, color: 'text-gray-500 dark:text-gray-400', bg: 'bg-gray-500/10' },
  CrashLoopBackOff: { icon: RotateCcw, color: 'text-rose-600', bg: 'bg-rose-500/10' },
  ContainerCreating: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10' },
  Terminating: { icon: XCircle, color: 'text-orange-500', bg: 'bg-orange-500/10' },
