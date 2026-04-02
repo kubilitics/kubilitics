@@ -171,7 +171,7 @@ export function TopologyToolbar({
     : `${availableEdgeCategories.length - hiddenEdgeCategories.size}/${availableEdgeCategories.length} categories`;
 
   return (
-    <div className="border-b border-gray-200/80 dark:border-slate-700/80 bg-gradient-to-r from-white via-gray-50/30 to-white dark:from-slate-900 dark:via-slate-900/80 dark:to-slate-900">
+    <div className="border-b border-slate-200 dark:border-slate-700 bg-card shadow-sm">
       {/* Main toolbar row */}
       <div className="flex items-center gap-3 px-4 py-2.5">
 
