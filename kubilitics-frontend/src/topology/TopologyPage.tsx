@@ -348,7 +348,7 @@ export function TopologyPage() {
   };
 
   return (
-    <div className="flex h-full w-full flex-col bg-white dark:bg-slate-950">
+    <div className="flex w-full flex-col bg-white dark:bg-slate-950" style={{ minHeight: 'calc(100vh - 4rem)' }}>
       {/* Toolbar — hidden in presentation mode */}
       {!presentationMode && <TopologyToolbar
         viewMode={viewMode}
@@ -456,8 +456,8 @@ export function TopologyPage() {
       )}
 
       {/* Main content */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="relative flex min-h-0 flex-1">
+      <div className="flex flex-1" style={{ minHeight: 'max(60vh, 500px)' }}>
+        <div className="relative flex flex-1">
           {renderContent()}
           <HealthLegend visible={healthOverlay && !!topology} />
 
