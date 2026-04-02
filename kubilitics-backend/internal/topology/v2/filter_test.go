@@ -1,6 +1,9 @@
 package v2
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 func newTestResponse() *TopologyResponse {
 	return &TopologyResponse{
@@ -415,6 +418,178 @@ func TestViewFilter_Resource_StorageClassIsLeafOnlyInFullMode(t *testing.T) {
 	}
 	if nodeIDs["PersistentVolume/unrelated-pv"] {
 		t.Fatal("storage class must be leaf-only and must not expand to unrelated PVs")
+	}
+}
+
+// TestDynamicHubHysteresis verifies Bug 4 fix: nodes near the hub threshold
+// boundary don't flip between hub/non-hub status when the graph size changes
+// slightly. Uses hysteresis: promote at 5%, demote at 3%.
+func TestDynamicHubHysteresis(t *testing.T) {
+	// Create a graph where a ConfigMap has exactly 12 connections.
+	// With 200 nodes: 5% = 10 (promote threshold), 3% = 7 (demote threshold).
+	// 12 > 10, so it should be promoted to hub.
+	nodeKind := make(map[string]string, 200)
+	outgoing := make(map[string][]adjacencyEntry)
+	incoming := make(map[string][]adjacencyEntry)
+
+	// Fill 200 nodes
+	nodeKind["ConfigMap/default/shared-cm"] = "ConfigMap"
+	for i := 1; i < 200; i++ {
+		id := "Pod/default/pod-" + strconv.Itoa(i)
+		nodeKind[id] = "Pod"
+	}
+
+	// Give the ConfigMap exactly 12 connections
+	for i := 1; i <= 12; i++ {
+		podID := "Pod/default/pod-" + strconv.Itoa(i)
+		outgoing["ConfigMap/default/shared-cm"] = append(outgoing["ConfigMap/default/shared-cm"],
+			adjacencyEntry{nodeID: podID, category: "configuration"})
+		incoming[podID] = append(incoming[podID],
+			adjacencyEntry{nodeID: "ConfigMap/default/shared-cm", category: "configuration"})
+	}
+
+	// First computation: ConfigMap (12 connections) > promote threshold (10) => hub
+	hubs1 := computeDynamicHubsWithHysteresis(outgoing, incoming, nodeKind, nil)
+	if !hubs1["ConfigMap/default/shared-cm"] {
+		t.Fatal("ConfigMap with 12 connections should be promoted to hub (threshold=10)")
+	}
+
+	// Now simulate graph growing to 250 nodes.
+	// New promote threshold = 250*0.05 = 12 (ties don't exceed).
+	// 12 is NOT > 12, so without hysteresis the ConfigMap would lose hub status.
+	// With hysteresis: demote threshold = 250*0.03 = 7. 12 > 7, so it stays hub.
+	for i := 200; i < 250; i++ {
+		id := "Pod/default/pod-" + strconv.Itoa(i)
+		nodeKind[id] = "Pod"
+	}
+
+	hubs2 := computeDynamicHubsWithHysteresis(outgoing, incoming, nodeKind, hubs1)
+	if !hubs2["ConfigMap/default/shared-cm"] {
+		t.Fatal("BUG: ConfigMap should remain hub with hysteresis (12 > demote threshold 7)")
+	}
+
+	// Now reduce connections to 6 (below demote threshold of 7)
+	outgoing["ConfigMap/default/shared-cm"] = outgoing["ConfigMap/default/shared-cm"][:6]
+	for i := 7; i <= 12; i++ {
+		podID := "Pod/default/pod-" + strconv.Itoa(i)
+		incoming[podID] = nil
+	}
+
+	hubs3 := computeDynamicHubsWithHysteresis(outgoing, incoming, nodeKind, hubs2)
+	if hubs3["ConfigMap/default/shared-cm"] {
+		t.Fatal("ConfigMap with 6 connections should be demoted (below demote threshold 7)")
+	}
+}
+
+// TestSiblingFiltering_CrossSiblingDependency verifies Bug 5 fix: siblings
+// reached through a shared dependency of a different kind (like a ConfigMap)
+// must NOT be skipped. Only siblings sharing the same direct parent are filtered.
+func TestSiblingFiltering_CrossSiblingDependency(t *testing.T) {
+	// Topology: both pods mount the same ConfigMap:
+	//   Pod A -> ConfigMap (configuration) — outgoing from Pod A
+	//   Pod B -> ConfigMap (configuration) — outgoing from Pod B
+	// In the outgoing BFS from Pod A we reach ConfigMap at depth 1.
+	// In the incoming BFS from ConfigMap we reach Pod B at depth 2.
+	// But wait: directional BFS is monotonic. The outgoing BFS follows
+	// Source->Target, so Pod A -> ConfigMap. Then from ConfigMap, outgoing
+	// has nothing (ConfigMap is always a target). The incoming BFS from Pod A
+	// follows Target<-Source, so Pod A <- ReplicaSet.
+	//
+	// For the cross-sibling path to work, we need edges that create a
+	// traversable path in one direction. Use the pattern:
+	//   Pod A -> ConfigMap (configuration, outgoing)
+	//   ConfigMap -> Pod B (configuration, outgoing)
+	// This lets outgoing BFS go Pod A -> ConfigMap -> Pod B.
+	resp := &TopologyResponse{
+		Metadata: TopologyMetadata{ClusterID: "test"},
+		Nodes: []TopologyNode{
+			{ID: "ReplicaSet/default/rs-a", Kind: "ReplicaSet", Name: "rs-a", Namespace: "default"},
+			{ID: "ReplicaSet/default/rs-b", Kind: "ReplicaSet", Name: "rs-b", Namespace: "default"},
+			{ID: "Pod/default/pod-a", Kind: "Pod", Name: "pod-a", Namespace: "default"},
+			{ID: "Pod/default/pod-b", Kind: "Pod", Name: "pod-b", Namespace: "default"},
+			{ID: "ConfigMap/default/shared-cm", Kind: "ConfigMap", Name: "shared-cm", Namespace: "default"},
+		},
+		Edges: []TopologyEdge{
+			{ID: "e1", Source: "ReplicaSet/default/rs-a", Target: "Pod/default/pod-a", RelationshipCategory: "ownership"},
+			{ID: "e2", Source: "ReplicaSet/default/rs-b", Target: "Pod/default/pod-b", RelationshipCategory: "ownership"},
+			// Pod A mounts ConfigMap (outgoing from Pod A)
+			{ID: "e3", Source: "Pod/default/pod-a", Target: "ConfigMap/default/shared-cm", RelationshipCategory: "configuration"},
+			// ConfigMap is also consumed by Pod B (outgoing from ConfigMap to Pod B)
+			// This models a bidirectional config dependency where a ConfigMap update affects Pod B.
+			{ID: "e4", Source: "ConfigMap/default/shared-cm", Target: "Pod/default/pod-b", RelationshipCategory: "configuration"},
+		},
+	}
+
+	filter := &ViewFilter{}
+	result := filter.Filter(resp, Options{
+		Mode:     ViewModeResource,
+		Resource: "Pod/default/pod-a",
+		Depth:    3,
+	})
+
+	nodeIDs := make(map[string]bool)
+	for _, n := range result.Nodes {
+		nodeIDs[n.ID] = true
+	}
+
+	if !nodeIDs["Pod/default/pod-a"] {
+		t.Fatal("missing focus pod")
+	}
+	if !nodeIDs["ConfigMap/default/shared-cm"] {
+		t.Fatal("missing shared ConfigMap")
+	}
+	// Bug 5: Pod B should be included because it's reached through ConfigMap
+	// (a configuration dependency), not through a shared parent.
+	if !nodeIDs["Pod/default/pod-b"] {
+		t.Fatal("BUG: Pod B should be included — reached via ConfigMap (cross-kind dependency)")
+	}
+}
+
+// TestSiblingFiltering_SameOwnerSiblingsStillFiltered verifies that the Bug 5
+// fix doesn't break the original sibling filtering. Pods that share the same
+// parent ReplicaSet should still be filtered when not reached via a cross-kind path.
+func TestSiblingFiltering_SameOwnerSiblingsStillFiltered(t *testing.T) {
+	resp := &TopologyResponse{
+		Metadata: TopologyMetadata{ClusterID: "test"},
+		Nodes: []TopologyNode{
+			{ID: "Deployment/default/app", Kind: "Deployment", Name: "app", Namespace: "default"},
+			{ID: "ReplicaSet/default/app-rs", Kind: "ReplicaSet", Name: "app-rs", Namespace: "default"},
+			{ID: "Pod/default/app-pod-0", Kind: "Pod", Name: "app-pod-0", Namespace: "default"},
+			{ID: "Pod/default/app-pod-1", Kind: "Pod", Name: "app-pod-1", Namespace: "default"},
+			{ID: "Pod/default/app-pod-2", Kind: "Pod", Name: "app-pod-2", Namespace: "default"},
+		},
+		Edges: []TopologyEdge{
+			{ID: "e1", Source: "Deployment/default/app", Target: "ReplicaSet/default/app-rs", RelationshipCategory: "ownership"},
+			{ID: "e2", Source: "ReplicaSet/default/app-rs", Target: "Pod/default/app-pod-0", RelationshipCategory: "ownership"},
+			{ID: "e3", Source: "ReplicaSet/default/app-rs", Target: "Pod/default/app-pod-1", RelationshipCategory: "ownership"},
+			{ID: "e4", Source: "ReplicaSet/default/app-rs", Target: "Pod/default/app-pod-2", RelationshipCategory: "ownership"},
+		},
+	}
+
+	filter := &ViewFilter{}
+	result := filter.Filter(resp, Options{
+		Mode:     ViewModeResource,
+		Resource: "Pod/default/app-pod-0",
+		Depth:    3,
+	})
+
+	nodeIDs := make(map[string]bool)
+	for _, n := range result.Nodes {
+		nodeIDs[n.ID] = true
+	}
+
+	if !nodeIDs["Pod/default/app-pod-0"] {
+		t.Fatal("missing focus pod")
+	}
+	if !nodeIDs["ReplicaSet/default/app-rs"] {
+		t.Fatal("missing ReplicaSet")
+	}
+	// Sibling pods sharing the same ReplicaSet should still be filtered
+	if nodeIDs["Pod/default/app-pod-1"] {
+		t.Fatal("BUG: sibling pod-1 (same owner) should be filtered")
+	}
+	if nodeIDs["Pod/default/app-pod-2"] {
+		t.Fatal("BUG: sibling pod-2 (same owner) should be filtered")
 	}
 }
 

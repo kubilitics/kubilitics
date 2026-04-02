@@ -98,14 +98,18 @@ var leafOnlyCategories = map[string]bool{
 	"scheduling":  true,
 }
 
-// dynamicHubFraction — a non-workload node becomes a dynamic hub if its total
-// connections exceed this fraction of the graph size. This scales with the
+// dynamicHubPromoteFraction — a non-workload node becomes a dynamic hub if its
+// total connections exceed this fraction of the graph size. This scales with the
 // cluster: a 100-node graph allows 5 connections before hub-ing; a 5000-node
 // graph allows 250. This prevents explosion through shared infrastructure
 // (kube-root-ca.crt, default ServiceAccount) without a fragile fixed threshold.
-// Floor of 10 ensures small graphs don't hub everything.
-const dynamicHubFraction = 0.05 // 5% of total graph nodes
-const dynamicHubFloor = 10     // minimum connections before hub-ing
+//
+// Bug 4 fix: hysteresis — promote at 5%, demote at 3%. Nodes near the boundary
+// no longer flip between hub/non-hub status when cluster size changes slightly.
+const dynamicHubPromoteFraction = 0.05 // 5% of total graph nodes — threshold to become hub
+const dynamicHubDemoteFraction = 0.03  // 3% of total graph nodes — threshold to stop being hub
+const dynamicHubPromoteFloor = 10      // minimum connections before hub-ing
+const dynamicHubDemoteFloor = 7        // minimum connections to remain a hub
 
 // filterResource builds a resource-centric view using edge-type-aware, hub-aware
 // BFS traversal. This is the core USP topology per the final specification.
@@ -188,8 +192,20 @@ func (f *ViewFilter) filterResource(resp *TopologyResponse, resource, ns string,
 
 	focusKind := nodeKind[focusID]
 
+	// Bug 5 fix: dependency categories are edge types through which same-kind
+	// siblings may legitimately connect. For example, Pod A -> ConfigMap -> Pod B
+	// is a valid dependency path (both pods depend on the same config).
+	// In contrast, Pod A -> ServiceAccount -> Pod B is shared identity, not a
+	// dependency chain — siblings through RBAC/ownership/scheduling are filtered.
+	dependencyCategories := map[string]bool{
+		"configuration": true, // ConfigMap, Secret mounts
+		"storage":       true, // PVC/PV shared storage
+	}
+
 	traverse := func(adj map[string][]adjacencyEntry) {
+		// Track which category was used to reach each node, for sibling filtering.
 		visited := make(map[string]int)
+		reachedViaCategory := make(map[string]string) // nodeID -> category of edge that reached it
 		visited[focusID] = 0
 		queue := []bfsEntry{{id: focusID, depth: 0}}
 		for len(queue) > 0 {
@@ -208,17 +224,26 @@ func (f *ViewFilter) filterResource(resp *TopologyResponse, resource, ns string,
 					continue
 				}
 
-				// Skip siblings: same kind as the focus node reached through
-				// an intermediate (e.g., sibling Pod via shared ReplicaSet).
-				// The focus node's own chain goes UP (RS→Deployment) or DOWN
-				// (Service→Endpoints), never sideways to peer pods.
+				// Bug 5 fix: skip same-kind siblings UNLESS they are reached
+				// through a dependency intermediary (configuration, storage).
+				// This allows Pod A -> ConfigMap -> Pod B (legitimate shared
+				// config dependency) while still blocking Pod A -> ReplicaSet ->
+				// Pod B (peer replicas) and Pod A -> ServiceAccount -> Pod B
+				// (shared identity, not dependency).
 				if current.id != focusID && nodeKind[neighbor.nodeID] == focusKind && neighbor.nodeID != focusID {
-					continue
+					// Allow through if the current node was reached via a dependency
+					// category edge, meaning the cross-sibling path goes through
+					// shared configuration or storage.
+					currentReachedVia := reachedViaCategory[current.id]
+					if !dependencyCategories[currentReachedVia] && !dependencyCategories[neighbor.category] {
+						continue
+					}
 				}
 
 				neighborDepth := current.depth + 1
 				visited[neighbor.nodeID] = neighborDepth
 				included[neighbor.nodeID] = true
+				reachedViaCategory[neighbor.nodeID] = neighbor.category
 
 				// Leaf-only edges (containment, scheduling) normally produce leaf
 				// nodes that are never expanded further. BUT when the focus
@@ -278,10 +303,18 @@ func buildDirectedTypedAdjacency(edges []TopologyEdge) (map[string][]adjacencyEn
 }
 
 // computeDynamicHubs identifies non-workload, non-static-hub nodes whose
-// connection count exceeds a scaling threshold (5% of graph size, floor of 10).
-// These are treated as hubs at runtime to prevent graph explosion through
-// shared infrastructure (e.g., kube-root-ca.crt mounted by every Pod).
+// connection count exceeds a scaling threshold.
+// Bug 4 fix: uses hysteresis to prevent threshold instability. A node is
+// promoted to hub status at 5% (promoteThreshold) and only demoted at 3%
+// (demoteThreshold). The previousHubs parameter carries forward the hub set
+// from the last computation; pass nil on the first call.
 func computeDynamicHubs(outgoingAdj, incomingAdj map[string][]adjacencyEntry, nodeKind map[string]string) map[string]bool {
+	return computeDynamicHubsWithHysteresis(outgoingAdj, incomingAdj, nodeKind, nil)
+}
+
+// computeDynamicHubsWithHysteresis implements hub detection with hysteresis.
+// previousHubs is the hub set from the previous computation; pass nil for fresh.
+func computeDynamicHubsWithHysteresis(outgoingAdj, incomingAdj map[string][]adjacencyEntry, nodeKind map[string]string, previousHubs map[string]bool) map[string]bool {
 	// Workload kinds are never dynamic hubs — they are core dependency chain members.
 	neverDynamicHub := map[string]bool{
 		"Deployment": true, "StatefulSet": true, "DaemonSet": true,
@@ -294,12 +327,17 @@ func computeDynamicHubs(outgoingAdj, incomingAdj map[string][]adjacencyEntry, no
 		"Ingress": true, "NetworkPolicy": true,
 	}
 
-	// Scaling threshold: 5% of graph size, minimum 10.
-	// 200-node graph → threshold 10; 1000-node → 50; 5000-node → 250.
+	// Scaling threshold with hysteresis (Bug 4 fix):
+	// Promote to hub at 5%, demote at 3%. This prevents nodes near the boundary
+	// from flipping between hub/non-hub on minor cluster size changes.
 	graphSize := len(nodeKind)
-	threshold := int(float64(graphSize) * dynamicHubFraction)
-	if threshold < dynamicHubFloor {
-		threshold = dynamicHubFloor
+	promoteThreshold := int(float64(graphSize) * dynamicHubPromoteFraction)
+	if promoteThreshold < dynamicHubPromoteFloor {
+		promoteThreshold = dynamicHubPromoteFloor
+	}
+	demoteThreshold := int(float64(graphSize) * dynamicHubDemoteFraction)
+	if demoteThreshold < dynamicHubDemoteFloor {
+		demoteThreshold = dynamicHubDemoteFloor
 	}
 
 	hubs := make(map[string]bool)
@@ -308,8 +346,18 @@ func computeDynamicHubs(outgoingAdj, incomingAdj map[string][]adjacencyEntry, no
 			continue
 		}
 		neighborCount := len(outgoingAdj[nodeID]) + len(incomingAdj[nodeID])
-		if neighborCount > threshold {
-			hubs[nodeID] = true
+
+		wasHub := previousHubs != nil && previousHubs[nodeID]
+		if wasHub {
+			// Already a hub: only demote if connections drop below the lower threshold
+			if neighborCount > demoteThreshold {
+				hubs[nodeID] = true
+			}
+		} else {
+			// Not a hub: only promote if connections exceed the upper threshold
+			if neighborCount > promoteThreshold {
+				hubs[nodeID] = true
+			}
 		}
 	}
 	return hubs

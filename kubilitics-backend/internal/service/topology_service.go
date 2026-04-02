@@ -63,8 +63,12 @@ func (s *topologyService) GetTopology(ctx context.Context, clusterID string, fil
 	defer span.End()
 
 	// BE-SCALE-002: Check cache unless force_refresh is true
+	// Bug 1+6 fix: cache key now includes mode ("v1") and depth (0) to prevent
+	// cross-contamination with V2 topology views of different modes/depths.
+	const v1CacheMode = "v1"
+	const v1CacheDepth = 0
 	if !forceRefresh && s.cache != nil {
-		if g, ok := s.cache.Get(clusterID, filters.Namespace); ok {
+		if g, ok := s.cache.Get(clusterID, v1CacheMode, filters.Namespace, v1CacheDepth); ok {
 			span.SetAttributes(attribute.Bool("topology.cache_hit", true))
 			return g, nil
 		}
@@ -96,7 +100,7 @@ func (s *topologyService) GetTopology(ctx context.Context, clusterID string, fil
 	}
 
 	if s.cache != nil {
-		s.cache.Set(clusterID, filters.Namespace, g)
+		s.cache.Set(clusterID, v1CacheMode, filters.Namespace, v1CacheDepth, g)
 	}
 	return g, nil
 }
@@ -111,8 +115,10 @@ func (s *topologyService) GetTopologyWithClient(ctx context.Context, client *k8s
 	)
 	defer span.End()
 
+	const v1CacheMode = "v1"
+	const v1CacheDepth = 0
 	if !forceRefresh && s.cache != nil {
-		if g, ok := s.cache.Get(clusterID, filters.Namespace); ok {
+		if g, ok := s.cache.Get(clusterID, v1CacheMode, filters.Namespace, v1CacheDepth); ok {
 			span.SetAttributes(attribute.Bool("topology.cache_hit", true))
 			return g, nil
 		}
@@ -137,7 +143,7 @@ func (s *topologyService) GetTopologyWithClient(ctx context.Context, client *k8s
 	}
 
 	if s.cache != nil {
-		s.cache.Set(clusterID, filters.Namespace, g)
+		s.cache.Set(clusterID, v1CacheMode, filters.Namespace, v1CacheDepth, g)
 	}
 	return g, nil
 }

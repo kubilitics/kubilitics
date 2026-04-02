@@ -80,6 +80,20 @@ func topologyCacheSet(key string, data *topologyv2.TopologyResponse) {
 	})
 }
 
+// topologyCacheInvalidateForCluster removes all cached topology entries for the
+// given clusterID. Bug 2 fix: called from graph engine onRebuild callback to
+// actively invalidate caches when K8s resources change, rather than relying
+// solely on TTL expiration.
+func topologyCacheInvalidateForCluster(clusterID string) {
+	prefix := clusterID + "|"
+	topologyCache.Range(func(key, _ any) bool {
+		if k, ok := key.(string); ok && strings.HasPrefix(k, prefix) {
+			topologyCache.Delete(key)
+		}
+		return true
+	})
+}
+
 // Handler manages HTTP request handlers
 type Handler struct {
 	clusterService        service.ClusterService

@@ -3,6 +3,7 @@
 package topologycache
 
 import (
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,20 +32,22 @@ func New(ttl time.Duration) *Cache {
 	}
 }
 
-func key(clusterID, namespace string) string {
-	if namespace == "" {
-		return clusterID + "|"
-	}
-	return clusterID + "|" + namespace
+// key builds a cache key that includes mode and depth to prevent
+// cross-contamination between different topology views for the same cluster.
+// Previously only used clusterID|namespace, which caused stale data when
+// switching between modes or depth levels (Bug 1+6).
+func key(clusterID, mode, namespace string, depth int) string {
+	return clusterID + "|" + mode + "|" + namespace + "|" + strconv.Itoa(depth)
 }
 
 // Get returns a cached graph if the key exists and is not expired. Records hit/miss.
-func (c *Cache) Get(clusterID, namespace string) (*models.TopologyGraph, bool) {
+// The key includes mode and depth to avoid cross-contamination between views (Bug 1+6).
+func (c *Cache) Get(clusterID, mode, namespace string, depth int) (*models.TopologyGraph, bool) {
 	if c.ttl <= 0 {
 		metrics.TopologyCacheMissesTotal.Inc()
 		return nil, false
 	}
-	k := key(clusterID, namespace)
+	k := key(clusterID, mode, namespace, depth)
 	c.mu.RLock()
 	e, ok := c.store[k]
 	c.mu.RUnlock()
@@ -57,11 +60,12 @@ func (c *Cache) Get(clusterID, namespace string) (*models.TopologyGraph, bool) {
 }
 
 // Set stores the graph for the given scope with TTL from cache config.
-func (c *Cache) Set(clusterID, namespace string, graph *models.TopologyGraph) {
+// The key includes mode and depth to avoid cross-contamination between views (Bug 1+6).
+func (c *Cache) Set(clusterID, mode, namespace string, depth int, graph *models.TopologyGraph) {
 	if c.ttl <= 0 || graph == nil {
 		return
 	}
-	k := key(clusterID, namespace)
+	k := key(clusterID, mode, namespace, depth)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.store[k] = &entry{graph: graph, expAt: time.Now().Add(c.ttl)}
@@ -79,10 +83,19 @@ func (c *Cache) InvalidateForCluster(clusterID string) {
 	}
 }
 
-// InvalidateForClusterNamespace removes the entry for (clusterID, namespace).
-// Use namespace == "" to invalidate cluster-scoped topology only (key clusterID|).
+// InvalidateForClusterNamespace removes all entries for the given clusterID and namespace
+// regardless of mode/depth. This is the safe approach since callers may not know
+// which modes are cached.
 func (c *Cache) InvalidateForClusterNamespace(clusterID, namespace string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.store, key(clusterID, namespace))
+	// With the new key format (clusterID|mode|namespace|depth), we need to scan
+	// for all entries matching the clusterID and namespace components.
+	prefix := clusterID + "|"
+	needle := "|" + namespace + "|"
+	for k := range c.store {
+		if strings.HasPrefix(k, prefix) && strings.Contains(k, needle) {
+			delete(c.store, k)
+		}
+	}
 }
