@@ -332,11 +332,14 @@ function TopologyCanvasInner({
       const isDimmed = hasDimming && !dimmedNodeIds.has(n.id);
       const isInErrorChain = hasErrorChain && errorChainNodeIds.has(n.id) && !isSelected;
 
-      // Blast radius simulation styling (takes priority) — wave-depth-aware coloring
+      // Blast radius simulation styling (takes priority) — wave-depth-aware coloring.
+      // Cross-namespace affected nodes get amber ring + dashed border for visual distinction.
       if (hasSimulation) {
         const isFailureOrigin = n.id === simulatedFailureNodeId;
         const isAffected = simulationAffectedNodes.has(n.id);
         const waveDepth = simulationWaveDepths?.get(n.id) ?? 0;
+        const nodeNamespace = (n.data as Record<string, unknown>)?.namespace as string | undefined;
+        const isCrossNs = !!namespace && !!nodeNamespace && nodeNamespace !== namespace;
 
         let className: string;
         let extraStyle: React.CSSProperties;
@@ -345,6 +348,13 @@ function TopologyCanvasInner({
           // Origin node: red ring with pulsing glow
           className = "ring-[3px] ring-red-600 dark:ring-red-500 rounded-lg shadow-[0_0_20px_rgba(239,68,68,0.6)] animate-pulse";
           extraStyle = { zIndex: 100, transition: "opacity 0.15s" };
+        } else if (isAffected && isCrossNs) {
+          // Cross-namespace affected node: amber dashed ring to distinguish from same-ns
+          className = "ring-2 ring-amber-500 dark:ring-amber-400 ring-offset-1 rounded-lg shadow-[0_0_12px_rgba(245,158,11,0.4)]";
+          extraStyle = {
+            borderStyle: "dashed",
+            transition: "opacity 0.15s",
+          };
         } else if (isAffected && waveDepth === 1) {
           // Wave 1 (direct dependencies)
           className = "ring-2 ring-red-500 dark:ring-red-400 rounded-lg shadow-[0_0_12px_rgba(239,68,68,0.4)]";
@@ -391,17 +401,22 @@ function TopologyCanvasInner({
 
   // Edge styling — ALWAYS show edges, just hide labels at low zoom
   const styledEdges = useMemo(() => {
-    // Blast radius simulation: affected edges red + animated, others nearly invisible
+    // Blast radius simulation: affected edges red + animated, others nearly invisible.
+    // Cross-namespace blast edges (blast_cross_ns) get amber color for visual distinction.
     if (simulationAffectedNodes && simulationAffectedNodes.size > 0) {
       return edges.map((e) => {
         const bothAffected = simulationAffectedNodes.has(e.source) && simulationAffectedNodes.has(e.target);
+        const isCrossNs = (e.data as Record<string, unknown>)?.relationshipType === "blast_cross_ns";
         return {
           ...e,
           animated: bothAffected,
           style: {
             ...(e.style ?? {}),
-            stroke: bothAffected ? "#dc2626" : undefined,
-            strokeWidth: bothAffected ? 2.5 : 1,
+            stroke: bothAffected
+              ? (isCrossNs ? "#f59e0b" : "#dc2626")  // amber-500 for cross-ns, red-600 for same-ns
+              : undefined,
+            strokeWidth: bothAffected ? (isCrossNs ? 3 : 2.5) : 1,
+            strokeDasharray: isCrossNs && bothAffected ? "6 3" : undefined,
             opacity: bothAffected ? 1 : 0.08,
           },
         };

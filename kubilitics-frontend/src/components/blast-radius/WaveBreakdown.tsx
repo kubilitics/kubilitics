@@ -12,6 +12,8 @@ import type { BlastWave, AffectedResource, PathHop } from '@/services/api/types'
 
 export interface WaveBreakdownProps {
   waves: BlastWave[];
+  /** The namespace of the target resource — used to highlight cross-namespace resources */
+  targetNamespace?: string;
   onResourceClick: (kind: string, namespace: string, name: string) => void;
 }
 
@@ -55,9 +57,11 @@ function FailurePath({ hops }: { hops: PathHop[] }) {
 
 function ResourceRow({
   resource,
+  isCrossNamespace,
   onResourceClick,
 }: {
   resource: AffectedResource;
+  isCrossNamespace: boolean;
   onResourceClick: (kind: string, namespace: string, name: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -77,6 +81,7 @@ function ResourceRow({
         className={cn(
           'w-full flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm',
           'hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors',
+          isCrossNamespace && 'border-l-2 border-amber-400 dark:border-amber-500',
         )}
       >
         {hasPath && (
@@ -96,9 +101,16 @@ function ResourceRow({
         >
           {resource.name}
         </span>
-        <span className="text-xs text-slate-400 dark:text-slate-500 shrink-0">
-          {resource.namespace}
-        </span>
+        {isCrossNamespace ? (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/40 px-1.5 py-0.5 rounded shrink-0">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+            {resource.namespace}
+          </span>
+        ) : (
+          <span className="text-xs text-slate-400 dark:text-slate-500 shrink-0">
+            {resource.namespace}
+          </span>
+        )}
       </button>
       <AnimatePresence>
         {expanded && hasPath && (
@@ -117,7 +129,7 @@ function ResourceRow({
   );
 }
 
-export function WaveBreakdown({ waves, onResourceClick }: WaveBreakdownProps) {
+export function WaveBreakdown({ waves, targetNamespace, onResourceClick }: WaveBreakdownProps) {
   if (!waves || waves.length === 0) {
     return (
       <div className="text-sm text-slate-400 dark:text-slate-500 py-6 text-center">
@@ -126,13 +138,46 @@ export function WaveBreakdown({ waves, onResourceClick }: WaveBreakdownProps) {
     );
   }
 
+  // Count unique cross-namespace namespaces across all waves
+  const crossNsSet = new Set<string>();
+  for (const wave of waves) {
+    for (const res of wave.resources) {
+      if (targetNamespace && res.namespace !== targetNamespace) {
+        crossNsSet.add(res.namespace);
+      }
+    }
+  }
+  const crossNsCount = crossNsSet.size;
+
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-        Wave Breakdown
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+          Wave Breakdown
+        </h3>
+        {crossNsCount > 0 && (
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-full">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+            {crossNsCount} cross-namespace{crossNsCount !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
       {waves.map((wave) => {
         const color = getWaveColor(wave.depth);
+        // Group resources: same-namespace first, then by cross-namespace grouped by ns
+        const sameNs = wave.resources.filter(
+          (r) => !targetNamespace || r.namespace === targetNamespace,
+        );
+        const crossNs = wave.resources.filter(
+          (r) => !!targetNamespace && r.namespace !== targetNamespace,
+        );
+        // Group cross-namespace resources by namespace
+        const crossNsByNs = new Map<string, AffectedResource[]>();
+        for (const r of crossNs) {
+          if (!crossNsByNs.has(r.namespace)) crossNsByNs.set(r.namespace, []);
+          crossNsByNs.get(r.namespace)!.push(r);
+        }
+
         return (
           <motion.div
             key={wave.depth}
@@ -149,15 +194,41 @@ export function WaveBreakdown({ waves, onResourceClick }: WaveBreakdownProps) {
               <span className="text-xs text-slate-400 dark:text-slate-500">
                 ({wave.resources.length} resource{wave.resources.length !== 1 ? 's' : ''})
               </span>
+              {crossNs.length > 0 && (
+                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                  {crossNs.length} cross-ns
+                </span>
+              )}
             </div>
-            {/* Resources */}
+            {/* Resources — same namespace */}
             <div className={cn('rounded-lg border p-1', color.border, color.bg)}>
-              {wave.resources.map((resource) => (
+              {sameNs.map((resource) => (
                 <ResourceRow
                   key={`${resource.kind}/${resource.namespace}/${resource.name}`}
                   resource={resource}
+                  isCrossNamespace={false}
                   onResourceClick={onResourceClick}
                 />
+              ))}
+              {/* Cross-namespace resources grouped by namespace */}
+              {Array.from(crossNsByNs.entries()).map(([ns, resources]) => (
+                <div key={`cross-ns-${ns}`} className="mt-1">
+                  <div className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+                    {ns}
+                    <span className="text-amber-500/60 dark:text-amber-500/40 font-normal normal-case">
+                      (external namespace)
+                    </span>
+                  </div>
+                  {resources.map((resource) => (
+                    <ResourceRow
+                      key={`${resource.kind}/${resource.namespace}/${resource.name}`}
+                      resource={resource}
+                      isCrossNamespace={true}
+                      onResourceClick={onResourceClick}
+                    />
+                  ))}
+                </div>
               ))}
             </div>
           </motion.div>
