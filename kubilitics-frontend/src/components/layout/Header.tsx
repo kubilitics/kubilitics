@@ -394,7 +394,7 @@ export function Header() {
                             {orgEnvTags[activeCluster.id] ? ENV_LABELS[orgEnvTags[activeCluster.id]] : activeEnvLabel}
                           </span>
                         )}
-                        <ChevronDown className="h-5 w-5 text-slate-400 group-hover:text-slate-600 transition-colors shrink-0" />
+                        <ChevronDown className="h-5 w-5 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors shrink-0" />
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-[360px] rounded-[2.5rem] p-4 border-none shadow-2xl mt-2 animate-in fade-in zoom-in-95 duration-200 elevation-2 max-h-[70vh] overflow-hidden flex flex-col">
@@ -671,7 +671,7 @@ export function Header() {
                       )}
                       aria-label="User menu"
                     >
-                      <Avatar className="h-9 w-9 shrink-0 rounded-[0.9rem] border border-slate-100 shadow-sm">
+                      <Avatar className="h-9 w-9 shrink-0 rounded-[0.9rem] border border-slate-100 dark:border-slate-700 shadow-sm">
                         <AvatarImage src="" />
                         <AvatarFallback className="bg-primary/5 text-[10px] font-black text-primary uppercase">
                           AD

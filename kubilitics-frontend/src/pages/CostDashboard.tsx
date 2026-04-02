@@ -376,8 +376,8 @@ export default function CostDashboard() {
                 <ResponsiveContainer width="100%" height={220}>
                   <AreaChart data={data.trend}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10 }} className="text-slate-500" />
-                    <YAxis tick={{ fontSize: 10 }} className="text-slate-500" width={50} tickFormatter={(v) => formatCostCompact(v)} />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} className="text-slate-500 dark:text-slate-400" />
+                    <YAxis tick={{ fontSize: 10 }} className="text-slate-500 dark:text-slate-400" width={50} tickFormatter={(v) => formatCostCompact(v)} />
                     <Tooltip
                       contentStyle={{
                         backgroundColor: 'var(--color-card, #fff)',
@@ -516,13 +516,13 @@ export default function CostDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b bg-slate-50/60 dark:bg-slate-800/40">
-                    <th className="text-left p-3 font-bold uppercase tracking-widest text-slate-500">Namespace</th>
-                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500">CPU</th>
-                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500">Memory</th>
-                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500">Storage</th>
-                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500">Network</th>
-                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500">Total</th>
-                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500">Trend</th>
+                    <th className="text-left p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Namespace</th>
+                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">CPU</th>
+                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Memory</th>
+                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Storage</th>
+                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Network</th>
+                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Total</th>
+                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Trend</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -570,13 +570,13 @@ export default function CostDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b bg-slate-50/60 dark:bg-slate-800/40">
-                    <th className="text-left p-3 font-bold uppercase tracking-widest text-slate-500">Workload</th>
-                    <th className="text-left p-3 font-bold uppercase tracking-widest text-slate-500">Namespace</th>
-                    <th className="text-left p-3 font-bold uppercase tracking-widest text-slate-500">Kind</th>
-                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500">CPU</th>
-                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500">Memory</th>
-                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500">Total</th>
-                    <th className="text-center p-3 font-bold uppercase tracking-widest text-slate-500">Efficiency</th>
+                    <th className="text-left p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Workload</th>
+                    <th className="text-left p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Namespace</th>
+                    <th className="text-left p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Kind</th>
+                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">CPU</th>
+                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Memory</th>
+                    <th className="text-right p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Total</th>
+                    <th className="text-center p-3 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Efficiency</th>
                   </tr>
                 </thead>
                 <tbody>

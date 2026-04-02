@@ -322,7 +322,7 @@ export default function SLODashboard() {
       {stats && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-xl border p-3 flex items-center gap-3 bg-slate-50 dark:bg-slate-800/30">
-            <Target className="h-4 w-4 text-slate-600" />
+            <Target className="h-4 w-4 text-slate-600 dark:text-slate-300" />
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Total SLOs</p>
               <p className="text-lg font-bold text-slate-900 dark:text-slate-100 tabular-nums">{stats.total}</p>
@@ -396,11 +396,11 @@ export default function SLODashboard() {
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={budgetTrendData}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
-                <XAxis dataKey="time" tick={{ fontSize: 10 }} className="text-slate-500" />
+                <XAxis dataKey="time" tick={{ fontSize: 10 }} className="text-slate-500 dark:text-slate-400" />
                 <YAxis
                   tick={{ fontSize: 10 }}
                   domain={[0, 100]}
-                  className="text-slate-500"
+                  className="text-slate-500 dark:text-slate-400"
                   width={35}
                   unit="%"
                 />

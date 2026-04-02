@@ -260,7 +260,7 @@ export function UpdateChecker() {
                 onClick={handleUpdate}
                 className={cn(
                   'flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-sm font-semibold',
-                  'bg-slate-600 text-white hover:bg-slate-700',
+                  'bg-slate-600 dark:bg-slate-700 text-white hover:bg-slate-700 dark:hover:bg-slate-600',
                   'transition-colors',
                 )}
               >

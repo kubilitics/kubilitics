@@ -284,7 +284,7 @@ export function AuditLogExport({ className }: { className?: string }) {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
-                      <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-1">
+                      <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
                         From Date
                       </Label>
@@ -296,7 +296,7 @@ export function AuditLogExport({ className }: { className?: string }) {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-1">
+                      <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
                         To Date
                       </Label>
@@ -308,7 +308,7 @@ export function AuditLogExport({ className }: { className?: string }) {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-1">
+                      <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1">
                         <User className="h-3 w-3" />
                         User
                       </Label>
@@ -320,7 +320,7 @@ export function AuditLogExport({ className }: { className?: string }) {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-1">
+                      <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1">
                         <Box className="h-3 w-3" />
                         Resource Type
                       </Label>
@@ -343,7 +343,7 @@ export function AuditLogExport({ className }: { className?: string }) {
                       </Select>
                     </div>
                     <div className="space-y-1 sm:col-span-2">
-                      <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-1">
+                      <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1">
                         <Zap className="h-3 w-3" />
                         Action
                       </Label>

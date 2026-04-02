@@ -390,7 +390,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
                   {errors.map((error, i) => (
                     <div
                       key={i}
-                      className="px-2.5 py-2 rounded-lg bg-white border border-destructive/15 cursor-pointer hover:border-destructive/30 transition-colors"
+                      className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-destructive/15 cursor-pointer hover:border-destructive/30 transition-colors"
                     >
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <span className="text-[10px] font-mono font-bold text-destructive tabular-nums">

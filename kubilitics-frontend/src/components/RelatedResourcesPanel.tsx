@@ -246,7 +246,7 @@ export function RelatedResourcesPanel({
                     {resource.status}
                   </Badge>
                 )}
-                <ExternalLink className="h-3 w-3 text-gray-400 group-hover:text-blue-600" />
+                <ExternalLink className="h-3 w-3 text-gray-400 dark:text-gray-500 group-hover:text-blue-600 dark:group-hover:text-blue-400" />
               </div>
             </Link>
           ))}

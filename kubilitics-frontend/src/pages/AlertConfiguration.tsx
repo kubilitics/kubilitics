@@ -196,7 +196,7 @@ function WebhookTargetEditor({
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <TargetIcon className="h-4 w-4 text-slate-500" />
+          <TargetIcon className="h-4 w-4 text-slate-500 dark:text-slate-400" />
           <Select
             value={target.type}
             onValueChange={(v) => onChange({ ...target, type: v as WebhookTarget })}
@@ -229,7 +229,7 @@ function WebhookTargetEditor({
 
       <div className="space-y-2">
         <div>
-          <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+          <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">
             {target.type === 'slack' ? 'Webhook URL' : target.type === 'pagerduty' ? 'Events API URL' : target.type === 'opsgenie' ? 'API URL' : 'Endpoint URL'}
           </Label>
           <Input
@@ -250,7 +250,7 @@ function WebhookTargetEditor({
 
         {target.type === 'slack' && (
           <div>
-            <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Channel (optional)</Label>
+            <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Channel (optional)</Label>
             <Input
               value={target.channel ?? ''}
               onChange={(e) => onChange({ ...target, channel: e.target.value })}
@@ -262,7 +262,7 @@ function WebhookTargetEditor({
 
         {(target.type === 'pagerduty' || target.type === 'opsgenie') && (
           <div>
-            <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Routing Key / API Key</Label>
+            <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Routing Key / API Key</Label>
             <Input
               type="password"
               value={target.routingKey ?? ''}
@@ -681,7 +681,7 @@ export default function AlertConfiguration() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center gap-2">
-            <Clock className="h-4 w-4 text-slate-500" />
+            <Clock className="h-4 w-4 text-slate-500 dark:text-slate-400" />
             Alert History
             {historyData && (
               <Badge variant="secondary" className="text-[10px]">{historyTotal}</Badge>
@@ -694,11 +694,11 @@ export default function AlertConfiguration() {
         <CardContent className="p-0">
           {/* Column headers */}
           <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 items-center px-4 py-2 border-b bg-slate-50/60 dark:bg-slate-800/40">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Alert</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 min-w-[80px]">Resource</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 min-w-[80px]">Severity</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 min-w-[70px]">Status</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 min-w-[100px] text-right">Time</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Alert</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 min-w-[80px]">Resource</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 min-w-[80px]">Severity</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 min-w-[70px]">Status</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 min-w-[100px] text-right">Time</span>
           </div>
 
           {historyLoading ? (
@@ -722,7 +722,7 @@ export default function AlertConfiguration() {
                     <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{entry.ruleName}</p>
                     <p className="text-[10px] text-muted-foreground line-clamp-1">{entry.message}</p>
                   </div>
-                  <div className="text-xs text-slate-500 min-w-[80px] truncate font-mono">
+                  <div className="text-xs text-slate-500 dark:text-slate-400 min-w-[80px] truncate font-mono">
                     {entry.resource}
                   </div>
                   <div className="min-w-[80px]">

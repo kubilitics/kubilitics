@@ -342,12 +342,12 @@ export function HistoricalMetrics({
                     dataKey="time"
                     tick={{ fontSize: 10 }}
                     interval="preserveStartEnd"
-                    className="text-slate-500"
+                    className="text-slate-500 dark:text-slate-400"
                   />
                   <YAxis
                     tick={{ fontSize: 10 }}
                     domain={[0, 100]}
-                    className="text-slate-500"
+                    className="text-slate-500 dark:text-slate-400"
                     width={35}
                     unit="%"
                   />
