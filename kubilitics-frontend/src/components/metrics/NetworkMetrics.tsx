@@ -313,12 +313,12 @@ export function NetworkMetrics({ className }: { className?: string }) {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b bg-slate-50/60 dark:bg-slate-800/40">
-                    <th className="text-left p-2 font-bold uppercase tracking-widest text-slate-500">Source</th>
-                    <th className="text-left p-2 font-bold uppercase tracking-widest text-slate-500">Destination</th>
-                    <th className="text-left p-2 font-bold uppercase tracking-widest text-slate-500">Protocol</th>
-                    <th className="text-right p-2 font-bold uppercase tracking-widest text-slate-500">In</th>
-                    <th className="text-right p-2 font-bold uppercase tracking-widest text-slate-500">Out</th>
-                    <th className="text-center p-2 font-bold uppercase tracking-widest text-slate-500">Verdict</th>
+                    <th className="text-left p-2 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Source</th>
+                    <th className="text-left p-2 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Destination</th>
+                    <th className="text-left p-2 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Protocol</th>
+                    <th className="text-right p-2 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">In</th>
+                    <th className="text-right p-2 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Out</th>
+                    <th className="text-center p-2 font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Verdict</th>
                   </tr>
                 </thead>
                 <tbody>

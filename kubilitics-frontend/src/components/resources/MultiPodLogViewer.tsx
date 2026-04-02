@@ -188,7 +188,7 @@ function HighlightedText({ text, regex }: { text: string; regex: RegExp | null }
     <>
       {parts.map((p, i) =>
         p.match ? (
-          <mark key={i} className="bg-amber-400/30 text-amber-200 rounded-sm not-italic">
+          <mark key={i} className="bg-amber-400/30 text-amber-700 dark:text-amber-200 rounded-sm not-italic">
             {p.text}
           </mark>
         ) : (
@@ -204,20 +204,20 @@ function HighlightedText({ text, regex }: { text: string; regex: RegExp | null }
 function JsonTree({ data, depth = 0 }: { data: unknown; depth?: number }) {
   const [collapsed, setCollapsed] = useState(depth > 1);
 
-  if (data === null) return <span className="text-slate-400">null</span>;
-  if (typeof data === 'boolean') return <span className="text-purple-400">{String(data)}</span>;
-  if (typeof data === 'number') return <span className="text-amber-300">{String(data)}</span>;
-  if (typeof data === 'string') return <span className="text-emerald-300">&quot;{data}&quot;</span>;
+  if (data === null) return <span className="text-slate-500 dark:text-slate-400">null</span>;
+  if (typeof data === 'boolean') return <span className="text-purple-600 dark:text-purple-400">{String(data)}</span>;
+  if (typeof data === 'number') return <span className="text-amber-600 dark:text-amber-300">{String(data)}</span>;
+  if (typeof data === 'string') return <span className="text-emerald-600 dark:text-emerald-300">&quot;{data}&quot;</span>;
 
   if (Array.isArray(data)) {
-    if (data.length === 0) return <span className="text-white/50">[]</span>;
+    if (data.length === 0) return <span className="text-black/50 dark:text-white/50">[]</span>;
     return (
       <span>
-        <button onClick={() => setCollapsed(v => !v)} className="text-white/40 hover:text-white/70">
+        <button onClick={() => setCollapsed(v => !v)} className="text-black/40 dark:text-white/40 hover:text-black/70 dark:hover:text-white/70">
           {collapsed ? <ChevronRight className="inline h-3 w-3" /> : <ChevronDown className="inline h-3 w-3" />}
         </button>
         {collapsed ? (
-          <span className="text-white/50">[{data.length}]</span>
+          <span className="text-black/50 dark:text-white/50">[{data.length}]</span>
         ) : (
           <span>
             {'['}
@@ -225,7 +225,7 @@ function JsonTree({ data, depth = 0 }: { data: unknown; depth?: number }) {
               {data.map((item, i) => (
                 <div key={i}>
                   <JsonTree data={item} depth={depth + 1} />
-                  {i < data.length - 1 && <span className="text-white/30">,</span>}
+                  {i < data.length - 1 && <span className="text-black/30 dark:text-white/30">,</span>}
                 </div>
               ))}
             </div>
@@ -238,24 +238,24 @@ function JsonTree({ data, depth = 0 }: { data: unknown; depth?: number }) {
 
   if (typeof data === 'object') {
     const entries = Object.entries(data as Record<string, unknown>);
-    if (entries.length === 0) return <span className="text-white/50">{'{}'}</span>;
+    if (entries.length === 0) return <span className="text-black/50 dark:text-white/50">{'{}'}</span>;
     return (
       <span>
-        <button onClick={() => setCollapsed(v => !v)} className="text-white/40 hover:text-white/70">
+        <button onClick={() => setCollapsed(v => !v)} className="text-black/40 dark:text-white/40 hover:text-black/70 dark:hover:text-white/70">
           {collapsed ? <ChevronRight className="inline h-3 w-3" /> : <ChevronDown className="inline h-3 w-3" />}
         </button>
         {collapsed ? (
-          <span className="text-white/50">{'{'}{entries.length} keys{'}'}</span>
+          <span className="text-black/50 dark:text-white/50">{'{'}{entries.length} keys{'}'}</span>
         ) : (
           <span>
             {'{'}
             <div style={{ marginLeft: 16 }}>
               {entries.map(([k, v], i) => (
                 <div key={k}>
-                  <span className="text-blue-300">&quot;{k}&quot;</span>
-                  <span className="text-white/50">: </span>
+                  <span className="text-blue-600 dark:text-blue-300">&quot;{k}&quot;</span>
+                  <span className="text-black/50 dark:text-white/50">: </span>
                   <JsonTree data={v} depth={depth + 1} />
-                  {i < entries.length - 1 && <span className="text-white/30">,</span>}
+                  {i < entries.length - 1 && <span className="text-black/30 dark:text-white/30">,</span>}
                 </div>
               ))}
             </div>
@@ -266,7 +266,7 @@ function JsonTree({ data, depth = 0 }: { data: unknown; depth?: number }) {
     );
   }
 
-  return <span className="text-white/70">{String(data)}</span>;
+  return <span className="text-black/70 dark:text-white/70">{String(data)}</span>;
 }
 
 // ─── MultiLogRow ───────────────────────────────────────────────────────────────
