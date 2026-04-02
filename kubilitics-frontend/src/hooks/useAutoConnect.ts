@@ -23,6 +23,7 @@ import {
   addCluster,
   type BackendCluster,
 } from '@/services/backendApiClient';
+import { isBackendEverReady } from '@/services/api/client';
 import { backendClusterToCluster } from '@/lib/backendClusterAdapter';
 import { toast } from '@/components/ui/sonner';
 
@@ -218,30 +219,26 @@ export function useAutoConnect(): UseAutoConnectReturn {
       try {
         const baseUrl = getEffectiveBackendBaseUrl(storedBackendUrl);
 
-        // ── Discover clusters — fast, no health-check gate ──
-        // Like Headlamp: just try to fetch contexts. If backend isn't
-        // ready yet (sidecar cold start), retry every 500ms. The discover
-        // endpoint is pure YAML parsing (<50ms), so once the backend is up
-        // it responds instantly.
-        let allBackend: BackendCluster[] = [];
-        for (let attempt = 0; attempt < 20; attempt++) {
+        // ── Wait for backend ready, then fetch contexts ──
+        // The Tauri sidecar emits "backend-status: ready" which sets
+        // isBackendEverReady(). Wait for that signal instead of polling
+        // APIs blindly. Once ready, one API call gets all contexts.
+        for (let i = 0; i < 30; i++) {
           if (controller.signal.aborted) return;
-          try {
-            const [registeredRaw, discoveredRaw] = await Promise.all([
-              getClusters(baseUrl),
-              discoverClusters(baseUrl),
-            ]);
-            const registered = Array.isArray(registeredRaw) ? registeredRaw : [] as BackendCluster[];
-            const discovered = Array.isArray(discoveredRaw) ? discoveredRaw : [] as BackendCluster[];
-            const registeredContexts = new Set(registered.map((c) => c.context));
-            const unregistered = discovered.filter((d) => !registeredContexts.has(d.context));
-            allBackend = [...registered, ...unregistered];
-            if (allBackend.length > 0) break;
-          } catch {
-            // Backend not ready — retry
-          }
+          if (isBackendEverReady()) break;
           await new Promise((r) => setTimeout(r, 500));
         }
+
+        // Fetch registered + discovered in one parallel call
+        const [registeredRaw, discoveredRaw] = await Promise.all([
+          getClusters(baseUrl).catch(() => null),
+          discoverClusters(baseUrl).catch(() => null),
+        ]);
+        const registered = Array.isArray(registeredRaw) ? registeredRaw : [] as BackendCluster[];
+        const discovered = Array.isArray(discoveredRaw) ? discoveredRaw : [] as BackendCluster[];
+        const registeredContexts = new Set(registered.map((c) => c.context));
+        const unregistered = discovered.filter((d) => !registeredContexts.has(d.context));
+        const allBackend = [...registered, ...unregistered];
 
         if (controller.signal.aborted) return;
 
