@@ -78,7 +78,7 @@ function backendToDiscovered(b: BackendCluster): DiscoveredContext {
  * Auto-connect timeout (ms). If the entire flow takes longer than this,
  * we abort and show the manual connect UI. Target: Home in <10s.
  */
-const AUTO_CONNECT_TIMEOUT_MS = 8_000;
+const AUTO_CONNECT_TIMEOUT_MS = 15_000;
 
 export function useAutoConnect(): UseAutoConnectReturn {
   const navigate = useNavigate();
@@ -215,12 +215,13 @@ export function useAutoConnect(): UseAutoConnectReturn {
     }, AUTO_CONNECT_TIMEOUT_MS);
 
     (async () => {
+      let retryCount = 0;
       try {
         const baseUrl = getEffectiveBackendBaseUrl(storedBackendUrl);
 
         // Wait for backend to be ready (Tauri sidecar cold start).
         // Retry health check up to 6 times with 1s delay (covers ~6s cold start).
-        for (let attempt = 0; attempt < 6; attempt++) {
+        for (let attempt = 0; attempt < 10; attempt++) {
           try {
             const resp = await fetch(`${baseUrl || ''}/api/v1/health`, { signal: controller.signal });
             if (resp.ok) break;
@@ -248,7 +249,33 @@ export function useAutoConnect(): UseAutoConnectReturn {
         const allBackend = [...registered, ...unregistered];
 
         if (allBackend.length === 0) {
-          // No contexts found at all
+          // No contexts found — backend may still be starting (cold start
+          // after update). Retry up to 3 times with 2s delay before giving up.
+          if (!controller.signal.aborted && (retryCount ?? 0) < 3) {
+            retryCount = (retryCount ?? 0) + 1;
+            await new Promise((r) => setTimeout(r, 2000));
+            // Re-fetch
+            const [r2, d2] = await Promise.all([
+              getClusters(baseUrl).catch(() => null),
+              discoverClusters(baseUrl).catch(() => null),
+            ]);
+            const reg2 = Array.isArray(r2) ? r2 : [] as BackendCluster[];
+            const disc2 = Array.isArray(d2) ? d2 : [] as BackendCluster[];
+            const regCtx2 = new Set(reg2.map((c) => c.context));
+            const unreg2 = disc2.filter((d) => !regCtx2.has(d.context));
+            const all2 = [...reg2, ...unreg2];
+            if (all2.length > 0) {
+              const allContexts = all2.map(backendToDiscovered);
+              setContexts(allContexts);
+              const current = allContexts.find((c) => c.isCurrent);
+              setSelectedContext(current?.context ?? allContexts[0]?.context ?? null);
+              clearTimeout(timeoutId);
+              setIsAutoConnecting(false);
+              setIsResolved(true);
+              return;
+            }
+          }
+          // Truly no contexts after retries
           setIsAutoConnecting(false);
           setIsResolved(true);
           return;
