@@ -319,10 +319,10 @@ export default function ScanDashboard() {
                           </Pie>
                           <RechartsTooltip
                             contentStyle={{
-                              background: '#1e293b',
-                              border: '1px solid #334155',
+                              backgroundColor: 'var(--color-card, #fff)',
+                              borderColor: 'var(--color-border, #e2e8f0)',
                               borderRadius: '8px',
-                              color: '#e2e8f0',
+                              color: 'var(--color-card-foreground, #0f172a)',
                             }}
                           />
                         </PieChart>
@@ -359,10 +359,11 @@ export default function ScanDashboard() {
                     {trendData.length > 0 ? (
                       <ResponsiveContainer width="100%" height={250}>
                         <AreaChart data={trendData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                          <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
                           <XAxis
                             dataKey="date"
-                            tick={{ fontSize: 11, fill: '#94a3b8' }}
+                            className="text-slate-500 dark:text-slate-400"
+                            tick={{ fontSize: 11 }}
                             tickFormatter={(v) =>
                               new Date(v).toLocaleDateString(undefined, {
                                 month: 'short',
@@ -370,13 +371,13 @@ export default function ScanDashboard() {
                               })
                             }
                           />
-                          <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                          <YAxis className="text-slate-500 dark:text-slate-400" tick={{ fontSize: 11 }} />
                           <RechartsTooltip
                             contentStyle={{
-                              background: '#1e293b',
-                              border: '1px solid #334155',
+                              backgroundColor: 'var(--color-card, #fff)',
+                              borderColor: 'var(--color-border, #e2e8f0)',
                               borderRadius: '8px',
-                              color: '#e2e8f0',
+                              color: 'var(--color-card-foreground, #0f172a)',
                             }}
                           />
                           <Area

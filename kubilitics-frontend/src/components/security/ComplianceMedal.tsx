@@ -15,7 +15,7 @@ export function ComplianceMedal({ grade, score, className }: ComplianceMedalProp
             case 'A': return 'from-blue-600 to-blue-400 text-white shadow-blue-600/20';
             case 'B': return 'from-blue-500 to-blue-300 text-white shadow-blue-500/20';
             case 'C': return 'from-blue-600 to-blue-400 text-white shadow-blue-600/20';
-            default: return 'from-slate-400 to-slate-200 text-slate-700 shadow-slate-400/20';
+            default: return 'from-slate-400 to-slate-200 text-slate-700 dark:text-slate-200 shadow-slate-400/20';
         }
     };
 

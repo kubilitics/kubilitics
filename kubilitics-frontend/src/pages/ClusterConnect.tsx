@@ -1276,7 +1276,7 @@ kubectl get svc -n kubilitics`,
               {/* Advanced Options */}
               <Card className="p-6 bg-card border-border">
                 <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <Settings className="h-5 w-5 text-slate-500" />
+                  <Settings className="h-5 w-5 text-slate-500 dark:text-slate-400" />
                   Advanced Installation Options
                 </h3>
 

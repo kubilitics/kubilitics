@@ -11,7 +11,7 @@ interface PulseItemProps {
 
 const PulseItem = ({ icon: Icon, label, value, colorClass, delay }: PulseItemProps) => (
     <div className={`flex items-center gap-3 px-6 border-r border-white/5 last:border-0 animate-fade-in`} style={{ animationDelay: `${delay}ms` }}>
-        <div className={`p-2 rounded-lg bg-white/5 ${colorClass}`}>
+        <div className={`p-2 rounded-lg bg-slate-100 dark:bg-white/5 ${colorClass}`}>
             <Icon className="w-4 h-4" />
         </div>
         <div>

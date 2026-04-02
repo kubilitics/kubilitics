@@ -362,11 +362,11 @@ export function PlatformMetrics({ className }: { className?: string }) {
                   <XAxis
                     dataKey="time"
                     tick={{ fontSize: 10 }}
-                    className="text-slate-500"
+                    className="text-slate-500 dark:text-slate-400"
                   />
                   <YAxis
                     tick={{ fontSize: 10 }}
-                    className="text-slate-500"
+                    className="text-slate-500 dark:text-slate-400"
                     width={40}
                   />
                   <Tooltip
@@ -412,11 +412,11 @@ export function PlatformMetrics({ className }: { className?: string }) {
                   <XAxis
                     dataKey="status"
                     tick={{ fontSize: 10 }}
-                    className="text-slate-500"
+                    className="text-slate-500 dark:text-slate-400"
                   />
                   <YAxis
                     tick={{ fontSize: 10 }}
-                    className="text-slate-500"
+                    className="text-slate-500 dark:text-slate-400"
                     width={40}
                   />
                   <Tooltip

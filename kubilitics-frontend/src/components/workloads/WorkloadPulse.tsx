@@ -107,7 +107,7 @@ export function WorkloadPulse({ data }: WorkloadPulseProps) {
 
                 <div className="flex items-center gap-1.5 mt-2 z-10">
                     <div className={`h-1.5 w-1.5 rounded-full ${score > 90 ? 'bg-emerald-500' : 'bg-amber-500'} animate-pulse`} />
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Sync Active</span>
+                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-tight">Sync Active</span>
                 </div>
             </div>
 

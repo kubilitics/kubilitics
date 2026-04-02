@@ -97,7 +97,7 @@ export function TopologyWelcomeTips() {
 
         {/* Footer */}
         <div className="border-t border-gray-100 dark:border-gray-700 px-6 py-4 flex items-center justify-between bg-gray-50/50 dark:bg-slate-800/50">
-          <span className="text-[11px] text-gray-400 dark:text-gray-500">Press ? anytime for keyboard shortcuts</span>
+          <span className="text-[11px] text-gray-500 dark:text-gray-400">Press ? anytime for keyboard shortcuts</span>
           <button
             type="button"
             className={`rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:from-blue-700 hover:to-indigo-700 shadow-sm ${A11Y.focusRing} ${A11Y.transition}`}

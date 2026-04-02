@@ -56,32 +56,32 @@ export function CreateProjectDialog({ children }: { children: React.ReactNode })
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>{children}</DialogTrigger>
-            <DialogContent className="sm:max-w-[425px] rounded-[2rem] border-slate-100">
+            <DialogContent className="sm:max-w-[425px] rounded-[2rem] border-slate-100 dark:border-slate-800">
                 <form onSubmit={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle className="text-xl font-bold">Create New Project</DialogTitle>
-                        <DialogDescription className="text-slate-500">
+                        <DialogDescription className="text-slate-500 dark:text-slate-400">
                             Group clusters and namespaces for logicized governance.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-6 py-8">
                         <div className="space-y-2">
-                            <Label htmlFor="name" className="text-sm font-semibold text-slate-700">Project Name</Label>
+                            <Label htmlFor="name" className="text-sm font-semibold text-slate-700 dark:text-slate-200">Project Name</Label>
                             <Input
                                 id="name"
                                 placeholder="e.g. Production Infrastructure"
-                                className="rounded-xl border-slate-200 h-11 focus:ring-blue-500"
+                                className="rounded-xl border-slate-200 dark:border-slate-700 h-11 focus:ring-blue-500"
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 required
                             />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="description" className="text-sm font-semibold text-slate-700">Description (Optional)</Label>
+                            <Label htmlFor="description" className="text-sm font-semibold text-slate-700 dark:text-slate-200">Description (Optional)</Label>
                             <Textarea
                                 id="description"
                                 placeholder="Briefly describe the business unit or environment..."
-                                className="rounded-xl border-slate-200 min-h-[100px] py-3 focus:ring-blue-500"
+                                className="rounded-xl border-slate-200 dark:border-slate-700 min-h-[100px] py-3 focus:ring-blue-500"
                                 value={description}
                                 onChange={(e) => setDescription(e.target.value)}
                             />
@@ -91,14 +91,14 @@ export function CreateProjectDialog({ children }: { children: React.ReactNode })
                         <Button
                             type="button"
                             variant="outline"
-                            className="rounded-xl h-11 px-6 border-slate-200"
+                            className="rounded-xl h-11 px-6 border-slate-200 dark:border-slate-700"
                             onClick={() => setOpen(false)}
                         >
                             Cancel
                         </Button>
                         <Button
                             type="submit"
-                            className="rounded-xl h-11 px-6 bg-slate-900 text-white hover:bg-slate-800"
+                            className="rounded-xl h-11 px-6 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-200"
                             disabled={createMutation.isPending || !name.trim()}
                         >
                             {createMutation.isPending && (

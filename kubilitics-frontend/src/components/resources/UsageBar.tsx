@@ -464,7 +464,7 @@ export function UsageBar({
                   />
                   {isHighUsage && pulseOnHigh && (
                     <motion.div
-                      className="absolute inset-0 bg-white/20"
+                      className="absolute inset-0 bg-black/10 dark:bg-white/20"
                       animate={{ opacity: [0, 0.4, 0] }}
                       transition={{ duration: 1.5, repeat: Infinity }}
                     />

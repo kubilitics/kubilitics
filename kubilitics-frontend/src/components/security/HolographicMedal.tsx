@@ -123,7 +123,7 @@ export const HolographicMedal: React.FC<HolographicMedalProps> = ({
                 <div className={cn("rounded-full bg-white/5 border border-white/10 backdrop-blur-md shadow-inner", s.scorePill)}>
                     <div className="flex items-center gap-1">
                         <Trophy className={cn("text-amber-400", s.trophySize)} />
-                        <span className={cn("font-black tracking-widest text-slate-100 uppercase italic leading-none", s.scoreText)}>
+                        <span className={cn("font-black tracking-widest text-slate-100 dark:text-slate-200 uppercase italic leading-none", s.scoreText)}>
                             {score}
                         </span>
                     </div>
@@ -132,7 +132,7 @@ export const HolographicMedal: React.FC<HolographicMedalProps> = ({
                 {/* Bottom Status Label */}
                 {size !== 'sm' && (
                     <div className={cn("absolute left-0 right-0 text-center", s.statusLabel)}>
-                        <span className="font-black uppercase tracking-[0.2em] text-slate-500/80">
+                        <span className="font-black uppercase tracking-[0.2em] text-slate-500/80 dark:text-slate-400/80">
                             Status
                         </span>
                     </div>
