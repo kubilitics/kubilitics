@@ -103,40 +103,72 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
 
     // Inject blast radius affected resources not already in the topology graph.
     // This ensures cross-namespace resources (found by the graph engine) are visible.
+    // Cross-namespace resources get namespace group containers and visual markers.
     if (blastData?.waves) {
       const existingIds = new Set(response.nodes.map((n) => n.id));
+      const crossNsGroupIds = new Set<string>();
+
       for (const wave of blastData.waves) {
         for (const res of wave.resources) {
           const nodeId = `${res.kind}/${res.namespace}/${res.name}`;
-          if (existingIds.has(nodeId)) continue;
-          existingIds.add(nodeId);
-          // Add as a minimal topology node
-          response.nodes.push({
-            id: nodeId,
-            kind: res.kind,
-            name: res.name,
-            namespace: res.namespace,
-            status: 'Active',
-            label: res.name,
-            category: res.kind === 'NetworkPolicy' ? 'policy' : res.kind === 'Ingress' ? 'networking' : 'workload',
-            layer: 2,
-            metadata: { labels: {}, annotations: {}, createdAt: '' },
-            computed: { health: 'healthy' },
-          } as TopologyResponse['nodes'][number]);
+          const isCrossNamespace = !!namespace && res.namespace !== namespace;
 
-          // Add edge from focus resource to this blast-affected resource
-          if (focusId) {
-            response.edges.push({
-              id: `blast:${focusId}→${nodeId}`,
-              source: focusId,
-              target: nodeId,
-              relationshipType: 'blast_impact',
-              relationshipCategory: 'policy',
-              label: `wave ${wave.depth} impact`,
-              detail: res.impact,
-              style: 'dashed',
-              healthy: true,
-            } as TopologyResponse['edges'][number]);
+          if (!existingIds.has(nodeId)) {
+            existingIds.add(nodeId);
+            // Add as a minimal topology node
+            response.nodes.push({
+              id: nodeId,
+              kind: res.kind,
+              name: res.name,
+              namespace: res.namespace,
+              status: 'Active',
+              label: res.name,
+              category: res.kind === 'NetworkPolicy' ? 'policy' : res.kind === 'Ingress' ? 'networking' : 'workload',
+              layer: 2,
+              metadata: { labels: {}, annotations: {}, createdAt: '' },
+              computed: { health: 'healthy' },
+            } as TopologyResponse['nodes'][number]);
+
+            // Add edge from focus resource to this blast-affected resource
+            if (focusId) {
+              response.edges.push({
+                id: `blast:${focusId}→${nodeId}`,
+                source: focusId,
+                target: nodeId,
+                relationshipType: isCrossNamespace ? 'blast_cross_ns' : 'blast_impact',
+                relationshipCategory: 'policy',
+                label: isCrossNamespace
+                  ? `wave ${wave.depth} → ${res.namespace}`
+                  : `wave ${wave.depth} impact`,
+                detail: res.impact,
+                style: 'dashed',
+                healthy: true,
+              } as TopologyResponse['edges'][number]);
+            }
+          }
+
+          // Track cross-namespace groups and assign nodes to them
+          if (isCrossNamespace) {
+            const groupId = `ns-group-${res.namespace}`;
+            if (!crossNsGroupIds.has(groupId)) {
+              crossNsGroupIds.add(groupId);
+              response.groups.push({
+                id: groupId,
+                label: res.namespace,
+                type: 'namespace',
+                members: [],
+                collapsed: false,
+                style: {
+                  backgroundColor: '#fef3c7',  // amber-100
+                  borderColor: '#f59e0b',       // amber-500
+                },
+              });
+            }
+            // Add this resource as a member of its namespace group
+            const group = response.groups.find((g) => g.id === groupId);
+            if (group && !group.members.includes(nodeId)) {
+              group.members.push(nodeId);
+            }
           }
         }
       }
@@ -396,6 +428,7 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
           selectedNodeId={selectedNodeId}
           highlightNodeIds={highlightNodeIds}
           viewMode="resource"
+          namespace={namespace}
           onSelectNode={setSelectedNodeId}
           fitViewRef={fitViewRef}
           exportRef={exportRef}
@@ -419,6 +452,7 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
           >
             <WaveBreakdown
               waves={blastData.waves ?? []}
+              targetNamespace={namespace}
               onResourceClick={handleResourceClick}
             />
           </div>
