@@ -34,6 +34,11 @@ type ClusterGraphEngine struct {
 
 	factory informers.SharedInformerFactory
 	cancel  context.CancelFunc
+
+	// onRebuild is called after every successful graph rebuild with the clusterID.
+	// Bug 2 fix: this allows active cache invalidation when K8s resources change,
+	// rather than relying solely on TTL expiration.
+	onRebuild func(clusterID string)
 }
 
 // NewClusterGraphEngine creates a new engine for the given cluster.
@@ -113,6 +118,12 @@ func (e *ClusterGraphEngine) Start(ctx context.Context) {
 	}()
 }
 
+// SetOnRebuild registers a callback that fires after every successful graph rebuild.
+// Use this to actively invalidate caches when K8s resources change (Bug 2 fix).
+func (e *ClusterGraphEngine) SetOnRebuild(fn func(clusterID string)) {
+	e.onRebuild = fn
+}
+
 // Stop cancels the context and stops the debounce timer.
 func (e *ClusterGraphEngine) Stop() {
 	if e.cancel != nil {
@@ -161,6 +172,11 @@ func (e *ClusterGraphEngine) rebuild() {
 		"duration", time.Since(start),
 		"rebuild_count", e.rebuildCount.Load(),
 	)
+
+	// Bug 2 fix: actively invalidate caches when resources change.
+	if e.onRebuild != nil {
+		e.onRebuild(e.clusterID)
+	}
 }
 
 // collectResources reads all resources from informer Lister caches.
