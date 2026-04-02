@@ -571,8 +571,8 @@ export default function ClusterConnect() {
     );
   }
 
-  // Multiple contexts detected in desktop mode: show the ContextPicker
-  if (autoConnect.isDesktopMode && autoConnect.isResolved && autoConnect.contexts.length > 1) {
+  // Desktop mode with detected contexts: show the ContextPicker (1 or more)
+  if (autoConnect.isDesktopMode && autoConnect.isResolved && autoConnect.contexts.length >= 1) {
     return (
       <ContextPicker
         contexts={autoConnect.contexts}
@@ -583,6 +583,34 @@ export default function ClusterConnect() {
         isConnecting={autoConnect.isAutoConnecting}
         error={autoConnect.error}
       />
+    );
+  }
+
+  // Desktop mode: 0 contexts resolved — backend may still be starting.
+  // Show a gentle loading state with retry instead of the browser ClusterConnect page.
+  if (autoConnect.isDesktopMode && autoConnect.isResolved && autoConnect.contexts.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-slate-50 via-white to-blue-50/30 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 gap-6">
+        <BrandLogo height={72} className="drop-shadow-lg" />
+        <div className="text-center">
+          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
+            No kubeconfig contexts found
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md">
+            Make sure you have a valid kubeconfig at <code className="bg-muted px-1.5 py-0.5 rounded text-xs">~/.kube/config</code> or try again.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button onClick={() => window.location.reload()} variant="default" size="sm" className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Retry
+          </Button>
+          <Button onClick={() => navigate('/connect?addCluster=true')} variant="outline" size="sm" className="gap-2">
+            <Upload className="h-4 w-4" />
+            Upload Kubeconfig
+          </Button>
+        </div>
+      </div>
     );
   }
 
