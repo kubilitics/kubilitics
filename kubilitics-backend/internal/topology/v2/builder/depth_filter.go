@@ -103,6 +103,11 @@ func FilterByDepth(nodes []v2.TopologyNode, edges []v2.TopologyEdge, depth int) 
 // ExpandNode adds all direct neighbors of the given nodeID to the visible set.
 // It takes the full graph (allNodes, allEdges), the currently visible nodes,
 // and the ID to expand. Returns the new combined node and edge sets.
+//
+// Bug 3 fix: after adding direct neighbors, also walk ownerRef edges upward
+// to include any intermediate parent nodes needed to connect new nodes to the
+// existing visible set. Without this, expanding at depth=0 creates orphaned
+// nodes (e.g., a ReplicaSet appears without its parent Deployment being visible).
 func ExpandNode(allNodes []v2.TopologyNode, allEdges []v2.TopologyEdge, visibleNodes []v2.TopologyNode, expandNodeID string) ([]v2.TopologyNode, []v2.TopologyEdge) {
 	// Build index of all nodes by ID
 	allNodeMap := make(map[string]v2.TopologyNode, len(allNodes))
@@ -116,13 +121,18 @@ func ExpandNode(allNodes []v2.TopologyNode, allEdges []v2.TopologyEdge, visibleN
 		visibleIDs[n.ID] = true
 	}
 
+	// Build owner map for parent chain resolution (Bug 3 fix)
+	ownerOf := buildOwnerMap(allEdges)
+
 	// Find all direct neighbors of expandNodeID in the full graph
+	newNeighbors := make([]string, 0)
 	for _, e := range allEdges {
 		if e.Source == expandNodeID {
 			if !visibleIDs[e.Target] {
 				if n, ok := allNodeMap[e.Target]; ok {
 					visibleNodes = append(visibleNodes, n)
 					visibleIDs[e.Target] = true
+					newNeighbors = append(newNeighbors, e.Target)
 				}
 			}
 		}
@@ -131,8 +141,30 @@ func ExpandNode(allNodes []v2.TopologyNode, allEdges []v2.TopologyEdge, visibleN
 				if n, ok := allNodeMap[e.Source]; ok {
 					visibleNodes = append(visibleNodes, n)
 					visibleIDs[e.Source] = true
+					newNeighbors = append(newNeighbors, e.Source)
 				}
 			}
+		}
+	}
+
+	// Bug 3 fix: resolve parent chain for each new neighbor.
+	// Walk ownerRef edges upward and include any intermediate nodes needed
+	// to prevent orphaned nodes in the visible graph.
+	for _, neighborID := range newNeighbors {
+		current := neighborID
+		for {
+			owner, hasOwner := ownerOf[current]
+			if !hasOwner || owner == "" {
+				break
+			}
+			if visibleIDs[owner] {
+				break // reached an already-visible ancestor — chain is connected
+			}
+			if n, ok := allNodeMap[owner]; ok {
+				visibleNodes = append(visibleNodes, n)
+				visibleIDs[owner] = true
+			}
+			current = owner
 		}
 	}
 

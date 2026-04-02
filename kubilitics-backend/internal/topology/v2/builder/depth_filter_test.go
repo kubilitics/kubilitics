@@ -258,6 +258,111 @@ func TestExpandNode_NoDuplicates(t *testing.T) {
 	}
 }
 
+// TestExpandNode_NoOrphanedNodes verifies Bug 3 fix: when expanding a node at
+// depth 0, newly revealed neighbors must have their parent chain resolved so
+// they connect to the visible graph. Without this fix, a Pod could appear
+// without its parent ReplicaSet or Deployment being visible.
+func TestExpandNode_NoOrphanedNodes(t *testing.T) {
+	// Graph: Deployment -> ReplicaSet -> Pod -> ConfigMap
+	// Plus an HPA -> Deployment edge
+	nodes := []v2.TopologyNode{
+		{ID: "Deployment/default/app", Kind: "Deployment", Name: "app", Namespace: "default"},
+		{ID: "ReplicaSet/default/app-rs", Kind: "ReplicaSet", Name: "app-rs", Namespace: "default"},
+		{ID: "Pod/default/app-pod", Kind: "Pod", Name: "app-pod", Namespace: "default"},
+		{ID: "ConfigMap/default/app-cm", Kind: "ConfigMap", Name: "app-cm", Namespace: "default"},
+		{ID: "Service/default/app-svc", Kind: "Service", Name: "app-svc", Namespace: "default"},
+	}
+	edges := []v2.TopologyEdge{
+		{ID: "e1", Source: "Deployment/default/app", Target: "ReplicaSet/default/app-rs", RelationshipType: "ownerRef"},
+		{ID: "e2", Source: "ReplicaSet/default/app-rs", Target: "Pod/default/app-pod", RelationshipType: "ownerRef"},
+		{ID: "e3", Source: "Pod/default/app-pod", Target: "ConfigMap/default/app-cm", RelationshipType: "volume_mount"},
+		{ID: "e4", Source: "Service/default/app-svc", Target: "Pod/default/app-pod", RelationshipType: "selector"},
+	}
+
+	// Start at depth 0: only Deployment and Service are visible
+	depth0Nodes, _, _ := FilterByDepth(nodes, edges, 0)
+	depth0IDs := make(map[string]bool)
+	for _, n := range depth0Nodes {
+		depth0IDs[n.ID] = true
+	}
+	if !depth0IDs["Deployment/default/app"] || !depth0IDs["Service/default/app-svc"] {
+		t.Fatal("depth=0 should show Deployment and Service")
+	}
+
+	// Expand the ReplicaSet (which itself is NOT visible at depth 0).
+	// We simulate expanding from the Deployment which reveals the ReplicaSet,
+	// then expanding the ReplicaSet to reveal Pod.
+	expanded1, _ := ExpandNode(nodes, edges, depth0Nodes, "Deployment/default/app")
+	expanded2, expandedEdges := ExpandNode(nodes, edges, expanded1, "ReplicaSet/default/app-rs")
+
+	expandedIDs := make(map[string]bool)
+	for _, n := range expanded2 {
+		expandedIDs[n.ID] = true
+	}
+
+	// Pod should now be visible
+	if !expandedIDs["Pod/default/app-pod"] {
+		t.Error("Pod should appear after expanding ReplicaSet")
+	}
+
+	// Bug 3 regression: the Pod's parent (ReplicaSet) must also be visible.
+	// Before the fix, if we expanded from a node at depth 0 and got a Pod,
+	// the ReplicaSet might be missing, creating an orphan.
+	if !expandedIDs["ReplicaSet/default/app-rs"] {
+		t.Error("BUG: ReplicaSet should be visible to connect Pod to the graph")
+	}
+
+	// Verify no orphaned edges (all edges should connect visible nodes)
+	for _, e := range expandedEdges {
+		if !expandedIDs[e.Source] {
+			t.Errorf("orphaned edge source: %s in edge %s", e.Source, e.ID)
+		}
+		if !expandedIDs[e.Target] {
+			t.Errorf("orphaned edge target: %s in edge %s", e.Target, e.ID)
+		}
+	}
+}
+
+// TestExpandNode_ParentChainResolution verifies that ExpandNode resolves the
+// full parent chain when revealing a deeply nested node (Bug 3 fix).
+func TestExpandNode_ParentChainResolution(t *testing.T) {
+	// Graph with a deep ownership chain:
+	// Deployment -> ReplicaSet -> Pod
+	// We start with only the Service visible and expand through it to get to
+	// the Pod; the fix must pull in ReplicaSet and Deployment as intermediaries.
+	nodes := []v2.TopologyNode{
+		{ID: "Service/default/svc", Kind: "Service", Name: "svc", Namespace: "default"},
+		{ID: "Pod/default/pod-1", Kind: "Pod", Name: "pod-1", Namespace: "default"},
+		{ID: "ReplicaSet/default/rs-1", Kind: "ReplicaSet", Name: "rs-1", Namespace: "default"},
+		{ID: "Deployment/default/deploy-1", Kind: "Deployment", Name: "deploy-1", Namespace: "default"},
+	}
+	edges := []v2.TopologyEdge{
+		{ID: "e1", Source: "Service/default/svc", Target: "Pod/default/pod-1", RelationshipType: "selector"},
+		{ID: "e2", Source: "ReplicaSet/default/rs-1", Target: "Pod/default/pod-1", RelationshipType: "ownerRef"},
+		{ID: "e3", Source: "Deployment/default/deploy-1", Target: "ReplicaSet/default/rs-1", RelationshipType: "ownerRef"},
+	}
+
+	// Only Service is initially visible
+	visibleNodes := []v2.TopologyNode{nodes[0]}
+	expanded, _ := ExpandNode(nodes, edges, visibleNodes, "Service/default/svc")
+
+	expandedIDs := make(map[string]bool)
+	for _, n := range expanded {
+		expandedIDs[n.ID] = true
+	}
+
+	if !expandedIDs["Pod/default/pod-1"] {
+		t.Error("Pod should appear after expanding Service")
+	}
+	// Bug 3: parent chain must be resolved
+	if !expandedIDs["ReplicaSet/default/rs-1"] {
+		t.Error("BUG: ReplicaSet (Pod's parent) should be included to prevent orphan")
+	}
+	if !expandedIDs["Deployment/default/deploy-1"] {
+		t.Error("BUG: Deployment (ReplicaSet's parent) should be included to prevent orphan")
+	}
+}
+
 func TestKindDepthLevel(t *testing.T) {
 	tests := []struct {
 		kind     string
