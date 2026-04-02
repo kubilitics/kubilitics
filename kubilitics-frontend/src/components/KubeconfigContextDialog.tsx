@@ -129,7 +129,7 @@ export function KubeconfigContextDialog({
                                                 </Badge>
                                             )}
                                         </div>
-                                        <div className="flex items-center gap-4 text-xs text-slate-500">
+                                        <div className="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
                                             <div className="flex items-center gap-1 truncate">
                                                 <Server className="h-3 w-3" />
                                                 <span className="truncate">{ctx.cluster}</span>
