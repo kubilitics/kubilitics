@@ -45,7 +45,7 @@ function SummaryNodeComponent({ data }: NodeProps) {
           className={`h-2.5 w-2.5 rounded-full ${
             d.status === "healthy" ? "bg-green-500" :
             d.status === "warning" ? "bg-yellow-500" :
-            d.status === "error" ? "bg-red-500" : "bg-gray-400"
+            d.status === "error" ? "bg-red-500" : "bg-gray-400 dark:bg-gray-500"
           }`}
         />
       </div>
