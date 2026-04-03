@@ -66,6 +66,7 @@ function buildAffectedNodes(result: SimulationResult | null): Set<string> | null
 export default function SimulationPage() {
   const clusterId = useActiveClusterId();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [loadingLong, setLoadingLong] = useState(false);
 
   const { scenarios, result, isRunning, error, autoRun, setResult, setRunning, setError } = useSimulationStore();
   const runMutation = useRunSimulation();
@@ -77,6 +78,15 @@ export default function SimulationPage() {
     depth: 1,
     enabled: !!clusterId,
   });
+
+  // Show "taking longer than usual" after 10s of loading
+  useEffect(() => {
+    if (isTopoLoading) {
+      const timer = setTimeout(() => setLoadingLong(true), 10000);
+      return () => clearTimeout(timer);
+    }
+    setLoadingLong(false);
+  }, [isTopoLoading]);
 
   // Extract node names from topology for the toolbar selector
   const nodeNames = useMemo(() => {
@@ -185,6 +195,7 @@ export default function SimulationPage() {
               <div className="flex flex-col items-center gap-2">
                 <div className="h-8 w-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
                 <p className="text-sm text-slate-500 dark:text-slate-400">Loading topology...</p>
+                {loadingLong && <p className="text-xs text-amber-500 mt-2">Taking longer than usual. Try refreshing.</p>}
               </div>
             </div>
           ) : (

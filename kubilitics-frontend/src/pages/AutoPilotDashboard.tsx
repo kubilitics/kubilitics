@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from '@/components/ui/sonner';
 import {
   Bot,
   Shield,
@@ -61,9 +62,9 @@ function statusBadge(status: string) {
 // ── Page Component ───────────────────────────────────────────────────────────
 
 const AutoPilotDashboard = () => {
-  const { data: findings = [], isLoading: findingsLoading } = useAutoPilotFindings();
-  const { data: pendingActions = [], isLoading: pendingLoading } = useAutoPilotActions('pending', 20, 0);
-  const { data: recentActions = [], isLoading: recentLoading } = useAutoPilotActions(undefined, 10, 0);
+  const { data: findings = [], isLoading: findingsLoading, error: findingsError } = useAutoPilotFindings();
+  const { data: pendingActions = [], isLoading: pendingLoading, error: pendingError } = useAutoPilotActions('pending', 20, 0);
+  const { data: recentActions = [], isLoading: recentLoading, error: recentError } = useAutoPilotActions(undefined, 10, 0);
   const { data: config = [] } = useAutoPilotConfig();
   const approveAction = useApproveAction();
   const dismissAction = useDismissAction();
@@ -148,6 +149,23 @@ const AutoPilotDashboard = () => {
           </Button>
         </div>
       </div>
+
+      {/* Error banners */}
+      {findingsError && (
+        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300">
+          Failed to load findings. The graph engine may still be starting.
+        </div>
+      )}
+      {pendingError && (
+        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300">
+          Failed to load pending actions. The backend may be unavailable.
+        </div>
+      )}
+      {recentError && (
+        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300">
+          Failed to load recent actions. The backend may be unavailable.
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -387,7 +405,7 @@ const AutoPilotDashboard = () => {
           )}
           {recentActions.length > 0 && (
             <div className="pt-3 text-center">
-              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground">
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => toast.info('Full audit log coming soon')}>
                 View Full Audit Log
                 <ChevronRight className="h-3 w-3 ml-1" />
               </Button>
