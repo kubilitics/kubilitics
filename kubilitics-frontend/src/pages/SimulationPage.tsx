@@ -87,6 +87,15 @@ export default function SimulationPage() {
       .sort();
   }, [topology]);
 
+  // Extract resource keys (Kind/Namespace/Name) for the delete_resource selector
+  const resourceKeys = useMemo(() => {
+    if (!topology?.nodes) return [];
+    return topology.nodes
+      .filter((n) => n.kind !== 'Node' && n.kind !== 'Namespace')
+      .map((n) => n.id || `${n.kind}/${n.namespace}/${n.name}`)
+      .sort();
+  }, [topology]);
+
   // Run simulation handler
   const handleRunSimulation = useCallback(async () => {
     if (!clusterId || scenarios.length === 0) return;
@@ -147,6 +156,7 @@ export default function SimulationPage() {
           isRunning={isRunning}
           nodeNames={nodeNames}
           namespaces={allNamespaces}
+          resourceKeys={resourceKeys}
         />
       </div>
 

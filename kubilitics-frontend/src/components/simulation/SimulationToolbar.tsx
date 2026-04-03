@@ -31,10 +31,10 @@ import type { Scenario } from '@/services/api/simulation';
 const SCENARIO_OPTIONS = [
   { type: 'node_failure' as const, label: 'Node Failure', icon: Server, description: 'Simulate a node going down' },
   { type: 'az_failure' as const, label: 'AZ Failure', icon: Globe, description: 'Simulate an availability zone outage' },
-  { type: 'scale_down' as const, label: 'Scale Down', icon: ArrowDown, description: 'Reduce replica count' },
-  { type: 'resource_delete' as const, label: 'Delete Resource', icon: Trash2, description: 'Remove a specific resource' },
-  { type: 'namespace_delete' as const, label: 'Delete Namespace', icon: FolderX, description: 'Remove an entire namespace' },
-  { type: 'manifest_apply' as const, label: 'Apply Manifest', icon: FileCode, description: 'Apply a YAML manifest' },
+  { type: 'scale_change' as const, label: 'Scale Change', icon: ArrowDown, description: 'Change replica count' },
+  { type: 'delete_resource' as const, label: 'Delete Resource', icon: Trash2, description: 'Remove a specific resource' },
+  { type: 'delete_namespace' as const, label: 'Delete Namespace', icon: FolderX, description: 'Remove an entire namespace' },
+  { type: 'deploy_new' as const, label: 'Deploy New', icon: FileCode, description: 'Apply a YAML manifest' },
 ] as const;
 
 interface SimulationToolbarProps {
@@ -44,6 +44,8 @@ interface SimulationToolbarProps {
   nodeNames?: string[];
   /** Available namespaces for namespace-related target selectors */
   namespaces?: string[];
+  /** Available resource keys (Kind/Namespace/Name) for delete_resource selector */
+  resourceKeys?: string[];
 }
 
 export default function SimulationToolbar({
@@ -51,6 +53,7 @@ export default function SimulationToolbar({
   isRunning,
   nodeNames = [],
   namespaces = [],
+  resourceKeys = [],
 }: SimulationToolbarProps) {
   const { scenarios, addScenario, clearScenarios, autoRun, toggleAutoRun } = useSimulationStore();
   const [selectedType, setSelectedType] = useState<Scenario['type']>('node_failure');
@@ -80,19 +83,19 @@ export default function SimulationToolbar({
       case 'az_failure':
         scenario.az_label = azLabel || undefined;
         break;
-      case 'scale_down':
+      case 'scale_change':
         scenario.target_key = targetKey || undefined;
         scenario.namespace = namespace || undefined;
         scenario.replicas = replicas;
         break;
-      case 'resource_delete':
+      case 'delete_resource':
         scenario.target_key = targetKey || undefined;
         scenario.namespace = namespace || undefined;
         break;
-      case 'namespace_delete':
+      case 'delete_namespace':
         scenario.namespace = namespace || undefined;
         break;
-      case 'manifest_apply':
+      case 'deploy_new':
         scenario.manifest_yaml = manifestYaml || undefined;
         break;
     }
@@ -148,7 +151,7 @@ export default function SimulationToolbar({
         />
       )}
 
-      {(selectedType === 'scale_down' || selectedType === 'resource_delete') && (
+      {(selectedType === 'scale_change' || selectedType === 'delete_resource') && (
         <>
           <select
             value={namespace}
@@ -160,17 +163,23 @@ export default function SimulationToolbar({
               <option key={ns} value={ns}>{ns}</option>
             ))}
           </select>
-          <input
-            type="text"
-            placeholder="Resource key (e.g. Deployment/my-app)"
+          <select
             value={targetKey}
             onChange={(e) => setTargetKey(e.target.value)}
-            className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[200px]"
-          />
+            className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[200px]"
+          >
+            <option value="">Select resource...</option>
+            {resourceKeys
+              .filter((k) => !namespace || k.includes(`/${namespace}/`))
+              .sort()
+              .map((k) => (
+                <option key={k} value={k}>{k}</option>
+              ))}
+          </select>
         </>
       )}
 
-      {selectedType === 'scale_down' && (
+      {selectedType === 'scale_change' && (
         <div className="flex items-center gap-2">
           <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Replicas:</label>
           <input
@@ -184,7 +193,7 @@ export default function SimulationToolbar({
         </div>
       )}
 
-      {selectedType === 'namespace_delete' && (
+      {selectedType === 'delete_namespace' && (
         <select
           value={namespace}
           onChange={(e) => setNamespace(e.target.value)}
@@ -197,7 +206,7 @@ export default function SimulationToolbar({
         </select>
       )}
 
-      {selectedType === 'manifest_apply' && (
+      {selectedType === 'deploy_new' && (
         <textarea
           placeholder="Paste YAML manifest..."
           value={manifestYaml}
