@@ -36,17 +36,17 @@ type ScheduleUpdate struct {
 	Enabled     *bool   `json:"enabled,omitempty"`
 }
 
-// Scheduler manages recurring report schedules in memory.
+// Scheduler manages recurring report schedules backed by a ScheduleStore.
 type Scheduler struct {
-	schedules map[string]*Schedule // ID -> Schedule
-	mu        sync.RWMutex
-	stopCh    chan struct{}
+	store  ScheduleStore
+	mu     sync.Mutex // protects stopCh only
+	stopCh chan struct{}
 }
 
-// NewScheduler creates a new in-memory scheduler.
-func NewScheduler() *Scheduler {
+// NewScheduler creates a scheduler backed by the given store.
+func NewScheduler(store ScheduleStore) *Scheduler {
 	return &Scheduler{
-		schedules: make(map[string]*Schedule),
+		store: store,
 	}
 }
 
@@ -84,46 +84,39 @@ func (s *Scheduler) Create(schedule Schedule) (*Schedule, error) {
 	schedule.CreatedAt = now
 	schedule.Format = "json"
 	schedule.NextRun = computeNextRun(now, schedule.Frequency)
+	schedule.Enabled = true
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.schedules[schedule.ID] = &schedule
+	if err := s.store.Save(&schedule); err != nil {
+		return nil, err
+	}
 	return &schedule, nil
 }
 
 // Get retrieves a schedule by ID.
 func (s *Scheduler) Get(id string) (*Schedule, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	sched, ok := s.schedules[id]
-	if !ok {
-		return nil, errors.New("schedule not found")
-	}
-	cp := *sched
-	return &cp, nil
+	return s.store.Get(id)
 }
 
 // List returns all schedules for a given cluster. If clusterID is empty, returns all.
 func (s *Scheduler) List(clusterID string) ([]Schedule, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]Schedule, 0)
-	for _, sched := range s.schedules {
-		if clusterID == "" || sched.ClusterID == clusterID {
-			result = append(result, *sched)
-		}
+	schedules, err := s.store.List(clusterID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Schedule, 0, len(schedules))
+	for _, sched := range schedules {
+		result = append(result, *sched)
 	}
 	return result, nil
 }
 
 // Update applies partial updates to an existing schedule.
 func (s *Scheduler) Update(id string, updates ScheduleUpdate) (*Schedule, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sched, ok := s.schedules[id]
-	if !ok {
-		return nil, errors.New("schedule not found")
+	sched, err := s.store.Get(id)
+	if err != nil {
+		return nil, err
 	}
+
 	if updates.Frequency != nil {
 		if !validFrequencies[*updates.Frequency] {
 			return nil, errors.New("frequency must be weekly, biweekly, or monthly")
@@ -147,30 +140,31 @@ func (s *Scheduler) Update(id string, updates ScheduleUpdate) (*Schedule, error)
 	if updates.Enabled != nil {
 		sched.Enabled = *updates.Enabled
 	}
-	cp := *sched
-	return &cp, nil
+
+	if err := s.store.Update(id, sched); err != nil {
+		return nil, err
+	}
+	return sched, nil
 }
 
 // Delete removes a schedule by ID.
 func (s *Scheduler) Delete(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.schedules[id]; !ok {
-		return errors.New("schedule not found")
-	}
-	delete(s.schedules, id)
-	return nil
+	return s.store.Delete(id)
 }
 
 // Start runs the background ticker that checks for due schedules every 60 seconds.
 // The reportFn callback generates the report; delivery is handled internally.
 func (s *Scheduler) Start(ctx context.Context, reportFn ReportFunc) {
+	s.mu.Lock()
 	s.stopCh = make(chan struct{})
+	s.mu.Unlock()
 	go s.run(ctx, reportFn)
 }
 
 // Stop stops the background scheduler loop.
 func (s *Scheduler) Stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.stopCh != nil {
 		close(s.stopCh)
 	}
@@ -195,15 +189,11 @@ func (s *Scheduler) run(ctx context.Context, reportFn ReportFunc) {
 // tick checks all schedules and runs any that are due.
 func (s *Scheduler) tick(reportFn ReportFunc) {
 	now := time.Now().UTC()
-	s.mu.RLock()
-	var due []*Schedule
-	for _, sched := range s.schedules {
-		if sched.Enabled && !sched.NextRun.After(now) {
-			cp := *sched
-			due = append(due, &cp)
-		}
+	due, err := s.store.ListDue(now)
+	if err != nil {
+		slog.Error("failed to list due schedules", "error", err)
+		return
 	}
-	s.mu.RUnlock()
 
 	for _, sched := range due {
 		s.executeSchedule(sched, reportFn)
@@ -233,15 +223,18 @@ func (s *Scheduler) executeSchedule(sched *Schedule, reportFn ReportFunc) {
 
 func (s *Scheduler) updateAfterRun(id, status string) {
 	now := time.Now().UTC()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sched, ok := s.schedules[id]
-	if !ok {
+	sched, err := s.store.Get(id)
+	if err != nil {
+		slog.Error("failed to get schedule for post-run update", "id", id, "error", err)
 		return
 	}
 	sched.LastRun = now
 	sched.LastStatus = status
 	sched.NextRun = computeNextRun(now, sched.Frequency)
+
+	if err := s.store.Update(id, sched); err != nil {
+		slog.Error("failed to update schedule after run", "id", id, "error", err)
+	}
 }
 
 // computeNextRun calculates the next run time from the given time.
