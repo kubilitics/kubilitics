@@ -116,6 +116,7 @@ type Handler struct {
 	wsConns               map[string]int // "clusterId:userIdentity" -> active WS connection count
 	graphEngines          map[string]*graph.ClusterGraphEngine // clusterId -> engine
 	snapshotStore         diff.SnapshotStore                   // topology diff snapshot persistence
+	scheduleHandler       *ScheduleHandler                     // optional: report schedule CRUD (nil = disabled)
 }
 
 // NewHandler creates a new HTTP handler. unifiedMetricsService can be nil; then metrics summary uses legacy per-resource endpoints. projSvc can be nil; then project routes return 501. addonService can be nil; then addon routes return 404 or 501. repo can be nil if auth is disabled. snapshotStore can be nil; then topology snapshot endpoints return 503.
@@ -141,6 +142,12 @@ func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *conf
 		graphEngines:          graphEngines,
 		snapshotStore:         snapshotStore,
 	}
+}
+
+// SetScheduleHandler attaches the report schedule handler to enable schedule CRUD routes.
+// Call this before SetupRoutes. When nil, schedule routes are not registered.
+func (h *Handler) SetScheduleHandler(sh *ScheduleHandler) {
+	h.scheduleHandler = sh
 }
 
 // wsCheckOrigin validates a WebSocket upgrade request's Origin header against the
@@ -310,6 +317,11 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 
 	// Resilience reports
 	router.Handle("/clusters/{clusterId}/reports/resilience", h.wrapWithRBAC(h.GetResilienceReport, auth.RoleViewer)).Methods("POST")
+
+	// Report schedules (CRUD) — registered when schedule handler is wired up
+	if h.scheduleHandler != nil {
+		h.scheduleHandler.RegisterRoutes(router)
+	}
 
 	// What-If Simulation Engine (Pillar 3)
 	router.Handle("/clusters/{clusterId}/simulation/run", h.wrapWithRBAC(h.PostSimulationRun, auth.RoleViewer)).Methods("POST")
