@@ -171,10 +171,11 @@ export function Header() {
     setActiveCluster(cluster);
     if (!isDemo) setCurrentClusterId(cluster.id);
     if (isSwitching) {
+      // Clear ALL cached data from the previous cluster to prevent stale data flash.
+      // Previously only cleared specific query keys, missing clusterOverview, metrics,
+      // topology, health, etc. — causing the dashboard to briefly show old cluster data.
       queryClient.removeQueries({ queryKey: ['k8s'] });
-      queryClient.removeQueries({ queryKey: ['backend', 'resources'] });
-      queryClient.removeQueries({ queryKey: ['backend', 'resource'] });
-      queryClient.removeQueries({ queryKey: ['backend', 'events'] });
+      queryClient.removeQueries({ queryKey: ['backend'] });
       navigate('/dashboard');
     }
   }, [currentClusterId, activeCluster?.id, setActiveCluster, isDemo, setCurrentClusterId, queryClient, navigate]);
