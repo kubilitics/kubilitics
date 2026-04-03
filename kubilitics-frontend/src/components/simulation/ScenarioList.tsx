@@ -22,13 +22,13 @@ import type { LucideIcon } from 'lucide-react';
 
 // ── Scenario display helpers ─────────────────────────────────────────────────
 
-const SCENARIO_META: Record<Scenario['type'], { icon: LucideIcon; label: string; color: string }> = {
+const SCENARIO_META: Record<string, { icon: LucideIcon; label: string; color: string }> = {
   node_failure: { icon: Server, label: 'Node Failure', color: 'text-red-500' },
   az_failure: { icon: Globe, label: 'AZ Failure', color: 'text-orange-500' },
-  scale_down: { icon: ArrowDown, label: 'Scale Down', color: 'text-amber-500' },
-  resource_delete: { icon: Trash2, label: 'Delete Resource', color: 'text-rose-500' },
-  namespace_delete: { icon: FolderX, label: 'Delete Namespace', color: 'text-red-600' },
-  manifest_apply: { icon: FileCode, label: 'Apply Manifest', color: 'text-blue-500' },
+  scale_change: { icon: ArrowDown, label: 'Scale Change', color: 'text-amber-500' },
+  delete_resource: { icon: Trash2, label: 'Delete Resource', color: 'text-rose-500' },
+  delete_namespace: { icon: FolderX, label: 'Delete Namespace', color: 'text-red-600' },
+  deploy_new: { icon: FileCode, label: 'Deploy New', color: 'text-blue-500' },
 };
 
 function getScenarioDescription(scenario: Scenario): string {
@@ -37,13 +37,13 @@ function getScenarioDescription(scenario: Scenario): string {
       return scenario.node_name ? `Node: ${scenario.node_name}` : 'Any node';
     case 'az_failure':
       return scenario.az_label ? `Zone: ${scenario.az_label}` : 'Availability zone';
-    case 'scale_down':
+    case 'scale_change':
       return `${scenario.target_key ?? 'resource'} -> ${scenario.replicas ?? 0} replicas`;
-    case 'resource_delete':
-      return `${scenario.namespace ? scenario.namespace + '/' : ''}${scenario.target_key ?? 'resource'}`;
-    case 'namespace_delete':
+    case 'delete_resource':
+      return scenario.target_key ?? 'resource';
+    case 'delete_namespace':
       return scenario.namespace ?? 'namespace';
-    case 'manifest_apply':
+    case 'deploy_new':
       return scenario.manifest_yaml
         ? `${scenario.manifest_yaml.slice(0, 40)}...`
         : 'YAML manifest';

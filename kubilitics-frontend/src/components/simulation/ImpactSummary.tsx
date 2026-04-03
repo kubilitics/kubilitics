@@ -182,8 +182,20 @@ export default function ImpactSummary({ result }: ImpactSummaryProps) {
           <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200">Affected Services</h3>
         </div>
         <p className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-          {result.affected_services}
+          {Array.isArray(result.affected_services) ? result.affected_services.length : 0}
         </p>
+        {Array.isArray(result.affected_services) && result.affected_services.length > 0 && (
+          <ul className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+            {result.affected_services.slice(0, 10).map((svc: { key?: string; kind?: string; namespace?: string; name?: string }) => (
+              <li key={svc.key || `${svc.kind}/${svc.namespace}/${svc.name}`} className="text-xs text-slate-600 dark:text-slate-400 truncate">
+                {svc.kind}/{svc.namespace}/{svc.name}
+              </li>
+            ))}
+            {result.affected_services.length > 10 && (
+              <li className="text-xs text-slate-400">...and {result.affected_services.length - 10} more</li>
+            )}
+          </ul>
+        )}
       </div>
 
       {/* Summary */}
