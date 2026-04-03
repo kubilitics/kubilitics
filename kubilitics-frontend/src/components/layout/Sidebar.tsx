@@ -38,10 +38,7 @@ import {
   Package,
   ShieldCheck,
   LayoutTemplate,
-  HeartPulse,
-  BarChart3,
-  FileWarning,
-  CalendarClock,
+  FlaskConical,
 } from 'lucide-react';
 import {
   K8sPodIcon, K8sDeploymentIcon, K8sReplicaSetIcon, K8sStatefulSetIcon,
@@ -396,7 +393,12 @@ const TOP_NAV_COLORS: Record<string, { active: string; activeBg: string; idle: s
     active: 'text-violet-600 dark:text-violet-400',
     activeBg: 'bg-violet-100 dark:bg-violet-500/20',
     idle: 'text-violet-500 dark:text-violet-400',
-    idleBg: 'bg-violet-50 dark:bg-violet-500/10',
+  },
+  '/simulation': {
+    active: 'text-fuchsia-600 dark:text-fuchsia-400',
+    activeBg: 'bg-fuchsia-100 dark:bg-fuchsia-500/20',
+    idle: 'text-fuchsia-500 dark:text-fuchsia-400',
+    idleBg: 'bg-fuchsia-50 dark:bg-fuchsia-500/10',
   },
   '/templates': {
     active: 'text-emerald-600 dark:text-emerald-400',
@@ -662,12 +664,8 @@ function SidebarContent({
   const isDashboardActive = pathname === '/dashboard';
   const isFleetActive = pathname === '/fleet';
   const isTopologyActive = pathname === '/topology';
+  const isSimulationActive = pathname === '/simulation';
   const isTemplatesActive = pathname === '/templates';
-  const isHealthActive = pathname === '/health';
-  const isRiskRankingActive = pathname === '/risk-ranking';
-  const isSPOFActive = pathname === '/spof-inventory';
-  const isReportSchedulesActive = pathname === '/report-schedules';
-  const isIntelligenceActive = isHealthActive || isRiskRankingActive || isSPOFActive || isReportSchedulesActive;
   const activeProject = useProjectStore((s) => s.activeProject);
   const clearActiveProject = useProjectStore((s) => s.clearActiveProject);
 
@@ -739,22 +737,8 @@ function SidebarContent({
         <TopLevelNavLink to="/dashboard" icon={LayoutDashboard} label="Dashboard" isActive={isDashboardActive} />
         <TopLevelNavLink to="/fleet" icon={Layers} label="Fleet" isActive={isFleetActive} />
         <TopLevelNavLink to="/topology" icon={Network} label="Topology" isActive={isTopologyActive} />
+        <TopLevelNavLink to="/simulation" icon={FlaskConical} label="Simulation" isActive={isSimulationActive} />
         <TopLevelNavLink to="/templates" icon={LayoutTemplate} label="Templates" isActive={isTemplatesActive} />
-      </div>
-
-      {/* Intelligence — structural health, risk, SPOF, reports */}
-      <div className="space-y-1">
-        <div className="flex items-center gap-2.5 px-2 pt-3 pb-1.5">
-          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-slate-200/80 to-slate-200/80 dark:via-slate-700/80 dark:to-slate-700/80" />
-          <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-[0.18em] select-none">Intelligence</span>
-          <div className="h-px flex-1 bg-gradient-to-l from-transparent via-slate-200/80 to-slate-200/80 dark:via-slate-700/80 dark:to-slate-700/80" />
-        </div>
-        <div className="space-y-0.5 px-1">
-          <NavItem to="/health" icon={HeartPulse} label="Health Scores" onNavigate={() => {}} />
-          <NavItem to="/risk-ranking" icon={BarChart3} label="Risk Ranking" onNavigate={() => {}} />
-          <NavItem to="/spof-inventory" icon={FileWarning} label="SPOF Inventory" onNavigate={() => {}} />
-          <NavItem to="/report-schedules" icon={CalendarClock} label="Reports" onNavigate={() => {}} />
-        </div>
       </div>
 
       {/* Resources — single expandable section containing all K8s resource categories */}
@@ -967,6 +951,7 @@ export function Sidebar() {
           <NavItemIconOnly to="/dashboard" icon={LayoutDashboard} label="Dashboard" iconColor="text-blue-600 group-hover:text-blue-700" />
           <NavItemIconOnly to="/fleet" icon={Layers} label="Fleet" iconColor="text-indigo-600 group-hover:text-indigo-700" />
           <NavItemIconOnly to="/topology" icon={Network} label="Topology" iconColor="text-violet-600 group-hover:text-violet-700" />
+          <NavItemIconOnly to="/simulation" icon={FlaskConical} label="Simulation" iconColor="text-fuchsia-600 group-hover:text-fuchsia-700" />
           <NavItemIconOnly to="/workloads" icon={Cpu} label="Workloads" iconColor="text-amber-600 group-hover:text-amber-700" />
           <div className="w-12 h-px bg-border/50 my-2" />
           <NavItemIconOnly to="/pods" icon={Box} label="Pods" iconColor="text-emerald-600 group-hover:text-emerald-700" />
