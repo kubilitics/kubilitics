@@ -39,6 +39,13 @@ const FleetXRayDashboard = lazy(() => import("./pages/FleetXRayDashboard"));
 const ComparisonView = lazy(() => import("./pages/ComparisonView"));
 const GoldenTemplateConfig = lazy(() => import("./pages/GoldenTemplateConfig"));
 const DRReadinessView = lazy(() => import("./pages/DRReadinessView"));
+
+// Pillar 3: What-If Simulation
+const SimulationPage = lazy(() => import("./pages/SimulationPage"));
+
+// Pillar 4: Auto-Pilot
+const AutoPilotDashboard = lazy(() => import("./pages/AutoPilotDashboard"));
+const AutoPilotConfig = lazy(() => import("./pages/AutoPilotConfig"));
 // HomePage removed — cluster/project management moved to Settings; Dashboard is the landing page
 const ProjectDetailPage = lazy(() => import("./pages/ProjectDetailPage"));
 const ProjectDashboardPage = lazy(() => import("./pages/ProjectDashboardPage"));
@@ -708,6 +715,14 @@ const App = () => (
                         <Route path="/fleet/xray/compare" element={<ComparisonView />} />
                         <Route path="/fleet/xray/templates" element={<GoldenTemplateConfig />} />
                         <Route path="/fleet/xray/dr" element={<DRReadinessView />} />
+
+                        {/* Pillar 3: What-If Simulation */}
+                        <Route path="/simulation" element={<SimulationPage />} />
+
+                        {/* Pillar 4: Auto-Pilot */}
+                        <Route path="/auto-pilot" element={<AutoPilotDashboard />} />
+                        <Route path="/auto-pilot/config" element={<AutoPilotConfig />} />
+
                         <Route path="/settings" element={<SettingsPage />} />
                         {/* Cluster Topology */}
                         <Route path="/topology" element={<Topology />} />
