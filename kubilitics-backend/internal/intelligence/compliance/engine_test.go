@@ -60,9 +60,9 @@ func TestEngine_Evaluate_SOC2(t *testing.T) {
 	require.NotNil(t, result)
 
 	assert.Equal(t, "soc2", result.Framework)
-	assert.Greater(t, result.TotalCount, 0)
-	// SOC2-CC6.1 always warns (RBAC), SOC2-CC8.1 always warns (CI/CD)
-	assert.GreaterOrEqual(t, result.WarnCount, 2, "SOC2 should have at least 2 warnings (RBAC + change mgmt)")
+	assert.Equal(t, 3, result.TotalCount, "SOC2 should have 3 controls (CC6.1, CC7.2, A1.2)")
+	// CC6.1 warns when no ClusterRoleBinding data provided
+	assert.GreaterOrEqual(t, result.WarnCount, 1, "SOC2 should have at least 1 warning (CC6.1 with no RBAC data)")
 }
 
 func TestEngine_Evaluate_SOC2_MapsCorrectly(t *testing.T) {
