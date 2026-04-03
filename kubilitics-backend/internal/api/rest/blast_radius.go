@@ -130,12 +130,13 @@ func (h *Handler) getOrStartGraphEngine(r *http.Request, clusterID string) *grap
 		return nil
 	}
 	engine := graph.NewClusterGraphEngine(clusterID, client.Clientset, slog.Default())
-	// Bug 2 fix: actively invalidate V2 topology cache when K8s resources change.
-	// The onRebuild callback fires after every debounced graph rebuild, which
-	// corresponds to informer add/update/delete events. This ensures the next
-	// topology request gets fresh data instead of waiting for TTL expiry.
+	// Gap 2 fix: actively invalidate BOTH V1 and V2 topology caches when K8s
+	// resources change. The onRebuild callback fires after every debounced graph
+	// rebuild (triggered by informer add/update/delete events). This ensures the
+	// next topology request gets fresh data instead of waiting for TTL expiry.
 	engine.SetOnRebuild(func(cid string) {
-		topologyCacheInvalidateForCluster(cid)
+		TopologyCacheInvalidateForCluster(cid)  // V2 handler cache (sync.Map)
+		h.topologyService.InvalidateForCluster(cid) // V1 service cache (topologycache.Cache)
 	})
 	engine.Start(context.Background())
 	h.graphEngines[clusterID] = engine

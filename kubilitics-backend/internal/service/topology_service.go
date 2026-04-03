@@ -36,6 +36,9 @@ type TopologyService interface {
 	GetResourceTopologyWithClient(ctx context.Context, client *k8s.Client, clusterID string, kind, namespace, name string) (*models.TopologyGraph, error)
 	ExportTopology(ctx context.Context, clusterID string, format string) ([]byte, error)
 	ExportTopologyWithClient(ctx context.Context, client *k8s.Client, clusterID string, format string) ([]byte, error)
+	// InvalidateForCluster removes all cached topology entries for the given cluster.
+	// Called by graph engine onRebuild callbacks for active cache invalidation (Gap 2 fix).
+	InvalidateForCluster(clusterID string)
 }
 
 type topologyService struct {
@@ -195,5 +198,14 @@ func (s *topologyService) ExportTopologyWithClient(ctx context.Context, client *
 		return topologyexport.GraphToPNG(graph)
 	default:
 		return nil, fmt.Errorf("%w: use format=json|svg|png|architecture", ErrExportNotImplemented)
+	}
+}
+
+// InvalidateForCluster removes all cached V1 topology entries for the given cluster.
+// Gap 2 fix: called by graph engine onRebuild callbacks so informer-driven changes
+// actively bust the cache instead of waiting for TTL expiry.
+func (s *topologyService) InvalidateForCluster(clusterID string) {
+	if s.cache != nil {
+		s.cache.InvalidateForCluster(clusterID)
 	}
 }
