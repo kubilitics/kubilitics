@@ -65,6 +65,12 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	return &SQLiteRepository{db: db}, nil
 }
 
+// DB returns the underlying *sql.DB for use by components that need direct
+// database access (e.g., the topology snapshot store).
+func (r *SQLiteRepository) DB() *sql.DB {
+	return r.db.DB
+}
+
 // Close closes the database connection
 func (r *SQLiteRepository) Close() error {
 	return r.db.Close()

@@ -296,6 +296,21 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 		h.wrapWithRBAC(h.GetGraphStatus, auth.RoleViewer)).Methods("GET")
 	router.Handle("/clusters/{clusterId}/blast-radius/{namespace}/{kind}/{name}", h.wrapWithRBAC(h.GetBlastRadius, auth.RoleViewer)).Methods("GET")
 
+	// Intelligence layer: health scores, SPOF inventory, risk ranking
+	router.Handle("/clusters/{clusterId}/health", h.wrapWithRBAC(h.GetClusterHealth, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/risk-ranking", h.wrapWithRBAC(h.GetClusterRiskRanking, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/spofs", h.wrapWithRBAC(h.GetSPOFInventory, auth.RoleViewer)).Methods("GET")
+
+	// Pre-apply blast radius preview
+	router.Handle("/clusters/{clusterId}/blast-radius/preview", h.wrapWithRBAC(h.PreviewBlastRadius, auth.RoleOperator)).Methods("POST")
+
+	// Topology diffing: snapshots and comparison
+	router.Handle("/clusters/{clusterId}/topology/snapshot", h.wrapWithRBAC(h.CreateTopologySnapshot, auth.RoleOperator)).Methods("POST")
+	router.Handle("/clusters/{clusterId}/topology/diff", h.wrapWithRBAC(h.GetTopologyDiff, auth.RoleViewer)).Methods("GET")
+
+	// Resilience reports
+	router.Handle("/clusters/{clusterId}/reports/resilience", h.wrapWithRBAC(h.GetResilienceReport, auth.RoleViewer)).Methods("POST")
+
 	// Global search (command palette): GET /clusters/{clusterId}/search?q=...&limit=25
 	router.Handle("/clusters/{clusterId}/search", h.wrapWithRBAC(h.GetSearch, auth.RoleViewer)).Methods("GET")
 

@@ -1,4 +1,3 @@
-// TODO: add database-backed store for production
 package diff
 
 import (
