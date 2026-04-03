@@ -41,6 +41,12 @@ import {
   Scan,
   GitCompareArrows,
   ShieldAlert,
+  HeartPulse,
+  BarChart3,
+  FileWarning,
+  CalendarClock,
+  FlaskConical,
+  Bot,
 } from 'lucide-react';
 import {
   K8sPodIcon, K8sDeploymentIcon, K8sReplicaSetIcon, K8sStatefulSetIcon,
@@ -735,6 +741,23 @@ function SidebarContent({
         <TopLevelNavLink to="/fleet" icon={Layers} label="Fleet" isActive={isFleetActive} />
         <TopLevelNavLink to="/topology" icon={Network} label="Topology" isActive={isTopologyActive} />
         <TopLevelNavLink to="/templates" icon={LayoutTemplate} label="Templates" isActive={isTemplatesActive} />
+      </div>
+
+      {/* Intelligence — structural health, risk, SPOF, simulation, auto-pilot, reports */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-2.5 px-2 pt-3 pb-1.5">
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-slate-200/80 to-slate-200/80 dark:via-slate-700/80 dark:to-slate-700/80" />
+          <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-[0.18em] select-none">Intelligence</span>
+          <div className="h-px flex-1 bg-gradient-to-l from-transparent via-slate-200/80 to-slate-200/80 dark:via-slate-700/80 dark:to-slate-700/80" />
+        </div>
+        <div className="space-y-0.5 px-1">
+          <NavItem to="/health" icon={HeartPulse} label="Health Scores" onNavigate={() => {}} />
+          <NavItem to="/risk-ranking" icon={BarChart3} label="Risk Ranking" onNavigate={() => {}} />
+          <NavItem to="/spof-inventory" icon={FileWarning} label="SPOF Inventory" onNavigate={() => {}} />
+          <NavItem to="/simulation" icon={FlaskConical} label="Simulation" onNavigate={() => {}} />
+          <NavItem to="/auto-pilot" icon={Bot} label="Auto-Pilot" onNavigate={() => {}} />
+          <NavItem to="/report-schedules" icon={CalendarClock} label="Reports" onNavigate={() => {}} />
+        </div>
       </div>
 
       {/* Fleet X-Ray sub-navigation */}
