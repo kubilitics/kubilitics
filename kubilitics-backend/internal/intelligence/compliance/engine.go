@@ -15,10 +15,18 @@ type Framework interface {
 // compliance controls. It is assembled from the graph snapshot and Kubernetes
 // resource state before being passed to each framework.
 type ClusterComplianceData struct {
-	Workloads         []WorkloadInfo
-	CriticalityScores map[string]ScoreInfo
-	NetworkPolicies   map[string]bool // namespace -> has network policy
-	ResourceQuotas    map[string]bool // namespace -> has resource quota
+	Workloads            []WorkloadInfo
+	CriticalityScores    map[string]ScoreInfo
+	NetworkPolicies      map[string]bool            // namespace -> has network policy
+	ResourceQuotas       map[string]bool            // namespace -> has resource quota
+	ClusterRoleBindings  []ClusterRoleBindingInfo   // for RBAC audit (SOC2 CC6.1)
+}
+
+// ClusterRoleBindingInfo captures properties of a ClusterRoleBinding for RBAC audit.
+type ClusterRoleBindingInfo struct {
+	Name        string
+	RoleName    string   // the ClusterRole being bound
+	SubjectKinds []string // "User", "Group", "ServiceAccount"
 }
 
 // WorkloadInfo captures the properties of a workload controller that are
