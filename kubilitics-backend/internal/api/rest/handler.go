@@ -311,6 +311,11 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 	// Resilience reports
 	router.Handle("/clusters/{clusterId}/reports/resilience", h.wrapWithRBAC(h.GetResilienceReport, auth.RoleViewer)).Methods("POST")
 
+	// What-If Simulation Engine (Pillar 3)
+	router.Handle("/clusters/{clusterId}/simulation/run", h.wrapWithRBAC(h.PostSimulationRun, auth.RoleViewer)).Methods("POST")
+	router.Handle("/clusters/{clusterId}/simulation/validate", h.wrapWithRBAC(h.PostSimulationValidate, auth.RoleViewer)).Methods("POST")
+	router.Handle("/clusters/{clusterId}/simulation/scenarios", h.wrapWithRBAC(h.GetSimulationScenarios, auth.RoleViewer)).Methods("GET")
+
 	// Global search (command palette): GET /clusters/{clusterId}/search?q=...&limit=25
 	router.Handle("/clusters/{clusterId}/search", h.wrapWithRBAC(h.GetSearch, auth.RoleViewer)).Methods("GET")
 
