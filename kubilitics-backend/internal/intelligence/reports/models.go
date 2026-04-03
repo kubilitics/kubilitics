@@ -11,12 +11,29 @@ type ResilienceReport struct {
 	GeneratedAt time.Time `json:"generated_at"`
 	Format      string    `json:"format"` // "pdf" or "json"
 
-	ExecutiveSummary ExecutiveSummary `json:"executive_summary"`
-	SPOFInventory    SPOFSection      `json:"spof_inventory"`
-	RiskRanking      RiskSection      `json:"risk_ranking"`
-	BlastRadiusMap   BlastSection     `json:"blast_radius_map"`
-	TopologyDrift    DriftSection     `json:"topology_drift"`
-	Recommendations  []Recommendation `json:"recommendations"`
+	// Top-level convenience fields used by webhook delivery formatting.
+	HealthScore    int    `json:"health_score"`
+	HealthLabel    string `json:"health_label"`
+	SPOFCount      int    `json:"spof_count"`
+	CriticalSPOFs  int    `json:"critical_spofs"`
+	NamespacesRisk int    `json:"namespaces_risk"`
+
+	ExecutiveSummary ExecutiveSummary    `json:"executive_summary"`
+	SPOFInventory    SPOFSection         `json:"spof_inventory"`
+	RiskRanking      RiskSection         `json:"risk_ranking"`
+	BlastRadiusMap   BlastSection        `json:"blast_radius_map"`
+	TopologyDrift    DriftSection        `json:"topology_drift"`
+	Recommendations  []Recommendation    `json:"recommendations"`
+	Findings         []ResilienceFinding `json:"findings,omitempty"`
+}
+
+// ResilienceFinding is a single finding included in a resilience report for delivery.
+type ResilienceFinding struct {
+	Severity    string `json:"severity"`
+	Category    string `json:"category"`
+	Resource    string `json:"resource"`
+	Namespace   string `json:"namespace"`
+	Description string `json:"description"`
 }
 
 // ExecutiveSummary provides a high-level overview of cluster resilience posture.

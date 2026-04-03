@@ -4,12 +4,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
+// newTestScheduler creates a Scheduler backed by an in-memory SQLite store.
+func newTestScheduler(t *testing.T) *Scheduler {
+	t.Helper()
+	db, err := sqlx.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	store, err := NewSQLiteScheduleStore(db)
+	require.NoError(t, err)
+	return NewScheduler(store)
+}
+
 func TestScheduler_Create(t *testing.T) {
-	s := NewScheduler()
+	s := newTestScheduler(t)
 
 	sched, err := s.Create(Schedule{
 		ClusterID:   "cluster-1",
@@ -29,7 +43,7 @@ func TestScheduler_Create(t *testing.T) {
 }
 
 func TestScheduler_Create_ValidationErrors(t *testing.T) {
-	s := NewScheduler()
+	s := newTestScheduler(t)
 
 	tests := []struct {
 		name     string
@@ -68,7 +82,7 @@ func TestScheduler_Create_ValidationErrors(t *testing.T) {
 }
 
 func TestScheduler_Get(t *testing.T) {
-	s := NewScheduler()
+	s := newTestScheduler(t)
 
 	created, err := s.Create(Schedule{
 		ClusterID: "c1", Frequency: "weekly",
@@ -85,7 +99,7 @@ func TestScheduler_Get(t *testing.T) {
 }
 
 func TestScheduler_List(t *testing.T) {
-	s := NewScheduler()
+	s := newTestScheduler(t)
 
 	_, err := s.Create(Schedule{ClusterID: "c1", Frequency: "weekly", WebhookURL: "https://x", WebhookType: "slack"})
 	require.NoError(t, err)
@@ -112,7 +126,7 @@ func TestScheduler_List(t *testing.T) {
 }
 
 func TestScheduler_Update(t *testing.T) {
-	s := NewScheduler()
+	s := newTestScheduler(t)
 
 	created, err := s.Create(Schedule{
 		ClusterID: "c1", Frequency: "weekly",
@@ -145,7 +159,7 @@ func TestScheduler_Update(t *testing.T) {
 }
 
 func TestScheduler_Delete(t *testing.T) {
-	s := NewScheduler()
+	s := newTestScheduler(t)
 
 	created, err := s.Create(Schedule{
 		ClusterID: "c1", Frequency: "weekly",
@@ -184,7 +198,7 @@ func TestComputeNextRun(t *testing.T) {
 }
 
 func TestScheduler_TickDetectsDueSchedules(t *testing.T) {
-	s := NewScheduler()
+	s := newTestScheduler(t)
 
 	// Create a schedule that is immediately due (NextRun in the past).
 	sched, err := s.Create(Schedule{
@@ -193,10 +207,11 @@ func TestScheduler_TickDetectsDueSchedules(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Manually set NextRun to the past.
-	s.mu.Lock()
-	s.schedules[sched.ID].NextRun = time.Now().UTC().Add(-1 * time.Hour)
-	s.mu.Unlock()
+	// Manually set NextRun to the past via the store.
+	stored, err := s.store.Get(sched.ID)
+	require.NoError(t, err)
+	stored.NextRun = time.Now().UTC().Add(-1 * time.Hour)
+	require.NoError(t, s.store.Update(sched.ID, stored))
 
 	called := false
 	reportFn := func(clusterID string) (*ResilienceReport, error) {
@@ -204,8 +219,6 @@ func TestScheduler_TickDetectsDueSchedules(t *testing.T) {
 		return &ResilienceReport{
 			ClusterID:   clusterID,
 			ClusterName: "test-cluster",
-			HealthScore: 85,
-			HealthLabel: "Healthy",
 		}, nil
 	}
 
@@ -220,18 +233,20 @@ func TestScheduler_TickDetectsDueSchedules(t *testing.T) {
 }
 
 func TestScheduler_TickSkipsDisabledSchedules(t *testing.T) {
-	s := NewScheduler()
+	s := newTestScheduler(t)
 
 	sched, err := s.Create(Schedule{
 		ClusterID: "c1", Frequency: "weekly",
-		WebhookURL: "https://x", WebhookType: "generic", Enabled: false,
+		WebhookURL: "https://x", WebhookType: "generic", Enabled: true,
 	})
 	require.NoError(t, err)
 
-	// Set NextRun to the past, but schedule is disabled.
-	s.mu.Lock()
-	s.schedules[sched.ID].NextRun = time.Now().UTC().Add(-1 * time.Hour)
-	s.mu.Unlock()
+	// Set NextRun to the past, but disable the schedule.
+	stored, err := s.store.Get(sched.ID)
+	require.NoError(t, err)
+	stored.NextRun = time.Now().UTC().Add(-1 * time.Hour)
+	stored.Enabled = false
+	require.NoError(t, s.store.Update(sched.ID, stored))
 
 	called := false
 	reportFn := func(clusterID string) (*ResilienceReport, error) {
@@ -244,7 +259,7 @@ func TestScheduler_TickSkipsDisabledSchedules(t *testing.T) {
 }
 
 func TestScheduler_TickSkipsFutureSchedules(t *testing.T) {
-	s := NewScheduler()
+	s := newTestScheduler(t)
 
 	_, err := s.Create(Schedule{
 		ClusterID: "c1", Frequency: "weekly",
