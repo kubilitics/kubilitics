@@ -55,6 +55,13 @@ export interface TopologyCanvasProps {
   simulationCurrentWave?: number;
   /** Total number of waves for progress overlay */
   simulationTotalWaves?: number;
+  /** What-If Simulation diff overlay: node keys grouped by change type */
+  simulationDiff?: {
+    removed: Set<string>;
+    added: Set<string>;
+    modified: Set<string>;
+    newSpofs: Set<string>;
+  } | null;
 }
 
 // Traffic-related relationship types — highlighted in traffic view mode
@@ -88,6 +95,7 @@ function TopologyCanvasInner({
   simulationWaveDepths,
   simulationCurrentWave,
   simulationTotalWaves,
+  simulationDiff,
 }: TopologyCanvasProps) {
   const [currentZoom, setCurrentZoom] = useState(0.5);
 
@@ -323,8 +331,9 @@ function TopologyCanvasInner({
     const hasDimming = dimmedNodeIds != null;
     const hasErrorChain = errorChainNodeIds.size > 0;
     const hasSimulation = simulationAffectedNodes != null && simulationAffectedNodes.size > 0;
+    const hasDiff = simulationDiff != null;
 
-    if (!selectedNodeId && highlightNodeIds.length === 0 && !hasDimming && !hasErrorChain && !hasSimulation) return nodes;
+    if (!selectedNodeId && highlightNodeIds.length === 0 && !hasDimming && !hasErrorChain && !hasSimulation && !hasDiff) return nodes;
 
     return nodes.map((n) => {
       const isHighlighted = highlightNodeIds.includes(n.id);
@@ -332,14 +341,11 @@ function TopologyCanvasInner({
       const isDimmed = hasDimming && !dimmedNodeIds.has(n.id);
       const isInErrorChain = hasErrorChain && errorChainNodeIds.has(n.id) && !isSelected;
 
-      // Blast radius simulation styling (takes priority) — wave-depth-aware coloring.
-      // Cross-namespace affected nodes get amber ring + dashed border for visual distinction.
+      // Blast radius simulation styling (takes priority) — wave-depth-aware coloring
       if (hasSimulation) {
         const isFailureOrigin = n.id === simulatedFailureNodeId;
         const isAffected = simulationAffectedNodes.has(n.id);
         const waveDepth = simulationWaveDepths?.get(n.id) ?? 0;
-        const nodeNamespace = (n.data as Record<string, unknown>)?.namespace as string | undefined;
-        const isCrossNs = !!namespace && !!nodeNamespace && nodeNamespace !== namespace;
 
         let className: string;
         let extraStyle: React.CSSProperties;
@@ -348,13 +354,6 @@ function TopologyCanvasInner({
           // Origin node: red ring with pulsing glow
           className = "ring-[3px] ring-red-600 dark:ring-red-500 rounded-lg shadow-[0_0_20px_rgba(239,68,68,0.6)] animate-pulse";
           extraStyle = { zIndex: 100, transition: "opacity 0.15s" };
-        } else if (isAffected && isCrossNs) {
-          // Cross-namespace affected node: amber dashed ring to distinguish from same-ns
-          className = "ring-2 ring-amber-500 dark:ring-amber-400 ring-offset-1 rounded-lg shadow-[0_0_12px_rgba(245,158,11,0.4)]";
-          extraStyle = {
-            borderStyle: "dashed",
-            transition: "opacity 0.15s",
-          };
         } else if (isAffected && waveDepth === 1) {
           // Wave 1 (direct dependencies)
           className = "ring-2 ring-red-500 dark:ring-red-400 rounded-lg shadow-[0_0_12px_rgba(239,68,68,0.4)]";
@@ -380,6 +379,52 @@ function TopologyCanvasInner({
         };
       }
 
+      // What-If Simulation diff styling — separate from blast radius
+      if (hasDiff) {
+        const isRemoved = simulationDiff.removed.has(n.id);
+        const isAdded = simulationDiff.added.has(n.id);
+        const isModified = simulationDiff.modified.has(n.id);
+        const isNewSpof = simulationDiff.newSpofs.has(n.id);
+        const isAnyDiff = isRemoved || isAdded || isModified || isNewSpof;
+
+        if (isRemoved) {
+          return {
+            ...n,
+            className: "ring-2 ring-red-500 ring-dashed rounded-lg",
+            style: { ...n.style, opacity: 0.5, borderStyle: "dashed", transition: "opacity 0.15s" },
+          };
+        }
+        if (isNewSpof) {
+          return {
+            ...n,
+            className: "ring-2 ring-amber-500 dark:ring-amber-400 rounded-lg shadow-[0_0_12px_rgba(245,158,11,0.4)]",
+            style: { ...n.style, transition: "opacity 0.15s" },
+          };
+        }
+        if (isAdded) {
+          return {
+            ...n,
+            className: "ring-2 ring-emerald-500 dark:ring-emerald-400 rounded-lg shadow-[0_0_10px_rgba(16,185,129,0.3)]",
+            style: { ...n.style, transition: "opacity 0.15s" },
+          };
+        }
+        if (isModified) {
+          return {
+            ...n,
+            className: "ring-2 ring-orange-500 dark:ring-orange-400 rounded-lg",
+            style: { ...n.style, transition: "opacity 0.15s" },
+          };
+        }
+        // Unaffected by diff: dim slightly
+        if (!isAnyDiff) {
+          return {
+            ...n,
+            className: "rounded-lg",
+            style: { ...n.style, opacity: 0.3, filter: "saturate(0.3)", transition: "opacity 0.15s" },
+          };
+        }
+      }
+
       if (!isHighlighted && !isSelected && !isDimmed && !isInErrorChain) return n;
       return {
         ...n,
@@ -397,26 +442,21 @@ function TopologyCanvasInner({
         },
       };
     });
-  }, [nodes, selectedNodeId, highlightNodeIds, dimmedNodeIds, errorChainNodeIds, simulationAffectedNodes, simulatedFailureNodeId, simulationWaveDepths]);
+  }, [nodes, selectedNodeId, highlightNodeIds, dimmedNodeIds, errorChainNodeIds, simulationAffectedNodes, simulatedFailureNodeId, simulationWaveDepths, simulationDiff]);
 
   // Edge styling — ALWAYS show edges, just hide labels at low zoom
   const styledEdges = useMemo(() => {
-    // Blast radius simulation: affected edges red + animated, others nearly invisible.
-    // Cross-namespace blast edges (blast_cross_ns) get amber color for visual distinction.
+    // Blast radius simulation: affected edges red + animated, others nearly invisible
     if (simulationAffectedNodes && simulationAffectedNodes.size > 0) {
       return edges.map((e) => {
         const bothAffected = simulationAffectedNodes.has(e.source) && simulationAffectedNodes.has(e.target);
-        const isCrossNs = (e.data as Record<string, unknown>)?.relationshipType === "blast_cross_ns";
         return {
           ...e,
           animated: bothAffected,
           style: {
             ...(e.style ?? {}),
-            stroke: bothAffected
-              ? (isCrossNs ? "#f59e0b" : "#dc2626")  // amber-500 for cross-ns, red-600 for same-ns
-              : undefined,
-            strokeWidth: bothAffected ? (isCrossNs ? 3 : 2.5) : 1,
-            strokeDasharray: isCrossNs && bothAffected ? "6 3" : undefined,
+            stroke: bothAffected ? "#dc2626" : undefined,
+            strokeWidth: bothAffected ? 2.5 : 1,
             opacity: bothAffected ? 1 : 0.08,
           },
         };

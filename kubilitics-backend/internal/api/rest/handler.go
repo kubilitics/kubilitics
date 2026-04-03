@@ -316,6 +316,17 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 	router.Handle("/clusters/{clusterId}/simulation/validate", h.wrapWithRBAC(h.PostSimulationValidate, auth.RoleViewer)).Methods("POST")
 	router.Handle("/clusters/{clusterId}/simulation/scenarios", h.wrapWithRBAC(h.GetSimulationScenarios, auth.RoleViewer)).Methods("GET")
 
+	// Architectural Auto-Pilot (Pillar 4)
+	router.Handle("/clusters/{clusterId}/autopilot/findings", h.wrapWithRBAC(h.GetAutoPilotFindings, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/autopilot/actions", h.wrapWithRBAC(h.GetAutoPilotActions, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/autopilot/actions/{actionId}", h.wrapWithRBAC(h.GetAutoPilotAction, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/autopilot/actions/{actionId}/approve", h.wrapWithRBAC(h.PostAutoPilotApprove, auth.RoleOperator)).Methods("POST")
+	router.Handle("/clusters/{clusterId}/autopilot/actions/{actionId}/dismiss", h.wrapWithRBAC(h.PostAutoPilotDismiss, auth.RoleOperator)).Methods("POST")
+	router.Handle("/clusters/{clusterId}/autopilot/config", h.wrapWithRBAC(h.GetAutoPilotConfig, auth.RoleViewer)).Methods("GET")
+	router.Handle("/clusters/{clusterId}/autopilot/config/{ruleId}", h.wrapWithRBAC(h.PutAutoPilotRuleConfig, auth.RoleOperator)).Methods("PUT")
+	router.Handle("/clusters/{clusterId}/autopilot/scan", h.wrapWithRBAC(h.PostAutoPilotScan, auth.RoleOperator)).Methods("POST")
+	router.Handle("/clusters/{clusterId}/autopilot/rules", h.wrapWithRBAC(h.GetAutoPilotRules, auth.RoleViewer)).Methods("GET")
+
 	// Global search (command palette): GET /clusters/{clusterId}/search?q=...&limit=25
 	router.Handle("/clusters/{clusterId}/search", h.wrapWithRBAC(h.GetSearch, auth.RoleViewer)).Methods("GET")
 

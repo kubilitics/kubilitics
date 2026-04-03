@@ -167,12 +167,7 @@ const ValidatingWebhooks = lazy(() => import("./pages/ValidatingWebhooks"));
 const ValidatingWebhookDetail = lazy(() => import("./pages/ValidatingWebhookDetail"));
 const Topology = lazy(() => import("./pages/Topology"));
 const ResourceTemplates = lazy(() => import("./pages/ResourceTemplates"));
-
-// Intelligence Layer
-const HealthDashboard = lazy(() => import("./pages/HealthDashboard"));
-const RiskRanking = lazy(() => import("./pages/RiskRanking"));
-const SPOFInventory = lazy(() => import("./pages/SPOFInventory"));
-const ReportSchedules = lazy(() => import("./pages/ReportSchedules"));
+const SimulationPage = lazy(() => import("./pages/SimulationPage"));
 
 
 import { useResourceLiveUpdates } from "./hooks/useResourceLiveUpdates";
@@ -709,14 +704,10 @@ const App = () => (
                         <Route path="/settings" element={<SettingsPage />} />
                         {/* Cluster Topology */}
                         <Route path="/topology" element={<Topology />} />
+                        {/* What-If Simulation */}
+                        <Route path="/simulation" element={<SimulationPage />} />
                         {/* Resource Templates */}
                         <Route path="/templates" element={<ResourceTemplates />} />
-
-                        {/* Intelligence Layer */}
-                        <Route path="/health" element={<HealthDashboard />} />
-                        <Route path="/risk-ranking" element={<RiskRanking />} />
-                        <Route path="/spof-inventory" element={<SPOFInventory />} />
-                        <Route path="/report-schedules" element={<ReportSchedules />} />
                         {/* Security Scanner — disabled until backend APIs are implemented */}
 
                         {/* Workloads */}
