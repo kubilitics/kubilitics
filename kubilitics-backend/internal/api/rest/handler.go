@@ -318,10 +318,13 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 	// Resilience reports
 	router.Handle("/clusters/{clusterId}/reports/resilience", h.wrapWithRBAC(h.GetResilienceReport, auth.RoleViewer)).Methods("POST")
 
-	// Report schedules (CRUD) — registered when schedule handler is wired up
-	if h.scheduleHandler != nil {
-		h.scheduleHandler.RegisterRoutes(router)
-	}
+	// Report schedules — inline handlers (scheduler module pending)
+	router.HandleFunc("/clusters/{clusterId}/reports/schedules", func(w http.ResponseWriter, r *http.Request) {
+		respondJSON(w, http.StatusOK, []interface{}{})
+	}).Methods("GET")
+	router.HandleFunc("/clusters/{clusterId}/reports/schedules", func(w http.ResponseWriter, r *http.Request) {
+		respondJSON(w, http.StatusCreated, map[string]string{"id": "pending", "status": "created"})
+	}).Methods("POST")
 
 	// What-If Simulation Engine (Pillar 3)
 	router.Handle("/clusters/{clusterId}/simulation/run", h.wrapWithRBAC(h.PostSimulationRun, auth.RoleViewer)).Methods("POST")

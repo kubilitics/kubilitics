@@ -35,6 +35,42 @@ type GraphSnapshot struct {
 	Namespaces     map[string]bool
 }
 
+// EnsureMaps initializes any nil maps on the snapshot to empty maps.
+// Call this defensively before accessing maps on snapshots that may be
+// partially constructed (e.g., error recovery, manual construction, cloning).
+func (s *GraphSnapshot) EnsureMaps() {
+	if s.Nodes == nil {
+		s.Nodes = make(map[string]models.ResourceRef)
+	}
+	if s.Forward == nil {
+		s.Forward = make(map[string]map[string]bool)
+	}
+	if s.Reverse == nil {
+		s.Reverse = make(map[string]map[string]bool)
+	}
+	if s.NodeScores == nil {
+		s.NodeScores = make(map[string]float64)
+	}
+	if s.NodeRisks == nil {
+		s.NodeRisks = make(map[string][]models.RiskIndicator)
+	}
+	if s.NodeReplicas == nil {
+		s.NodeReplicas = make(map[string]int)
+	}
+	if s.NodeHasHPA == nil {
+		s.NodeHasHPA = make(map[string]bool)
+	}
+	if s.NodeHasPDB == nil {
+		s.NodeHasPDB = make(map[string]bool)
+	}
+	if s.NodeIngress == nil {
+		s.NodeIngress = make(map[string][]string)
+	}
+	if s.Namespaces == nil {
+		s.Namespaces = make(map[string]bool)
+	}
+}
+
 // bfsWalk performs a BFS traversal over the adjacency map starting from startKey
 // and returns the set of all reachable keys (excluding startKey itself).
 func bfsWalk(adj map[string]map[string]bool, startKey string) map[string]bool {

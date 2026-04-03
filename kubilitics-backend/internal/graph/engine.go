@@ -50,12 +50,10 @@ func NewClusterGraphEngine(clusterID string, clientset kubernetes.Interface, log
 		log:       log.With("component", "graph-engine", "cluster", clusterID),
 	}
 	// Store an empty snapshot so Load() never returns nil.
-	e.snapshot.Store(&GraphSnapshot{
-		Nodes:      make(map[string]models.ResourceRef),
-		Forward:    make(map[string]map[string]bool),
-		Reverse:    make(map[string]map[string]bool),
-		Namespaces: make(map[string]bool),
-	})
+	// EnsureMaps() initializes ALL map fields to prevent nil-map panics.
+	empty := &GraphSnapshot{}
+	empty.EnsureMaps()
+	e.snapshot.Store(empty)
 	return e
 }
 
