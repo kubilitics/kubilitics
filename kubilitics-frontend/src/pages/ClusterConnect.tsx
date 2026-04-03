@@ -433,7 +433,10 @@ export default function ClusterConnect() {
   };
 
   const handleConnect = (cluster: DetectedCluster, isNew: boolean = false) => {
-    if (!isBackendConfigured) return;
+    if (!isBackendConfigured) {
+      toast.error('Backend not configured. Please wait for backend to start.');
+      return;
+    }
 
     // If it's a new cluster, we might not have it in the react-query cache yet.
     // We try to find it or use the passed cluster directly.
@@ -1140,7 +1143,10 @@ function InClusterSetupView({ isBackendConfigured, health, handleConnect, naviga
   };
 
   const handleTestConnection = async () => {
-    if (!backendUrl.trim()) return;
+    if (!backendUrl.trim()) {
+      toast.error('Please enter a backend URL first.');
+      return;
+    }
     setIsTestingConnection(true);
     setConnectionStatus('idle');
     try {

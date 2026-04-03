@@ -125,7 +125,7 @@ const defaultForm: ScheduleFormState = {
 // ---- Component --------------------------------------------------------------
 
 export default function ReportSchedules() {
-  const { data: schedules, isLoading, error } = useReportSchedules();
+  const { data: schedules, isLoading, error, refetch } = useReportSchedules();
   const createMutation = useCreateSchedule();
   const updateMutation = useUpdateSchedule();
   const deleteMutation = useDeleteSchedule();
@@ -235,8 +235,9 @@ export default function ReportSchedules() {
           )}
 
           {error && (
-            <div className="text-center py-12 text-destructive">
-              Failed to load schedules: {error.message}
+            <div className="text-center py-12">
+              <p className="text-destructive mb-2">Failed to load schedules: {error.message}</p>
+              <Button variant="outline" onClick={() => refetch()}>Retry</Button>
             </div>
           )}
 

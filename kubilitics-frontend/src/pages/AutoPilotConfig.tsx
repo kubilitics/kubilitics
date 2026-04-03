@@ -152,6 +152,7 @@ const AutoPilotConfig = () => {
         <Button
           onClick={handleSave}
           disabled={!isDirty || updateRuleConfig.isPending}
+          title={!isDirty ? 'Make changes above before saving' : undefined}
         >
           {updateRuleConfig.isPending ? (
             <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
