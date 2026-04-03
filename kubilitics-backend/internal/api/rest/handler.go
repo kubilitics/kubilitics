@@ -20,6 +20,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/auth"
 	"github.com/kubilitics/kubilitics-backend/internal/config"
 	"github.com/kubilitics/kubilitics-backend/internal/graph"
+	"github.com/kubilitics/kubilitics-backend/internal/intelligence/diff"
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
@@ -80,11 +81,11 @@ func topologyCacheSet(key string, data *topologyv2.TopologyResponse) {
 	})
 }
 
-// topologyCacheInvalidateForCluster removes all cached topology entries for the
-// given clusterID. Bug 2 fix: called from graph engine onRebuild callback to
+// TopologyCacheInvalidateForCluster removes all cached V2 topology entries for the
+// given clusterID. Gap 2 fix: called from graph engine onRebuild callback to
 // actively invalidate caches when K8s resources change, rather than relying
 // solely on TTL expiration.
-func topologyCacheInvalidateForCluster(clusterID string) {
+func TopologyCacheInvalidateForCluster(clusterID string) {
 	prefix := clusterID + "|"
 	topologyCache.Range(func(key, _ any) bool {
 		if k, ok := key.(string); ok && strings.HasPrefix(k, prefix) {
@@ -114,10 +115,11 @@ type Handler struct {
 	wsConnMu              sync.Mutex
 	wsConns               map[string]int // "clusterId:userIdentity" -> active WS connection count
 	graphEngines          map[string]*graph.ClusterGraphEngine // clusterId -> engine
+	snapshotStore         diff.SnapshotStore                   // topology diff snapshot persistence
 }
 
-// NewHandler creates a new HTTP handler. unifiedMetricsService can be nil; then metrics summary uses legacy per-resource endpoints. projSvc can be nil; then project routes return 501. addonService can be nil; then addon routes return 404 or 501. repo can be nil if auth is disabled.
-func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *config.Config, logsService service.LogsService, eventsService service.EventsService, metricsService service.MetricsService, unifiedMetricsService *service.UnifiedMetricsService, projSvc service.ProjectService, addonService service.AddOnService, repo *repository.SQLiteRepository, graphEngines map[string]*graph.ClusterGraphEngine) *Handler {
+// NewHandler creates a new HTTP handler. unifiedMetricsService can be nil; then metrics summary uses legacy per-resource endpoints. projSvc can be nil; then project routes return 501. addonService can be nil; then addon routes return 404 or 501. repo can be nil if auth is disabled. snapshotStore can be nil; then topology snapshot endpoints return 503.
+func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *config.Config, logsService service.LogsService, eventsService service.EventsService, metricsService service.MetricsService, unifiedMetricsService *service.UnifiedMetricsService, projSvc service.ProjectService, addonService service.AddOnService, repo *repository.SQLiteRepository, graphEngines map[string]*graph.ClusterGraphEngine, snapshotStore diff.SnapshotStore) *Handler {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
@@ -137,6 +139,7 @@ func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *conf
 		k8sClientCache:        expirable.NewLRU[string, *k8s.Client](100, nil, time.Minute*10),
 		wsConns:               map[string]int{},
 		graphEngines:          graphEngines,
+		snapshotStore:         snapshotStore,
 	}
 }
 

@@ -32,6 +32,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/auth"
 	"github.com/kubilitics/kubilitics-backend/internal/config"
 	"github.com/kubilitics/kubilitics-backend/internal/graph"
+	"github.com/kubilitics/kubilitics-backend/internal/intelligence/diff"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/metrics"
@@ -375,6 +376,13 @@ func main() {
 				continue
 			}
 			engine := graph.NewClusterGraphEngine(cluster.ID, client.Clientset, log)
+			// Gap 2 fix: actively invalidate BOTH V1 and V2 topology caches
+			// when informers detect K8s resource changes. Without this, the
+			// topology shows stale data for up to 30s (the TTL).
+			engine.SetOnRebuild(func(cid string) {
+				rest.TopologyCacheInvalidateForCluster(cid) // V2 handler cache (sync.Map)
+				topologyCache.InvalidateForCluster(cid)     // V1 service cache (topologycache.Cache)
+			})
 			engine.Start(ctx)
 			graphEngines[cluster.ID] = engine
 			log.Info("Started blast radius graph engine", "cluster", cluster.ID)
@@ -505,7 +513,12 @@ func main() {
 	}
 	router := mux.NewRouter()
 	router.UseEncodedPath()
-	handler := rest.NewHandler(clusterService, topologyService, cfg, logsService, eventsService, metricsService, unifiedMetricsService, projectService, addonSvc, repo, graphEngines)
+	snapshotStore, err := diff.NewSQLiteSnapshotStore(repo.DB())
+	if err != nil {
+		log.Error("Failed to initialize topology snapshot store", "error", err)
+		os.Exit(1)
+	}
+	handler := rest.NewHandler(clusterService, topologyService, cfg, logsService, eventsService, metricsService, unifiedMetricsService, projectService, addonSvc, repo, graphEngines, snapshotStore)
 	authHandler := rest.NewAuthHandler(repo, cfg)
 	
 	// OIDC handler (Phase 2: Enterprise Authentication)
