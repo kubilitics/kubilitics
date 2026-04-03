@@ -439,7 +439,9 @@ export default function ClusterConnect() {
     // We try to find it or use the passed cluster directly.
     const backendItem = clustersFromBackend.data?.find((c) => c.id === cluster.id || c.context === cluster.context);
 
-    if (!backendItem && !isNew) return;
+    // If backend cluster list hasn't loaded yet, treat as new connection instead of silently failing.
+    // This fixes the dead-click after logout — clustersFromBackend.data is undefined until refetched.
+    if (!backendItem && !isNew && clustersFromBackend.data !== undefined) return;
 
     setIsConnecting(true);
     setSelectedClusterId(cluster.id);
