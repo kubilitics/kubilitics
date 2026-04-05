@@ -179,6 +179,11 @@ func (rb *RelationshipBuilder) buildCoOccurs(ctx context.Context, event *WideEve
 		return nil
 	}
 
+	// Limit peer checks to avoid O(n^2) explosion.
+	if len(windowPeers) > 5 {
+		windowPeers = windowPeers[:5]
+	}
+
 	// Check 24h co-occurrence frequency for each peer resource.
 	twentyFourHoursAgo := time.Now().Add(-24 * time.Hour).UnixMilli()
 	for _, peer := range windowPeers {
