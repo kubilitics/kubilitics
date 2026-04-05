@@ -13,6 +13,7 @@ import { useTracesStore, type TracesMode } from '@/stores/tracesStore';
 import { TraceList } from '@/components/traces/TraceList';
 import { ServiceMapView } from '@/components/traces/ServiceMapView';
 import { TraceDetailPanel } from '@/components/traces/TraceDetailPanel';
+import { ComponentErrorBoundary } from '@/components/ui/component-error-boundary';
 
 /* ─── Mode tabs ──────────────────────────────────────────────────────────── */
 
@@ -70,10 +71,16 @@ export default function TracesPage() {
         extraActions={<ModeTabs mode={store.mode} onChange={store.setMode} />}
       />
 
-      {store.mode === 'list' && <TraceList />}
-      {store.mode === 'map' && <ServiceMapView />}
+      <ComponentErrorBoundary name="Trace List">
+        {store.mode === 'list' && <TraceList />}
+      </ComponentErrorBoundary>
+      <ComponentErrorBoundary name="Service Map">
+        {store.mode === 'map' && <ServiceMapView />}
+      </ComponentErrorBoundary>
 
-      <TraceDetailPanel />
+      <ComponentErrorBoundary name="Trace Detail">
+        <TraceDetailPanel />
+      </ComponentErrorBoundary>
     </PageLayout>
   );
 }

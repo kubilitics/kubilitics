@@ -12,6 +12,7 @@ import { useEventsStore } from '@/stores/eventsStore';
 import { EventRow } from './EventRow';
 import { ListPagination } from '@/components/list/ListPagination';
 import type { WideEvent, EventQueryParams } from '@/services/api/eventsIntelligence';
+import { getBackendBase } from '@/lib/backendUrl';
 
 /* ─── Time range presets ─────────────────────────────────────────────────── */
 
@@ -76,7 +77,7 @@ export function EventTimeline() {
     let cancelled = false;
     async function load() {
       try {
-        const base = 'http://localhost:8190';
+        const base = getBackendBase();
         const clustersRes = await fetch(`${base}/api/v1/clusters`);
         const clusters = await clustersRes.json();
         const connected = clusters.find((c: any) => c.status === 'connected');

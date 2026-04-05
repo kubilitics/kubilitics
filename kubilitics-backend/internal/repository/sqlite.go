@@ -50,6 +50,12 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
+	// Enable incremental auto-vacuum so PRAGMA incremental_vacuum can reclaim
+	// space without blocking writes like a full VACUUM would.
+	if _, err := db.Exec("PRAGMA auto_vacuum = INCREMENTAL"); err != nil {
+		return nil, fmt.Errorf("failed to set auto_vacuum: %w", err)
+	}
+
 	// Verify WAL mode is enabled
 	var journalMode string
 	if err := db.Get(&journalMode, "PRAGMA journal_mode"); err != nil {

@@ -7,6 +7,7 @@ import { Activity, AlertTriangle, HeartPulse, Flame, Loader2 } from 'lucide-reac
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import type { EventStats } from '@/services/api/eventsIntelligence';
+import { getBackendBase } from '@/lib/backendUrl';
 
 export function EventStatsBar() {
   const [stats, setStats] = useState<EventStats | null>(null);
@@ -16,7 +17,7 @@ export function EventStatsBar() {
     let cancelled = false;
     async function load() {
       try {
-        const base = 'http://localhost:8190';
+        const base = getBackendBase();
         const clustersRes = await fetch(`${base}/api/v1/clusters`);
         const clusters = await clustersRes.json();
         const connected = clusters.find((c: any) => c.status === 'connected');

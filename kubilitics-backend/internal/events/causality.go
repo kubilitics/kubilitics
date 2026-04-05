@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,32 +21,86 @@ type CausalLink struct {
 // matching a known failure pattern.
 type CausalityEngine struct {
 	store *Store
+	// Dedup: event_id -> timestamp of last causal assignment.
+	// Prevents the same event from being re-assigned within 60 seconds.
+	assigned map[string]int64
+	mu       sync.Mutex
 }
 
 // NewCausalityEngine creates a new causality engine.
 func NewCausalityEngine(store *Store) *CausalityEngine {
-	return &CausalityEngine{store: store}
+	return &CausalityEngine{
+		store:    store,
+		assigned: make(map[string]int64),
+	}
 }
 
 // InferCause runs all 6 causality rules against the given event and returns
 // the first match (highest confidence). Returns nil if no cause is found.
+// A deduplication window prevents the same event from being re-assigned
+// within 60 seconds of a previous causal assignment.
 func (ce *CausalityEngine) InferCause(ctx context.Context, event *WideEvent) *CausalLink {
-	// Rules ordered by specificity/confidence
-	rules := []func(context.Context, *WideEvent) *CausalLink{
-		ce.ruleOOMCausesCrashLoop,
-		ce.ruleNodeCausesEviction,
-		ce.ruleDeploymentCausesPodEvent,
-		ce.ruleScaleDownCausesSPOF,
-		ce.ruleConfigCausesRestart,
-		ce.ruleQuotaCausesScheduling,
+	// Dedup check: skip if this event was already assigned within 60 seconds.
+	ce.mu.Lock()
+	if lastAssign, ok := ce.assigned[event.EventID]; ok {
+		if event.Timestamp-lastAssign < 60000 { // 60 seconds in ms
+			ce.mu.Unlock()
+			return nil
+		}
+	}
+	ce.mu.Unlock()
+
+	// Rules ordered by priority:
+	// Priority 1: Node-level rules (if node-level matches, skip pod-level)
+	// Priority 2: Pod-level rules
+	// Priority 3: Namespace/config-level rules
+	nodeRules := []func(context.Context, *WideEvent) *CausalLink{
+		ce.ruleNodeCausesEviction, // node-level
+	}
+	podRules := []func(context.Context, *WideEvent) *CausalLink{
+		ce.ruleOOMCausesCrashLoop,       // pod-level
+		ce.ruleDeploymentCausesPodEvent, // pod-level
+	}
+	otherRules := []func(context.Context, *WideEvent) *CausalLink{
+		ce.ruleConfigCausesRestart,    // config-level
+		ce.ruleScaleDownCausesSPOF,    // scaling
+		ce.ruleQuotaCausesScheduling,  // quota
 	}
 
-	for _, rule := range rules {
+	// Run node-level rules first; if matched, skip pod-level for this event.
+	for _, rule := range nodeRules {
 		if link := rule(ctx, event); link != nil {
+			ce.recordAssignment(event)
+			return link
+		}
+	}
+	for _, rule := range podRules {
+		if link := rule(ctx, event); link != nil {
+			ce.recordAssignment(event)
+			return link
+		}
+	}
+	for _, rule := range otherRules {
+		if link := rule(ctx, event); link != nil {
+			ce.recordAssignment(event)
 			return link
 		}
 	}
 	return nil
+}
+
+// recordAssignment marks an event as assigned and cleans up stale entries.
+func (ce *CausalityEngine) recordAssignment(event *WideEvent) {
+	ce.mu.Lock()
+	defer ce.mu.Unlock()
+	ce.assigned[event.EventID] = event.Timestamp
+	// Cleanup entries older than 5 minutes.
+	cutoff := event.Timestamp - 300000
+	for id, ts := range ce.assigned {
+		if ts < cutoff {
+			delete(ce.assigned, id)
+		}
+	}
 }
 
 // Rule 1: Deployment rollout causes Pod events

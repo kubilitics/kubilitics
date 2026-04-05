@@ -1,14 +1,13 @@
 package events
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -279,7 +278,7 @@ func (c *Collector) handleK8sEvent(obj interface{}, clusterID string) {
 	dims, _ := json.Marshal(k8sEvent)
 
 	we := &WideEvent{
-		EventID:            fmt.Sprintf("evt_%s", shortUUID()),
+		EventID:            generateEventID(clusterID, string(k8sEvent.InvolvedObject.UID), k8sEvent.Reason, ts),
 		Timestamp:          ts,
 		ClusterID:          clusterID,
 		EventType:          k8sEvent.Type,
@@ -315,7 +314,7 @@ func (c *Collector) handleK8sEvent(obj interface{}, clusterID string) {
 // emitResourceChangeEvent creates a WideEvent for a resource spec change.
 func (c *Collector) emitResourceChangeEvent(clusterID, kind, name, namespace, uid, reason string) {
 	we := &WideEvent{
-		EventID:           fmt.Sprintf("evt_%s", shortUUID()),
+		EventID:           generateEventID(clusterID, uid, reason, UnixMillis()),
 		Timestamp:         UnixMillis(),
 		ClusterID:         clusterID,
 		EventType:         "Normal",
@@ -360,9 +359,13 @@ func timeToMillis(t time.Time) int64 {
 	return t.UnixMilli()
 }
 
-// shortUUID returns the first 12 characters of a UUID v4.
-func shortUUID() string {
-	return uuid.New().String()[:12]
+// generateEventID creates a deterministic event ID from key fields.
+// The same K8s event always produces the same ID, preventing duplicates
+// when informers reconnect and relist.
+func generateEventID(clusterID, resourceUID, reason string, timestamp int64) string {
+	data := fmt.Sprintf("%s:%s:%s:%d", clusterID, resourceUID, reason, timestamp)
+	hash := sha256.Sum256([]byte(data))
+	return fmt.Sprintf("evt_%x", hash[:8])
 }
 
 // classifySeverity maps K8s event type and reason to a severity level.
