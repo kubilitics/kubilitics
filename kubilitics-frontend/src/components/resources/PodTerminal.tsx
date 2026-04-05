@@ -272,8 +272,12 @@ export function PodTerminal({
     if (!el) return;
     const observer = new IntersectionObserver((entries) => {
       if (entries[0]?.isIntersecting) {
-        // Refit terminal dimensions
-        requestAnimationFrame(() => fitRef.current?.fit());
+        // Refit terminal dimensions — multiple attempts because layout may not be settled
+        const fit = () => fitRef.current?.fit();
+        requestAnimationFrame(fit);
+        setTimeout(fit, 50);
+        setTimeout(fit, 150);
+        setTimeout(fit, 300);
         // Reconnect if disconnected (first terminal starts hidden)
         if (wsRef.current?.readyState !== WebSocket.OPEN) {
           connect();
@@ -281,7 +285,19 @@ export function PodTerminal({
       }
     });
     observer.observe(el);
-    return () => observer.disconnect();
+
+    // Also refit whenever container size actually changes (catches hidden→visible transitions)
+    const resizeObs = new ResizeObserver(() => {
+      if (el.offsetWidth > 50 && el.offsetHeight > 50) {
+        fitRef.current?.fit();
+      }
+    });
+    resizeObs.observe(el);
+
+    return () => {
+      observer.disconnect();
+      resizeObs.disconnect();
+    };
   }, [connect]);
 
   const handleClear = () => xtermRef.current?.clear();
