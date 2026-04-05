@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/kubilitics/kubilitics-backend/internal/events"
@@ -80,17 +81,40 @@ type SpanEvent struct {
 // Receiver
 // ---------------------------------------------------------------------------
 
+// ErrRateLimited is returned when span ingestion massively exceeds the rate limit (10x).
+var ErrRateLimited = fmt.Errorf("span rate limit exceeded")
+
 // Receiver accepts OTLP trace data and persists it.
 type Receiver struct {
 	store            *Store
 	defaultClusterID string // fallback for single-cluster desktop setups
+	// Rate limiting
+	spanCount      int64 // atomic counter for current second
+	lastReset      int64 // unix second of last reset
+	maxSpansPerSec int64 // default 1000
 }
 
 // NewReceiver creates a new OTLP trace receiver. The defaultClusterID is used
 // as a fallback when spans arrive without a kubilitics.cluster.id attribute
 // (common in single-cluster desktop setups).
 func NewReceiver(store *Store, defaultClusterID string) *Receiver {
-	return &Receiver{store: store, defaultClusterID: defaultClusterID}
+	return &Receiver{
+		store:            store,
+		defaultClusterID: defaultClusterID,
+		maxSpansPerSec:   1000,
+	}
+}
+
+// checkRateLimit atomically increments the span counter and returns true if
+// the current second's total is within the allowed limit.
+func (r *Receiver) checkRateLimit(spanCount int) bool {
+	now := time.Now().Unix()
+	if now != atomic.LoadInt64(&r.lastReset) {
+		atomic.StoreInt64(&r.spanCount, 0)
+		atomic.StoreInt64(&r.lastReset, now)
+	}
+	current := atomic.AddInt64(&r.spanCount, int64(spanCount))
+	return current <= r.maxSpansPerSec
 }
 
 // SetDefaultClusterID updates the fallback cluster ID. This is called when the
@@ -254,6 +278,39 @@ func (r *Receiver) ProcessTraces(ctx context.Context, req *OTLPTraceRequest, clu
 				if clusterID != "" {
 					agg.clusterID = clusterID
 				}
+			}
+		}
+	}
+
+	// Rate limiting: check if we're over the per-second span budget.
+	if !r.checkRateLimit(len(allSpans)) {
+		currentCount := atomic.LoadInt64(&r.spanCount)
+		limit := r.maxSpansPerSec
+
+		// Massively over limit (10x) — reject entirely with HTTP 429.
+		if currentCount > limit*10 {
+			log.Printf("[otel/receiver] RATE LIMIT: %d spans/sec exceeds 10x limit (%d) — rejecting batch", currentCount, limit)
+			return ErrRateLimited
+		}
+
+		// Over limit but not catastrophic — keep ERROR spans, drop OK/UNSET.
+		log.Printf("[otel/receiver] RATE LIMIT: %d spans/sec exceeds limit (%d) — sampling non-error spans", currentCount, limit)
+		filtered := make([]Span, 0, len(allSpans))
+		for i := range allSpans {
+			if allSpans[i].StatusCode == "ERROR" {
+				filtered = append(filtered, allSpans[i])
+			}
+		}
+		allSpans = filtered
+
+		// Also filter trace aggregates: only keep traces that still have spans.
+		keptTraces := make(map[string]bool, len(filtered))
+		for i := range filtered {
+			keptTraces[filtered[i].TraceID] = true
+		}
+		for traceID := range traceMap {
+			if !keptTraces[traceID] {
+				delete(traceMap, traceID)
 			}
 		}
 	}

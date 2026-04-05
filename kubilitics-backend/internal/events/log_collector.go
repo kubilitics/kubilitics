@@ -15,6 +15,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const (
+	// MaxPodsPerCycle limits how many pods the log collector fetches per cycle
+	// to avoid overwhelming the API server on large clusters.
+	MaxPodsPerCycle = 50
+)
+
 // LogCollector periodically fetches recent pod logs and persists them as
 // structured StoredLog records for cross-pod search and aggregation.
 type LogCollector struct {
@@ -70,9 +76,11 @@ func (lc *LogCollector) collect(logsService service.LogsService, clientset kuber
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 
-	// List running pods across all namespaces.
+	// List running pods across all namespaces, capped to avoid overwhelming
+	// the API server on large clusters.
 	pods, err := clientset.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{
 		FieldSelector: "status.phase=Running",
+		Limit:         int64(MaxPodsPerCycle),
 	})
 	if err != nil {
 		log.Printf("[events/log_collector] failed to list pods: %v", err)

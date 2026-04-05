@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useTracesStore } from '@/stores/tracesStore';
+import { getBackendBase } from '@/lib/backendUrl';
 import type { Span } from '@/services/api/traces';
 
 function fmtDur(ns: number): string {
@@ -57,7 +58,7 @@ export function TraceDetailPanel() {
     (async () => {
       setIsLoading(true);
       try {
-        const base = 'http://localhost:8190';
+        const base = getBackendBase();
         const cl = await (await fetch(`${base}/api/v1/clusters`)).json();
         const c = cl.find((x: any) => x.status === 'connected');
         if (!c) { setIsLoading(false); return; }

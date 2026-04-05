@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { useTracesStore } from '@/stores/tracesStore';
+import { getBackendBase } from '@/lib/backendUrl';
 import type { TraceSummary, TraceQueryParams } from '@/services/api/traces';
 
 /* ─── Helpers ──────────────────────────────────────────────────────────── */
@@ -95,7 +96,7 @@ export function TraceList() {
     let cancelled = false;
     async function load() {
       try {
-        const base = 'http://localhost:8190';
+        const base = getBackendBase();
         const clustersRes = await fetch(`${base}/api/v1/clusters`);
         const clusters = await clustersRes.json();
         const connected = clusters.find((c: any) => c.status === 'connected');

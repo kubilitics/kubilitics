@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useEventsStore } from '@/stores/eventsStore';
 import type { AnalyzeResult } from '@/services/api/eventsIntelligence';
+import { getBackendBase } from '@/lib/backendUrl';
 
 /* ─── Presets ────────────────────────────────────────────────────────────── */
 
@@ -63,7 +64,7 @@ export function EventAnalyze() {
     setIsLoading(true);
     setError(null);
     try {
-      const base = 'http://localhost:8190';
+      const base = getBackendBase();
       const clustersRes = await fetch(`${base}/api/v1/clusters`);
       const clusters = await clustersRes.json();
       const connected = clusters.find((c: any) => c.status === 'connected');

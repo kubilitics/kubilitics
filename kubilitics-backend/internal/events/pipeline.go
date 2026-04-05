@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -47,7 +48,19 @@ type Pipeline struct {
 	stopCh        chan struct{}
 	clusterID     string             // set during Start()
 	startedAt     time.Time          // set during Start(), used for uptime calculation
+
+	// Write batching: buffer events and flush in 100ms windows or when full.
+	writeBatch []*WideEvent
+	batchMu    sync.Mutex
+	batchTimer *time.Timer
+
+	droppedEvents int64 // atomic counter for dropped SSE events
 }
+
+const (
+	batchWindow  = 100 * time.Millisecond
+	maxBatchSize = 50
+)
 
 // NewPipeline creates a new Pipeline and all sub-components.
 func NewPipeline(db *sqlx.DB) *Pipeline {
@@ -152,6 +165,26 @@ func (p *Pipeline) Stop() {
 		p.cancel()
 	}
 
+	// Flush any remaining batched events before shutting down.
+	p.batchMu.Lock()
+	if p.batchTimer != nil {
+		p.batchTimer.Stop()
+		p.batchTimer = nil
+	}
+	remaining := p.writeBatch
+	p.writeBatch = nil
+	p.batchMu.Unlock()
+	if len(remaining) > 0 {
+		// Use a background context since p.ctx is cancelled.
+		bgCtx := context.Background()
+		for _, event := range remaining {
+			if err := p.store.InsertEvent(bgCtx, event); err != nil {
+				log.Printf("[events/pipeline] flush-on-stop: failed to store event %s: %v", event.EventID, err)
+			}
+			p.relationships.BuildRelationships(bgCtx, event)
+		}
+	}
+
 	p.collector.Stop()
 	if p.logCollector != nil {
 		p.logCollector.Stop()
@@ -199,6 +232,9 @@ func (p *Pipeline) Health(ctx context.Context) *PipelineHealth {
 	if !p.startedAt.IsZero() {
 		health.Uptime = int64(time.Since(p.startedAt).Seconds())
 	}
+
+	// Dropped events counter.
+	health.DroppedEvents = atomic.LoadInt64(&p.droppedEvents)
 
 	// Determine status.
 	if health.CollectorOK && health.InsightsOK && health.SnapshotsOK {
@@ -262,18 +298,10 @@ func (p *Pipeline) processEvents() {
 			// 3. Check for incident.
 			p.incidents.Evaluate(p.ctx, event)
 
-			// 4. Store the event.
-			if err := p.store.InsertEvent(p.ctx, event); err != nil {
-				log.Printf("[events/pipeline] failed to store event %s: %v", event.EventID, err)
-				continue
-			}
+			// 4. Batch the write (store + relationships) for efficiency.
+			p.addToBatch(event)
 
-			// 5. Build relationships.
-			if err := p.relationships.BuildRelationships(p.ctx, event); err != nil {
-				log.Printf("[events/pipeline] failed to build relationships for %s: %v", event.EventID, err)
-			}
-
-			// 6. Broadcast to SSE subscribers.
+			// 5. Broadcast to SSE subscribers (immediate, not batched).
 			p.broadcast(event)
 
 		case <-p.ctx.Done():
@@ -291,6 +319,58 @@ func (p *Pipeline) broadcast(event *WideEvent) {
 		case ch <- event:
 		default:
 			// Subscriber is slow; drop the event to avoid blocking.
+			n := atomic.AddInt64(&p.droppedEvents, 1)
+			if n%100 == 0 {
+				log.Printf("[events/pipeline] WARNING: %d events dropped (channel full)", n)
+			}
+		}
+	}
+}
+
+// addToBatch queues an event for batched writing. Flushes immediately when
+// the batch reaches maxBatchSize, otherwise flushes after batchWindow.
+func (p *Pipeline) addToBatch(event *WideEvent) {
+	p.batchMu.Lock()
+	p.writeBatch = append(p.writeBatch, event)
+
+	if len(p.writeBatch) >= maxBatchSize {
+		// Flush immediately if batch is full.
+		batch := p.writeBatch
+		p.writeBatch = nil
+		if p.batchTimer != nil {
+			p.batchTimer.Stop()
+			p.batchTimer = nil
+		}
+		p.batchMu.Unlock()
+		p.flushBatch(batch)
+		return
+	}
+
+	if p.batchTimer == nil {
+		p.batchTimer = time.AfterFunc(batchWindow, func() {
+			p.batchMu.Lock()
+			batch := p.writeBatch
+			p.writeBatch = nil
+			p.batchTimer = nil
+			p.batchMu.Unlock()
+			if len(batch) > 0 {
+				p.flushBatch(batch)
+			}
+		})
+	}
+	p.batchMu.Unlock()
+}
+
+// flushBatch writes a batch of events to the store and builds relationships.
+func (p *Pipeline) flushBatch(batch []*WideEvent) {
+	ctx := p.ctx
+	for _, event := range batch {
+		if err := p.store.InsertEvent(ctx, event); err != nil {
+			log.Printf("[events/pipeline] failed to store event %s: %v", event.EventID, err)
+			continue
+		}
+		if err := p.relationships.BuildRelationships(ctx, event); err != nil {
+			log.Printf("[events/pipeline] failed to build relationships for %s: %v", event.EventID, err)
 		}
 	}
 }
@@ -392,11 +472,13 @@ func (p *Pipeline) checkDBSize(ctx context.Context) {
 		log.Printf("[events/pipeline] emergency prune complete (1-day events, all logs deleted)")
 	}
 
-	// Reclaim space from deleted rows.
-	if _, err := p.store.db.Exec("VACUUM"); err != nil {
-		log.Printf("[events/pipeline] VACUUM error: %v", err)
+	// Incremental vacuum — frees up to 1000 pages without blocking writes
+	// like a full VACUUM would. Requires PRAGMA auto_vacuum = INCREMENTAL
+	// (set during DB initialization).
+	if _, err := p.store.db.ExecContext(ctx, "PRAGMA incremental_vacuum(1000)"); err != nil {
+		log.Printf("[events/pipeline] incremental_vacuum error: %v", err)
 	} else {
 		finalSize, _ := p.store.GetDBSizeBytes()
-		log.Printf("[events/pipeline] VACUUM complete, DB size now %.1fMB", float64(finalSize)/(1024*1024))
+		log.Printf("[events/pipeline] incremental vacuum complete, DB size now %.1fMB", float64(finalSize)/(1024*1024))
 	}
 }

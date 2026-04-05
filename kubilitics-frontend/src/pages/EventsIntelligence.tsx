@@ -17,6 +17,7 @@ import { IncidentView } from '@/components/events/IncidentView';
 import { EventContextPanel } from '@/components/events/EventContextPanel';
 import { InsightsBanner } from '@/components/events/InsightsBanner';
 import { EventStatsBar } from '@/components/events/EventStatsBar';
+import { ComponentErrorBoundary } from '@/components/ui/component-error-boundary';
 import type { Insight } from '@/services/api/eventsIntelligence';
 
 /* ─── Mode tabs ──────────────────────────────────────────────────────────── */
@@ -106,9 +107,15 @@ export default function EventsIntelligence() {
       />
 
       {/* Mode content */}
-      {store.mode === 'timeline' && <EventTimeline />}
-      {store.mode === 'analyze' && <EventAnalyze />}
-      {store.mode === 'incidents' && <IncidentView />}
+      <ComponentErrorBoundary name="Timeline">
+        {store.mode === 'timeline' && <EventTimeline />}
+      </ComponentErrorBoundary>
+      <ComponentErrorBoundary name="Analysis">
+        {store.mode === 'analyze' && <EventAnalyze />}
+      </ComponentErrorBoundary>
+      <ComponentErrorBoundary name="Incidents">
+        {store.mode === 'incidents' && <IncidentView />}
+      </ComponentErrorBoundary>
 
       {/* Stats bar */}
       <EventStatsBar />

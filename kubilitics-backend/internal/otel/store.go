@@ -144,15 +144,15 @@ func (s *Store) GetSpansByTrace(ctx context.Context, traceID string) ([]Span, er
 func (s *Store) GetServiceMap(ctx context.Context, clusterID string, from, to int64) (*ServiceMap, error) {
 	// Get per-service aggregates
 	type svcAgg struct {
-		Name        string `db:"service_name"`
-		SpanCount   int    `db:"span_count"`
-		ErrorCount  int    `db:"error_count"`
-		AvgDuration int64  `db:"avg_duration"`
+		Name        string  `db:"service_name"`
+		SpanCount   int     `db:"span_count"`
+		ErrorCount  int     `db:"error_count"`
+		AvgDuration float64 `db:"avg_duration"`
 	}
 	nodeQuery := `
-		SELECT service_name, COUNT(*) AS span_count,
-			SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) AS error_count,
-			AVG(duration_ns) AS avg_duration
+		SELECT service_name, COALESCE(COUNT(*), 0) AS span_count,
+			COALESCE(SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END), 0) AS error_count,
+			COALESCE(AVG(duration_ns), 0) AS avg_duration
 		FROM spans
 		WHERE cluster_id = ? AND start_time >= ? AND start_time <= ? AND service_name != ''
 		GROUP BY service_name`
@@ -168,7 +168,7 @@ func (s *Store) GetServiceMap(ctx context.Context, clusterID string, from, to in
 			Name:        n.Name,
 			SpanCount:   n.SpanCount,
 			ErrorCount:  n.ErrorCount,
-			AvgDuration: n.AvgDuration,
+			AvgDuration: int64(n.AvgDuration),
 		}
 	}
 
@@ -179,7 +179,7 @@ func (s *Store) GetServiceMap(ctx context.Context, clusterID string, from, to in
 		Count  int    `db:"call_count"`
 	}
 	edgeQuery := `
-		SELECT p.service_name AS source_service, c.service_name AS target_service, COUNT(*) AS call_count
+		SELECT p.service_name AS source_service, c.service_name AS target_service, COALESCE(COUNT(*), 0) AS call_count
 		FROM spans c
 		INNER JOIN spans p ON c.parent_span_id = p.span_id AND c.trace_id = p.trace_id
 		WHERE c.cluster_id = ? AND c.start_time >= ? AND c.start_time <= ?

@@ -20,6 +20,7 @@ import ELK from 'elkjs/lib/elk.bundled.js';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { getBackendBase } from '@/lib/backendUrl';
 import { useServiceMap } from '@/hooks/useTraces';
 import { useTracesStore } from '@/stores/tracesStore';
 import type { ServiceNode as ServiceNodeData, ServiceEdge } from '@/services/api/traces';
@@ -143,7 +144,7 @@ function ServiceMapInner() {
     let cancelled = false;
     (async () => {
       try {
-        const base = 'http://localhost:8190';
+        const base = getBackendBase();
         const cl = await (await fetch(`${base}/api/v1/clusters`)).json();
         const c = cl.find((x: any) => x.status === 'connected');
         if (!c) { setIsLoading(false); return; }

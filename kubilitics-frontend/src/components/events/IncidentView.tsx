@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { getBackendBase } from '@/lib/backendUrl';
 import { useEventsStore } from '@/stores/eventsStore';
 import type { Incident } from '@/services/api/eventsIntelligence';
 
@@ -63,7 +64,7 @@ export function IncidentView() {
     let cancelled = false;
     async function load() {
       try {
-        const base = 'http://localhost:8190';
+        const base = getBackendBase();
         const clustersRes = await fetch(`${base}/api/v1/clusters`);
         const clusters = await clustersRes.json();
         const connected = clusters.find((c: any) => c.status === 'connected');

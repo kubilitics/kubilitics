@@ -23,6 +23,7 @@ type PipelineHealth struct {
 	CollectorOK    bool   `json:"collector_ok"`
 	InsightsOK     bool   `json:"insights_ok"`
 	SnapshotsOK    bool   `json:"snapshots_ok"`
+	DroppedEvents  int64  `json:"dropped_events"`
 }
 
 // SystemHealth describes the overall health of the Events Intelligence system.
