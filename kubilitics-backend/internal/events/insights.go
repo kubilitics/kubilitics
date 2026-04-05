@@ -87,9 +87,14 @@ func (e *InsightsEngine) Start(ctx context.Context) {
 	}()
 }
 
-// Stop stops the insights engine.
+// Stop stops the insights engine. Safe to call multiple times.
 func (e *InsightsEngine) Stop() {
-	close(e.stopCh)
+	select {
+	case <-e.stopCh:
+		return // already closed
+	default:
+		close(e.stopCh)
+	}
 }
 
 // RunRules executes all rules and returns any new insights.

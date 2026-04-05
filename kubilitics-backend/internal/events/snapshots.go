@@ -55,9 +55,14 @@ func (sm *SnapshotManager) Start(ctx context.Context, interval time.Duration) {
 	}()
 }
 
-// Stop stops the snapshot manager.
+// Stop stops the snapshot manager. Safe to call multiple times.
 func (sm *SnapshotManager) Stop() {
-	close(sm.stopCh)
+	select {
+	case <-sm.stopCh:
+		return // already closed
+	default:
+		close(sm.stopCh)
+	}
 }
 
 // TakeSnapshot captures the current cluster state as a snapshot.
