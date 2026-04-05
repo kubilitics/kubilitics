@@ -2,6 +2,7 @@ package otel
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -32,14 +33,22 @@ func SetupOTelRoutes(router *mux.Router, handler *OTelHandler) {
 
 // ReceiveTraces handles POST /v1/traces (OTLP JSON).
 func (h *OTelHandler) ReceiveTraces(w http.ResponseWriter, r *http.Request) {
+	// Limit request body to 10MB to prevent OOM from oversized payloads.
+	r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
+
 	var req OTLPTraceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"invalid JSON or payload too large"}`, http.StatusBadRequest)
 		return
 	}
 
 	clusterIDHint := r.Header.Get("X-Kubilitics-Cluster-Id")
 	if err := h.receiver.ProcessTraces(r.Context(), &req, clusterIDHint); err != nil {
+		if errors.Is(err, ErrRateLimited) {
+			w.Header().Set("Retry-After", "5")
+			http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
+			return
+		}
 		http.Error(w, `{"error":"failed to process traces"}`, http.StatusInternalServerError)
 		return
 	}

@@ -87,7 +87,7 @@ var ErrRateLimited = fmt.Errorf("span rate limit exceeded")
 // Receiver accepts OTLP trace data and persists it.
 type Receiver struct {
 	store            *Store
-	defaultClusterID string // fallback for single-cluster desktop setups
+	defaultClusterID atomic.Value // string, fallback for single-cluster desktop setups
 	// Rate limiting
 	spanCount      int64 // atomic counter for current second
 	lastReset      int64 // unix second of last reset
@@ -98,11 +98,12 @@ type Receiver struct {
 // as a fallback when spans arrive without a kubilitics.cluster.id attribute
 // (common in single-cluster desktop setups).
 func NewReceiver(store *Store, defaultClusterID string) *Receiver {
-	return &Receiver{
-		store:            store,
-		defaultClusterID: defaultClusterID,
-		maxSpansPerSec:   1000,
+	r := &Receiver{
+		store:          store,
+		maxSpansPerSec: 1000,
 	}
+	r.defaultClusterID.Store(defaultClusterID)
+	return r
 }
 
 // checkRateLimit atomically increments the span counter and returns true if
@@ -121,7 +122,7 @@ func (r *Receiver) checkRateLimit(spanCount int) bool {
 // active cluster changes so that spans without an explicit cluster attribute
 // are attributed to the correct cluster.
 func (r *Receiver) SetDefaultClusterID(id string) {
-	r.defaultClusterID = id
+	r.defaultClusterID.Store(id)
 }
 
 // ProcessTraces parses an OTLP JSON request and stores the spans.
@@ -206,8 +207,10 @@ func (r *Receiver) ProcessTraces(ctx context.Context, req *OTLPTraceRequest, clu
 				if clusterID == "" && clusterIDHint != "" {
 					clusterID = clusterIDHint
 				}
-				if clusterID == "" && r.defaultClusterID != "" {
-					clusterID = r.defaultClusterID
+				if clusterID == "" {
+					if defID, ok := r.defaultClusterID.Load().(string); ok && defID != "" {
+						clusterID = defID
+					}
 				}
 				if clusterID == "" {
 					log.Printf("[otel/receiver] span %s has no cluster ID, using 'unknown'", os.SpanID)
