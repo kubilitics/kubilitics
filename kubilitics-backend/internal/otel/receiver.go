@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -88,8 +89,9 @@ var ErrRateLimited = fmt.Errorf("span rate limit exceeded")
 type Receiver struct {
 	store            *Store
 	defaultClusterID atomic.Value // string, fallback for single-cluster desktop setups
-	// Rate limiting
-	spanCount      int64 // atomic counter for current second
+	// Rate limiting (protected by rateMu)
+	rateMu         sync.Mutex
+	spanCount      int64 // counter for current second
 	lastReset      int64 // unix second of last reset
 	maxSpansPerSec int64 // default 1000
 }
@@ -106,16 +108,18 @@ func NewReceiver(store *Store, defaultClusterID string) *Receiver {
 	return r
 }
 
-// checkRateLimit atomically increments the span counter and returns true if
+// checkRateLimit increments the span counter under a mutex and returns true if
 // the current second's total is within the allowed limit.
-func (r *Receiver) checkRateLimit(spanCount int) bool {
+func (r *Receiver) checkRateLimit(count int) bool {
+	r.rateMu.Lock()
+	defer r.rateMu.Unlock()
 	now := time.Now().Unix()
-	if now != atomic.LoadInt64(&r.lastReset) {
-		atomic.StoreInt64(&r.spanCount, 0)
-		atomic.StoreInt64(&r.lastReset, now)
+	if now != r.lastReset {
+		r.spanCount = 0
+		r.lastReset = now
 	}
-	current := atomic.AddInt64(&r.spanCount, int64(spanCount))
-	return current <= r.maxSpansPerSec
+	r.spanCount += int64(count)
+	return r.spanCount <= r.maxSpansPerSec
 }
 
 // SetDefaultClusterID updates the fallback cluster ID. This is called when the
@@ -287,7 +291,9 @@ func (r *Receiver) ProcessTraces(ctx context.Context, req *OTLPTraceRequest, clu
 
 	// Rate limiting: check if we're over the per-second span budget.
 	if !r.checkRateLimit(len(allSpans)) {
-		currentCount := atomic.LoadInt64(&r.spanCount)
+		r.rateMu.Lock()
+		currentCount := r.spanCount
+		r.rateMu.Unlock()
 		limit := r.maxSpansPerSec
 
 		// Massively over limit (10x) — reject entirely with HTTP 429.
@@ -371,8 +377,9 @@ func attributeMap(attrs []Attribute) map[string]string {
 			m[a.Key] = a.Value.StringValue
 		} else if a.Value.IntValue != "" {
 			m[a.Key] = a.Value.IntValue
-		} else if a.Value.BoolValue {
-			m[a.Key] = "true"
+		} else if a.Key != "" {
+			// Bool attribute — store as string (handles both true and false)
+			m[a.Key] = fmt.Sprintf("%t", a.Value.BoolValue)
 		}
 	}
 	return m

@@ -78,13 +78,10 @@ func (m *PipelineManager) StartCluster(clientset kubernetes.Interface, clusterID
 	}
 
 	// Validate the clientset can actually connect before starting informers
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	_, err := clientset.Discovery().ServerVersion()
 	if err != nil {
 		return fmt.Errorf("cannot start pipeline: cluster %s unreachable: %w", clusterID, err)
 	}
-	_ = ctx // used for timeout scope
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -146,13 +143,18 @@ func (m *PipelineManager) GetStore() *Store {
 }
 
 // Subscribe returns an SSE channel that merges events from ALL running pipelines.
+// The merged channel is closed when all source pipeline channels are closed.
 func (m *PipelineManager) Subscribe() <-chan *WideEvent {
 	merged := make(chan *WideEvent, 128)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
+	var wg sync.WaitGroup
 	for _, p := range m.pipelines {
 		pCh := p.Subscribe()
+		wg.Add(1)
 		go func(src <-chan *WideEvent) {
+			defer wg.Done()
 			for evt := range src {
 				select {
 				case merged <- evt:
@@ -161,6 +163,13 @@ func (m *PipelineManager) Subscribe() <-chan *WideEvent {
 			}
 		}(pCh)
 	}
+
+	// Close merged channel when all sources are done.
+	go func() {
+		wg.Wait()
+		close(merged)
+	}()
+
 	if len(m.pipelines) == 0 {
 		log.Printf("[events/manager] Subscribe called with no running pipelines")
 	}

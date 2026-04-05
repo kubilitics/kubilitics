@@ -8,10 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/informers"
@@ -94,140 +91,6 @@ func (c *Collector) WatchResourceChanges(clientset kubernetes.Interface, cluster
 	// all resource changes as events. Re-enable these when we have a panic-safe
 	// informer wrapper that survives client-go's internal goroutine re-panics.
 	log.Printf("[events/collector] resource change watchers disabled (using graph engine informers)")
-	return
-
-	// Deployment watcher
-	go c.watchWithRetry("deployments", func() cache.Controller {
-		lw := cache.NewListWatchFromClient(clientset.AppsV1().RESTClient(), "deployments", metav1.NamespaceAll, nil)
-		_, informer := cache.NewInformer(lw, &appsv1.Deployment{}, 0, cache.ResourceEventHandlerFuncs{
-			UpdateFunc: func(oldObj, newObj interface{}) {
-				oldDep, ok1 := oldObj.(*appsv1.Deployment)
-				newDep, ok2 := newObj.(*appsv1.Deployment)
-				if !ok1 || !ok2 {
-					return
-				}
-				if oldDep.Generation == newDep.Generation {
-					return
-				}
-				c.emitResourceChangeEvent(clusterID, "Deployment", newDep.Name, newDep.Namespace, string(newDep.UID), "SpecChanged")
-			},
-		})
-		return informer
-	})
-
-	// ConfigMap watcher
-	go c.watchWithRetry("configmaps", func() cache.Controller {
-		lw := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "configmaps", metav1.NamespaceAll, nil)
-		_, informer := cache.NewInformer(lw, &corev1.ConfigMap{}, 0, cache.ResourceEventHandlerFuncs{
-			UpdateFunc: func(oldObj, newObj interface{}) {
-				oldCM, ok1 := oldObj.(*corev1.ConfigMap)
-				newCM, ok2 := newObj.(*corev1.ConfigMap)
-				if !ok1 || !ok2 {
-					return
-				}
-				if oldCM.ResourceVersion == newCM.ResourceVersion {
-					return
-				}
-				c.emitResourceChangeEvent(clusterID, "ConfigMap", newCM.Name, newCM.Namespace, string(newCM.UID), "ConfigChanged")
-			},
-		})
-		return informer
-	})
-
-	// Secret watcher
-	go c.watchWithRetry("secrets", func() cache.Controller {
-		lw := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "secrets", metav1.NamespaceAll, nil)
-		_, informer := cache.NewInformer(lw, &corev1.Secret{}, 0, cache.ResourceEventHandlerFuncs{
-			UpdateFunc: func(oldObj, newObj interface{}) {
-				oldSec, ok1 := oldObj.(*corev1.Secret)
-				newSec, ok2 := newObj.(*corev1.Secret)
-				if !ok1 || !ok2 {
-					return
-				}
-				if oldSec.ResourceVersion == newSec.ResourceVersion {
-					return
-				}
-				c.emitResourceChangeEvent(clusterID, "Secret", newSec.Name, newSec.Namespace, string(newSec.UID), "SecretChanged")
-			},
-		})
-		return informer
-	})
-
-	log.Printf("[events/collector] started watching resource changes for cluster %s", clusterID)
-}
-
-// watchWithRetry wraps informer creation and startup in a retry loop with
-// exponential backoff. When the K8s API server disconnects, tokens expire, or
-// RBAC changes cause the watch to drop, the informer silently stops. This
-// method detects that and reconnects automatically.
-func (c *Collector) watchWithRetry(name string, createInformer func() cache.Controller) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("[events/collector] PANIC in %s watcher (recovered): %v", name, r)
-		}
-	}()
-
-	// Run the informer in a child goroutine so its internal panics don't kill this loop
-	runInformerSafe := func(informer cache.Controller, stopCh <-chan struct{}) (completed bool) {
-		panicCh := make(chan interface{}, 1)
-		doneCh := make(chan struct{})
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					panicCh <- r
-				}
-				close(doneCh)
-			}()
-			informer.Run(stopCh)
-		}()
-		select {
-		case r := <-panicCh:
-			log.Printf("[events/collector] %s informer panicked (caught): %v", name, r)
-			return false
-		case <-doneCh:
-			return true
-		}
-	}
-	_ = runInformerSafe // used below
-
-	backoff := 5 * time.Second
-	maxBackoff := 5 * time.Minute
-
-	for {
-		select {
-		case <-c.stopCh:
-			return
-		default:
-		}
-
-		log.Printf("[events/collector] starting %s watcher", name)
-		informer := createInformer()
-
-		// Run the informer in a panic-safe wrapper.
-		completed := runInformerSafe(informer, c.stopCh)
-
-		if completed {
-			log.Printf("[events/collector] %s watcher completed normally", name)
-		} else {
-			log.Printf("[events/collector] %s watcher failed/panicked, will retry in %v", name, backoff)
-		}
-
-		// Check if we were asked to stop.
-		select {
-		case <-c.stopCh:
-			return
-		default:
-		}
-
-		// Informer stopped unexpectedly — retry with backoff.
-		log.Printf("[events/collector] %s watcher stopped, reconnecting in %v", name, backoff)
-		select {
-		case <-time.After(backoff):
-			backoff = minDuration(backoff*2, maxBackoff)
-		case <-c.stopCh:
-			return
-		}
-	}
 }
 
 // IsHealthy reports whether the collector has received events recently (within
@@ -274,7 +137,8 @@ func (c *Collector) handleK8sEvent(obj interface{}, clusterID string) {
 
 	ts := eventTimestamp(k8sEvent)
 
-	// Marshal the full K8s event as dimensions
+	// Strip managedFields to save storage (can be 50%+ of the event size)
+	k8sEvent.ManagedFields = nil
 	dims, _ := json.Marshal(k8sEvent)
 
 	we := &WideEvent{
@@ -303,28 +167,6 @@ func (c *Collector) handleK8sEvent(obj interface{}, clusterID string) {
 	// (e.g., pod name often contains deployment name via replicaset)
 	if k8sEvent.InvolvedObject.Kind == "Pod" {
 		we.OwnerKind, we.OwnerName = inferPodOwner(k8sEvent.InvolvedObject.Name)
-	}
-
-	select {
-	case c.eventsCh <- we:
-	case <-c.stopCh:
-	}
-}
-
-// emitResourceChangeEvent creates a WideEvent for a resource spec change.
-func (c *Collector) emitResourceChangeEvent(clusterID, kind, name, namespace, uid, reason string) {
-	we := &WideEvent{
-		EventID:           generateEventID(clusterID, uid, reason, UnixMillis()),
-		Timestamp:         UnixMillis(),
-		ClusterID:         clusterID,
-		EventType:         "Normal",
-		Reason:            reason,
-		Message:           fmt.Sprintf("%s %s/%s spec changed", kind, namespace, name),
-		ResourceKind:      kind,
-		ResourceName:      name,
-		ResourceNamespace: namespace,
-		ResourceUID:       uid,
-		Severity:          "info",
 	}
 
 	select {
@@ -396,13 +238,3 @@ func inferPodOwner(podName string) (kind, name string) {
 	return "", ""
 }
 
-// minDuration returns the smaller of a and b.
-func minDuration(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// Ensure watch.Interface is referenced to prevent import removal.
-var _ watch.Interface

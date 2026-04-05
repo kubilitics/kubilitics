@@ -218,6 +218,7 @@ type AnalyzeQuery struct {
 	Namespace    string `json:"namespace,omitempty"`
 	Since        *int64 `json:"since,omitempty"`
 	Until        *int64 `json:"until,omitempty"`
+	TimeRange    string `json:"time_range,omitempty"`     // "1h", "6h", "24h", "7d"
 	GroupBy      string `json:"group_by,omitempty"`       // reason, resource_kind, severity, etc.
 	TopN         int    `json:"top_n,omitempty"`
 }

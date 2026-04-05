@@ -3,8 +3,14 @@ package events
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
+)
+
+const (
+	maxActiveIncidents = 50
+	incidentMaxAge     = 30 * time.Minute
 )
 
 // IncidentDetector groups related events into incidents.
@@ -39,6 +45,11 @@ func (d *IncidentDetector) Evaluate(ctx context.Context, event *WideEvent) *Inci
 
 	// Check if the event should start a new incident.
 	if d.shouldStartIncident(ctx, event) {
+		// Cap active incidents to prevent unbounded growth.
+		if len(d.activeIncidents) >= maxActiveIncidents {
+			log.Printf("[events/incidents] max active incidents reached (%d), skipping new incident", maxActiveIncidents)
+			return nil
+		}
 		inc := d.createIncident(ctx, event)
 		return inc
 	}
@@ -75,8 +86,26 @@ func (d *IncidentDetector) shouldStartIncident(ctx context.Context, event *WideE
 }
 
 // eventMatchesIncident checks if an event belongs to an existing active incident.
+// Only Warning events within 10 minutes of the incident start are eligible,
+// and the event must share the same namespace OR correlation group.
 func (d *IncidentDetector) eventMatchesIncident(event *WideEvent, inc *Incident) bool {
 	if inc.Status == "resolved" {
+		return false
+	}
+
+	// Only match Warning events — Normal events should not join incidents.
+	if event.EventType != "Warning" {
+		return false
+	}
+
+	// Only match events within 10 minutes of incident start.
+	tenMinMs := int64(10 * 60 * 1000)
+	if event.Timestamp-inc.StartedAt > tenMinMs {
+		return false
+	}
+
+	// Must be the same cluster.
+	if event.ClusterID != inc.ClusterID {
 		return false
 	}
 
@@ -85,8 +114,8 @@ func (d *IncidentDetector) eventMatchesIncident(event *WideEvent, inc *Incident)
 		return true
 	}
 
-	// Same namespace and within the incident time window (since incident started).
-	if event.ResourceNamespace == inc.Namespace && event.ClusterID == inc.ClusterID {
+	// Same namespace.
+	if event.ResourceNamespace == inc.Namespace {
 		return true
 	}
 
@@ -156,8 +185,20 @@ func (d *IncidentDetector) ResolveStaleIncidents(ctx context.Context) error {
 	defer d.mu.Unlock()
 
 	tenMinAgo := UnixMillis() - 10*60*1000
+	ageCutoff := time.Now().Add(-incidentMaxAge).UnixMilli()
 
 	for id, inc := range d.activeIncidents {
+		// Force-resolve incidents older than incidentMaxAge regardless of activity.
+		if inc.StartedAt < ageCutoff {
+			now := UnixMillis()
+			inc.EndedAt = &now
+			inc.Status = "resolved"
+			ttr := (now - inc.StartedAt) / 1000
+			inc.TTR = &ttr
+			_ = d.store.InsertIncident(ctx, inc)
+			delete(d.activeIncidents, id)
+			continue
+		}
 		if inc.Status == "resolved" {
 			delete(d.activeIncidents, id)
 			continue

@@ -42,6 +42,13 @@ type EventSubscriber interface {
 	Unsubscribe(ch <-chan *WideEvent)
 }
 
+// writeJSONError writes a JSON-formatted error response.
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
 // EventsHandler handles REST API requests for the Events Intelligence subsystem.
 type EventsHandler struct {
 	subscriber EventSubscriber
@@ -155,7 +162,7 @@ func (h *EventsHandler) QueryEvents(w http.ResponseWriter, r *http.Request) {
 
 	events, err := h.store.QueryEvents(ctx, q)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("query events: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("query events: %v", err))
 		return
 	}
 
@@ -185,7 +192,7 @@ func (h *EventsHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 
 	stats, err := h.store.GetStats(ctx, clusterID, since, until)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("get stats: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("get stats: %v", err))
 		return
 	}
 
@@ -203,7 +210,7 @@ func (h *EventsHandler) GetEvent(w http.ResponseWriter, r *http.Request) {
 
 	event, err := h.store.GetEvent(ctx, eventID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("get event: %v", err), http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("get event: %v", err))
 		return
 	}
 
@@ -340,7 +347,7 @@ func (h *EventsHandler) GetRelationships(w http.ResponseWriter, r *http.Request)
 
 	rels, err := h.store.GetRelationships(ctx, eventID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("get relationships: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("get relationships: %v", err))
 		return
 	}
 
@@ -355,10 +362,18 @@ func (h *EventsHandler) AnalyzeEvents(w http.ResponseWriter, r *http.Request) {
 
 	var aq AnalyzeQuery
 	if err := json.NewDecoder(r.Body).Decode(&aq); err != nil {
-		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
 		return
 	}
 	aq.ClusterID = clusterID
+
+	// Convert time_range to Since timestamp if Since is not already set.
+	if aq.TimeRange != "" && aq.Since == nil {
+		if dur := parseTimeRange(aq.TimeRange); dur > 0 {
+			since := time.Now().Add(-dur).UnixMilli()
+			aq.Since = &since
+		}
+	}
 
 	// Validate group_by column to prevent SQL injection.
 	allowedGroupBy := map[string]bool{
@@ -371,7 +386,7 @@ func (h *EventsHandler) AnalyzeEvents(w http.ResponseWriter, r *http.Request) {
 		groupBy = "reason"
 	}
 	if !allowedGroupBy[groupBy] {
-		http.Error(w, fmt.Sprintf("invalid group_by column: %s", groupBy), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("invalid group_by column: %s", groupBy))
 		return
 	}
 
@@ -413,7 +428,7 @@ func (h *EventsHandler) AnalyzeEvents(w http.ResponseWriter, r *http.Request) {
 
 	var results []AnalyzeResult
 	if err := h.store.db.SelectContext(ctx, &results, query, args...); err != nil {
-		http.Error(w, fmt.Sprintf("analyze events: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("analyze events: %v", err))
 		return
 	}
 
@@ -439,7 +454,7 @@ func (h *EventsHandler) GetRecentChanges(w http.ResponseWriter, r *http.Request)
 
 	changes, err := h.store.GetRecentChanges(ctx, clusterID, limit)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("get recent changes: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("get recent changes: %v", err))
 		return
 	}
 
@@ -458,7 +473,7 @@ func (h *EventsHandler) ListIncidents(w http.ResponseWriter, r *http.Request) {
 
 	active, err := h.store.GetActiveIncidents(ctx, clusterID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("get active incidents: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("get active incidents: %v", err))
 		return
 	}
 
@@ -473,7 +488,7 @@ func (h *EventsHandler) GetIncident(w http.ResponseWriter, r *http.Request) {
 
 	inc, err := h.store.GetIncident(ctx, incidentID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("get incident: %v", err), http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("get incident: %v", err))
 		return
 	}
 
@@ -488,7 +503,7 @@ func (h *EventsHandler) GetIncidentEvents(w http.ResponseWriter, r *http.Request
 
 	events, err := h.store.GetIncidentEvents(ctx, incidentID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("get incident events: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("get incident events: %v", err))
 		return
 	}
 
@@ -507,7 +522,7 @@ func (h *EventsHandler) GetActiveInsights(w http.ResponseWriter, r *http.Request
 
 	insights, err := h.store.GetActiveInsights(ctx, clusterID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("get active insights: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("get active insights: %v", err))
 		return
 	}
 
@@ -521,7 +536,7 @@ func (h *EventsHandler) DismissInsight(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if err := h.store.DismissInsight(ctx, insightID); err != nil {
-		http.Error(w, fmt.Sprintf("dismiss insight: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("dismiss insight: %v", err))
 		return
 	}
 
@@ -540,19 +555,19 @@ func (h *EventsHandler) GetStateAt(w http.ResponseWriter, r *http.Request) {
 
 	tStr := r.URL.Query().Get("t")
 	if tStr == "" {
-		http.Error(w, "missing 't' query parameter (unix ms)", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing 't' query parameter (unix ms)")
 		return
 	}
 
 	ts, err := strconv.ParseInt(tStr, 10, 64)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("invalid 't' parameter: %v", err), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("invalid 't' parameter: %v", err))
 		return
 	}
 
 	snap, err := h.store.GetSnapshotAt(ctx, clusterID, ts)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("get state at %d: %v", ts, err), http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("get state at %d: %v", ts, err))
 		return
 	}
 
@@ -603,7 +618,7 @@ func (h *EventsHandler) SearchLogs(w http.ResponseWriter, r *http.Request) {
 
 	logs, err := h.store.QueryLogs(ctx, q)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("search logs: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("search logs: %v", err))
 		return
 	}
 
@@ -623,7 +638,7 @@ func (h *EventsHandler) AggregateLogs(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("namespace")
 
 	if ownerKind == "" || ownerName == "" {
-		http.Error(w, "owner_kind and owner_name are required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "owner_kind and owner_name are required")
 		return
 	}
 
@@ -654,7 +669,7 @@ func (h *EventsHandler) AggregateLogs(w http.ResponseWriter, r *http.Request) {
 
 	logs, err := h.store.QueryLogs(ctx, q)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("aggregate logs: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("aggregate logs: %v", err))
 		return
 	}
 
@@ -681,7 +696,7 @@ func (h *EventsHandler) GetLinkedTraces(w http.ResponseWriter, r *http.Request) 
 	// Try linked_event_ids first
 	traces, err := h.otelStore.QuerySpansByLinkedEvent(ctx, clusterID, eventID, 10)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("query linked traces: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("query linked traces: %v", err))
 		return
 	}
 
@@ -721,7 +736,7 @@ func (h *EventsHandler) GetResourceTraces(w http.ResponseWriter, r *http.Request
 	namespace := r.URL.Query().Get("namespace")
 
 	if kind == "" || name == "" {
-		http.Error(w, "kind and name are required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "kind and name are required")
 		return
 	}
 
@@ -751,7 +766,7 @@ func (h *EventsHandler) GetResourceTraces(w http.ResponseWriter, r *http.Request
 
 	traces, err := h.otelStore.QuerySpansByResource(ctx, clusterID, kind, name, namespace, from, to, limit)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("query resource traces: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("query resource traces: %v", err))
 		return
 	}
 
@@ -769,7 +784,7 @@ func (h *EventsHandler) GetResourceTraces(w http.ResponseWriter, r *http.Request
 // across all clusters. This endpoint is NOT cluster-scoped.
 func (h *EventsHandler) GetSystemHealth(w http.ResponseWriter, r *http.Request) {
 	if h.manager == nil {
-		http.Error(w, "events health not available (single-pipeline mode)", http.StatusNotImplemented)
+		writeJSONError(w, http.StatusNotImplemented, "events health not available (single-pipeline mode)")
 		return
 	}
 	health := h.manager.Health(r.Context())
@@ -786,5 +801,29 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
 	if data != nil {
 		_ = json.NewEncoder(w).Encode(data)
+	}
+}
+
+// parseTimeRange converts a human-readable time range string to a time.Duration.
+// Supported formats: "1h", "6h", "24h", "7d". Returns 0 for unrecognized input.
+func parseTimeRange(s string) time.Duration {
+	if len(s) < 2 {
+		return 0
+	}
+	unit := s[len(s)-1]
+	numStr := s[:len(s)-1]
+	n, err := strconv.Atoi(numStr)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	switch unit {
+	case 'h':
+		return time.Duration(n) * time.Hour
+	case 'd':
+		return time.Duration(n) * 24 * time.Hour
+	case 'm':
+		return time.Duration(n) * time.Minute
+	default:
+		return 0
 	}
 }

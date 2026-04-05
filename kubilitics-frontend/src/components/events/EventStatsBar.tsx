@@ -45,7 +45,8 @@ export function EventStatsBar() {
       }
     }
     load();
-    return () => { cancelled = true; };
+    const interval = setInterval(load, 30_000); // refresh every 30 seconds
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
   if (isLoading) {
