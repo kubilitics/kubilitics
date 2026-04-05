@@ -255,9 +255,15 @@ export function PodTerminal({
     };
   }, []);
 
-  // Refit on maximize toggle
+  // Refit on maximize toggle + Escape to exit fullscreen
   useEffect(() => {
     setTimeout(() => fitRef.current?.fit(), 100);
+    if (!isMaximized) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsMaximized(false);
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
   }, [isMaximized]);
 
   // Refit + reconnect when terminal becomes visible (e.g. tab switch with keep-alive)
@@ -292,9 +298,20 @@ export function PodTerminal({
   return (
     <div className={cn(
       'flex flex-col rounded-xl overflow-hidden border border-slate-700/50 min-h-0',
-      isMaximized ? 'fixed inset-4 z-50 shadow-2xl' : 'flex-1',
+      isMaximized ? 'fixed inset-0 z-[200] shadow-2xl rounded-none' : 'flex-1',
       className,
     )}>
+      {/* Floating exit button when maximized — always visible */}
+      {isMaximized && (
+        <button
+          onClick={() => setIsMaximized(false)}
+          className="fixed top-3 right-3 z-[201] flex items-center gap-1.5 px-3 py-1.5 bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium rounded-lg border border-slate-600/50 backdrop-blur-sm shadow-lg transition-colors"
+          title="Exit fullscreen (Esc)"
+        >
+          <Minimize2 className="h-3.5 w-3.5" />
+          Exit
+        </button>
+      )}
       {/* Header */}
       <div className="bg-slate-950 border-b border-slate-700/50 px-4 py-2 flex items-center gap-2">
         <div className="flex gap-1.5">
