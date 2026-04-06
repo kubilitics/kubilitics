@@ -1,9 +1,11 @@
 /**
  * BrandWatermark — Persistent Kubilitics branding for fullscreen/presentation views.
  *
- * Shows the logo + wordmark in a subtle glass-morphism pill. Positioned at
- * top-left by default (opposite the Exit button at top-right). Ensures brand
- * visibility when the main app chrome (header, sidebar) is hidden.
+ * Matches enterprise conventions (Datadog, Grafana, Splunk):
+ * - Persistent navbar logos are 24-32px in those products
+ * - Our floating watermark uses 44px to compensate for hidden app chrome
+ * - Glass-morphism pill with backdrop blur for non-intrusive overlay
+ * - pointer-events: none so it never blocks interaction
  */
 import { BrandLogo } from './BrandLogo';
 import { cn } from '@/lib/utils';
@@ -11,37 +13,34 @@ import { cn } from '@/lib/utils';
 interface BrandWatermarkProps {
   /** Position on screen. Default: 'top-left' */
   position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-  /** Logo height in pixels. Default: 20 */
-  logoHeight?: number;
   /** Additional CSS classes */
   className?: string;
 }
 
 const positionClasses = {
-  'top-left': 'top-4 left-4',
-  'top-right': 'top-4 right-4',
-  'bottom-left': 'bottom-4 left-4',
-  'bottom-right': 'bottom-4 right-4',
+  'top-left': 'top-5 left-5',
+  'top-right': 'top-5 right-5',
+  'bottom-left': 'bottom-5 left-5',
+  'bottom-right': 'bottom-5 right-5',
 };
 
 export function BrandWatermark({
   position = 'top-left',
-  logoHeight = 36,
   className,
 }: BrandWatermarkProps) {
   return (
     <div
       className={cn(
-        'absolute z-50 flex items-center gap-2.5 rounded-xl',
-        'border border-white/20 dark:border-slate-700/50',
-        'bg-white/80 dark:bg-slate-900/80 backdrop-blur-md',
-        'px-4 py-2.5 shadow-lg select-none pointer-events-none',
+        'absolute z-50 flex items-center gap-3 rounded-2xl',
+        'border border-white/25 dark:border-slate-600/50',
+        'bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl',
+        'px-5 py-3 shadow-xl select-none pointer-events-none',
         positionClasses[position],
         className,
       )}
     >
-      <BrandLogo height={logoHeight} variant="dark" className="dark:hidden" />
-      <BrandLogo height={logoHeight} variant="light" className="hidden dark:block" />
+      <BrandLogo height={44} variant="dark" className="dark:hidden" />
+      <BrandLogo height={44} variant="light" className="hidden dark:block" />
     </div>
   );
 }
