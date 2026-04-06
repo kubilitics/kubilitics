@@ -1,4 +1,4 @@
-import { ReactNode, useId } from 'react';
+import { ReactNode, useId, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -28,6 +28,11 @@ export interface ResourceTabsProps {
 
 export function ResourceTabs({ tabs, activeTab, onTabChange, className }: ResourceTabsProps) {
   const instanceId = useId();
+
+  // Persist keep-alive tab content across re-renders.
+  // Without this, parent re-renders create new ReactNode references for tab.content,
+  // causing React to unmount/remount keep-alive children (killing terminal sessions).
+  const keepAliveContentRef = useRef<Map<string, ReactNode>>(new Map());
 
   return (
     <div className={cn('space-y-6 w-full', className)}>
@@ -91,6 +96,16 @@ export function ResourceTabs({ tabs, activeTab, onTabChange, className }: Resour
         // Non-active, non-keepalive tabs are fully unmounted for performance
         if (!isActive && !keepAlive) return null;
 
+        // For keep-alive tabs: capture content on first render and reuse the same
+        // ReactNode reference so React doesn't unmount/remount when parent re-renders.
+        let content = tab.content;
+        if (keepAlive) {
+          if (!keepAliveContentRef.current.has(tab.id)) {
+            keepAliveContentRef.current.set(tab.id, tab.content);
+          }
+          content = keepAliveContentRef.current.get(tab.id)!;
+        }
+
         if (isActive) {
           return (
             <motion.div
@@ -101,7 +116,7 @@ export function ResourceTabs({ tabs, activeTab, onTabChange, className }: Resour
               className="min-h-[60vh]"
               role="tabpanel"
             >
-              {tab.content}
+              {content}
             </motion.div>
           );
         }
@@ -122,7 +137,7 @@ export function ResourceTabs({ tabs, activeTab, onTabChange, className }: Resour
             }}
             aria-hidden
           >
-            {tab.content}
+            {content}
           </div>
         );
       })}
