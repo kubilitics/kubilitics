@@ -12,6 +12,7 @@ import '@xterm/xterm/css/xterm.css';
 import { Maximize2, Minimize2, Trash2, RefreshCw, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/sonner';
+import { BrandWatermark } from '@/components/BrandWatermark';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 
 interface PodTerminalProps {
@@ -319,16 +320,21 @@ export function PodTerminal({
       isMaximized ? 'fixed inset-0 z-[200] shadow-2xl rounded-none' : 'flex-1',
       className,
     )}>
-      {/* Floating exit button when maximized — always visible */}
+      {/* Floating brand + exit button when maximized */}
       {isMaximized && (
-        <button
-          onClick={() => setIsMaximized(false)}
-          className="fixed top-3 right-3 z-[201] flex items-center gap-1.5 px-3 py-1.5 bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium rounded-lg border border-slate-600/50 backdrop-blur-sm shadow-lg transition-colors"
-          title="Exit fullscreen (Esc)"
-        >
-          <Minimize2 className="h-3.5 w-3.5" />
-          Exit
-        </button>
+        <>
+          <div className="fixed top-3 left-3 z-[201]">
+            <BrandWatermark position="top-left" logoHeight={18} className="!absolute !top-0 !left-0" />
+          </div>
+          <button
+            onClick={() => setIsMaximized(false)}
+            className="fixed top-3 right-3 z-[201] flex items-center gap-1.5 px-3 py-1.5 bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium rounded-lg border border-slate-600/50 backdrop-blur-sm shadow-lg transition-colors"
+            title="Exit fullscreen (Esc)"
+          >
+            <Minimize2 className="h-3.5 w-3.5" />
+            Exit
+          </button>
+        </>
       )}
       {/* Header */}
       <div className="bg-slate-950 border-b border-slate-700/50 px-4 py-2 flex items-center gap-2">

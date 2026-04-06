@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Monitor, X } from "lucide-react";
+import { BrandWatermark } from "@/components/BrandWatermark";
 
 interface PresentationOverlayProps {
   clusterName?: string;
@@ -22,6 +23,9 @@ function PresentationOverlayInner({
 }: PresentationOverlayProps) {
   return (
     <>
+      {/* Brand watermark — top-left */}
+      <BrandWatermark position="top-left" logoHeight={22} />
+
       {/* Context panel — bottom-left */}
       <div className="absolute bottom-4 left-4 z-50 rounded-xl border border-white/20 dark:border-slate-700/50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-4 py-3 shadow-lg">
         <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-1">

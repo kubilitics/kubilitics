@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 
+import { BrandWatermark } from "@/components/BrandWatermark";
 import { useResourceTopology } from "@/hooks/useResourceTopology";
 import { useBackendConfigStore } from "@/stores/backendConfigStore";
 import { useClusterStore } from "@/stores/clusterStore";
@@ -390,16 +391,19 @@ export function ResourceTopologyV2View({
             </span>
           </div>
 
-          {/* Presentation mode exit button */}
+          {/* Presentation mode: brand watermark + exit button */}
           {presentationMode && (
-            <button
-              type="button"
-              onClick={() => setPresentationMode(false)}
-              className="absolute top-4 right-4 z-50 flex items-center gap-1.5 rounded-lg border border-white/20 dark:border-slate-700/50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 shadow-md hover:bg-white dark:hover:bg-slate-800 transition-colors"
-            >
-              <X className="h-3.5 w-3.5" />
-              Exit
-            </button>
+            <>
+              <BrandWatermark position="top-left" logoHeight={22} />
+              <button
+                type="button"
+                onClick={() => setPresentationMode(false)}
+                className="absolute top-4 right-4 z-50 flex items-center gap-1.5 rounded-lg border border-white/20 dark:border-slate-700/50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 shadow-md hover:bg-white dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+                Exit
+              </button>
+            </>
           )}
         </div>
 
@@ -462,6 +466,7 @@ export function ResourceTopologyV2View({
               clusterName={activeClusterName ?? undefined}
               namespace={namespace ?? undefined}
             />
+            <BrandWatermark position="top-left" logoHeight={22} />
             {topology && (
               <div className="absolute bottom-4 right-4 z-50 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-md px-2.5 py-1">
                 <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
