@@ -494,7 +494,7 @@ export function MetricsDashboard({ resourceType, resourceName, namespace, podRes
                             {cpuTrend >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                             {cpuTrend >= 0 ? '+' : ''}{cpuTrend.toFixed(3)}m
                           </div>
-                          {trendTimeLabel && <span className="text-[10px] text-muted-foreground/60">{trendTimeLabel}</span>}
+                          {trendTimeLabel && <span className="text-[11px] text-muted-foreground font-medium">{trendTimeLabel}</span>}
                         </div>
                       )}
                     </div>
@@ -527,7 +527,7 @@ export function MetricsDashboard({ resourceType, resourceName, namespace, podRes
                             {memoryTrend >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                             {memoryTrend >= 0 ? '+' : ''}{memoryTrend.toFixed(3)}Mi
                           </div>
-                          {trendTimeLabel && <span className="text-[10px] text-muted-foreground/60">{trendTimeLabel}</span>}
+                          {trendTimeLabel && <span className="text-[11px] text-muted-foreground font-medium">{trendTimeLabel}</span>}
                         </div>
                       )}
                     </div>
