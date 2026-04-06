@@ -330,9 +330,10 @@ export function MetricsDashboard({ resourceType, resourceName, namespace, podRes
   const memoryTrend = currentMemory - prevMemory;
 
   // Time delta between last two data points for helper text
-  const lastCpuTime = (metrics?.cpu?.[metrics.cpu.length - 1] as any)?.timestamp ?? 0;
-  const prevCpuTime = (metrics?.cpu?.[metrics.cpu.length - 2] as any)?.timestamp ?? 0;
-  const trendTimeDeltaSec = lastCpuTime && prevCpuTime ? Math.round((lastCpuTime - prevCpuTime) / 1000) : 0;
+  const histLen = filteredHistory.length;
+  const lastTs = histLen >= 1 ? filteredHistory[histLen - 1]?.ts ?? 0 : 0;
+  const prevTs = histLen >= 2 ? filteredHistory[histLen - 2]?.ts ?? 0 : 0;
+  const trendTimeDeltaSec = lastTs && prevTs ? Math.round(lastTs - prevTs) : 0;
   const trendTimeLabel = trendTimeDeltaSec > 0
     ? trendTimeDeltaSec < 60 ? `vs ${trendTimeDeltaSec}s ago` : `vs ${Math.round(trendTimeDeltaSec / 60)}m ago`
     : '';
