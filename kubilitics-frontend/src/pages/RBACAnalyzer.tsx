@@ -273,11 +273,11 @@ export default function RBACAnalyzer() {
   const [whoCanParsed, setWhoCanParsed] = useState<WhoCanQuery | null>(null);
 
   // Fetch RBAC resources
-  const rolesQuery = useK8sResourceList<RoleResource>('roles');
-  const clusterRolesQuery = useK8sResourceList<RoleResource>('clusterroles');
-  const roleBindingsQuery = useK8sResourceList<BindingResource>('rolebindings');
-  const clusterRoleBindingsQuery = useK8sResourceList<BindingResource>('clusterrolebindings');
-  const serviceAccountsQuery = useK8sResourceList<KubernetesResource>('serviceaccounts');
+  const rolesQuery = useK8sResourceList<RoleResource>('roles', undefined, { limit: 2000 });
+  const clusterRolesQuery = useK8sResourceList<RoleResource>('clusterroles', undefined, { limit: 2000 });
+  const roleBindingsQuery = useK8sResourceList<BindingResource>('rolebindings', undefined, { limit: 2000 });
+  const clusterRoleBindingsQuery = useK8sResourceList<BindingResource>('clusterrolebindings', undefined, { limit: 2000 });
+  const serviceAccountsQuery = useK8sResourceList<KubernetesResource>('serviceaccounts', undefined, { limit: 2000 });
 
   const isLoading = rolesQuery.isLoading || clusterRolesQuery.isLoading ||
     roleBindingsQuery.isLoading || clusterRoleBindingsQuery.isLoading || serviceAccountsQuery.isLoading;

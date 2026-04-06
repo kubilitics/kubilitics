@@ -13,7 +13,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
-import { useK8sResourceList, useDeleteK8sResource, usePatchK8sResource, useCreateK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { useK8sResourceList, useServerPaginatedResourceList, useDeleteK8sResource, usePatchK8sResource, useCreateK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { DeleteConfirmDialog, ScaleDialog, MetricBar, parseCpu, parseMemory, calculatePodResourceMax } from '@/components/resources';
 import { ResourceExportDropdown, ListViewSegmentedControl, ListPagination, PAGE_SIZE_OPTIONS, ResourceCommandBar, resourceTableRowClassName, ROW_MOTION, StatusPill, ListPageStatCard, ListPageHeader, TableColumnHeaderWithFilterAndSort, TableFilterCell, AgeCell, TableEmptyState, TableErrorState, ListPageLoadingShell, NamespaceBadge, ResourceListTableToolbar } from '@/components/list';
@@ -131,13 +131,46 @@ export default function ReplicaSets() {
  const [pageIndex, setPageIndex] = useState(0);
 
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<ReplicaSetResource>('replicasets', undefined, { limit: 5000 });
+
+ // Server-side pagination path (backend + informer cache)
+ const {
+   data: serverItems,
+   isLoading: serverIsLoading,
+   isError: serverIsError,
+   isFetching: serverIsFetching,
+   dataUpdatedAt: serverDataUpdatedAt,
+   refetch: serverRefetch,
+   pagination: serverPagination,
+   total: serverTotal,
+   isBackendAvailable,
+ } = useServerPaginatedResourceList<ReplicaSetResource>('replicasets', selectedNamespace !== 'all' ? selectedNamespace : undefined, {
+   pageSize: 50,
+   search: searchQuery || undefined,
+ });
+
+ // Fallback: direct K8s / non-backend mode
+ const { data: fallbackData, isLoading: fallbackIsLoading, isError: fallbackIsError, isFetching: fallbackIsFetching, dataUpdatedAt: fallbackDataUpdatedAt, refetch: fallbackRefetch } = useK8sResourceList<ReplicaSetResource>('replicasets', undefined, {
+   limit: 500,
+   enabled: !isBackendAvailable,
+ });
+
+ const data = isBackendAvailable ? null : fallbackData;
+ const isLoading = isBackendAvailable ? serverIsLoading : fallbackIsLoading;
+ const isError = isBackendAvailable ? serverIsError : fallbackIsError;
+ const isFetching = isBackendAvailable ? serverIsFetching : fallbackIsFetching;
+ const dataUpdatedAt = isBackendAvailable ? serverDataUpdatedAt : fallbackDataUpdatedAt;
+ const refetch = isBackendAvailable ? serverRefetch : fallbackRefetch;
  const deleteResource = useDeleteK8sResource('replicasets');
  const patchReplicaSet = usePatchK8sResource('replicasets');
  const createResource = useCreateK8sResource('replicasets');
 
+ const rawReplicaSetItems: ReplicaSetResource[] = useMemo(() => {
+   if (isBackendAvailable) return isConnected ? serverItems : [];
+   return isConnected && fallbackData ? (fallbackData.items ?? []) : [];
+ }, [isBackendAvailable, serverItems, fallbackData, isConnected]);
+
  // eslint-disable-next-line react-hooks/exhaustive-deps
- const items: ReplicaSet[] = isConnected && data ? (data.items ?? []).map(transformResource) : [];
+ const items: ReplicaSet[] = useMemo(() => rawReplicaSetItems.map(transformResource), [rawReplicaSetItems]);
 
  const stats = useMemo(() => ({
  total: items.length,
@@ -148,13 +181,17 @@ export default function ReplicaSets() {
  const namespaces = useMemo(() => ['all', ...Array.from(new Set(items.map(i => i.namespace)))], [items]);
 
  const itemsAfterSearchAndNs = useMemo(() => {
+ if (isBackendAvailable) {
+ // Server handled search + namespace; only apply activeOnly client-side
+ return items.filter((item) => !activeOnly || item.desired > 0);
+ }
  return items.filter((item) => {
  const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) || item.namespace.toLowerCase().includes(searchQuery.toLowerCase());
  const matchesNamespace = selectedNamespace === 'all' || item.namespace === selectedNamespace;
  const matchesActive = !activeOnly || item.desired > 0;
  return matchesSearch && matchesNamespace && matchesActive;
  });
- }, [items, searchQuery, selectedNamespace, activeOnly]);
+ }, [isBackendAvailable, items, searchQuery, selectedNamespace, activeOnly]);
 
  const replicaSetsTableConfig: ColumnConfig<ReplicaSet>[] = useMemo(() => [
  { columnId: 'name', getValue: (i) => i.name, sortable: true, filterable: true },
@@ -178,11 +215,12 @@ export default function ReplicaSets() {
  alwaysVisible: ['name'],
  });
 
- const totalFiltered = filteredItems.length;
+ const totalFiltered = isBackendAvailable ? serverTotal : filteredItems.length;
  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
  const safePageIndex = Math.min(pageIndex, totalPages - 1);
  const start = safePageIndex * pageSize;
- const itemsOnPage = filteredItems.slice(start, start + pageSize);
+ // In backend mode, filteredItems IS the current page (server paginated)
+ const itemsOnPage = isBackendAvailable ? filteredItems : filteredItems.slice(start, start + pageSize);
 
  const metricsEntries = useMemo(
  () => itemsOnPage.map((i) => ({ namespace: i.namespace, name: i.name })),
@@ -193,8 +231,7 @@ export default function ReplicaSets() {
  // Calculate resource max values from replicaset pod template container limits/requests
  const replicasetResourceMaxMap = useMemo(() => {
  const m: Record<string, { cpuMax?: number; memoryMax?: number }> = {};
- if (data?.items) {
- data.items.forEach((rsResource) => {
+ rawReplicaSetItems.forEach((rsResource) => {
  const key = `${rsResource.metadata.namespace}/${rsResource.metadata.name}`;
  const containers = rsResource.spec?.template?.spec?.containers || [];
  const cpuMax = calculatePodResourceMax(containers, 'cpu');
@@ -203,9 +240,8 @@ export default function ReplicaSets() {
  m[key] = { cpuMax, memoryMax };
  }
  });
- }
  return m;
- }, [data?.items]);
+ }, [rawReplicaSetItems]);
 
  const groupedOnPage = useMemo(() => {
  if ((listView !== 'byNamespace' && listView !== 'byOwner') || itemsOnPage.length === 0) return [];
@@ -223,15 +259,20 @@ export default function ReplicaSets() {
  }, [listView, itemsOnPage]);
 
  useEffect(() => {
- if (safePageIndex !== pageIndex) setPageIndex(safePageIndex);
- }, [safePageIndex, pageIndex]);
+ if (!isBackendAvailable && safePageIndex !== pageIndex) setPageIndex(safePageIndex);
+ }, [isBackendAvailable, safePageIndex, pageIndex]);
 
  const handlePageSizeChange = (size: number) => {
  setPageSize(size);
  setPageIndex(0);
  };
 
- const pagination = {
+ const pagination = isBackendAvailable
+ ? {
+ ...serverPagination,
+ rangeLabel: serverPagination.rangeLabel ?? (serverTotal === 0 ? 'No replicasets' : undefined),
+ }
+ : {
  rangeLabel: totalFiltered > 0
  ? `Showing ${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered}`
  : 'No replicasets',
@@ -339,11 +380,11 @@ spec:
  const map = new Map<string, Record<string, string>>();
  for (const key of selectedItems) {
  const [ns, n] = key.split('/');
- const raw = (data?.items ?? []).find((r) => r.metadata.namespace === ns && r.metadata.name === n);
+ const raw = rawReplicaSetItems.find((r) => r.metadata.namespace === ns && r.metadata.name === n);
  if (raw) map.set(key, raw.metadata.labels ?? {});
  }
  return map;
- }, [selectedItems, data?.items]);
+ }, [selectedItems, rawReplicaSetItems]);
 
  const isAllSelected = multiSelect.isAllSelected(allItemKeys);
  const isSomeSelected = multiSelect.isSomeSelected(allItemKeys);

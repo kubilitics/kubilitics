@@ -28,10 +28,10 @@ export function useClusterOverviewData() {
 
     const fallbackEnabled = !!(activeCluster || clusterId);
 
-    const nodes = useK8sResourceList('nodes', undefined, { enabled: fallbackEnabled });
-    const namespaces = useK8sResourceList('namespaces', undefined, { enabled: fallbackEnabled });
-    const events = useK8sResourceList('events', undefined, { enabled: fallbackEnabled });
-    const apiServices = useK8sResourceList('apiservices', undefined, { enabled: fallbackEnabled });
+    const nodes = useK8sResourceList('nodes', undefined, { enabled: fallbackEnabled, limit: 500 });
+    const namespaces = useK8sResourceList('namespaces', undefined, { enabled: fallbackEnabled, limit: 500 });
+    const events = useK8sResourceList('events', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const apiServices = useK8sResourceList('apiservices', undefined, { enabled: fallbackEnabled, limit: 500 });
 
     const data = useMemo(() => {
         const items: ClusterOverviewData['resources'] = [];

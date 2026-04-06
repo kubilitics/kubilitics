@@ -108,6 +108,8 @@ func (h *Handler) GetGraphStatus(w http.ResponseWriter, r *http.Request) {
 
 // getGraphEngine returns the graph engine for a cluster, or nil.
 func (h *Handler) getGraphEngine(clusterID string) *graph.ClusterGraphEngine {
+	h.graphEnginesMu.RLock()
+	defer h.graphEnginesMu.RUnlock()
 	if h.graphEngines == nil {
 		return nil
 	}
@@ -116,10 +118,26 @@ func (h *Handler) getGraphEngine(clusterID string) *graph.ClusterGraphEngine {
 
 // getOrStartGraphEngine returns an existing engine or lazily starts one.
 // Uses the request context to resolve the K8s client (same as other handlers).
+// Uses a double-checked locking pattern to avoid the TOCTOU race on the map.
 func (h *Handler) getOrStartGraphEngine(r *http.Request, clusterID string) *graph.ClusterGraphEngine {
+	// Fast path: engine already exists.
+	h.graphEnginesMu.RLock()
+	if h.graphEngines != nil {
+		if engine, ok := h.graphEngines[clusterID]; ok {
+			h.graphEnginesMu.RUnlock()
+			return engine
+		}
+	}
+	h.graphEnginesMu.RUnlock()
+
+	// Slow path: acquire write lock and re-check before inserting (TOCTOU guard).
+	h.graphEnginesMu.Lock()
+	defer h.graphEnginesMu.Unlock()
+
 	if h.graphEngines == nil {
 		h.graphEngines = make(map[string]*graph.ClusterGraphEngine)
 	}
+	// Re-check: another goroutine may have inserted while we were waiting.
 	if engine, ok := h.graphEngines[clusterID]; ok {
 		return engine
 	}
@@ -135,7 +153,7 @@ func (h *Handler) getOrStartGraphEngine(r *http.Request, clusterID string) *grap
 	// rebuild (triggered by informer add/update/delete events). This ensures the
 	// next topology request gets fresh data instead of waiting for TTL expiry.
 	engine.SetOnRebuild(func(cid string) {
-		TopologyCacheInvalidateForCluster(cid)  // V2 handler cache (sync.Map)
+		TopologyCacheInvalidateForCluster(cid)      // V2 handler cache (sync.Map)
 		h.topologyService.InvalidateForCluster(cid) // V1 service cache (topologycache.Cache)
 	})
 	engine.Start(context.Background())

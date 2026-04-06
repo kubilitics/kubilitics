@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -214,6 +215,128 @@ func (im *InformerManager) ListFromCache(resourceType, namespace string, opts me
 	}
 
 	return result, true
+}
+
+// CacheListResult holds paginated cache results with metadata.
+type CacheListResult struct {
+	Items []unstructured.Unstructured
+	Total int64 // total matching items before pagination
+}
+
+// ListFromCacheWithPagination serves resources from the in-memory informer cache
+// with server-side search, sort, and offset-based pagination.
+// - search: case-insensitive substring match on resource name or namespace
+// - sortBy: "name", "namespace", "creationTimestamp", "status" (default: "name")
+// - sortOrder: "asc" (default), "desc"
+// - offset: skip first N items (for page navigation)
+// - limit: max items to return (0 = all)
+func (im *InformerManager) ListFromCacheWithPagination(resourceType, namespace string, search string, sortBy string, sortOrder string, offset int, limit int) (*CacheListResult, bool) {
+	// Cannot serve from cache if informers haven't synced yet
+	if !im.HasSynced() {
+		return nil, false
+	}
+
+	// Map resource type to store key
+	storeKey, ok := resourceKindToStoreKey[strings.ToLower(resourceType)]
+	if !ok {
+		return nil, false
+	}
+
+	store := im.stores[storeKey]
+	if store == nil {
+		return nil, false
+	}
+
+	// Read all items from the informer store (lock-free, O(n))
+	rawItems := store.List()
+	filtered := make([]unstructured.Unstructured, 0, len(rawItems))
+
+	searchLower := strings.ToLower(search)
+
+	for _, item := range rawItems {
+		// Convert runtime.Object to unstructured
+		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(item)
+		if err != nil {
+			continue
+		}
+		u := unstructured.Unstructured{Object: obj}
+
+		// Namespace filter
+		if namespace != "" && u.GetNamespace() != namespace {
+			continue
+		}
+
+		// Search filter: case-insensitive substring on name or namespace
+		if searchLower != "" {
+			nameLower := strings.ToLower(u.GetName())
+			nsLower := strings.ToLower(u.GetNamespace())
+			if !strings.Contains(nameLower, searchLower) && !strings.Contains(nsLower, searchLower) {
+				continue
+			}
+		}
+
+		filtered = append(filtered, u)
+	}
+
+	// Sort
+	if sortBy == "" {
+		sortBy = "name"
+	}
+	if sortOrder == "" {
+		sortOrder = "asc"
+	}
+	descending := strings.ToLower(sortOrder) == "desc"
+
+	sort.Slice(filtered, func(i, j int) bool {
+		var vi, vj string
+		switch strings.ToLower(sortBy) {
+		case "namespace":
+			vi = filtered[i].GetNamespace()
+			vj = filtered[j].GetNamespace()
+		case "creationtimestamp":
+			ti := filtered[i].GetCreationTimestamp().Time
+			tj := filtered[j].GetCreationTimestamp().Time
+			if descending {
+				return ti.After(tj)
+			}
+			return ti.Before(tj)
+		case "status":
+			// For pods use .status.phase; for others fall back to name
+			vi, _, _ = unstructured.NestedString(filtered[i].Object, "status", "phase")
+			vj, _, _ = unstructured.NestedString(filtered[j].Object, "status", "phase")
+			if vi == "" {
+				vi = filtered[i].GetName()
+			}
+			if vj == "" {
+				vj = filtered[j].GetName()
+			}
+		default: // "name"
+			vi = filtered[i].GetName()
+			vj = filtered[j].GetName()
+		}
+		if descending {
+			return vi > vj
+		}
+		return vi < vj
+	})
+
+	// Record total after filtering and sorting, before pagination
+	total := int64(len(filtered))
+
+	// Apply offset
+	if offset > 0 {
+		if offset >= len(filtered) {
+			return &CacheListResult{Items: []unstructured.Unstructured{}, Total: total}, true
+		}
+		filtered = filtered[offset:]
+	}
+
+	// Apply limit
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+
+	return &CacheListResult{Items: filtered, Total: total}, true
 }
 
 // Stop stops all informers

@@ -4,6 +4,7 @@ import { useKubernetesConfigStore } from '@/stores/kubernetesConfigStore';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
 import { listResources, getResource, deleteResource, patchResource, applyManifest, getPodLogsUrl, CONFIRM_DESTRUCTIVE_HEADER, getCronJobJobs, BackendApiError } from '@/services/backendApiClient';
+import type { ResourceListParams } from '@/services/backendApiClient';
 import { notifyError, notifySuccess } from '@/lib/notificationFormatter';
 import yamlParser from 'js-yaml';
 import { useProjectStore } from '@/stores/projectStore';
@@ -447,6 +448,122 @@ export function usePaginatedResourceList<T extends KubernetesResource>(
     refetch,
     pagination,
     pageSize,
+  };
+}
+
+/**
+ * Server-side paginated resource list with search and sort.
+ * Uses offset-based pagination backed by the informer cache.
+ * When backend is not configured, returns empty data (caller should fall back to useK8sResourceList).
+ */
+export function useServerPaginatedResourceList<T extends KubernetesResource>(
+  resourceType: ResourceType,
+  namespace?: string,
+  options?: {
+    enabled?: boolean;
+    pageSize?: number;
+    search?: string;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+  }
+) {
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
+  const storedUrl = useBackendConfigStore((s) => s.backendBaseUrl);
+  const backendBaseUrl = getEffectiveBackendBaseUrl(storedUrl);
+  const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
+  const clusterId = currentClusterId;
+  const useBackend = isBackendConfigured && !!clusterId;
+
+  const { activeProject, activeProjectId } = useProjectStore();
+  const projectNamespaces = useMemo(() => {
+    if (!activeProject || !clusterId || !activeProject.clusters) return null;
+    const projectCluster = activeProject.clusters.find(c => c.cluster_id === clusterId);
+    return projectCluster?.namespaces ?? null;
+  }, [activeProject, clusterId]);
+
+  const pageSize = Math.max(1, Math.min(100, options?.pageSize ?? 50));
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Reset to page 1 when search or sort changes
+  const searchRef = useRef(options?.search);
+  const sortRef = useRef(`${options?.sortBy}-${options?.sortOrder}`);
+  useEffect(() => {
+    const newSort = `${options?.sortBy}-${options?.sortOrder}`;
+    if (searchRef.current !== options?.search || sortRef.current !== newSort) {
+      searchRef.current = options?.search;
+      sortRef.current = newSort;
+      setCurrentPage(1);
+    }
+  }, [options?.search, options?.sortBy, options?.sortOrder]);
+
+  const offset = (currentPage - 1) * pageSize;
+
+  const query = useQuery({
+    queryKey: [
+      'backend', 'resources-paginated', clusterId, activeProjectId ?? 'no-project',
+      resourceType, namespace ?? '',
+      pageSize, offset,
+      options?.search ?? '', options?.sortBy ?? '', options?.sortOrder ?? '',
+    ],
+    queryFn: () => {
+      const params: ResourceListParams = {
+        limit: pageSize,
+        offset,
+        search: options?.search || undefined,
+        sortBy: options?.sortBy || undefined,
+        sortOrder: options?.sortOrder || undefined,
+      };
+      // Apply project namespace scoping
+      const projectNamespacesParam = projectNamespaces && projectNamespaces.length !== 1 ? projectNamespaces : undefined;
+      const projectNamespaceParam = projectNamespaces && projectNamespaces.length === 1 ? projectNamespaces[0] : undefined;
+      if (projectNamespacesParam) {
+        params.namespaces = projectNamespacesParam;
+      } else if (namespace || projectNamespaceParam) {
+        params.namespace = namespace || projectNamespaceParam;
+      }
+      return listResources(backendBaseUrl, clusterId!, resourceType, params).then(
+        (r) => ({ items: r.items as T[], metadata: r.metadata })
+      );
+    },
+    enabled: useBackend && (options?.enabled !== false),
+    staleTime: 15_000,
+    refetchOnMount: true,
+    placeholderData: keepPreviousData,
+    retry: (failureCount, error) => {
+      if (error instanceof BackendApiError && error.status === 404) return false;
+      return failureCount < 3;
+    },
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+  });
+
+  const total = query.data?.metadata?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  const pagination: UsePaginatedResourceListPagination = {
+    hasPrev: currentPage > 1,
+    hasNext: currentPage < totalPages,
+    onPrev: () => setCurrentPage(p => Math.max(1, p - 1)),
+    onNext: () => setCurrentPage(p => Math.min(totalPages, p + 1)),
+    currentPage,
+    totalPages,
+    onPageChange: (page: number) => setCurrentPage(Math.max(1, Math.min(totalPages, page))),
+    rangeLabel: total > 0
+      ? `Showing ${offset + 1}–${Math.min(offset + pageSize, total)} of ${total}`
+      : undefined,
+    dataUpdatedAt: query.dataUpdatedAt,
+    isFetching: query.isFetching,
+  };
+
+  return {
+    data: query.data?.items ?? [],
+    isLoading: query.isLoading,
+    isError: query.isError,
+    isFetching: query.isFetching,
+    dataUpdatedAt: query.dataUpdatedAt,
+    refetch: query.refetch,
+    total,
+    pagination,
+    isBackendAvailable: useBackend,
   };
 }
 

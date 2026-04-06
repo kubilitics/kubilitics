@@ -11,10 +11,10 @@ export function useResourcesOverview() {
 
     const fallbackEnabled = !!(activeCluster || clusterId);
 
-    const quotas = useK8sResourceList('resourcequotas', undefined, { enabled: fallbackEnabled });
-    const limits = useK8sResourceList('limitranges', undefined, { enabled: fallbackEnabled });
-    const slices = useK8sResourceList('resourceslices', undefined, { enabled: fallbackEnabled });
-    const classes = useK8sResourceList('deviceclasses', undefined, { enabled: fallbackEnabled });
+    const quotas = useK8sResourceList('resourcequotas', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const limits = useK8sResourceList('limitranges', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const slices = useK8sResourceList('resourceslices', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const classes = useK8sResourceList('deviceclasses', undefined, { enabled: fallbackEnabled, limit: 1000 });
 
     const data = useMemo(() => {
         const items: Record<string, unknown>[] = [];

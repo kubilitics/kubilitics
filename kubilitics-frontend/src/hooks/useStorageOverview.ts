@@ -28,11 +28,11 @@ export function useStorageOverview() {
 
     const fallbackEnabled = !!(activeCluster || clusterId);
 
-    const pvcs = useK8sResourceList('persistentvolumeclaims', undefined, { enabled: fallbackEnabled });
-    const pvs = useK8sResourceList('persistentvolumes', undefined, { enabled: fallbackEnabled });
-    const scs = useK8sResourceList('storageclasses', undefined, { enabled: fallbackEnabled });
-    const configMaps = useK8sResourceList('configmaps', undefined, { enabled: fallbackEnabled });
-    const secrets = useK8sResourceList('secrets', undefined, { enabled: fallbackEnabled });
+    const pvcs = useK8sResourceList('persistentvolumeclaims', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const pvs = useK8sResourceList('persistentvolumes', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const scs = useK8sResourceList('storageclasses', undefined, { enabled: fallbackEnabled, limit: 500 });
+    const configMaps = useK8sResourceList('configmaps', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const secrets = useK8sResourceList('secrets', undefined, { enabled: fallbackEnabled, limit: 1000 });
 
     const data = useMemo(() => {
         const items: StorageOverviewData['resources'] = [];

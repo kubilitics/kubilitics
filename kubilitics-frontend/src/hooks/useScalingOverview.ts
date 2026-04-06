@@ -11,9 +11,9 @@ export function useScalingOverview() {
 
     const fallbackEnabled = !!(activeCluster || clusterId);
 
-    const hpas = useK8sResourceList('horizontalpodautoscalers', undefined, { enabled: fallbackEnabled });
-    const vpas = useK8sResourceList('verticalpodautoscalers', undefined, { enabled: fallbackEnabled });
-    const pdbs = useK8sResourceList('poddisruptionbudgets', undefined, { enabled: fallbackEnabled });
+    const hpas = useK8sResourceList('horizontalpodautoscalers', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const vpas = useK8sResourceList('verticalpodautoscalers', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const pdbs = useK8sResourceList('poddisruptionbudgets', undefined, { enabled: fallbackEnabled, limit: 1000 });
 
     const data = useMemo(() => {
         const items: Record<string, unknown>[] = [];

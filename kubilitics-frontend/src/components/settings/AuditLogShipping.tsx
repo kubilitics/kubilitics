@@ -110,7 +110,9 @@ export default function AuditLogShipping() {
   const fetchConfig = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${backendBaseUrl}/api/v1/settings/audit-log`);
+      const res = await fetch(`${backendBaseUrl}/api/v1/settings/audit-log`, {
+        signal: AbortSignal.timeout(10_000),
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.sinks?.length) setSinks(data.sinks);
@@ -166,6 +168,7 @@ export default function AuditLogShipping() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sinks, retention }),
+        signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: res.statusText }));
@@ -173,9 +176,13 @@ export default function AuditLogShipping() {
       }
       toast.success('Audit log shipping configuration saved');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to save';
-      setError(msg);
-      toast.error(msg);
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        toast.error('Request timed out — backend may be unreachable');
+      } else {
+        const msg = err instanceof Error ? err.message : 'Failed to save';
+        setError(msg);
+        toast.error(msg);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -190,6 +197,7 @@ export default function AuditLogShipping() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sink),
+        signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) throw new Error('Connection test failed');
       const data: SinkHealth = await res.json();
@@ -200,11 +208,15 @@ export default function AuditLogShipping() {
         toast.warning(`${SINK_META[sink.type].label}: ${data.message}`);
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        toast.error('Request timed out — backend may be unreachable');
+      } else {
+        toast.error('Connection test failed');
+      }
       setSinkHealth((prev) => ({
         ...prev,
         [sink.id]: { sinkId: sink.id, status: 'error', message: err instanceof Error ? err.message : 'Test failed' },
       }));
-      toast.error('Connection test failed');
     } finally {
       setTestingSinkId(null);
     }

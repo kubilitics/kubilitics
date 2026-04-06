@@ -33,22 +33,33 @@ export async function listCRDInstances(
   return backendRequest<BackendResourceListResponse>(baseUrl, path);
 }
 
+export interface ResourceListParams {
+  namespace?: string;
+  namespaces?: string[];
+  limit?: number;
+  continue?: string;
+  labelSelector?: string;
+  fieldSelector?: string;
+  /** Server-side full-text search (name, namespace). Requires informer cache. */
+  search?: string;
+  /** Server-side sort field: name | namespace | creationTimestamp */
+  sortBy?: string;
+  /** Server-side sort direction */
+  sortOrder?: 'asc' | 'desc';
+  /** Offset-based pagination offset (0-indexed). Requires informer cache. */
+  offset?: number;
+}
+
 /**
  * GET /api/v1/clusters/{clusterId}/resources/{kind} — list resources by kind.
- * Query: namespace (single), namespaces (comma-separated for project scope), limit, continue, labelSelector, fieldSelector.
+ * Query: namespace (single), namespaces (comma-separated for project scope), limit, continue,
+ * labelSelector, fieldSelector, search, sortBy, sortOrder, offset (server-side pagination).
  */
 export async function listResources(
   baseUrl: string,
   clusterId: string,
   kind: string,
-  params?: {
-    namespace?: string;
-    namespaces?: string[];
-    limit?: number;
-    continue?: string;
-    labelSelector?: string;
-    fieldSelector?: string;
-  }
+  params?: ResourceListParams
 ): Promise<BackendResourceListResponse> {
   const search = new URLSearchParams();
   if (params?.namespaces !== undefined) {
@@ -60,6 +71,10 @@ export async function listResources(
   if (params?.continue) search.set('continue', params.continue);
   if (params?.labelSelector) search.set('labelSelector', params.labelSelector);
   if (params?.fieldSelector) search.set('fieldSelector', params.fieldSelector);
+  if (params?.search) search.set('search', params.search);
+  if (params?.sortBy) search.set('sortBy', params.sortBy);
+  if (params?.sortOrder) search.set('sortOrder', params.sortOrder);
+  if (params?.offset !== undefined) search.set('offset', String(params.offset));
   const query = search.toString();
   const path = `clusters/${encodeURIComponent(clusterId)}/resources/${encodeURIComponent(kind)}${query ? `?${query}` : ''}`;
   try {

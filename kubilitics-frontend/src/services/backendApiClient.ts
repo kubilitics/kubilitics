@@ -84,6 +84,7 @@ export {
 export { getBlastRadius } from './api/blastRadius';
 
 // ── Resources ─────────────────────────────────────────────────────────────────
+export type { ResourceListParams } from './api/resources';
 export {
   listCRDInstances,
   listResources,

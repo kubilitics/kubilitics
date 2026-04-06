@@ -106,19 +106,37 @@ func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// BE-FUNC-002: Pagination support (limit, continue token). For multi-namespace, continue is ignored.
-	opts := metav1.ListOptions{}
-	const defaultLimit = 100
-	const maxLimit = 500
-	opts.Limit = int64(defaultLimit)
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if n, err := strconv.ParseInt(limitStr, 10, 64); err == nil && n > 0 {
-			if n > maxLimit {
-				n = maxLimit
-			}
-			opts.Limit = n
+	// New pagination/search/sort query params
+	search := r.URL.Query().Get("search")
+	sortBy := r.URL.Query().Get("sortBy")
+	sortOrder := r.URL.Query().Get("sortOrder")
+	offsetStr := r.URL.Query().Get("offset")
+	offset := 0
+	if offsetStr != "" {
+		if n, err := strconv.Atoi(offsetStr); err == nil && n > 0 {
+			offset = n
 		}
 	}
+
+	// BE-FUNC-002: Pagination support (limit, continue token). For multi-namespace, continue is ignored.
+	// Cache reads are in-memory — allow up to 5000 for cache hits.
+	// K8s API calls use a lower cap of 500 to protect the API server.
+	opts := metav1.ListOptions{}
+	const defaultLimit = 100
+	const maxLimitAPI = 500
+	const maxLimitCache = 5000
+	requestedLimit := int64(defaultLimit)
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if n, err := strconv.ParseInt(limitStr, 10, 64); err == nil && n > 0 {
+			requestedLimit = n
+		}
+	}
+	// Set API limit now (capped conservatively); cache path will use its own cap
+	apiLimit := requestedLimit
+	if apiLimit > maxLimitAPI {
+		apiLimit = maxLimitAPI
+	}
+	opts.Limit = apiLimit
 	continueToken := r.URL.Query().Get("continue")
 	if continueToken != "" && len(nsList) == 0 {
 		opts.Continue = continueToken
@@ -132,6 +150,13 @@ func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
 
 	var list *unstructured.UnstructuredList
 	cacheHit := false
+	var cacheTotal int64 = -1 // -1 means not set from cache
+
+	// Effective limit for cache reads (higher cap — reads are sub-millisecond, in-memory)
+	cacheLimit := int(requestedLimit)
+	if cacheLimit > maxLimitCache {
+		cacheLimit = maxLimitCache
+	}
 
 	// PERF: Try informer cache first (Lens/Headlamp model).
 	// The OverviewCache maintains a live mirror of every resource via Watch events.
@@ -141,26 +166,50 @@ func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
 		if hasNamespacesParam && len(nsList) == 0 {
 			list = &unstructured.UnstructuredList{Items: nil}
 			cacheHit = true
+			cacheTotal = 0
 		} else if len(nsList) > 0 {
-			// Multi-namespace: try cache for each namespace and merge
-			merged := &unstructured.UnstructuredList{}
-			allHit := true
-			for _, ns := range nsList {
-				part, ok := im.ListFromCache(kind, ns, opts)
-				if !ok {
-					allHit = false
-					break
+			// Multi-namespace: only use enhanced cache path when no selectors/continue
+			if opts.LabelSelector == "" && opts.FieldSelector == "" && opts.Continue == "" {
+				merged := &unstructured.UnstructuredList{}
+				allHit := true
+				var mergedTotal int64 = 0
+				for _, ns := range nsList {
+					result, ok := im.ListFromCacheWithPagination(kind, ns, search, sortBy, sortOrder, 0, 0)
+					if !ok {
+						allHit = false
+						break
+					}
+					mergedTotal += result.Total
+					merged.Items = append(merged.Items, result.Items...)
 				}
-				merged.Items = append(merged.Items, part.Items...)
+				if allHit {
+					// Apply global limit/offset across merged results
+					cacheTotal = mergedTotal
+					if offset > 0 {
+						if offset >= len(merged.Items) {
+							merged.Items = []unstructured.Unstructured{}
+						} else {
+							merged.Items = merged.Items[offset:]
+						}
+					}
+					if cacheLimit > 0 && len(merged.Items) > cacheLimit {
+						merged.Items = merged.Items[:cacheLimit]
+					}
+					list = merged
+					cacheHit = true
+				}
 			}
-			if allHit {
-				if int64(len(merged.Items)) > opts.Limit {
-					merged.Items = merged.Items[:opts.Limit]
-				}
-				list = merged
+		} else if opts.LabelSelector == "" && opts.FieldSelector == "" && opts.Continue == "" {
+			// Single namespace (or cluster-scoped): use enhanced pagination cache path
+			result, ok := im.ListFromCacheWithPagination(kind, namespace, search, sortBy, sortOrder, offset, cacheLimit)
+			if ok {
+				list = &unstructured.UnstructuredList{}
+				list.Items = result.Items
+				cacheTotal = result.Total
 				cacheHit = true
 			}
 		} else {
+			// Fallback: label/field selectors or continue token — use old cache path (no search/sort)
 			if cached, ok := im.ListFromCache(kind, namespace, opts); ok {
 				list = cached
 				cacheHit = true
@@ -235,15 +284,29 @@ func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
 			redact.SecretData(itemsRaw[i])
 		}
 	}
-	total := int64(len(itemsRaw))
-	if len(nsList) == 0 && list.GetRemainingItemCount() != nil {
-		total = int64(len(itemsRaw)) + *list.GetRemainingItemCount()
+
+	var total int64
+	if cacheTotal >= 0 {
+		// Cache path: use the pre-pagination total reported by ListFromCacheWithPagination
+		// so the frontend knows the real dataset size, not just the truncated page size.
+		total = cacheTotal
+	} else {
+		// Non-cache (K8s API) path: best-effort total from RemainingItemCount
+		total = int64(len(itemsRaw))
+		if len(nsList) == 0 && list.GetRemainingItemCount() != nil {
+			total = int64(len(itemsRaw)) + *list.GetRemainingItemCount()
+		}
 	}
+
 	meta := map[string]interface{}{
 		"resourceVersion": list.GetResourceVersion(),
-		"total":            total,
+		"total":           total,
 	}
-	if len(nsList) == 0 {
+	if cacheHit {
+		// Expose offset in cache responses so clients can implement page navigation
+		meta["offset"] = offset
+	}
+	if len(nsList) == 0 && !cacheHit {
 		meta["continue"] = list.GetContinue()
 		if list.GetRemainingItemCount() != nil {
 			meta["remainingItemCount"] = *list.GetRemainingItemCount()

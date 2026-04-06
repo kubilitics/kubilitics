@@ -37,7 +37,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useK8sResourceList, useDeleteK8sResource, useCreateK8sResource, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
+import { useK8sResourceList, useServerPaginatedResourceList, useDeleteK8sResource, useCreateK8sResource, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
@@ -227,12 +227,55 @@ export default function Pods() {
  const setSelectedPods = (s: Set<string>) => { if (s.size === 0) multiSelect.clearSelection(); else multiSelect.selectAll(Array.from(s)); };
  const [showTableFilters, setShowTableFilters] = useState(false);
 
- // Pagination State
+ // Client-side page size selector (used only in fallback/non-backend mode)
  const [pageSize, setPageSize] = useState(10);
  const [pageIndex, setPageIndex] = useState(0);
 
  const { isConnected } = useConnectionStatus();
- const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = useK8sResourceList<PodResource>('pods', undefined, { limit: 10000 });
+
+ // Server-side pagination path (backend + informer cache)
+ // sortKey/sortOrder are not yet available here (declared below via useTableFiltersAndSort),
+ // so we derive them from a separate local ref-like state. We pass the debounced search
+ // to the server; namespace/status filtering remains client-side.
+ const [serverSortKey, setServerSortKey] = useState<string>('name');
+ const [serverSortOrder, setServerSortOrder] = useState<'asc' | 'desc'>('asc');
+
+ // Map Pods sort columns to backend sortBy field names
+ const serverSortBy = (serverSortKey === 'age') ? 'creationTimestamp'
+   : (serverSortKey === 'name' || serverSortKey === 'namespace') ? serverSortKey
+   : undefined; // cpu/memory/ip/node/restarts → client-side only
+
+ // Server-side fetch (backend mode)
+ const {
+   data: serverItems,
+   isLoading: serverIsLoading,
+   isError: serverIsError,
+   isFetching: serverIsFetching,
+   dataUpdatedAt: serverDataUpdatedAt,
+   refetch: serverRefetch,
+   pagination: serverPagination,
+   total: serverTotal,
+   isBackendAvailable,
+ } = useServerPaginatedResourceList<PodResource>('pods', selectedNamespaces.size === 1 ? Array.from(selectedNamespaces)[0] : undefined, {
+   pageSize: 50,
+   search: debouncedSearch || undefined,
+   sortBy: serverSortBy,
+   sortOrder: serverSortOrder,
+ });
+
+ // Fallback: direct K8s / non-backend mode (limit 500, client-side pagination)
+ const { data: fallbackData, isLoading: fallbackIsLoading, isError: fallbackIsError, isFetching: fallbackIsFetching, dataUpdatedAt: fallbackDataUpdatedAt, refetch: fallbackRefetch } = useK8sResourceList<PodResource>('pods', undefined, {
+   limit: 500,
+   enabled: !isBackendAvailable,
+ });
+
+ // Unified data surface
+ const data = isBackendAvailable ? null : fallbackData;
+ const isLoading = isBackendAvailable ? serverIsLoading : fallbackIsLoading;
+ const isError = isBackendAvailable ? serverIsError : fallbackIsError;
+ const isFetching = isBackendAvailable ? serverIsFetching : fallbackIsFetching;
+ const dataUpdatedAt = isBackendAvailable ? serverDataUpdatedAt : fallbackDataUpdatedAt;
+ const refetch = isBackendAvailable ? serverRefetch : fallbackRefetch;
  const deleteResource = useDeleteK8sResource('pods');
  const patchResource = usePatchK8sResource('pods');
  const createResource = useCreateK8sResource('pods');
@@ -241,9 +284,14 @@ export default function Pods() {
  const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
  const clusterId = currentClusterId ?? null;
 
- const fullPods: Pod[] = useMemo(() => {
- return isConnected && data ? (data.items ?? []).map(transformResource) : [];
- }, [data, isConnected]);
+ // In backend mode, serverItems is the current page from the server (already paginated + searched).
+ // In fallback mode, fallbackData.items is the full fetched list for client-side processing.
+ const rawItems: PodResource[] = useMemo(() => {
+   if (isBackendAvailable) return isConnected ? serverItems : [];
+   return isConnected && fallbackData ? (fallbackData.items ?? []) : [];
+ }, [isBackendAvailable, serverItems, fallbackData, isConnected]);
+
+ const fullPods: Pod[] = useMemo(() => rawItems.map(transformResource), [rawItems]);
 
  const namespaceList = useMemo(() => {
  return Array.from(new Set(fullPods.map(p => p.namespace))).sort();
@@ -261,8 +309,7 @@ export default function Pods() {
  // Calculate resource max values from pod spec (for CPU/Memory bars)
  const podResourceMaxMap = useMemo(() => {
  const m: Record<string, { cpuMax?: number; memoryMax?: number }> = {};
- if (data?.items) {
- data.items.forEach((podResource) => {
+ rawItems.forEach((podResource) => {
  const key = `${podResource.metadata.namespace}/${podResource.metadata.name}`;
  const containers = podResource.spec?.containers || [];
  const cpuMax = calculatePodResourceMax(containers, 'cpu'); // millicores
@@ -271,11 +318,19 @@ export default function Pods() {
  m[key] = { cpuMax, memoryMax };
  }
  });
- }
  return m;
- }, [data?.items]);
+ }, [rawItems]);
 
  const currentFilteredPods = useMemo(() => {
+ if (isBackendAvailable) {
+ // Server already handled search + single-namespace filter.
+ // Only apply multi-namespace and status filters client-side here.
+ return fullPods.filter((pod) => {
+ const matchesNs = selectedNamespaces.size === 0 || selectedNamespaces.has(pod.namespace);
+ return matchesNs;
+ });
+ }
+ // Fallback / non-backend: full client-side filtering
  const q = debouncedSearch.toLowerCase();
  return fullPods.filter((pod) => {
  const matchesSearch = !q ||
@@ -286,7 +341,7 @@ export default function Pods() {
  const matchesNs = selectedNamespaces.size === 0 || selectedNamespaces.has(pod.namespace);
  return matchesSearch && matchesNs;
  });
- }, [fullPods, debouncedSearch, selectedNamespaces]);
+ }, [isBackendAvailable, fullPods, debouncedSearch, selectedNamespaces]);
 
  // High-level stats aligned with the current global scope (search + namespace filter)
  const stats = useMemo(
@@ -417,23 +472,36 @@ export default function Pods() {
  });
  }, [filteredPods, fullPods]);
 
- // Calculate pagination
- const totalFiltered = filteredPods.length;
+ // Sync sort state from useTableFiltersAndSort → server-side sort params
+ // (only fields the backend supports: name, namespace, age/creationTimestamp)
+ useEffect(() => {
+ setServerSortKey(sortKey);
+ setServerSortOrder(sortOrder as 'asc' | 'desc');
+ }, [sortKey, sortOrder]);
+
+ // Pagination: server-side in backend mode, client-side in fallback mode
+ const totalFiltered = isBackendAvailable ? serverTotal : filteredPods.length;
  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
  const safePageIndex = Math.min(pageIndex, totalPages - 1);
  const start = safePageIndex * pageSize;
- const itemsOnPage = filteredPods.slice(start, start + pageSize);
+ // In backend mode, server returns the correct page; filteredPods IS the current page
+ const itemsOnPage = isBackendAvailable ? filteredPods : filteredPods.slice(start, start + pageSize);
 
  useEffect(() => {
- if (safePageIndex !== pageIndex) setPageIndex(safePageIndex);
- }, [safePageIndex, pageIndex]);
+ if (!isBackendAvailable && safePageIndex !== pageIndex) setPageIndex(safePageIndex);
+ }, [isBackendAvailable, safePageIndex, pageIndex]);
 
  const handlePageSizeChange = (size: number) => {
  setPageSize(size);
  setPageIndex(0);
  };
 
- const pagination = {
+ const pagination = isBackendAvailable
+ ? {
+ ...serverPagination,
+ rangeLabel: serverPagination.rangeLabel ?? (serverTotal === 0 ? 'No pods' : undefined),
+ }
+ : {
  rangeLabel: totalFiltered > 0
  ? `Showing ${start + 1}–${Math.min(start + pageSize, totalFiltered)} of ${totalFiltered}`
  : 'No pods',
@@ -698,11 +766,11 @@ export default function Pods() {
  const map = new Map<string, Record<string, string>>();
  for (const key of selectedPods) {
  const [ns, n] = key.split('/');
- const raw = (data?.items ?? []).find((r) => r.metadata.namespace === ns && r.metadata.name === n);
+ const raw = rawItems.find((r) => r.metadata.namespace === ns && r.metadata.name === n);
  if (raw) map.set(key, raw.metadata.labels ?? {});
  }
  return map;
- }, [selectedPods, data?.items]);
+ }, [selectedPods, rawItems]);
 
  const keyboardNav = useTableKeyboardNav({
  rowCount: itemsToRender.length,

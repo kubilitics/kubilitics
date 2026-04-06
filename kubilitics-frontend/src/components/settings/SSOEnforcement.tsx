@@ -116,7 +116,9 @@ export default function SSOEnforcement() {
   const fetchConfig = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${backendBaseUrl}/api/v1/settings/sso`);
+      const res = await fetch(`${backendBaseUrl}/api/v1/settings/sso`, {
+        signal: AbortSignal.timeout(10_000),
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.config) setConfig({ ...DEFAULT_CONFIG, ...data.config });
@@ -162,6 +164,7 @@ export default function SSOEnforcement() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
+        signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: res.statusText }));
@@ -171,9 +174,13 @@ export default function SSOEnforcement() {
       if (data.health) setHealth(data.health);
       toast.success('SSO configuration saved');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to save';
-      setError(msg);
-      toast.error(msg);
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        toast.error('Request timed out — backend may be unreachable');
+      } else {
+        const msg = err instanceof Error ? err.message : 'Failed to save';
+        setError(msg);
+        toast.error(msg);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -188,6 +195,7 @@ export default function SSOEnforcement() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
+        signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) throw new Error('SSO verification failed');
       const data: SSOHealth = await res.json();
@@ -198,8 +206,12 @@ export default function SSOEnforcement() {
         toast.warning(data.message || 'SSO verification returned warnings');
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        toast.error('Request timed out — backend may be unreachable');
+      } else {
+        toast.error('SSO verification failed');
+      }
       setHealth({ status: 'error', message: err instanceof Error ? err.message : 'Verification failed' });
-      toast.error('SSO verification failed');
     } finally {
       setIsTesting(false);
     }
