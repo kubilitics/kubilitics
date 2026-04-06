@@ -95,7 +95,9 @@ export default function CacheConfiguration() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${backendBaseUrl}/api/v1/settings/cache`);
+      const res = await fetch(`${backendBaseUrl}/api/v1/settings/cache`, {
+        signal: AbortSignal.timeout(10_000),
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.config) {
@@ -150,6 +152,7 @@ export default function CacheConfiguration() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
+        signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: res.statusText }));
@@ -159,9 +162,13 @@ export default function CacheConfiguration() {
       if (data.health) setHealth(data.health);
       toast.success('Cache configuration saved');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to save';
-      setError(msg);
-      toast.error(msg);
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        toast.error('Request timed out — backend may be unreachable');
+      } else {
+        const msg = err instanceof Error ? err.message : 'Failed to save';
+        setError(msg);
+        toast.error(msg);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -182,6 +189,7 @@ export default function CacheConfiguration() {
             ? { host: redisHost, port: redisPort, password: redisPassword, db: redisDb, tls: redisTls }
             : undefined,
         }),
+        signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) throw new Error('Health check failed');
       const data: CacheHealth = await res.json();
@@ -192,7 +200,11 @@ export default function CacheConfiguration() {
         toast.warning(`Cache status: ${data.status}`, { description: data.message });
       }
     } catch (err) {
-      toast.error('Health check failed');
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        toast.error('Request timed out — backend may be unreachable');
+      } else {
+        toast.error('Health check failed');
+      }
       setHealth({
         status: 'unreachable',
         provider,

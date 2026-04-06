@@ -128,9 +128,10 @@ export default function HomePage() {
   const { data: overview } = useClusterOverview(currentClusterId ?? undefined);
 
   // Resource counts for the active cluster
-  const podsList = useK8sResourceList('pods', undefined, { enabled: isConnected, limit: 5000 });
-  const deploymentsList = useK8sResourceList('deployments', undefined, { enabled: isConnected });
-  const servicesList = useK8sResourceList('services', undefined, { enabled: isConnected });
+  // Reduced from 5000 — overview.pod_status provides counts; this is only a fallback
+  const podsList = useK8sResourceList('pods', undefined, { enabled: isConnected, limit: 200 });
+  const deploymentsList = useK8sResourceList('deployments', undefined, { enabled: isConnected, limit: 500 });
+  const servicesList = useK8sResourceList('services', undefined, { enabled: isConnected, limit: 500 });
 
   const podStats = useMemo(() => {
     if (overview?.pod_status) {

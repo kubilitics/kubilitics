@@ -18,14 +18,18 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
 
+// pfCleanerOnce ensures startPortForwardCleaner is started at most once.
+var pfCleanerOnce sync.Once
+
 // ─── Session Store ────────────────────────────────────────────────────────────
 
 // portForwardSession tracks a running kubectl port-forward subprocess.
 type portForwardSession struct {
-	cancel  context.CancelFunc
-	cmd     *exec.Cmd
-	mu      sync.Mutex
-	stopped bool
+	cancel       context.CancelFunc
+	cmd          *exec.Cmd
+	mu           sync.Mutex
+	stopped      bool
+	lastActivity time.Time
 }
 
 func (s *portForwardSession) stop() {
@@ -73,6 +77,42 @@ func pfLookup(clusterID, sessionID string) (*portForwardSession, bool) {
 		return sess, found
 	}
 	return nil, false
+}
+
+// startPortForwardCleaner runs a background goroutine that periodically removes
+// abandoned port-forward sessions. A session is eligible for removal when:
+//   - its lastActivity is older than 30 minutes, AND
+//   - the underlying subprocess has already exited (ProcessState != nil) or was
+//     explicitly stopped.
+//
+// Call once via pfCleanerOnce.Do.
+func startPortForwardCleaner() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			expiry := time.Now().Add(-30 * time.Minute)
+			pfMu.Lock()
+			for clusterID, sessions := range pfByCluster {
+				for sessionID, sess := range sessions {
+					sess.mu.Lock()
+					idle := sess.lastActivity.Before(expiry)
+					dead := sess.stopped ||
+						(sess.cmd != nil && sess.cmd.ProcessState != nil)
+					sess.mu.Unlock()
+
+					if idle && dead {
+						log.Printf("[port-forward] cleaner: removing expired session %s (cluster %s)", sessionID, clusterID)
+						delete(sessions, sessionID)
+					}
+				}
+				if len(sessions) == 0 {
+					delete(pfByCluster, clusterID)
+				}
+			}
+			pfMu.Unlock()
+		}
+	}()
 }
 
 // ─── Request / Response types ─────────────────────────────────────────────────
@@ -214,8 +254,11 @@ func (h *Handler) PostPortForward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := uuid.New().String()
-	sess := &portForwardSession{cancel: cancel, cmd: cmd}
+	sess := &portForwardSession{cancel: cancel, cmd: cmd, lastActivity: time.Now()}
 	pfStore(clusterID, sessionID, sess)
+
+	// Ensure the background cleaner is running (started at most once per process).
+	pfCleanerOnce.Do(startPortForwardCleaner)
 
 	// Reap subprocess in background; remove session when the process exits naturally.
 	go func() {

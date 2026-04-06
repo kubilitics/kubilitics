@@ -11,7 +11,7 @@ export function useCRDOverview() {
 
     const fallbackEnabled = !!(activeCluster || clusterId);
 
-    const crds = useK8sResourceList('customresourcedefinitions', undefined, { enabled: fallbackEnabled });
+    const crds = useK8sResourceList('customresourcedefinitions', undefined, { enabled: fallbackEnabled, limit: 1000 });
 
     const data = useMemo(() => {
         const items: Record<string, unknown>[] = [];

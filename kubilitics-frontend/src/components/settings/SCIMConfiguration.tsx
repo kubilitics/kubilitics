@@ -112,7 +112,9 @@ export default function SCIMConfiguration() {
   const fetchConfig = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${backendBaseUrl}/api/v1/settings/scim`);
+      const res = await fetch(`${backendBaseUrl}/api/v1/settings/scim`, {
+        signal: AbortSignal.timeout(10_000),
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.config) setConfig(data.config);
@@ -139,6 +141,7 @@ export default function SCIMConfiguration() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
+        signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: res.statusText }));
@@ -146,9 +149,13 @@ export default function SCIMConfiguration() {
       }
       toast.success('SCIM configuration saved');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to save';
-      setError(msg);
-      toast.error(msg);
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        toast.error('Request timed out — backend may be unreachable');
+      } else {
+        const msg = err instanceof Error ? err.message : 'Failed to save';
+        setError(msg);
+        toast.error(msg);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -159,13 +166,20 @@ export default function SCIMConfiguration() {
   async function handleSync() {
     setIsSyncing(true);
     try {
-      const res = await fetch(`${backendBaseUrl}/api/v1/settings/scim/sync`, { method: 'POST' });
+      const res = await fetch(`${backendBaseUrl}/api/v1/settings/scim/sync`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10_000),
+      });
       if (!res.ok) throw new Error('Sync failed');
       const data = await res.json();
       if (data.syncStatus) setSyncStatus(data.syncStatus);
       toast.success('User sync completed');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Sync failed');
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        toast.error('Request timed out — backend may be unreachable');
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Sync failed');
+      }
     } finally {
       setIsSyncing(false);
     }

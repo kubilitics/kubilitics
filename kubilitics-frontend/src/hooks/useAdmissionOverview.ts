@@ -11,8 +11,8 @@ export function useAdmissionOverview() {
 
     const fallbackEnabled = !!(activeCluster || clusterId);
 
-    const mutating = useK8sResourceList('mutatingwebhookconfigurations', undefined, { enabled: fallbackEnabled });
-    const validating = useK8sResourceList('validatingwebhookconfigurations', undefined, { enabled: fallbackEnabled });
+    const mutating = useK8sResourceList('mutatingwebhookconfigurations', undefined, { enabled: fallbackEnabled, limit: 500 });
+    const validating = useK8sResourceList('validatingwebhookconfigurations', undefined, { enabled: fallbackEnabled, limit: 500 });
 
     const data = useMemo(() => {
         const items: Record<string, unknown>[] = [];

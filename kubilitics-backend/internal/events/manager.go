@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -160,10 +161,17 @@ func (m *PipelineManager) Subscribe() <-chan *WideEvent {
 		wg.Add(1)
 		go func(src <-chan *WideEvent) {
 			defer wg.Done()
+			var dropped atomic.Int64
 			for evt := range src {
 				select {
 				case merged <- evt:
-				default: // drop if full
+				default:
+					// Buffer full — increment counter and log a warning every 100 drops
+					// so operators know they are losing events.
+					n := dropped.Add(1)
+					if n%100 == 0 {
+						log.Printf("[events/manager] dropped %d events for subscriber (buffer full)", n)
+					}
 				}
 			}
 		}(pCh)

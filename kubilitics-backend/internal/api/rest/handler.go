@@ -125,6 +125,7 @@ type Handler struct {
 	k8sClientCache        *expirable.LRU[string, *k8s.Client] // Cache for stateless requests
 	wsConnMu              sync.Mutex
 	wsConns               map[string]int // "clusterId:userIdentity" -> active WS connection count
+	graphEnginesMu        sync.RWMutex
 	graphEngines          map[string]*graph.ClusterGraphEngine // clusterId -> engine
 	snapshotStore         diff.SnapshotStore                   // topology diff snapshot persistence
 	scheduleHandler       *ScheduleHandler                     // optional: report schedule CRUD (nil = disabled)

@@ -30,10 +30,10 @@ export function useNetworkingOverview() {
 
     const fallbackEnabled = !!(activeCluster || clusterId);
 
-    const services = useK8sResourceList('services', undefined, { enabled: fallbackEnabled });
-    const ingresses = useK8sResourceList('ingresses', undefined, { enabled: fallbackEnabled });
-    const networkPolicies = useK8sResourceList('networkpolicies', undefined, { enabled: fallbackEnabled });
-    const endpoints = useK8sResourceList('endpoints', undefined, { enabled: fallbackEnabled });
+    const services = useK8sResourceList('services', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const ingresses = useK8sResourceList('ingresses', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const networkPolicies = useK8sResourceList('networkpolicies', undefined, { enabled: fallbackEnabled, limit: 1000 });
+    const endpoints = useK8sResourceList('endpoints', undefined, { enabled: fallbackEnabled, limit: 1000 });
 
     const data = useMemo(() => {
         const items: NetworkingOverviewData['resources'] = [];

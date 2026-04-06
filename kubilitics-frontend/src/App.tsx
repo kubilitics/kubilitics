@@ -206,7 +206,7 @@ const queryClient = new QueryClient({
       // Retry with backoff: 5s between retries to avoid hammering a dead endpoint.
       // 2 retries (not 3) — faster failure acknowledgment when cluster is truly gone.
       retry: 2,
-      retryDelay: 5000,
+      retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 8000),
       // 60s stale time: data from informer cache is always consistent.
       // WebSocket invalidation triggers refetch when resources actually change.
       // Headlamp uses 3min; 60s is a good balance for Kubilitics.
