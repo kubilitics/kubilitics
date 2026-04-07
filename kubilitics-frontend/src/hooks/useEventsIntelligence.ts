@@ -4,7 +4,6 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
-import { useClusterStore } from '@/stores/clusterStore';
 import {
   queryEvents,
   getEventStats,
@@ -34,12 +33,12 @@ import type {
 } from '@/services/api/eventsIntelligence';
 
 function useBackendContext() {
-  const storedClusterId = useBackendConfigStore((s) => s.currentClusterId);
-  const activeClusterId = useClusterStore((s) => s.activeCluster?.id);
+  // P0-D: Use currentClusterId exclusively. activeCluster.id may hold a stale or
+  // different ID that doesn't match the events pipeline's cluster ID.
+  const clusterId = useBackendConfigStore((s) => s.currentClusterId);
   const backendBaseUrl = useBackendConfigStore((s) => s.backendBaseUrl);
   const effectiveBaseUrl = getEffectiveBackendBaseUrl(backendBaseUrl);
   const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
-  const clusterId = activeClusterId || storedClusterId || null;
 
   const enabled = !!clusterId && isBackendConfigured;
   return { clusterId, effectiveBaseUrl, enabled };
