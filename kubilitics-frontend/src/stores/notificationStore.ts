@@ -99,8 +99,15 @@ export const useNotificationStore = create<NotificationState>()(
         get().notifications.filter((n) => n.category === category),
 
       addNotification: (partial) => {
+        const id = partial.id ?? generateId();
+
+        // Dedup: if a notification with this ID already exists, skip
+        if (partial.id && get().notifications.some((n) => n.id === partial.id)) {
+          return;
+        }
+
         const notification: Notification = {
-          id: partial.id ?? generateId(),
+          id,
           title: partial.title,
           description: partial.description,
           severity: partial.severity,
