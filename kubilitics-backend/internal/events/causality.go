@@ -35,7 +35,7 @@ func NewCausalityEngine(store *Store) *CausalityEngine {
 	}
 }
 
-// InferCause runs all 6 causality rules against the given event and returns
+// InferCause runs all causality rules against the given event and returns
 // the first match (highest confidence). Returns nil if no cause is found.
 // A deduplication window prevents the same event from being re-assigned
 // within 60 seconds of a previous causal assignment.
@@ -52,19 +52,23 @@ func (ce *CausalityEngine) InferCause(ctx context.Context, event *WideEvent) *Ca
 
 	// Rules ordered by priority:
 	// Priority 1: Node-level rules (if node-level matches, skip pod-level)
-	// Priority 2: Pod-level rules
+	// Priority 2: Pod-level rules (common K8s failure chains)
 	// Priority 3: Namespace/config-level rules
 	nodeRules := []func(context.Context, *WideEvent) *CausalLink{
 		ce.ruleNodeCausesEviction, // node-level
 	}
 	podRules := []func(context.Context, *WideEvent) *CausalLink{
-		ce.ruleOOMCausesCrashLoop,       // pod-level
-		ce.ruleDeploymentCausesPodEvent, // pod-level
+		ce.ruleImagePullCausesBackOff,    // Failed(ErrImagePull) → BackOff(ImagePullBackOff)
+		ce.ruleCrashLoopBackOff,          // Started/Created → BackOff(CrashLoopBackOff)
+		ce.ruleOOMCausesCrashLoop,        // OOMKilling → BackOff(CrashLoopBackOff)
+		ce.ruleFailedCausesBackOff,       // Generic: Failed → BackOff on same pod
+		ce.rulePullingCausesFailed,       // Pulling → Failed on same pod (image pull error)
+		ce.ruleDeploymentCausesPodEvent,  // Deployment ScalingReplicaSet → Pod events
 	}
 	otherRules := []func(context.Context, *WideEvent) *CausalLink{
-		ce.ruleConfigCausesRestart,    // config-level
-		ce.ruleScaleDownCausesSPOF,    // scaling
-		ce.ruleQuotaCausesScheduling,  // quota
+		ce.ruleConfigCausesRestart,   // config-level
+		ce.ruleScaleDownCausesSPOF,   // scaling
+		ce.ruleQuotaCausesScheduling, // quota
 	}
 
 	// Run node-level rules first; if matched, skip pod-level for this event.
@@ -103,7 +107,176 @@ func (ce *CausalityEngine) recordAssignment(event *WideEvent) {
 	}
 }
 
-// Rule 1: Deployment rollout causes Pod events
+// ---------------------------------------------------------------------------
+// Pod-level causal rules — match common K8s failure chains
+// ---------------------------------------------------------------------------
+
+// Rule: Image pull failure causes BackOff
+// Failed(ErrImagePull/ImagePullBackOff) → BackOff on same pod within 5 min.
+// Also matches: BackOff with message containing "ImagePullBackOff".
+func (ce *CausalityEngine) ruleImagePullCausesBackOff(ctx context.Context, event *WideEvent) *CausalLink {
+	if event.ResourceKind != "Pod" {
+		return nil
+	}
+
+	// Target: BackOff with ImagePullBackOff in the message, or reason=ImagePullBackOff
+	isImagePullBackOff := event.Reason == "BackOff" && strings.Contains(event.Message, "ImagePullBackOff")
+	isImagePullBackOffReason := event.Reason == "ImagePullBackOff"
+	if !isImagePullBackOff && !isImagePullBackOffReason {
+		return nil
+	}
+
+	// Look for a preceding Failed event with ErrImagePull or ImagePull in message on the same pod.
+	cause, err := ce.findRecentEventOnSameResource(ctx,
+		event.ClusterID, event.ResourceKind, event.ResourceName, event.ResourceNamespace,
+		"Failed", event.Timestamp, 5*time.Minute,
+	)
+	if err != nil || cause == nil {
+		return nil
+	}
+
+	// Verify the Failed event is related to image pulling.
+	if strings.Contains(cause.Message, "ImagePull") || strings.Contains(cause.Message, "ErrImagePull") ||
+		strings.Contains(cause.Message, "pulling image") || strings.Contains(cause.Message, "pull image") {
+		return &CausalLink{
+			CausedByEventID: cause.EventID,
+			Confidence:      0.95,
+			Rule:            "image_pull_causes_backoff",
+		}
+	}
+
+	// Even without image keywords, Failed → BackOff on same pod is a causal link.
+	return &CausalLink{
+		CausedByEventID: cause.EventID,
+		Confidence:      0.80,
+		Rule:            "image_pull_causes_backoff",
+	}
+}
+
+// Rule: Container crash causes CrashLoopBackOff
+// Started/Created → BackOff(CrashLoopBackOff) on same pod within 5 min.
+func (ce *CausalityEngine) ruleCrashLoopBackOff(ctx context.Context, event *WideEvent) *CausalLink {
+	if event.ResourceKind != "Pod" {
+		return nil
+	}
+
+	// Target: BackOff with CrashLoopBackOff in message, or reason=CrashLoopBackOff.
+	isCrashLoop := (event.Reason == "BackOff" && strings.Contains(event.Message, "CrashLoopBackOff")) ||
+		event.Reason == "CrashLoopBackOff"
+	if !isCrashLoop {
+		return nil
+	}
+
+	// Look for a preceding Started event on the same pod — this shows the container
+	// did start before crashing.
+	cause, err := ce.findRecentEventOnSameResource(ctx,
+		event.ClusterID, event.ResourceKind, event.ResourceName, event.ResourceNamespace,
+		"Started", event.Timestamp, 5*time.Minute,
+	)
+	if err != nil || cause == nil {
+		// Fallback: look for Created event.
+		cause, err = ce.findRecentEventOnSameResource(ctx,
+			event.ClusterID, event.ResourceKind, event.ResourceName, event.ResourceNamespace,
+			"Created", event.Timestamp, 5*time.Minute,
+		)
+		if err != nil || cause == nil {
+			return nil
+		}
+	}
+
+	return &CausalLink{
+		CausedByEventID: cause.EventID,
+		Confidence:      0.90,
+		Rule:            "crash_loop_backoff",
+	}
+}
+
+// Rule: OOMKilled causes CrashLoopBackOff
+// Any event with "OOMKilled" or "OOMKilling" in reason or message →
+// subsequent BackOff on the same pod within 5 min.
+func (ce *CausalityEngine) ruleOOMCausesCrashLoop(ctx context.Context, event *WideEvent) *CausalLink {
+	if event.ResourceKind != "Pod" {
+		return nil
+	}
+
+	// Target: BackOff or CrashLoopBackOff event.
+	isBackOff := event.Reason == "BackOff" || event.Reason == "CrashLoopBackOff"
+	if !isBackOff {
+		return nil
+	}
+
+	// Look for OOMKilled/OOMKilling event on the same pod.
+	cause, err := ce.findRecentEventByMessagePattern(ctx,
+		event.ClusterID, event.ResourceKind, event.ResourceName, event.ResourceNamespace,
+		"OOMKill", event.Timestamp, 5*time.Minute,
+	)
+	if err != nil || cause == nil {
+		return nil
+	}
+
+	return &CausalLink{
+		CausedByEventID: cause.EventID,
+		Confidence:      0.95,
+		Rule:            "oom_causes_crashloop",
+	}
+}
+
+// Rule: Generic Failed → BackOff on same pod.
+// Any Failed event followed by BackOff on the same pod within 5 min.
+func (ce *CausalityEngine) ruleFailedCausesBackOff(ctx context.Context, event *WideEvent) *CausalLink {
+	if event.ResourceKind != "Pod" {
+		return nil
+	}
+	if event.Reason != "BackOff" {
+		return nil
+	}
+
+	cause, err := ce.findRecentEventOnSameResource(ctx,
+		event.ClusterID, event.ResourceKind, event.ResourceName, event.ResourceNamespace,
+		"Failed", event.Timestamp, 5*time.Minute,
+	)
+	if err != nil || cause == nil {
+		return nil
+	}
+
+	return &CausalLink{
+		CausedByEventID: cause.EventID,
+		Confidence:      0.85,
+		Rule:            "failed_causes_backoff",
+	}
+}
+
+// Rule: Pulling → Failed on same pod (image pull error chain).
+// Pulling event followed by Failed with image-related message.
+func (ce *CausalityEngine) rulePullingCausesFailed(ctx context.Context, event *WideEvent) *CausalLink {
+	if event.ResourceKind != "Pod" {
+		return nil
+	}
+	if event.Reason != "Failed" {
+		return nil
+	}
+	// Only match image-pull-related failures.
+	if !strings.Contains(event.Message, "ImagePull") && !strings.Contains(event.Message, "ErrImagePull") &&
+		!strings.Contains(event.Message, "pull image") && !strings.Contains(event.Message, "pulling image") {
+		return nil
+	}
+
+	cause, err := ce.findRecentEventOnSameResource(ctx,
+		event.ClusterID, event.ResourceKind, event.ResourceName, event.ResourceNamespace,
+		"Pulling", event.Timestamp, 5*time.Minute,
+	)
+	if err != nil || cause == nil {
+		return nil
+	}
+
+	return &CausalLink{
+		CausedByEventID: cause.EventID,
+		Confidence:      0.90,
+		Rule:            "pulling_causes_failed",
+	}
+}
+
+// Rule: Deployment rollout causes Pod events
 // If a Pod event occurs within 5 min of its owning Deployment's rollout event, link them.
 func (ce *CausalityEngine) ruleDeploymentCausesPodEvent(ctx context.Context, event *WideEvent) *CausalLink {
 	if event.ResourceKind != "Pod" {
@@ -138,56 +311,55 @@ func (ce *CausalityEngine) ruleDeploymentCausesPodEvent(ctx context.Context, eve
 	}
 }
 
-// Rule 2: OOMKilled causes CrashLoopBackOff
-// If CrashLoopBackOff follows OOMKilled on the same container within 2 min.
-func (ce *CausalityEngine) ruleOOMCausesCrashLoop(ctx context.Context, event *WideEvent) *CausalLink {
-	if event.Reason != "CrashLoopBackOff" {
-		return nil
-	}
+// ---------------------------------------------------------------------------
+// Node-level causal rules
+// ---------------------------------------------------------------------------
 
-	cause, err := ce.findRecentEventInWindow(ctx,
-		event.ClusterID, event.ResourceKind, event.ResourceName, event.ResourceNamespace,
-		"OOMKilled", event.Timestamp, 2*time.Minute,
-	)
-	if err != nil || cause == nil {
-		return nil
-	}
-
-	return &CausalLink{
-		CausedByEventID: cause.EventID,
-		Confidence:      0.95,
-		Rule:            "oom_causes_crashloop",
-	}
-}
-
-// Rule 3: Node NotReady causes Pod eviction
-// If Pod eviction follows Node NotReady within 5 min on the same node.
+// Rule: Node condition causes Pod eviction/killing.
+// If Pod eviction/killing follows a node condition event (NotReady, MemoryPressure,
+// DiskPressure, PIDPressure) on the same node within 10 min.
 func (ce *CausalityEngine) ruleNodeCausesEviction(ctx context.Context, event *WideEvent) *CausalLink {
-	if event.Reason != "Evicted" && event.Reason != "Preempting" {
+	if event.ResourceKind != "Pod" {
+		return nil
+	}
+	// Match eviction-related reasons.
+	switch event.Reason {
+	case "Evicted", "Preempting", "Killing", "EvictionThresholdMet":
+		// proceed
+	default:
 		return nil
 	}
 	if event.NodeName == "" {
 		return nil
 	}
 
-	// Look for a Node NotReady event on the same node
-	cause, err := ce.findRecentEventInWindow(ctx,
-		event.ClusterID, "Node", event.NodeName, "",
-		"NodeNotReady", event.Timestamp, 5*time.Minute,
-	)
-	if err != nil || cause == nil {
-		return nil
+	// Look for node condition events on the same node. K8s uses multiple reason strings.
+	nodeReasons := []string{"NodeNotReady", "NodeStatusUnknown", "MemoryPressure", "DiskPressure", "PIDPressure", "Rebooted"}
+	for _, reason := range nodeReasons {
+		cause, err := ce.findRecentEventInWindow(ctx,
+			event.ClusterID, "Node", event.NodeName, "",
+			reason, event.Timestamp, 10*time.Minute,
+		)
+		if err != nil {
+			continue
+		}
+		if cause != nil {
+			return &CausalLink{
+				CausedByEventID: cause.EventID,
+				Confidence:      0.95,
+				Rule:            "node_causes_eviction",
+			}
+		}
 	}
 
-	return &CausalLink{
-		CausedByEventID: cause.EventID,
-		Confidence:      0.95,
-		Rule:            "node_causes_eviction",
-	}
+	return nil
 }
 
-// Rule 4: ConfigMap/Secret change causes Pod restart
-// If Pod restart follows ConfigMap/Secret change within 2 min in the same namespace.
+// ---------------------------------------------------------------------------
+// Config/scaling/quota rules
+// ---------------------------------------------------------------------------
+
+// Rule: ConfigMap/Secret change causes Pod restart
 func (ce *CausalityEngine) ruleConfigCausesRestart(ctx context.Context, event *WideEvent) *CausalLink {
 	if event.ResourceKind != "Pod" {
 		return nil
@@ -196,7 +368,6 @@ func (ce *CausalityEngine) ruleConfigCausesRestart(ctx context.Context, event *W
 		return nil
 	}
 
-	// Look for ConfigMap changes in the same namespace
 	cause, err := ce.findRecentConfigChange(ctx,
 		event.ClusterID, event.ResourceNamespace, event.Timestamp, 2*time.Minute,
 	)
@@ -211,18 +382,15 @@ func (ce *CausalityEngine) ruleConfigCausesRestart(ctx context.Context, event *W
 	}
 }
 
-// Rule 5: Scale-down causes SPOF condition
-// If a resource has replica_count=1 after a scaling event.
+// Rule: Scale-down causes SPOF condition
 func (ce *CausalityEngine) ruleScaleDownCausesSPOF(ctx context.Context, event *WideEvent) *CausalLink {
 	if event.Reason != "ScalingReplicaSet" {
 		return nil
 	}
-	// Check if the message indicates scaling down to 1
 	if !strings.Contains(event.Message, "to 1") && !strings.Contains(event.Message, "Scaled down") {
 		return nil
 	}
 
-	// The scaling event itself is the cause — flag it
 	return &CausalLink{
 		CausedByEventID: event.EventID,
 		Confidence:      0.90,
@@ -230,14 +398,24 @@ func (ce *CausalityEngine) ruleScaleDownCausesSPOF(ctx context.Context, event *W
 	}
 }
 
-// Rule 6: ResourceQuota exceeded causes FailedScheduling
-// If FailedScheduling follows ResourceQuota exceeded in the same namespace.
+// Rule: ResourceQuota exceeded causes FailedScheduling
 func (ce *CausalityEngine) ruleQuotaCausesScheduling(ctx context.Context, event *WideEvent) *CausalLink {
 	if event.Reason != "FailedScheduling" {
 		return nil
 	}
 
-	// Look for quota exceeded events in the same namespace
+	// Check if the FailedScheduling message mentions quota or insufficient resources.
+	if strings.Contains(event.Message, "Insufficient") || strings.Contains(event.Message, "quota") ||
+		strings.Contains(event.Message, "exceeded") {
+		// Self-referential: the event itself explains the cause.
+		return &CausalLink{
+			CausedByEventID: event.EventID,
+			Confidence:      0.85,
+			Rule:            "resource_constraint_scheduling",
+		}
+	}
+
+	// Look for quota exceeded events.
 	cause, err := ce.findRecentEventInWindow(ctx,
 		event.ClusterID, "ResourceQuota", "", event.ResourceNamespace,
 		"FailedCreate", event.Timestamp, 5*time.Minute,
@@ -287,6 +465,56 @@ func (ce *CausalityEngine) findRecentEventInWindow(
 		return nil, nil
 	}
 	return &events[0], nil
+}
+
+// findRecentEventOnSameResource searches for a recent event on the same
+// resource (kind+name+namespace) with a specific reason. This is the primary
+// helper for pod-level causal rules.
+func (ce *CausalityEngine) findRecentEventOnSameResource(
+	ctx context.Context,
+	clusterID, resourceKind, resourceName, namespace, reason string,
+	timestamp int64, window time.Duration,
+) (*WideEvent, error) {
+	return ce.findRecentEventInWindow(ctx, clusterID, resourceKind, resourceName, namespace, reason, timestamp, window)
+}
+
+// findRecentEventByMessagePattern searches for a recent event on the same
+// resource where the reason OR message contains the given pattern.
+// This handles K8s events where the key info is in the message, not reason.
+func (ce *CausalityEngine) findRecentEventByMessagePattern(
+	ctx context.Context,
+	clusterID, resourceKind, resourceName, namespace, pattern string,
+	timestamp int64, window time.Duration,
+) (*WideEvent, error) {
+	since := timestamp - window.Milliseconds()
+
+	// First try to find by reason containing the pattern.
+	q := EventQuery{
+		ClusterID:    clusterID,
+		ResourceKind: resourceKind,
+		ResourceName: resourceName,
+		Namespace:    namespace,
+		Since:        &since,
+		Until:        &timestamp,
+		Limit:        50,
+	}
+
+	events, err := ce.store.QueryEvents(ctx, q)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	// Search for events where reason or message contains the pattern.
+	for i := range events {
+		if strings.Contains(events[i].Reason, pattern) || strings.Contains(events[i].Message, pattern) {
+			return &events[i], nil
+		}
+	}
+
+	return nil, nil
 }
 
 // findRecentConfigChange looks for ConfigMap or Secret change events

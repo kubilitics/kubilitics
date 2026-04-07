@@ -29,12 +29,9 @@ func NewEnricher(store *Store, metrics MetricsProvider) *Enricher {
 }
 
 // Enrich augments a raw WideEvent with Kubilitics intelligence fields.
-// Currently applies basic heuristics; health scores, SPOF detection, and
-// blast radius will be populated by service integrations in the Pipeline.
+// Applies heuristic health scoring, severity classification, blast radius
+// estimation, and real-time metrics enrichment.
 func (e *Enricher) Enrich(ctx context.Context, event *WideEvent) *WideEvent {
-	// Health scores: nil until health service integration
-	event.HealthScore = nil
-
 	// SPOF: false until graph engine integration
 	event.IsSPOF = 0
 
@@ -44,6 +41,13 @@ func (e *Enricher) Enrich(ctx context.Context, event *WideEvent) *WideEvent {
 	// Severity: compute from event type and reason if not already set
 	if event.Severity == "" {
 		event.Severity = e.classifyEventSeverity(event)
+	}
+
+	// Health score: estimate from event severity when health service is not integrated.
+	// This ensures incident detection and insight rules have usable health data.
+	if event.HealthScore == nil {
+		score := e.estimateHealthScore(event)
+		event.HealthScore = &score
 	}
 
 	// For Warning events, set basic impact estimates
@@ -113,14 +117,33 @@ func (e *Enricher) enrichWithMetrics(ctx context.Context, event *WideEvent) {
 	}
 }
 
+// estimateHealthScore provides a heuristic health score based on event severity.
+// Normal events get 100 (healthy), warnings get lower scores based on the failure type.
+// This is used when the real health service integration is not available.
+func (e *Enricher) estimateHealthScore(event *WideEvent) float64 {
+	if event.EventType != "Warning" {
+		return 100.0
+	}
+
+	switch event.Severity {
+	case "critical":
+		return 20.0 // OOMKilled, CrashLoopBackOff, Evicted, FailedScheduling
+	case "warning":
+		return 50.0 // Unhealthy, BackOff, FailedMount, etc.
+	default:
+		return 70.0
+	}
+}
+
 // classifyEventSeverity determines severity from event characteristics.
 func (e *Enricher) classifyEventSeverity(event *WideEvent) string {
 	if event.EventType == "Warning" {
 		switch event.Reason {
-		case "OOMKilled", "CrashLoopBackOff", "Evicted", "FailedScheduling":
+		case "OOMKilled", "OOMKilling", "CrashLoopBackOff", "Evicted", "FailedScheduling",
+			"NodeNotReady", "NodeStatusUnknown", "EvictionThresholdMet", "Preempting":
 			return "critical"
-		case "Unhealthy", "BackOff", "FailedMount", "FailedAttachVolume",
-			"FailedCreate", "FailedDelete":
+		case "Unhealthy", "BackOff", "Failed", "FailedMount", "FailedAttachVolume",
+			"FailedCreate", "FailedDelete", "ImagePullBackOff", "ErrImagePull":
 			return "warning"
 		default:
 			return "warning"

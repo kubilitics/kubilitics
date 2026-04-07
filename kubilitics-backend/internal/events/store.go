@@ -416,6 +416,20 @@ func (s *Store) GetActiveInsights(ctx context.Context, clusterID string) ([]Insi
 	return insights, nil
 }
 
+// GetRecentInsights returns insights matching the given rule that were generated
+// within the specified window (milliseconds) for deduplication purposes.
+func (s *Store) GetRecentInsights(ctx context.Context, clusterID, rule string, windowMs int64) ([]Insight, error) {
+	since := UnixMillis() - windowMs
+	var insights []Insight
+	err := s.db.SelectContext(ctx, &insights,
+		`SELECT * FROM insights WHERE cluster_id = ? AND rule = ? AND timestamp >= ? AND status = 'active' ORDER BY timestamp DESC LIMIT 5`,
+		clusterID, rule, since)
+	if err != nil {
+		return nil, fmt.Errorf("get recent insights: %w", err)
+	}
+	return insights, nil
+}
+
 // DismissInsight marks an insight as dismissed.
 func (s *Store) DismissInsight(ctx context.Context, insightID string) error {
 	_, err := s.db.ExecContext(ctx,
