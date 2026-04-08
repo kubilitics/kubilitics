@@ -728,6 +728,12 @@ func main() {
 			pipelineManager.StartLogCollector(logsService, client.Clientset, cl.ID)
 			log.Info("Started log collector", "cluster", cl.Name, "id", cl.ID)
 
+			// Start trace puller for this cluster.
+			if err := tracePuller.OnClusterConnected(client.Clientset, cl.ID); err != nil {
+				log.Warn("Failed to start trace puller", "cluster", cl.Name, "id", cl.ID, "error", err)
+			} else {
+				log.Info("Started trace puller", "cluster", cl.Name, "id", cl.ID)
+			}
 		}
 	}()
 

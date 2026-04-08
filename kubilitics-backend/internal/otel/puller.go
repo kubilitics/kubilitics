@@ -133,6 +133,19 @@ func (p *TracePuller) StopCluster(clusterID string) {
 	p.OnClusterDisconnected(clusterID)
 }
 
+// PullNow triggers an immediate pull for a cluster. Used by the tracing
+// status endpoint to ensure traces are fresh when the user opens the page.
+func (p *TracePuller) PullNow(ctx context.Context, clientset kubernetes.Interface, clusterID string) error {
+	// Also ensure the poll loop is running
+	p.OnClusterConnected(clientset, clusterID)
+
+	_, err := p.pullOnce(ctx, clientset, clusterID, 0) // since=0 pulls everything
+	if err != nil {
+		log.Printf("[otel/puller] PullNow for %s failed: %v", clusterID, err)
+	}
+	return err
+}
+
 // IsAgentReachable checks whether the trace-agent is healthy via the K8s
 // API server service proxy.
 func (p *TracePuller) IsAgentReachable(ctx context.Context, clientset kubernetes.Interface) bool {
