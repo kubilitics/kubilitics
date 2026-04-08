@@ -58,23 +58,32 @@ export function TracingSetup({ open, onOpenChange, onComplete }: TracingSetupPro
   const [deployError, setDeployError] = useState<string | null>(null);
   const [tracingStatus, setTracingStatus] = useState<TracingStatus | null>(null);
   const [isInstrumenting, setIsInstrumenting] = useState(false);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
 
   // When dialog opens, check if tracing is already enabled → skip to deployment picker
   useEffect(() => {
     if (!open || !clusterId) return;
-    (async () => {
-      try {
-        const status = await getTracingStatus(baseUrl, clusterId);
+    let cancelled = false;
+    setIsCheckingStatus(true);
+    getTracingStatus(baseUrl, clusterId)
+      .then((status) => {
+        if (cancelled) return;
         setTracingStatus(status);
-        if (status.enabled) {
+        if (status.enabled && status.available_deployments && status.available_deployments.length > 0) {
           setState('pick_deployments');
+        } else if (status.enabled) {
+          setState('done');
         } else {
           setState('intro');
         }
-      } catch {
-        setState('intro');
-      }
-    })();
+      })
+      .catch(() => {
+        if (!cancelled) setState('intro');
+      })
+      .finally(() => {
+        if (!cancelled) setIsCheckingStatus(false);
+      });
+    return () => { cancelled = true; };
   }, [open, clusterId, baseUrl]);
 
   // Reset state when dialog closes
@@ -86,6 +95,7 @@ export function TracingSetup({ open, onOpenChange, onComplete }: TracingSetupPro
           setDeployError(null);
           setTracingStatus(null);
           setIsInstrumenting(false);
+          setIsCheckingStatus(false);
         }, 300);
       }
       onOpenChange(next);
@@ -160,8 +170,16 @@ export function TracingSetup({ open, onOpenChange, onComplete }: TracingSetupPro
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md">
         <AnimatePresence mode="wait">
+          {/* ── Loading status check ─────────────────────────────────── */}
+          {isCheckingStatus && (
+            <motion.div key="checking" {...fadeSlide} className="flex flex-col items-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
+              <p className="text-sm text-muted-foreground">Checking tracing status...</p>
+            </motion.div>
+          )}
+
           {/* ── Intro ─────────────────────────────────────────────────── */}
-          {state === 'intro' && (
+          {!isCheckingStatus && state === 'intro' && (
             <motion.div key="intro" {...fadeSlide}>
               <DialogHeader className="mb-5">
                 <div className="flex items-center gap-3 mb-3">
@@ -218,7 +236,7 @@ export function TracingSetup({ open, onOpenChange, onComplete }: TracingSetupPro
           )}
 
           {/* ── Deploying ─────────────────────────────────────────────── */}
-          {state === 'deploying' && (
+          {!isCheckingStatus && state === 'deploying' && (
             <motion.div key="deploying" {...fadeSlide} className="py-4">
               <DialogHeader className="mb-6">
                 <DialogTitle>Deploying Trace Agent</DialogTitle>
@@ -259,7 +277,7 @@ export function TracingSetup({ open, onOpenChange, onComplete }: TracingSetupPro
           )}
 
           {/* ── Pick deployments ──────────────────────────────────────── */}
-          {state === 'pick_deployments' && (
+          {!isCheckingStatus && state === 'pick_deployments' && (
             <motion.div key="pick" {...fadeSlide}>
               <DialogHeader className="mb-5">
                 <DialogTitle>Instrument Deployments</DialogTitle>
@@ -287,7 +305,7 @@ export function TracingSetup({ open, onOpenChange, onComplete }: TracingSetupPro
           )}
 
           {/* ── Done ──────────────────────────────────────────────────── */}
-          {state === 'done' && (
+          {!isCheckingStatus && state === 'done' && (
             <motion.div key="done" {...fadeSlide} className="py-4">
               <div className="flex flex-col items-center gap-4 py-6 text-center">
                 <div className="h-14 w-14 rounded-full bg-[hsl(var(--success))]/10 flex items-center justify-center">
