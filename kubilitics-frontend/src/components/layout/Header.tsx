@@ -315,9 +315,12 @@ export function Header() {
         data-tauri-drag-region
         onDoubleClick={(e) => {
           // macOS: double-click empty header area toggles maximize.
-          // Only trigger on the drag region — not on buttons, inputs, or other controls.
+          // Only trigger when clicking directly on the header or its drag-region divs,
+          // not on any interactive child (button, input, dropdown, etc.)
           const target = e.target as HTMLElement;
-          if (target.closest('button, input, a, [role="menuitem"], [role="combobox"], select, [data-no-maximize]')) return;
+          const isDragRegion = target.hasAttribute('data-tauri-drag-region') ||
+            target.tagName === 'HEADER';
+          if (!isDragRegion) return;
           if (isTauri()) {
             import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
               getCurrentWindow().toggleMaximize();
@@ -325,7 +328,7 @@ export function Header() {
           }
         }}
       >
-        <div className="flex items-center h-full w-full">
+        <div className="flex items-center h-full w-full" data-tauri-drag-region>
 
           {/* ──── Logo zone: Docker Desktop pattern — generous spacing after traffic lights ──── */}
           <div className="shrink-0 flex items-center h-full pl-[88px] pr-6" data-tauri-drag-region>
@@ -349,7 +352,7 @@ export function Header() {
           <div className="w-px h-7 bg-border/40 shrink-0" />
 
           {/* ──── Main bar ──── */}
-          <div className="flex-1 min-w-0 flex items-center gap-2 md:gap-4 px-3 md:px-6">
+          <div className="flex-1 min-w-0 flex items-center gap-2 md:gap-4 px-3 md:px-6" data-tauri-drag-region>
             {/* Search resources — global search: refined command palette trigger */}
             <button
               type="button"
