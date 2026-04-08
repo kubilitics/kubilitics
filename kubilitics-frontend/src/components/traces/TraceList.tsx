@@ -3,7 +3,6 @@
  * Shows trace summaries with service badges, duration, span/error counts.
  */
 import { useMemo, useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
 import { Search, Clock, Filter, GitBranch, RefreshCw, Copy, Check, ArrowRight } from 'lucide-react';
 import { ListPagination } from '@/components/list/ListPagination';
 import { Card, CardContent } from '@/components/ui/card';
@@ -302,46 +301,38 @@ function OTelSetupGuide({ onRefresh }: { onRefresh: () => void }) {
       </p>
 
       <div className="w-full text-left space-y-6 mb-8">
-        <SetupStep number={1} title="Install OTel Collector">
-          <p>
-            Go to{' '}
-            <Link to="/addons" className="text-primary hover:text-primary/80 font-medium underline underline-offset-2">
-              Add-ons
-            </Link>{' '}
-            and install "OpenTelemetry Collector", or run:
-          </p>
+        <SetupStep number={1} title="Install OpenTelemetry Collector in your cluster">
+          <p>Run these commands from your terminal:</p>
           <CopyableCode>
-            {`helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts\nhelm install otel-collector open-telemetry/opentelemetry-collector -n otel-system --create-namespace`}
+            {`helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts\nhelm install otel-collector open-telemetry/opentelemetry-collector \\\n  --set mode=deployment \\\n  --set config.exporters.otlphttp.endpoint=http://host.docker.internal:8190 \\\n  -n otel-system --create-namespace`}
           </CopyableCode>
         </SetupStep>
 
-        <SetupStep number={2} title="Configure your apps">
-          <p>Add these environment variables to your deployments:</p>
+        <SetupStep number={2} title="Instrument your applications">
+          <p>Add these environment variables to your deployment manifests:</p>
           <CopyableCode>
             {`OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.otel-system:4317\nOTEL_SERVICE_NAME=your-service-name`}
           </CopyableCode>
+          <p className="text-xs text-muted-foreground/70 mt-1">
+            For auto-instrumentation without code changes, use the{' '}
+            <a href="https://opentelemetry.io/docs/kubernetes/operator/" target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80 underline underline-offset-2">
+              OTel Operator
+            </a>
+          </p>
         </SetupStep>
 
         <SetupStep number={3} title="Traces appear automatically">
           <p>
-            Once configured, traces flow from your apps through the collector into Kubilitics.
+            Once configured, traces flow from your apps → collector → Kubilitics.
             They will appear here within seconds.
           </p>
         </SetupStep>
       </div>
 
-      <div className="flex items-center gap-3">
-        <Button variant="outline" size="sm" onClick={onRefresh}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Check for traces
-        </Button>
-        <Link to="/addons">
-          <Button variant="default" size="sm">
-            Install Collector
-            <ArrowRight className="h-4 w-4 ml-2" />
-          </Button>
-        </Link>
-      </div>
+      <Button variant="outline" size="sm" onClick={onRefresh}>
+        <RefreshCw className="h-4 w-4 mr-2" />
+        Check for traces
+      </Button>
     </div>
   );
 }
