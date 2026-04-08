@@ -33,6 +33,7 @@ spec:
       containers:
         - name: trace-agent
           image: ghcr.io/kubilitics/trace-agent:%s
+          imagePullPolicy: IfNotPresent
           ports:
             - name: otlp-grpc
               containerPort: 4317
