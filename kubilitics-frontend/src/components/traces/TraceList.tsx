@@ -294,55 +294,48 @@ function OTelSetupGuide({ onRefresh }: { onRefresh: () => void }) {
       <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center mb-4">
         <GitBranch className="h-7 w-7 text-primary/60" />
       </div>
-      <h3 className="text-lg font-semibold mb-2">Enable Distributed Tracing</h3>
-      <p className="text-sm text-muted-foreground mb-8 leading-relaxed">
-        Traces show request flows across your services. Install the OpenTelemetry Collector
-        to start collecting traces from your applications.
+      <h3 className="text-lg font-semibold mb-2">Distributed Tracing</h3>
+      <p className="text-sm text-muted-foreground mb-8 leading-relaxed max-w-md">
+        See request flows across your services. Instrument your applications with
+        OpenTelemetry and point them to Kubilitics.
       </p>
 
       <div className="w-full text-left space-y-6 mb-8">
-        <SetupStep number={1} title="Install OpenTelemetry Collector">
-          <p>Deploy the OTel Collector in your cluster:</p>
+        <SetupStep number={1} title="Add OpenTelemetry to your apps">
+          <p>Set these environment variables in your deployment manifests:</p>
           <CopyableCode>
-            {`helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts\nhelm install otel-collector open-telemetry/opentelemetry-collector \\\n  --set mode=deployment \\\n  -n otel-system --create-namespace`}
-          </CopyableCode>
-        </SetupStep>
-
-        <SetupStep number={2} title="Configure the collector to export to Kubilitics">
-          <p>Set the OTLP exporter endpoint to your machine&apos;s IP where Kubilitics is running:</p>
-          <CopyableCode>
-            {`# Find your machine's IP (the host running Kubilitics):\nhostname -I   # Linux\nipconfig getifaddr en0   # macOS\n\n# Then configure the collector:\nhelm upgrade otel-collector open-telemetry/opentelemetry-collector \\\n  --set config.exporters.otlphttp.endpoint=http://<YOUR_IP>:8190 \\\n  -n otel-system`}
+            {`OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:8190\nOTEL_EXPORTER_OTLP_PROTOCOL=http/json\nOTEL_SERVICE_NAME=your-service-name`}
           </CopyableCode>
           <p className="text-xs text-muted-foreground/70 mt-1">
-            Replace <code className="bg-muted px-1 rounded text-[11px]">&lt;YOUR_IP&gt;</code> with your machine&apos;s network IP (e.g. 192.168.1.5)
+            Use <code className="bg-muted px-1 rounded text-[11px]">kubectl port-forward</code> to expose Kubilitics to in-cluster apps,
+            or deploy the{' '}
+            <a href="https://opentelemetry.io/docs/collector/" target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80 underline underline-offset-2">
+              OTel Collector
+            </a>{' '}
+            as an in-cluster relay.
           </p>
         </SetupStep>
 
-        <SetupStep number={3} title="Instrument your applications">
-          <p>Add these environment variables to your deployment manifests:</p>
-          <CopyableCode>
-            {`OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.otel-system:4317\nOTEL_SERVICE_NAME=your-service-name`}
-          </CopyableCode>
-          <p className="text-xs text-muted-foreground/70 mt-1">
-            For auto-instrumentation without code changes, use the{' '}
-            <a href="https://opentelemetry.io/docs/kubernetes/operator/" target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80 underline underline-offset-2">
-              OTel Operator
-            </a>
-          </p>
-        </SetupStep>
-
-        <SetupStep number={4} title="Traces appear automatically">
+        <SetupStep number={2} title="Traces appear here">
           <p>
-            Once configured, traces flow from your apps → collector → Kubilitics.
-            They will appear here within seconds.
+            Once your apps send OTLP data, traces show up automatically with
+            service maps, span waterfalls, and error tracking.
           </p>
         </SetupStep>
       </div>
 
-      <Button variant="outline" size="sm" onClick={onRefresh}>
-        <RefreshCw className="h-4 w-4 mr-2" />
-        Check for traces
-      </Button>
+      <div className="flex items-center gap-3">
+        <Button variant="outline" size="sm" onClick={onRefresh}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Check for traces
+        </Button>
+        <a href="https://opentelemetry.io/docs/getting-started/" target="_blank" rel="noopener noreferrer">
+          <Button variant="ghost" size="sm" className="text-muted-foreground">
+            OTel docs
+            <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+          </Button>
+        </a>
+      </div>
     </div>
   );
 }
