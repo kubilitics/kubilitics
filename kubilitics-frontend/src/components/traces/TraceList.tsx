@@ -295,47 +295,46 @@ function OTelSetupGuide({ onRefresh }: { onRefresh: () => void }) {
         <GitBranch className="h-7 w-7 text-primary/60" />
       </div>
       <h3 className="text-lg font-semibold mb-2">Distributed Tracing</h3>
-      <p className="text-sm text-muted-foreground mb-8 leading-relaxed max-w-md">
-        See request flows across your services. Instrument your applications with
-        OpenTelemetry and point them to Kubilitics.
+      <p className="text-sm text-muted-foreground mb-6 leading-relaxed max-w-md">
+        Traces show how requests flow across your services — which service called which,
+        how long each step took, and where failures happened.
       </p>
 
-      <div className="w-full text-left space-y-6 mb-8">
-        <SetupStep number={1} title="Add OpenTelemetry to your apps">
-          <p>Set these environment variables in your deployment manifests:</p>
-          <CopyableCode>
-            {`OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:8190\nOTEL_EXPORTER_OTLP_PROTOCOL=http/json\nOTEL_SERVICE_NAME=your-service-name`}
-          </CopyableCode>
-          <p className="text-xs text-muted-foreground/70 mt-1">
-            Use <code className="bg-muted px-1 rounded text-[11px]">kubectl port-forward</code> to expose Kubilitics to in-cluster apps,
-            or deploy the{' '}
-            <a href="https://opentelemetry.io/docs/collector/" target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80 underline underline-offset-2">
-              OTel Collector
-            </a>{' '}
-            as an in-cluster relay.
+      <div className="w-full text-left space-y-5 mb-8">
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-4">
+          <h4 className="text-sm font-semibold mb-2">How to enable</h4>
+          <p className="text-sm text-muted-foreground mb-3">
+            Your applications need an OpenTelemetry SDK. Most languages have zero-code
+            auto-instrumentation — no code changes required.
           </p>
-        </SetupStep>
+          <a
+            href="https://opentelemetry.io/docs/zero-code/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-primary/80 transition-colors"
+          >
+            OpenTelemetry Auto-Instrumentation Guide
+            <ArrowRight className="h-3.5 w-3.5" />
+          </a>
+        </div>
 
-        <SetupStep number={2} title="Traces appear here">
-          <p>
-            Once your apps send OTLP data, traces show up automatically with
-            service maps, span waterfalls, and error tracking.
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-4">
+          <h4 className="text-sm font-semibold mb-2">Kubilitics OTLP endpoint</h4>
+          <p className="text-sm text-muted-foreground mb-2">
+            Point your OTel exporter to:
           </p>
-        </SetupStep>
+          <CopyableCode>{`http://localhost:8190/v1/traces`}</CopyableCode>
+          <p className="text-xs text-muted-foreground/60 mt-2">
+            Accepts standard OTLP/HTTP JSON. Service names are auto-detected from
+            K8s pod labels — no manual configuration per service.
+          </p>
+        </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <Button variant="outline" size="sm" onClick={onRefresh}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Check for traces
-        </Button>
-        <a href="https://opentelemetry.io/docs/getting-started/" target="_blank" rel="noopener noreferrer">
-          <Button variant="ghost" size="sm" className="text-muted-foreground">
-            OTel docs
-            <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
-          </Button>
-        </a>
-      </div>
+      <Button variant="outline" size="sm" onClick={onRefresh}>
+        <RefreshCw className="h-4 w-4 mr-2" />
+        Check for traces
+      </Button>
     </div>
   );
 }
