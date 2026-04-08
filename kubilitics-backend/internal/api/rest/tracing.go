@@ -204,6 +204,12 @@ func (th *TracingHandler) GetTracingStatus(w http.ResponseWriter, r *http.Reques
 	// Check agent health via proxy
 	status.AgentHealthy = th.puller.IsAgentReachable(ctx, client.Clientset)
 
+	// Trigger immediate pull so traces are fresh when user opens the page.
+	// Also ensures the poll loop is started for this cluster.
+	if status.AgentHealthy {
+		go th.puller.PullNow(context.Background(), client.Clientset, clusterID)
+	}
+
 	// List all deployments across all namespaces
 	systemNamespaces := map[string]bool{
 		"kube-system": true, "kube-public": true, "kube-node-lease": true,
