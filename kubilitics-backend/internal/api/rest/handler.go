@@ -133,7 +133,7 @@ type Handler struct {
 	graphEngines          map[string]*graph.ClusterGraphEngine // clusterId -> engine
 	snapshotStore         diff.SnapshotStore                   // topology diff snapshot persistence
 	scheduleHandler       *ScheduleHandler                     // optional: report schedule CRUD (nil = disabled)
-	lifecycleHook         ClusterLifecycleHook                 // optional: events pipeline lifecycle (nil = disabled)
+	lifecycleHooks        []ClusterLifecycleHook               // optional: lifecycle hooks (events pipeline, trace generator, etc.)
 }
 
 // NewHandler creates a new HTTP handler. unifiedMetricsService can be nil; then metrics summary uses legacy per-resource endpoints. projSvc can be nil; then project routes return 501. addonService can be nil; then addon routes return 404 or 501. repo can be nil if auth is disabled. snapshotStore can be nil; then topology snapshot endpoints return 503.
@@ -169,15 +169,16 @@ func (h *Handler) SetScheduleHandler(sh *ScheduleHandler) {
 
 // SetLifecycleHook attaches a ClusterLifecycleHook (typically PipelineManager) so
 // that event pipelines start/stop when clusters are added/removed/reconnected.
+// Can be called multiple times to register multiple hooks.
 func (h *Handler) SetLifecycleHook(hook ClusterLifecycleHook) {
-	h.lifecycleHook = hook
+	h.lifecycleHooks = append(h.lifecycleHooks, hook)
 }
 
-// notifyClusterConnected tells the lifecycle hook (events pipeline manager) that
-// a cluster has been connected or reconnected. It fetches the K8s client from the
-// cluster service and calls the hook asynchronously to avoid blocking the HTTP response.
+// notifyClusterConnected tells all lifecycle hooks that a cluster has been
+// connected or reconnected. It fetches the K8s client from the cluster service
+// and calls the hooks asynchronously to avoid blocking the HTTP response.
 func (h *Handler) notifyClusterConnected(clusterID string) {
-	if h.lifecycleHook == nil {
+	if len(h.lifecycleHooks) == 0 {
 		return
 	}
 	client, err := h.clusterService.GetClient(clusterID)
@@ -186,8 +187,10 @@ func (h *Handler) notifyClusterConnected(clusterID string) {
 		return
 	}
 	go func() {
-		if err := h.lifecycleHook.OnClusterConnected(client.Clientset, clusterID); err != nil {
-			fmt.Printf("[handler] lifecycle hook: failed to start pipeline for cluster %s: %v\n", clusterID, err)
+		for _, hook := range h.lifecycleHooks {
+			if err := hook.OnClusterConnected(client.Clientset, clusterID); err != nil {
+				fmt.Printf("[handler] lifecycle hook: failed for cluster %s: %v\n", clusterID, err)
+			}
 		}
 	}()
 }
@@ -759,9 +762,9 @@ func (h *Handler) RemoveCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stop events pipeline before removing the cluster.
-	if h.lifecycleHook != nil {
-		h.lifecycleHook.OnClusterDisconnected(resolvedID)
+	// Stop lifecycle hooks (events pipeline, trace generator, etc.) before removing the cluster.
+	for _, hook := range h.lifecycleHooks {
+		hook.OnClusterDisconnected(resolvedID)
 	}
 
 	if err := h.clusterService.RemoveCluster(r.Context(), resolvedID); err != nil {
