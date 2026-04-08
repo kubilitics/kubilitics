@@ -133,6 +133,7 @@ type Handler struct {
 	graphEngines          map[string]*graph.ClusterGraphEngine // clusterId -> engine
 	snapshotStore         diff.SnapshotStore                   // topology diff snapshot persistence
 	scheduleHandler       *ScheduleHandler                     // optional: report schedule CRUD (nil = disabled)
+	tracingHandler        *TracingHandler                      // optional: tracing enable/disable/instrument (nil = disabled)
 	lifecycleHooks        []ClusterLifecycleHook               // optional: lifecycle hooks (events pipeline, etc.)
 }
 
@@ -165,6 +166,12 @@ func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *conf
 // Call this before SetupRoutes. When nil, schedule routes are not registered.
 func (h *Handler) SetScheduleHandler(sh *ScheduleHandler) {
 	h.scheduleHandler = sh
+}
+
+// SetTracingHandler attaches the tracing handler to enable tracing lifecycle routes.
+// Call this before SetupRoutes.
+func (h *Handler) SetTracingHandler(th *TracingHandler) {
+	h.tracingHandler = th
 }
 
 // SetLifecycleHook attaches a ClusterLifecycleHook (typically PipelineManager) so
@@ -375,6 +382,14 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 	router.Handle("/clusters/{clusterId}/simulation/run", h.wrapWithRBAC(h.PostSimulationRun, auth.RoleViewer)).Methods("POST")
 	router.Handle("/clusters/{clusterId}/simulation/validate", h.wrapWithRBAC(h.PostSimulationValidate, auth.RoleViewer)).Methods("POST")
 	router.Handle("/clusters/{clusterId}/simulation/scenarios", h.wrapWithRBAC(h.GetSimulationScenarios, auth.RoleViewer)).Methods("GET")
+
+	// Distributed Tracing lifecycle (enable/disable/instrument/status)
+	if h.tracingHandler != nil {
+		router.Handle("/clusters/{clusterId}/tracing/enable", h.wrapWithRBAC(h.tracingHandler.EnableTracing, auth.RoleOperator)).Methods("POST")
+		router.Handle("/clusters/{clusterId}/tracing/disable", h.wrapWithRBAC(h.tracingHandler.DisableTracing, auth.RoleOperator)).Methods("POST")
+		router.Handle("/clusters/{clusterId}/tracing/status", h.wrapWithRBAC(h.tracingHandler.GetTracingStatus, auth.RoleViewer)).Methods("GET")
+		router.Handle("/clusters/{clusterId}/tracing/instrument", h.wrapWithRBAC(h.tracingHandler.InstrumentDeployments, auth.RoleOperator)).Methods("POST")
+	}
 
 	// Architectural Auto-Pilot (Pillar 4)
 	router.Handle("/clusters/{clusterId}/autopilot/findings", h.wrapWithRBAC(h.GetAutoPilotFindings, auth.RoleViewer)).Methods("GET")

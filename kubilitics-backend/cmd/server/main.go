@@ -682,6 +682,11 @@ func main() {
 	// Wire events pipeline lifecycle into cluster add/remove/reconnect handlers.
 	handler.SetLifecycleHook(pipelineManager)
 
+	// Distributed tracing: puller polls in-cluster trace-agent via K8s service proxy.
+	tracePuller := otel.NewTracePuller(otelStore)
+	handler.SetLifecycleHook(tracePuller)
+	tracingHandler := rest.NewTracingHandler(clusterService, tracePuller)
+	handler.SetTracingHandler(tracingHandler)
 
 	rest.SetupRoutes(apiRouter, handler)
 
