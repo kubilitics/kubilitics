@@ -82,13 +82,13 @@ export function TraceList() {
   const clusterId = useActiveClusterId();
   const storedUrl = useBackendConfigStore((s) => s.backendBaseUrl);
   const baseUrl = getEffectiveBackendBaseUrl(storedUrl);
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
   const { data: tracingStatusData } = useQuery({
     queryKey: ['tracing-status', clusterId],
     queryFn: () => getTracingStatus(baseUrl, clusterId!),
-    enabled: !!clusterId && !!baseUrl,
+    enabled: !!clusterId && isBackendConfigured,
     staleTime: 10_000,
     refetchInterval: 30_000,
-    retry: false,
   });
 
   const timeRangeMs = TIME_RANGES.find((t) => t.value === store.timeRange)?.ms ?? 3_600_000;
