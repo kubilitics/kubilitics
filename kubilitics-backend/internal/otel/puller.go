@@ -24,16 +24,17 @@ const (
 // /traces/since JSON response. Fields mirror TraceSummary but use JSON
 // tags that match the agent's output.
 type pulledTraceSummary struct {
-	TraceID       string   `json:"trace_id"`
-	RootService   string   `json:"root_service"`
-	RootOperation string   `json:"root_operation"`
-	StartTime     int64    `json:"start_time"`
-	DurationNs    int64    `json:"duration_ns"`
-	SpanCount     int      `json:"span_count"`
-	ErrorCount    int      `json:"error_count"`
-	ServiceCount  int      `json:"service_count"`
-	Status        string   `json:"status"`
-	Services      []string `json:"services"`
+	TraceID       string `json:"trace_id"`
+	RootService   string `json:"root_service"`
+	RootOperation string `json:"root_operation"`
+	StartTime     int64  `json:"start_time"`
+	DurationNs    int64  `json:"duration_ns"`
+	SpanCount     int    `json:"span_count"`
+	ErrorCount    int    `json:"error_count"`
+	ServiceCount  int    `json:"service_count"`
+	Status        string `json:"status"`
+	Services      string `json:"services"` // JSON text from agent, e.g. '["svc1","svc2"]'
+	UpdatedAt     int64  `json:"updated_at"`
 }
 
 // pulledTraceDetail matches the trace-agent's /traces/{id} response.
@@ -47,7 +48,7 @@ type pulledTraceDetail struct {
 	ErrorCount    int          `json:"error_count"`
 	ServiceCount  int          `json:"service_count"`
 	Status        string       `json:"status"`
-	Services      []string     `json:"services"`
+	Services      string       `json:"services"`
 	Spans         []pulledSpan `json:"spans"`
 }
 
@@ -268,7 +269,10 @@ func (p *TracePuller) pullOnce(ctx context.Context, clientset kubernetes.Interfa
 		}
 
 		// Store trace summary
-		servicesJSON, _ := json.Marshal(ts.Services)
+		servicesText := ts.Services
+		if servicesText == "" {
+			servicesText = "[]"
+		}
 		summary := &TraceSummary{
 			TraceID:       ts.TraceID,
 			RootService:   ts.RootService,
@@ -280,7 +284,7 @@ func (p *TracePuller) pullOnce(ctx context.Context, clientset kubernetes.Interfa
 			ServiceCount:  ts.ServiceCount,
 			Status:        ts.Status,
 			ClusterID:     clusterID,
-			Services:      events.JSONText(servicesJSON),
+			Services:      events.JSONText(servicesText),
 			UpdatedAt:     time.Now().UnixNano(),
 		}
 		if err := p.store.InsertTraceSummary(ctx, summary); err != nil {
