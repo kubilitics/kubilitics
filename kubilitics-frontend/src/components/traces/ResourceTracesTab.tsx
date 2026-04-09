@@ -81,10 +81,16 @@ export function ResourceTracesTab({
   // Show skeleton only when actually fetching, not when disabled/idle.
   const isLoading = queryLoading && fetchStatus !== 'idle';
 
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(1);
+
   const sortedTraces = useMemo(
     () => (traces ?? []).slice().sort((a, b) => b.start_time - a.start_time),
     [traces],
   );
+
+  const totalPages = Math.max(1, Math.ceil(sortedTraces.length / PAGE_SIZE));
+  const pagedTraces = sortedTraces.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Link to the full Traces page filtered for this resource
   const tracesPageLink = useMemo(() => {
@@ -161,8 +167,8 @@ export function ResourceTracesTab({
             </Link>
           </div>
         ) : (
-          <div className="max-h-[600px] overflow-y-auto">
-            {sortedTraces.map((trace) => (
+          <div>
+            {pagedTraces.map((trace) => (
               <Link
                 key={trace.trace_id}
                 to={`/traces?traceId=${encodeURIComponent(trace.trace_id)}`}
@@ -231,8 +237,8 @@ export function ResourceTracesTab({
         )}
       </CardContent>
 
-      {/* Footer link */}
-      <div className="px-4 py-3 border-t border-border/40">
+      {/* Pagination + Footer */}
+      <div className="px-4 py-3 border-t border-border/40 flex items-center justify-between">
         <Link
           to={tracesPageLink}
           className={cn(
@@ -243,6 +249,13 @@ export function ResourceTracesTab({
           View in Traces Explorer
           <ExternalLink className="h-3 w-3" />
         </Link>
+        {sortedTraces.length > PAGE_SIZE && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sortedTraces.length)} of {sortedTraces.length}</span>
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>‹</Button>
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>›</Button>
+          </div>
+        )}
       </div>
     </Card>
   );
