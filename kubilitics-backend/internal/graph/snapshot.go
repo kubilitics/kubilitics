@@ -6,6 +6,10 @@ import (
 	"time"
 
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/otel"
+
+	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 )
 
 // refKey builds a canonical "Kind/Namespace/Name" key for a ResourceRef.
@@ -28,6 +32,11 @@ type GraphSnapshot struct {
 	NodeHasHPA   map[string]bool
 	NodeHasPDB   map[string]bool
 	NodeIngress  map[string][]string // refKey -> ingress hosts
+
+	PodOwners        map[string]string                  // podKey -> owning workload key (resolved through RS)
+	ServiceEndpoints map[string][]corev1.EndpointAddress // svcKey -> ready addresses
+	OTelServiceMap   *otel.ServiceMap                    // nullable, from trace data
+	PDBs             []policyv1.PodDisruptionBudget      // cluster PDBs for threshold computation
 
 	TotalWorkloads int
 	BuiltAt        int64         // unix ms
@@ -68,6 +77,12 @@ func (s *GraphSnapshot) EnsureMaps() {
 	}
 	if s.Namespaces == nil {
 		s.Namespaces = make(map[string]bool)
+	}
+	if s.PodOwners == nil {
+		s.PodOwners = make(map[string]string)
+	}
+	if s.ServiceEndpoints == nil {
+		s.ServiceEndpoints = make(map[string][]corev1.EndpointAddress)
 	}
 }
 
