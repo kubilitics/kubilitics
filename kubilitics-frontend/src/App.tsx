@@ -238,6 +238,7 @@ const queryClient = new QueryClient({
 function useRestoreClusterFromBackend() {
   const { activeCluster, setActiveCluster, setClusters, setDemo } = useClusterStore();
   const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
+  const setCurrentClusterId = useBackendConfigStore((s) => s.setCurrentClusterId);
   const backendBaseUrl = useBackendConfigStore((s) => s.backendBaseUrl);
   const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
   const [restoreAttempted, setRestoreAttempted] = useState(false);
@@ -258,14 +259,21 @@ function useRestoreClusterFromBackend() {
     Promise.all([lazyBackendApi(), lazyAdapter()])
       .then(([{ getClusters }, { backendClusterToCluster }]) =>
         getClusters(baseUrl).then((list) => {
+          const connectedClusters = list.map(backendClusterToCluster);
+          setClusters(connectedClusters);
+
+          // Try to restore the persisted cluster; if it was deleted, fall back to first available
           const backendCluster = list.find((c) => c.id === currentClusterId);
-          if (!backendCluster) {
+          const target = backendCluster ?? list[0];
+          if (!target) {
             setRestoreFailed(true);
             return;
           }
-          const connectedCluster = backendClusterToCluster(backendCluster);
-          const connectedClusters = list.map(backendClusterToCluster);
-          setClusters(connectedClusters);
+          // If we fell back to a different cluster, update the persisted ID
+          if (!backendCluster && target) {
+            setCurrentClusterId(target.id);
+          }
+          const connectedCluster = backendClusterToCluster(target);
           setActiveCluster(connectedCluster);
           setDemo(false);
         })
@@ -279,6 +287,7 @@ function useRestoreClusterFromBackend() {
     restoreAttempted,
     setClusters,
     setActiveCluster,
+    setCurrentClusterId,
     setDemo,
   ]);
 
