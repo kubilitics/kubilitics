@@ -26,6 +26,8 @@ import { SimulationControls } from '@/components/blast-radius/SimulationControls
 import { SimulationEngine } from '@/components/blast-radius/SimulationEngine';
 import { WaveBreakdown } from '@/components/blast-radius/WaveBreakdown';
 import { RiskPanel } from '@/components/blast-radius/RiskPanel';
+import { CoverageBanner } from '@/components/blast-radius/CoverageBanner';
+import { ScoreDetailSheet } from '@/components/blast-radius/ScoreDetailSheet';
 import { cn } from '@/lib/utils';
 
 export interface BlastRadiusTabProps {
@@ -62,6 +64,16 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
   const [currentWave, setCurrentWave] = useState(-1);
   const [isSimulating, setIsSimulating] = useState(false);
 
+  const [failureMode, setFailureMode] = useState<string>(() => {
+    switch (kind.toLowerCase()) {
+      case 'pod': return 'pod-crash';
+      case 'namespace': return 'namespace-deletion';
+      default: return 'workload-deletion';
+    }
+  });
+  const [detailSheetOpen, setDetailSheetOpen] = useState(false);
+  const [detailSheetSection, setDetailSheetSection] = useState<'resilience' | 'exposure' | 'recovery' | 'impact'>('resilience');
+
   const fitViewRef = useRef<(() => void) | null>(null);
   const exportRef = useRef<((format: ExportFormat, filename: string) => void) | null>(null);
   const centerOnNodeRef = useRef<((nodeId: string) => void) | null>(null);
@@ -75,7 +87,7 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
     isLoading: brLoading,
     error: brError,
     isGraphReady,
-  } = useBlastRadius({ kind, namespace, name, enabled: canFetch });
+  } = useBlastRadius({ kind, namespace, name, enabled: canFetch, failureMode });
 
   // ── Topology graph (for the canvas visualization) ──────────────────────
   const { graph, isLoading: topoLoading, error: topoError } = useResourceTopology({
@@ -379,28 +391,37 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
 
   return (
     <div className="flex flex-col gap-4 p-4 w-full">
+      {/* Coverage Banner */}
+      {hasBlastData && blastData && (
+        <CoverageBanner
+          coverageLevel={blastData.coverageLevel}
+          coverageNote={blastData.coverageNote}
+        />
+      )}
+
       {/* 1. Criticality Banner */}
       {hasBlastData && blastData && (
         <CriticalityBanner
           criticalityScore={blastData.criticalityScore}
           criticalityLevel={blastData.criticalityLevel}
-          blastRadiusPercent={blastData.blastRadiusPercent}
-          totalAffected={blastData.totalAffected}
-          affectedNamespaces={blastData.affectedNamespaces}
+          verdict={blastData.verdict || ''}
           targetName={targetName}
+          failureMode={failureMode}
+          onFailureModeChange={setFailureMode}
         />
       )}
 
       {/* 2. Risk Indicator Cards */}
-      {hasBlastData && blastData && (
+      {hasBlastData && blastData && blastData.subScores && (
         <RiskIndicatorCards
-          isSPOF={blastData.isSPOF}
+          subScores={blastData.subScores}
           blastRadiusPercent={blastData.blastRadiusPercent}
-          criticalityLevel={blastData.criticalityLevel}
-          fanIn={blastData.fanIn}
-          fanOut={blastData.fanOut}
-          affectedNamespaces={blastData.affectedNamespaces}
-          replicaCount={blastData.replicaCount}
+          impactSummary={blastData.impactSummary}
+          coverageLevel={blastData.coverageLevel || 'partial'}
+          onOpenDetail={(section) => {
+            setDetailSheetSection(section);
+            setDetailSheetOpen(true);
+          }}
         />
       )}
 
@@ -465,6 +486,16 @@ export function BlastRadiusTab({ kind, namespace, name }: BlastRadiusTabProps) {
             <RiskPanel risks={blastData.riskIndicators ?? []} />
           </div>
         </div>
+      )}
+
+      {/* Score Detail Sheet */}
+      {hasBlastData && blastData && (
+        <ScoreDetailSheet
+          open={detailSheetOpen}
+          onOpenChange={setDetailSheetOpen}
+          initialSection={detailSheetSection}
+          result={blastData}
+        />
       )}
     </div>
   );
