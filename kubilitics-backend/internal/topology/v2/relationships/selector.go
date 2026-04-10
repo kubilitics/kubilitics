@@ -3,6 +3,7 @@ package relationships
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -73,6 +74,7 @@ func (m *SelectorMatcher) Match(ctx context.Context, bundle *v2.ResourceBundle) 
 		}
 		sel, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
 		if err != nil {
+			slog.Warn("topology: invalid PDB label selector", "pdb", pdb.Name, "namespace", pdb.Namespace, "error", err)
 			continue
 		}
 		for j := range bundle.Pods {
@@ -103,6 +105,7 @@ func (m *SelectorMatcher) Match(ctx context.Context, bundle *v2.ResourceBundle) 
 		np := &bundle.NetworkPolicies[i]
 		sel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
 		if err != nil {
+			slog.Warn("topology: invalid NetworkPolicy label selector", "networkpolicy", np.Name, "namespace", np.Namespace, "error", err)
 			continue
 		}
 		for j := range bundle.Pods {

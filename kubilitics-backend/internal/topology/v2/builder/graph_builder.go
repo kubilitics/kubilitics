@@ -21,7 +21,7 @@ func BuildGraph(ctx context.Context, opts v2.Options, bundle *v2.ResourceBundle)
 	}
 	start := time.Now()
 	nodes := NodesFromBundle(bundle)
-	edges, err := defaultRegistry.MatchAll(ctx, bundle)
+	edges, failedMatchers, err := defaultRegistry.MatchAll(ctx, bundle)
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +49,7 @@ func BuildGraph(ctx context.Context, opts v2.Options, bundle *v2.ResourceBundle)
 			EdgeCount:       len(edges),
 			BuildTimeMs:     buildMs,
 			FailedResources: bundle.FailedResources,
+			FailedMatchers:  failedMatchers,
 		},
 		Nodes:  nodes,
 		Edges:  edges,

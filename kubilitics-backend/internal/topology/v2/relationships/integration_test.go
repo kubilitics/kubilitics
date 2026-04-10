@@ -11,7 +11,7 @@ func TestMatchAll_WithFixture(t *testing.T) {
 	bundle := v2.NewTestFixtureBundle()
 	reg := NewDefaultRegistry()
 	ctx := context.Background()
-	edges, err := reg.MatchAll(ctx, bundle)
+	edges, _, err := reg.MatchAll(ctx, bundle)
 	if err != nil {
 		t.Fatalf("MatchAll: %v", err)
 	}
@@ -79,8 +79,8 @@ func TestMatchAll_Deterministic(t *testing.T) {
 	bundle := v2.NewTestFixtureBundle()
 	reg := NewDefaultRegistry()
 	ctx := context.Background()
-	edges1, _ := reg.MatchAll(ctx, bundle)
-	edges2, _ := reg.MatchAll(ctx, bundle)
+	edges1, _, _ := reg.MatchAll(ctx, bundle)
+	edges2, _, _ := reg.MatchAll(ctx, bundle)
 	if len(edges1) != len(edges2) {
 		t.Errorf("determinism: first run %d edges, second run %d", len(edges1), len(edges2))
 	}

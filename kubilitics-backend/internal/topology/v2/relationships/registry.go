@@ -67,12 +67,14 @@ func NewDefaultRegistry() *Registry {
 
 // MatchAll runs all registered matchers concurrently and aggregates edges.
 // Errors from individual matchers are logged and not fatal; partial results are returned.
-func (r *Registry) MatchAll(ctx context.Context, bundle *v2.ResourceBundle) ([]v2.TopologyEdge, error) {
+// It returns deduplicated edges, a list of matcher names that encountered errors, and any fatal error.
+func (r *Registry) MatchAll(ctx context.Context, bundle *v2.ResourceBundle) ([]v2.TopologyEdge, []string, error) {
 	if bundle == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var mu sync.Mutex
 	var allEdges []v2.TopologyEdge
+	var failedMatchers []string
 	g, gctx := errgroup.WithContext(ctx)
 	for _, m := range r.matchers {
 		m := m
@@ -80,6 +82,9 @@ func (r *Registry) MatchAll(ctx context.Context, bundle *v2.ResourceBundle) ([]v
 			edges, err := m.Match(gctx, bundle)
 			if err != nil {
 				slog.Warn("topology v2 matcher error", "matcher", m.Name(), "error", err)
+				mu.Lock()
+				failedMatchers = append(failedMatchers, m.Name())
+				mu.Unlock()
 				return nil // non-fatal
 			}
 			if len(edges) > 0 {
@@ -91,8 +96,20 @@ func (r *Registry) MatchAll(ctx context.Context, bundle *v2.ResourceBundle) ([]v
 		})
 	}
 	if err := g.Wait(); err != nil {
-		return allEdges, err
+		return allEdges, failedMatchers, err
 	}
-	return allEdges, nil
+
+	// Global edge deduplication by (source + target + relationshipType)
+	seen := make(map[string]bool, len(allEdges))
+	deduped := make([]v2.TopologyEdge, 0, len(allEdges))
+	for _, e := range allEdges {
+		key := e.Source + "|" + e.Target + "|" + string(e.RelationshipType)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		deduped = append(deduped, e)
+	}
+	return deduped, failedMatchers, nil
 }
 

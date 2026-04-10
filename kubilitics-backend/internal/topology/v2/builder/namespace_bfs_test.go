@@ -16,7 +16,7 @@ func TestNamespaceEdgesInResourceBFS(t *testing.T) {
 	bundle := v2.NewTestFixtureBundle()
 	reg := relationships.NewDefaultRegistry()
 	ctx := context.Background()
-	edges, err := reg.MatchAll(ctx, bundle)
+	edges, _, err := reg.MatchAll(ctx, bundle)
 	if err != nil {
 		t.Fatalf("MatchAll: %v", err)
 	}

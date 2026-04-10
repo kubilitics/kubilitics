@@ -23,7 +23,7 @@ func BenchmarkTopologyBuild_100Resources(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		registry := relationships.NewDefaultRegistry()
-		edges, _ := registry.MatchAll(ctx, bundle)
+		edges, _, _ := registry.MatchAll(ctx, bundle)
 		nodes := builder.NodesFromBundle(bundle)
 		_ = &v2.TopologyResponse{
 			Nodes: nodes,
@@ -45,7 +45,7 @@ func BenchmarkTopologyBuild_500Resources(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		registry := relationships.NewDefaultRegistry()
-		edges, _ := registry.MatchAll(ctx, bundle)
+		edges, _, _ := registry.MatchAll(ctx, bundle)
 		nodes := builder.NodesFromBundle(bundle)
 		_ = &v2.TopologyResponse{
 			Nodes: nodes,
@@ -67,7 +67,7 @@ func BenchmarkTopologyBuild_1000Resources(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		registry := relationships.NewDefaultRegistry()
-		edges, _ := registry.MatchAll(ctx, bundle)
+		edges, _, _ := registry.MatchAll(ctx, bundle)
 		nodes := builder.NodesFromBundle(bundle)
 		_ = &v2.TopologyResponse{
 			Nodes: nodes,
@@ -89,7 +89,7 @@ func BenchmarkTopologyBuild_2000Resources(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		registry := relationships.NewDefaultRegistry()
-		edges, _ := registry.MatchAll(ctx, bundle)
+		edges, _, _ := registry.MatchAll(ctx, bundle)
 		nodes := builder.NodesFromBundle(bundle)
 		_ = &v2.TopologyResponse{
 			Nodes: nodes,
@@ -107,7 +107,7 @@ func BenchmarkMatchAll_StandardFixture(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = registry.MatchAll(ctx, bundle)
+		_, _, _ = registry.MatchAll(ctx, bundle)
 	}
 }
 
@@ -117,7 +117,7 @@ func BenchmarkViewFilter_ResourceCentric_Depth3(b *testing.B) {
 	bundle := v2.NewTestFixtureBundle()
 	ctx := context.Background()
 	registry := relationships.NewDefaultRegistry()
-	edges, _ := registry.MatchAll(ctx, bundle)
+	edges, _, _ := registry.MatchAll(ctx, bundle)
 	nodes := builder.NodesFromBundle(bundle)
 
 	response := &v2.TopologyResponse{
@@ -144,8 +144,8 @@ func TestDeterminism(t *testing.T) {
 	ctx := context.Background()
 	registry := relationships.NewDefaultRegistry()
 
-	edges1, _ := registry.MatchAll(ctx, bundle)
-	edges2, _ := registry.MatchAll(ctx, bundle)
+	edges1, _, _ := registry.MatchAll(ctx, bundle)
+	edges2, _, _ := registry.MatchAll(ctx, bundle)
 
 	if len(edges1) != len(edges2) {
 		t.Fatalf("edge count mismatch: %d vs %d", len(edges1), len(edges2))
