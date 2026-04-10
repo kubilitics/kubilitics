@@ -1,8 +1,12 @@
 package events
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/jmoiron/sqlx"
+	_ "modernc.org/sqlite"
 )
 
 // TestCausalChain_Basics verifies that CausalNode, CausalLinkV2, and CausalChain
@@ -117,5 +121,137 @@ func TestCausalChain_Basics(t *testing.T) {
 	}
 	if chain.UpdatedAt.IsZero() {
 		t.Error("expected UpdatedAt to be set")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Store tests
+// ---------------------------------------------------------------------------
+
+// newTestStore creates an in-memory SQLite Store and runs EnsureTables.
+func newTestStore(t *testing.T) *Store {
+	t.Helper()
+	db, err := sqlx.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open in-memory sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	s := NewStore(db)
+	if err := s.EnsureTables(); err != nil {
+		t.Fatalf("EnsureTables: %v", err)
+	}
+	return s
+}
+
+// TestStore_CausalChain_UpsertAndGet exercises UpsertCausalChain and GetCausalChain.
+func TestStore_CausalChain_UpsertAndGet(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	root := CausalNode{
+		ResourceKey:  "default/Pod/crashy-pod",
+		Kind:         "Pod",
+		Namespace:    "default",
+		Name:         "crashy-pod",
+		EventReason:  "BackOff",
+		EventMessage: "Back-off restarting failed container",
+		Timestamp:    now,
+		HealthStatus: "critical",
+	}
+
+	link := CausalLinkV2{
+		Cause: root,
+		Effect: CausalNode{
+			ResourceKey:  "default/Pod/crashy-pod",
+			Kind:         "Pod",
+			Namespace:    "default",
+			Name:         "crashy-pod",
+			EventReason:  "Killing",
+			EventMessage: "Stopping container",
+			Timestamp:    now.Add(30 * time.Second),
+			HealthStatus: "unhealthy",
+		},
+		Rule:        "crash_loop_backoff",
+		Confidence:  0.90,
+		TimeDeltaMs: 30000,
+	}
+
+	chain := &CausalChain{
+		ID:         "chain-001",
+		ClusterID:  "cluster-abc",
+		InsightID:  "insight-xyz",
+		RootCause:  root,
+		Links:      []CausalLinkV2{link},
+		Confidence: 0.90,
+		Status:     "active",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	// --- Insert ---
+	if err := s.UpsertCausalChain(ctx, chain); err != nil {
+		t.Fatalf("UpsertCausalChain (insert): %v", err)
+	}
+
+	// --- Retrieve ---
+	got, err := s.GetCausalChain(ctx, "cluster-abc", "insight-xyz")
+	if err != nil {
+		t.Fatalf("GetCausalChain: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil chain, got nil")
+	}
+	if got.ID != "chain-001" {
+		t.Errorf("ID: want chain-001, got %s", got.ID)
+	}
+	if got.ClusterID != "cluster-abc" {
+		t.Errorf("ClusterID: want cluster-abc, got %s", got.ClusterID)
+	}
+	if got.InsightID != "insight-xyz" {
+		t.Errorf("InsightID: want insight-xyz, got %s", got.InsightID)
+	}
+	if got.Confidence != 0.90 {
+		t.Errorf("Confidence: want 0.90, got %f", got.Confidence)
+	}
+	if got.Status != "active" {
+		t.Errorf("Status: want active, got %s", got.Status)
+	}
+	if got.RootCause.Kind != "Pod" {
+		t.Errorf("RootCause.Kind: want Pod, got %s", got.RootCause.Kind)
+	}
+	if len(got.Links) != 1 {
+		t.Errorf("Links: want 1, got %d", len(got.Links))
+	}
+
+	// --- Update (change confidence) ---
+	chain.Confidence = 0.75
+	chain.Status = "confirmed"
+	chain.UpdatedAt = now.Add(time.Minute)
+
+	if err := s.UpsertCausalChain(ctx, chain); err != nil {
+		t.Fatalf("UpsertCausalChain (update): %v", err)
+	}
+
+	updated, err := s.GetCausalChain(ctx, "cluster-abc", "insight-xyz")
+	if err != nil {
+		t.Fatalf("GetCausalChain after update: %v", err)
+	}
+	if updated.Confidence != 0.75 {
+		t.Errorf("updated Confidence: want 0.75, got %f", updated.Confidence)
+	}
+	if updated.Status != "confirmed" {
+		t.Errorf("updated Status: want confirmed, got %s", updated.Status)
+	}
+
+	// --- Non-existent insight returns nil, no error ---
+	missing, err := s.GetCausalChain(ctx, "cluster-abc", "no-such-insight")
+	if err != nil {
+		t.Fatalf("GetCausalChain (missing): unexpected error: %v", err)
+	}
+	if missing != nil {
+		t.Errorf("expected nil for missing insight, got %+v", missing)
 	}
 }
