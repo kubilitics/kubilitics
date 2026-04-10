@@ -19,7 +19,7 @@
 
 import { useState, useCallback, useEffect, ReactNode } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { LucideIcon, Clock, Download, Trash2, Edit, FileCode, GitCompare, Network, Zap, Copy, Loader2, FlaskConical, Activity, GitBranch } from 'lucide-react';
+import { LucideIcon, Clock, Download, Trash2, Edit, FileCode, GitCompare, Zap, Copy, Loader2, Activity, GitBranch } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -48,7 +48,6 @@ import {
   EventsSection,
   ActionsSection,
   DeleteConfirmDialog,
-  ResourceTopologyView,
   ResourceComparisonView,
   type ResourceStatus,
   type ResourceAction,
@@ -58,10 +57,8 @@ import { ResourceStatusCardProps } from '@/components/resources/ResourceStatusCa
 import { useResourceDetail, useResourceEvents } from '@/hooks/useK8sResourceDetail';
 import { useDeleteK8sResource, useUpdateK8sResource, type KubernetesResource, type ResourceType } from '@/hooks/useKubernetes';
 import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
-import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
 import { ResourceEventsTab } from '@/components/events/ResourceEventsTab';
 import { ResourceTracesTab } from '@/components/traces/ResourceTracesTab';
-import { PreApplyPanel } from '@/components/blast-radius/PreApplyPanel';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
@@ -661,38 +658,6 @@ export function GenericResourceDetail<T extends KubernetesResource>({
       ),
     },
     {
-      id: 'topology',
-      label: 'Topology',
-      icon: Network,
-      content: (
-        <ResourceTopologyView
-          kind={normalizeKindForTopology(kind)}
-          namespace={namespace ?? ''}
-          name={name ?? ''}
-          sourceResourceType={kind}
-          sourceResourceName={resource?.metadata?.name ?? name ?? ''}
-        />
-      ),
-    },
-    {
-      id: 'blast-radius',
-      label: 'Blast Radius',
-      icon: Zap,
-      content: (
-        <BlastRadiusTab
-          kind={normalizeKindForTopology(kind)}
-          namespace={namespace ?? ''}
-          name={name ?? ''}
-        />
-      ),
-    },
-    {
-      id: 'what-if',
-      label: 'What-If',
-      icon: FlaskConical,
-      content: <PreApplyPanel />,
-    },
-    {
       id: 'actions',
       label: 'Actions',
       icon: Edit,
@@ -723,6 +688,7 @@ export function GenericResourceDetail<T extends KubernetesResource>({
   // --- Header actions ---
   const defaultHeaderActions: ResourceAction[] = [
     { label: 'Download YAML', icon: Download, variant: 'outline', onClick: handleDownloadYaml, className: 'press-effect' },
+    { label: 'Analyze Impact', icon: Zap, variant: 'outline', onClick: () => navigate(`/intelligence/${namespace}/${normalizeKindForTopology(kind)}/${name}`) },
     { label: 'Delete', icon: Trash2, variant: 'destructive', onClick: () => setShowDeleteDialog(true), className: 'press-effect' },
   ];
 
