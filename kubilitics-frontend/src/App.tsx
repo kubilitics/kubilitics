@@ -42,6 +42,7 @@ const DRReadinessView = lazy(() => import("./pages/DRReadinessView"));
 
 // Intelligence Layer (Pillar 2 features)
 const HealthDashboard = lazy(() => import("./pages/HealthDashboard"));
+const HealthIssueDetail = lazy(() => import("./pages/HealthIssueDetail"));
 const RiskRanking = lazy(() => import("./pages/RiskRanking"));
 const SPOFInventory = lazy(() => import("./pages/SPOFInventory"));
 const ReportSchedules = lazy(() => import("./pages/ReportSchedules"));
@@ -754,6 +755,7 @@ const App = () => (
 
                         {/* Intelligence Layer */}
                         <Route path="/health" element={<HealthDashboard />} />
+                        <Route path="/health/issues/:insightId" element={<HealthIssueDetail />} />
                         <Route path="/risk-ranking" element={<RiskRanking />} />
                         <Route path="/spof-inventory" element={<SPOFInventory />} />
                         <Route path="/report-schedules" element={<ReportSchedules />} />
