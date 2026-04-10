@@ -244,14 +244,21 @@ func (h *Handler) GetPodExec(w http.ResponseWriter, r *http.Request) {
 	// If the user specified a custom shell, use that directly.
 	command := []string{shell}
 	if shell == "/bin/sh" {
-		wrapperScript := `
-printf 'export TERM=xterm-256color\nexport LS_COLORS="di=1;34:ln=1;36:so=1;35:pi=33:ex=1;32:bd=1;33;40:cd=1;33;40:su=37;41:sg=30;43:tw=30;42:ow=34;42"\nalias ls="ls --color=auto"\nalias ll="ls -la --color=auto"\nalias grep="grep --color=auto"\nexport PS1="\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ "\n' > /tmp/.krc 2>/dev/null
+		// Simple approach: write color config, prepend to ~/.bashrc, set ENV for sh/ash, then exec.
+		wrapperScript := `KRC='export TERM=xterm-256color
+export LS_COLORS="di=1;34:ln=1;36:so=1;35:pi=33:ex=1;32:bd=1;33;40:cd=1;33;40:su=37;41:sg=30;43:tw=30;42:ow=34;42"
+alias ls="ls --color=auto"
+alias ll="ls -la --color=auto"
+alias grep="grep --color=auto"
+'
+echo "$KRC" > /tmp/.krc
+if [ -f "$HOME/.bashrc" ]; then cat "$HOME/.bashrc" >> /tmp/.krc; fi
+cp /tmp/.krc "$HOME/.bashrc" 2>/dev/null
 export ENV="/tmp/.krc"
-if [ -x /bin/bash ]; then exec /bin/bash --rcfile /tmp/.krc -i
-elif [ -x /bin/sh ]; then exec /bin/sh -i
+if [ -x /bin/bash ]; then exec /bin/bash -i
 elif [ -x /bin/ash ]; then exec /bin/ash -i
-else echo "No shell found"; sleep 3600; fi
-`
+else exec /bin/sh -i
+fi`
 		command = []string{"/bin/sh", "-c", wrapperScript}
 	}
 
