@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { FlaskConical } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { TopologyCanvas } from '@/topology/TopologyCanvas';
 import { useTopologyData } from '@/topology/hooks/useTopologyData';
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
@@ -160,6 +161,20 @@ export default function SimulationPage() {
           icon={FlaskConical}
           iconClassName="from-purple-500/20 to-purple-500/5 text-purple-600 border-purple-500/10"
           showAiButton={false}
+          extraActions={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs text-muted-foreground"
+              onClick={() =>
+                toast.info(
+                  'Select a resource, then use "Analyze Impact" on its detail page to open the Intelligence Workspace'
+                )
+              }
+            >
+              Try Intelligence Workspace →
+            </Button>
+          }
         />
 
         {/* Insights Banner */}
