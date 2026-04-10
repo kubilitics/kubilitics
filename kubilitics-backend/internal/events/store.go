@@ -2,8 +2,11 @@ package events
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -17,6 +20,219 @@ type Store struct {
 // NewStore creates a new events Store.
 func NewStore(db *sqlx.DB) *Store {
 	return &Store{db: db}
+}
+
+// EnsureTables creates all tables required by the events subsystem if they do
+// not already exist. This includes the base schema tables defined in migration
+// 047_events_intelligence.sql as well as the root-cause-engine causal_chains
+// table added in Task 2 of the root-cause-engine worktree.
+func (s *Store) EnsureTables() error {
+	ddl := `
+		CREATE TABLE IF NOT EXISTS wide_events (
+			event_id              TEXT PRIMARY KEY,
+			timestamp             INTEGER NOT NULL,
+			cluster_id            TEXT NOT NULL,
+			event_type            TEXT NOT NULL DEFAULT '',
+			reason                TEXT NOT NULL DEFAULT '',
+			message               TEXT NOT NULL DEFAULT '',
+			source_component      TEXT NOT NULL DEFAULT '',
+			source_host           TEXT NOT NULL DEFAULT '',
+			event_count           INTEGER NOT NULL DEFAULT 1,
+			first_seen            INTEGER NOT NULL DEFAULT 0,
+			last_seen             INTEGER NOT NULL DEFAULT 0,
+			resource_kind         TEXT NOT NULL DEFAULT '',
+			resource_name         TEXT NOT NULL DEFAULT '',
+			resource_namespace    TEXT NOT NULL DEFAULT '',
+			resource_uid          TEXT NOT NULL DEFAULT '',
+			resource_api_version  TEXT NOT NULL DEFAULT '',
+			owner_kind            TEXT NOT NULL DEFAULT '',
+			owner_name            TEXT NOT NULL DEFAULT '',
+			node_name             TEXT NOT NULL DEFAULT '',
+			health_score          REAL,
+			is_spof               INTEGER NOT NULL DEFAULT 0,
+			blast_radius          INTEGER NOT NULL DEFAULT 0,
+			severity              TEXT NOT NULL DEFAULT 'info',
+			caused_by_event_id    TEXT,
+			correlation_group_id  TEXT NOT NULL DEFAULT '',
+			dimensions            TEXT NOT NULL DEFAULT '{}'
+		);
+		CREATE INDEX IF NOT EXISTS idx_wide_events_cluster_time   ON wide_events(cluster_id, timestamp);
+		CREATE INDEX IF NOT EXISTS idx_wide_events_resource       ON wide_events(resource_kind, resource_name, resource_namespace);
+		CREATE INDEX IF NOT EXISTS idx_wide_events_type_reason    ON wide_events(event_type, reason);
+		CREATE INDEX IF NOT EXISTS idx_wide_events_severity       ON wide_events(severity, timestamp);
+		CREATE INDEX IF NOT EXISTS idx_wide_events_correlation    ON wide_events(correlation_group_id);
+		CREATE INDEX IF NOT EXISTS idx_wide_events_node           ON wide_events(node_name, timestamp);
+		CREATE INDEX IF NOT EXISTS idx_wide_events_namespace_time ON wide_events(resource_namespace, timestamp);
+		CREATE INDEX IF NOT EXISTS idx_wide_events_caused_by      ON wide_events(caused_by_event_id);
+
+		CREATE TABLE IF NOT EXISTS changes (
+			change_id          TEXT PRIMARY KEY,
+			timestamp          INTEGER NOT NULL,
+			cluster_id         TEXT NOT NULL,
+			resource_kind      TEXT NOT NULL DEFAULT '',
+			resource_name      TEXT NOT NULL DEFAULT '',
+			resource_namespace TEXT NOT NULL DEFAULT '',
+			resource_uid       TEXT NOT NULL DEFAULT '',
+			change_type        TEXT NOT NULL DEFAULT '',
+			field_changes      TEXT NOT NULL DEFAULT '[]',
+			change_source      TEXT NOT NULL DEFAULT '',
+			events_caused      INTEGER NOT NULL DEFAULT 0,
+			health_impact      REAL,
+			event_id           TEXT
+		);
+		CREATE INDEX IF NOT EXISTS idx_changes_cluster_time ON changes(cluster_id, timestamp);
+		CREATE INDEX IF NOT EXISTS idx_changes_resource     ON changes(resource_kind, resource_name, resource_namespace);
+		CREATE INDEX IF NOT EXISTS idx_changes_event        ON changes(event_id);
+		CREATE INDEX IF NOT EXISTS idx_changes_type         ON changes(change_type, timestamp);
+
+		CREATE TABLE IF NOT EXISTS event_relationships (
+			source_event_id   TEXT NOT NULL,
+			target_event_id   TEXT NOT NULL,
+			relationship_type TEXT NOT NULL DEFAULT '',
+			confidence        REAL NOT NULL DEFAULT 1.0,
+			metadata          TEXT NOT NULL DEFAULT '{}',
+			PRIMARY KEY (source_event_id, target_event_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_event_rel_target ON event_relationships(target_event_id);
+		CREATE INDEX IF NOT EXISTS idx_event_rel_type   ON event_relationships(relationship_type);
+
+		CREATE TABLE IF NOT EXISTS incidents (
+			incident_id        TEXT PRIMARY KEY,
+			started_at         INTEGER NOT NULL,
+			ended_at           INTEGER,
+			status             TEXT NOT NULL DEFAULT 'active',
+			severity           TEXT NOT NULL DEFAULT 'medium',
+			cluster_id         TEXT NOT NULL,
+			namespace          TEXT NOT NULL DEFAULT '',
+			health_before      REAL,
+			health_after       REAL,
+			health_lowest      REAL,
+			root_cause_kind    TEXT NOT NULL DEFAULT '',
+			root_cause_name    TEXT NOT NULL DEFAULT '',
+			root_cause_summary TEXT NOT NULL DEFAULT '',
+			ttd                INTEGER,
+			ttr                INTEGER,
+			dimensions         TEXT NOT NULL DEFAULT '{}'
+		);
+		CREATE INDEX IF NOT EXISTS idx_incidents_cluster_status ON incidents(cluster_id, status);
+		CREATE INDEX IF NOT EXISTS idx_incidents_severity       ON incidents(severity, started_at);
+		CREATE INDEX IF NOT EXISTS idx_incidents_started        ON incidents(started_at);
+
+		CREATE TABLE IF NOT EXISTS incident_events (
+			incident_id TEXT NOT NULL,
+			event_id    TEXT NOT NULL,
+			role        TEXT NOT NULL DEFAULT 'member',
+			PRIMARY KEY (incident_id, event_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_incident_events_event ON incident_events(event_id);
+
+		CREATE TABLE IF NOT EXISTS insights (
+			insight_id TEXT PRIMARY KEY,
+			timestamp  INTEGER NOT NULL,
+			cluster_id TEXT NOT NULL,
+			rule       TEXT NOT NULL DEFAULT '',
+			severity   TEXT NOT NULL DEFAULT 'info',
+			title      TEXT NOT NULL DEFAULT '',
+			detail     TEXT NOT NULL DEFAULT '',
+			status     TEXT NOT NULL DEFAULT 'active'
+		);
+		CREATE INDEX IF NOT EXISTS idx_insights_cluster_status ON insights(cluster_id, status);
+		CREATE INDEX IF NOT EXISTS idx_insights_severity       ON insights(severity, timestamp);
+
+		CREATE TABLE IF NOT EXISTS state_snapshots (
+			snapshot_id       TEXT PRIMARY KEY,
+			timestamp         INTEGER NOT NULL,
+			cluster_id        TEXT NOT NULL,
+			total_pods        INTEGER NOT NULL DEFAULT 0,
+			running_pods      INTEGER NOT NULL DEFAULT 0,
+			total_nodes       INTEGER NOT NULL DEFAULT 0,
+			ready_nodes       INTEGER NOT NULL DEFAULT 0,
+			health_score      REAL NOT NULL DEFAULT 0,
+			spof_count        INTEGER NOT NULL DEFAULT 0,
+			warning_events    INTEGER NOT NULL DEFAULT 0,
+			error_events      INTEGER NOT NULL DEFAULT 0,
+			namespace_states  TEXT NOT NULL DEFAULT '[]',
+			deployment_states TEXT NOT NULL DEFAULT '[]'
+		);
+		CREATE INDEX IF NOT EXISTS idx_state_snapshots_cluster_time ON state_snapshots(cluster_id, timestamp);
+
+		CREATE TABLE IF NOT EXISTS causal_chains (
+			id          TEXT PRIMARY KEY,
+			cluster_id  TEXT NOT NULL,
+			insight_id  TEXT,
+			chain_json  TEXT NOT NULL,
+			confidence  REAL NOT NULL,
+			status      TEXT NOT NULL DEFAULT 'active',
+			created_at  DATETIME NOT NULL,
+			updated_at  DATETIME NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_causal_chains_cluster ON causal_chains(cluster_id, status);
+		CREATE INDEX IF NOT EXISTS idx_causal_chains_insight ON causal_chains(insight_id);
+	`
+	_, err := s.db.Exec(ddl)
+	if err != nil {
+		return fmt.Errorf("ensure tables: %w", err)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Causal Chains
+// ---------------------------------------------------------------------------
+
+// UpsertCausalChain serialises the chain to JSON and inserts or replaces the
+// record in the causal_chains table.
+func (s *Store) UpsertCausalChain(ctx context.Context, chain *CausalChain) error {
+	chainJSON, err := json.Marshal(chain)
+	if err != nil {
+		return fmt.Errorf("marshal causal chain %s: %w", chain.ID, err)
+	}
+
+	const q = `
+		INSERT OR REPLACE INTO causal_chains
+			(id, cluster_id, insight_id, chain_json, confidence, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+
+	_, err = s.db.ExecContext(ctx, q,
+		chain.ID,
+		chain.ClusterID,
+		chain.InsightID,
+		string(chainJSON),
+		chain.Confidence,
+		chain.Status,
+		chain.CreatedAt.UTC().Format(time.RFC3339Nano),
+		chain.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return fmt.Errorf("upsert causal chain %s: %w", chain.ID, err)
+	}
+	return nil
+}
+
+// causalChainRow is the DB row representation used by GetCausalChain.
+type causalChainRow struct {
+	ChainJSON string `db:"chain_json"`
+}
+
+// GetCausalChain retrieves the most-recently updated causal chain for a given
+// cluster and insight. Returns nil, nil when no matching row exists.
+func (s *Store) GetCausalChain(ctx context.Context, clusterID, insightID string) (*CausalChain, error) {
+	var row causalChainRow
+	err := s.db.GetContext(ctx, &row,
+		`SELECT chain_json FROM causal_chains WHERE cluster_id = ? AND insight_id = ? ORDER BY updated_at DESC LIMIT 1`,
+		clusterID, insightID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get causal chain (cluster=%s insight=%s): %w", clusterID, insightID, err)
+	}
+
+	var chain CausalChain
+	if err := json.Unmarshal([]byte(row.ChainJSON), &chain); err != nil {
+		return nil, fmt.Errorf("unmarshal causal chain: %w", err)
+	}
+	return &chain, nil
 }
 
 // ---------------------------------------------------------------------------
