@@ -41,6 +41,7 @@ const GoldenTemplateConfig = lazy(() => import("./pages/GoldenTemplateConfig"));
 const DRReadinessView = lazy(() => import("./pages/DRReadinessView"));
 
 // Intelligence Layer (Pillar 2 features)
+const IntelligenceWorkspace = lazy(() => import("./pages/IntelligenceWorkspace"));
 const HealthDashboard = lazy(() => import("./pages/HealthDashboard"));
 const HealthIssueDetail = lazy(() => import("./pages/HealthIssueDetail"));
 const RiskRanking = lazy(() => import("./pages/RiskRanking"));
@@ -761,6 +762,7 @@ const App = () => (
                         <Route path="/report-schedules" element={<ReportSchedules />} />
                         <Route path="/events-intelligence" element={<EventsIntelligence />} />
                         <Route path="/traces" element={<TracesPage />} />
+                        <Route path="/intelligence/:namespace/:kind/:name" element={<IntelligenceWorkspace />} />
 
                         {/* Pillar 3: What-If Simulation */}
                         <Route path="/simulation" element={<SimulationPage />} />
