@@ -291,11 +291,16 @@ function useRestoreClusterFromBackend() {
     }
   }, [backendBaseUrl, isBackendConfigured, setClusters, setActiveCluster, setCurrentClusterId, setDemo]);
 
-  // Initial sync on mount
+  // Initial sync on mount — set restoreAttempted AFTER async fetch completes
   useEffect(() => {
     if (restoreAttempted || !isBackendConfigured) return;
-    setRestoreAttempted(true);
-    syncClusters(true);
+    let cancelled = false;
+    syncClusters(true).then(() => {
+      if (!cancelled) setRestoreAttempted(true);
+    }).catch(() => {
+      if (!cancelled) setRestoreAttempted(true);
+    });
+    return () => { cancelled = true; };
   }, [isBackendConfigured, restoreAttempted, syncClusters]);
 
   // Poll every 30s to pick up external changes (cluster add/delete via API/CLI)
