@@ -245,14 +245,18 @@ func (h *Handler) GetPodExec(w http.ResponseWriter, r *http.Request) {
 	command := []string{shell}
 	if shell == "/bin/sh" {
 		wrapperScript := `
+# Write a temporary rc file with color setup
+cat > /tmp/.kubilitics_rc 2>/dev/null << 'RCEOF'
 export TERM="${TERM:-xterm-256color}"
 export LS_COLORS="di=1;34:ln=1;36:so=1;35:pi=33:ex=1;32:bd=1;33;40:cd=1;33;40:su=37;41:sg=30;43:tw=30;42:ow=34;42"
-export PS1="\033[01;32m\u@\h\033[00m:\033[01;34m\w\033[00m\$ "
 alias ls="ls --color=auto" 2>/dev/null
 alias ll="ls -la --color=auto" 2>/dev/null
 alias grep="grep --color=auto" 2>/dev/null
+export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+RCEOF
+export ENV="/tmp/.kubilitics_rc"
 if [ -x /bin/bash ]; then
-  exec /bin/bash -i
+  exec /bin/bash --rcfile /tmp/.kubilitics_rc -i
 elif [ -x /bin/sh ]; then
   exec /bin/sh -i
 elif [ -x /bin/ash ]; then
