@@ -236,8 +236,9 @@ type AnalyzeResult struct {
 // Response / enrichment types
 // ---------------------------------------------------------------------------
 
-// CausalChain represents a chain of causally linked events.
-type CausalChain struct {
+// EventCausalChain represents a chain of causally linked events (legacy/API walk response).
+// Renamed from CausalChain to avoid collision with the richer CausalChain root-cause type.
+type EventCausalChain struct {
 	RootEventID string      `json:"root_event_id"`
 	Links       []ChainLink `json:"links"`
 	Depth       int         `json:"depth"`
@@ -252,6 +253,45 @@ type ChainLink struct {
 	ResourceName     string  `json:"resource_name"`
 	RelationshipType string  `json:"relationship_type"`
 	Confidence       float64 `json:"confidence"`
+}
+
+// ---------------------------------------------------------------------------
+// Root Cause Engine types
+// ---------------------------------------------------------------------------
+
+// CausalNode represents a K8s resource at a point in time within a causal chain.
+type CausalNode struct {
+	ResourceKey  string    `json:"resourceKey" db:"resource_key"`
+	Kind         string    `json:"kind" db:"kind"`
+	Namespace    string    `json:"namespace" db:"namespace"`
+	Name         string    `json:"name" db:"name"`
+	EventReason  string    `json:"eventReason" db:"event_reason"`
+	EventMessage string    `json:"eventMessage" db:"event_message"`
+	Timestamp    time.Time `json:"timestamp" db:"timestamp"`
+	HealthStatus string    `json:"healthStatus" db:"health_status"`
+}
+
+// CausalLinkV2 represents one cause→effect hop in a causal chain.
+// Named V2 to avoid collision with existing CausalLink in causality.go.
+type CausalLinkV2 struct {
+	Cause       CausalNode `json:"cause"`
+	Effect      CausalNode `json:"effect"`
+	Rule        string     `json:"rule"`
+	Confidence  float64    `json:"confidence"`
+	TimeDeltaMs int64      `json:"timeDeltaMs"`
+}
+
+// CausalChain represents a complete root cause analysis.
+type CausalChain struct {
+	ID         string         `json:"id" db:"id"`
+	ClusterID  string         `json:"clusterId" db:"cluster_id"`
+	InsightID  string         `json:"insightId,omitempty" db:"insight_id"`
+	RootCause  CausalNode     `json:"rootCause"`
+	Links      []CausalLinkV2 `json:"links"`
+	Confidence float64        `json:"confidence" db:"confidence"`
+	Status     string         `json:"status" db:"status"`
+	CreatedAt  time.Time      `json:"createdAt" db:"created_at"`
+	UpdatedAt  time.Time      `json:"updatedAt" db:"updated_at"`
 }
 
 // EventContext provides surrounding context for a single event.

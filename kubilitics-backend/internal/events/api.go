@@ -280,7 +280,7 @@ func (h *EventsHandler) GetCausalChain(w http.ResponseWriter, r *http.Request) {
 	eventID := vars["eventId"]
 	ctx := r.Context()
 
-	chain := CausalChain{
+	chain := EventCausalChain{
 		RootEventID: eventID,
 	}
 
