@@ -16,7 +16,7 @@ func TestPartialData_NoSecrets(t *testing.T) {
 
 	ctx := context.Background()
 	registry := relationships.NewDefaultRegistry()
-	edges, err := registry.MatchAll(ctx, bundle)
+	edges, _, err := registry.MatchAll(ctx, bundle)
 	if err != nil {
 		t.Fatalf("MatchAll should not fail even with nil Secrets: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestPartialData_NoMetrics(t *testing.T) {
 	bundle := v2.NewTestFixtureBundle()
 	ctx := context.Background()
 	registry := relationships.NewDefaultRegistry()
-	edges, _ := registry.MatchAll(ctx, bundle)
+	edges, _, _ := registry.MatchAll(ctx, bundle)
 	nodes := builder.NodesFromBundle(bundle)
 
 	// MetricsEnricher with no pod metrics (simulating metrics-server unavailable)
@@ -65,7 +65,7 @@ func TestPartialData_NoNodes(t *testing.T) {
 
 	ctx := context.Background()
 	registry := relationships.NewDefaultRegistry()
-	edges, err := registry.MatchAll(ctx, bundle)
+	edges, _, err := registry.MatchAll(ctx, bundle)
 	if err != nil {
 		t.Fatalf("MatchAll should not fail with nil Nodes: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestPartialData_EmptyBundle(t *testing.T) {
 
 	ctx := context.Background()
 	registry := relationships.NewDefaultRegistry()
-	edges, err := registry.MatchAll(ctx, bundle)
+	edges, _, err := registry.MatchAll(ctx, bundle)
 	if err != nil {
 		t.Fatalf("MatchAll should not fail with empty bundle: %v", err)
 	}

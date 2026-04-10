@@ -32,5 +32,8 @@ type TopologyMetadata struct {
 
 	// FailedResources lists resource types that could not be fetched from the API.
 	FailedResources []string `json:"failed_resources,omitempty"`
+
+	// FailedMatchers lists matcher names that encountered errors during relationship discovery.
+	FailedMatchers []string `json:"failed_matchers,omitempty"`
 }
 
