@@ -1,9 +1,10 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import type { BaseNodeData } from "./BaseNode";
 import { formatBytes, formatCPU } from "./nodeUtils";
 import { K8sIcon } from "../icons/K8sIcon";
+import { useCloudContext } from '@/topology/hooks/useCloudContext';
 import {
   categoryBorderClass,
   categoryHeaderClass,
@@ -37,6 +38,15 @@ function ExpandedNodeInner({ data }: NodeProps<ExpandedNodeData>) {
   const badge = getStatusBadge(data.status);
   const metrics = data.metrics;
 
+  const cloudMeta = useMemo(() => ({
+    serviceType: data.serviceType,
+    storageClass: (data as Record<string, unknown>).storageClass as string | undefined,
+    annotations: data.annotations,
+    labels: data.labels,
+  }), [data.serviceType, data.annotations, data.labels]);
+
+  const { providerLogo, cloudIconUrl } = useCloudContext(data.kind, cloudMeta);
+
   return (
     <div
       className={`w-[380px] rounded-lg border ${borderColor} bg-white dark:bg-slate-800 shadow-sm ${A11Y.transition} hover:shadow-md ${A11Y.focusRing} overflow-hidden`}
@@ -49,7 +59,16 @@ function ExpandedNodeInner({ data }: NodeProps<ExpandedNodeData>) {
 
       {/* Header */}
       <div className={`flex items-center gap-2.5 ${headerBg} px-3 py-1.5`}>
-        <K8sIcon kind={data.kind} size={22} backdrop />
+        <div className="relative">
+          <K8sIcon kind={data.kind} size={22} backdrop cloudIconUrl={cloudIconUrl} />
+          {providerLogo && (
+            <div className="absolute -top-1 -right-1 z-10">
+              <div className="w-[18px] h-[18px] rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center shadow-sm">
+                <img src={providerLogo} alt="" className="w-3 h-3" draggable={false} />
+              </div>
+            </div>
+          )}
+        </div>
         <div className="flex-1 min-w-0">
           <span className="text-xs font-semibold text-white tracking-wide uppercase">{data.kind}</span>
         </div>
