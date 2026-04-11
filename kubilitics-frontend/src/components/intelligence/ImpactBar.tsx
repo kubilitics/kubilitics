@@ -17,11 +17,13 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronUp,
+  Crosshair,
   FilePlus,
   FileMinus,
   FileEdit,
   Globe,
   Layers,
+  Link2,
   Minus,
   ShieldAlert,
   Zap,
@@ -29,6 +31,7 @@ import {
 import { cn } from '@/lib/utils';
 import type { BlastRadiusResult } from '@/services/api/types';
 import type { PreviewResult } from '@/services/api/preview';
+import { useCausalChainStore } from '@/stores/causalChainStore';
 
 // --- Local type ---
 type WorkspaceMode = 'live' | 'preview';
@@ -128,6 +131,8 @@ function LiveImpactBar({ data }: LiveImpactBarProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const toggle = (id: string) => setExpanded(prev => (prev === id ? null : id));
 
+  const { chainData, overlayEnabled, isTimelineExpanded, highlightedStep, toggleTimeline, setHighlightedStep } = useCausalChainStore();
+
   const levelColors = blastLevelColors(data.criticalityLevel);
 
   return (
@@ -182,7 +187,116 @@ function LiveImpactBar({ data }: LiveImpactBarProps) {
             accentClass="text-red-400"
           />
         )}
+
+        {/* Root Cause pill — only visible when chain overlay is active */}
+        {overlayEnabled && chainData && (
+          <MetricPill
+            id="root-cause"
+            icon={<Crosshair className="h-3.5 w-3.5" />}
+            label="Root Cause"
+            value={chainData.rootCause.name}
+            expanded={false}
+            onToggle={() => {}}
+            accentClass="text-amber-500"
+          />
+        )}
+
+        {/* Chain pill — toggles timeline drawer */}
+        {overlayEnabled && chainData && chainData.links.length > 0 && (
+          <MetricPill
+            id="chain"
+            icon={<Link2 className="h-3.5 w-3.5" />}
+            label="Chain"
+            value={`${chainData.links.length} step${chainData.links.length !== 1 ? 's' : ''}`}
+            expanded={isTimelineExpanded}
+            onToggle={toggleTimeline}
+            accentClass="text-orange-400"
+          />
+        )}
       </div>
+
+      {/* Chain timeline drawer */}
+      <AnimatePresence>
+        {overlayEnabled && chainData && chainData.links.length > 0 && isTimelineExpanded && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="col-span-full overflow-hidden"
+          >
+            <div className="mt-2 px-3 py-2.5 rounded-lg bg-slate-800/80 ring-1 ring-slate-700/50">
+              <div className="flex flex-col gap-0">
+                {chainData.links.map((link, i) => {
+                  const isRoot = i === 0;
+                  const isSymptom = i === chainData.links.length - 1;
+                  const stepIndex = isRoot ? 0 : i + 1;
+                  const isHighlighted = highlightedStep === stepIndex;
+
+                  return (
+                    <div
+                      key={`${link.rule}-${i}`}
+                      className={cn(
+                        'flex gap-3 items-start py-2 px-2 rounded-lg cursor-pointer transition-colors duration-150',
+                        isHighlighted && 'bg-slate-700/50',
+                        isRoot && 'bg-amber-500/5 ring-1 ring-amber-500/10'
+                      )}
+                      onMouseEnter={() => setHighlightedStep(stepIndex)}
+                      onMouseLeave={() => setHighlightedStep(null)}
+                    >
+                      <div className="flex flex-col items-center shrink-0">
+                        <div className={cn(
+                          'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold',
+                          isRoot ? 'bg-amber-500 text-black' :
+                          isSymptom ? 'bg-red-500 text-white' :
+                          'bg-orange-500 text-black'
+                        )}>
+                          {stepIndex + 1}
+                        </div>
+                        {!isSymptom && (
+                          <div className="w-0.5 h-5 bg-gradient-to-b from-amber-500 to-red-500 mt-1" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[13px] font-semibold text-white truncate">
+                            {isRoot ? link.cause.name : link.effect.name}
+                          </span>
+                          <span className="text-[10px] text-slate-400 bg-slate-700/50 px-1.5 py-0.5 rounded shrink-0">
+                            {isRoot ? link.cause.kind : link.effect.kind}
+                          </span>
+                          {isRoot && (
+                            <span className="text-[9px] text-amber-500 font-semibold uppercase tracking-wider">
+                              Root Cause
+                            </span>
+                          )}
+                          {isSymptom && (
+                            <span className="text-[9px] text-red-500 font-semibold uppercase tracking-wider">
+                              Symptom
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+                          {isRoot ? link.cause.eventMessage : link.effect.eventMessage}
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          {link.timeDeltaMs > 0 && `${(link.timeDeltaMs / 1000).toFixed(0)}s after cause · `}
+                          confidence {(link.confidence * 100).toFixed(0)}%
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-2 pt-2 border-t border-slate-700/50 flex items-center justify-between">
+                <span className="text-[11px] text-slate-500">
+                  Overall confidence: <span className="text-amber-500 font-semibold">{(chainData.confidence * 100).toFixed(0)}%</span>
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Expandable detail panels */}
       <AnimatePresence>
