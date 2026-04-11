@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useClusterSummaryWithProject } from '@/hooks/useClusterSummary';
+import { useNamespacesFromCluster } from '@/hooks/useNamespacesFromCluster';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageLayout } from '@/components/layout/PageLayout';
 import {
@@ -284,9 +285,13 @@ export default function Pods() {
 
  const fullPods: Pod[] = useMemo(() => rawItems.map(transformResource), [rawItems]);
 
+ // Namespace list: use cluster-wide namespace list when backend is available
+ // (not just namespaces from the current page of pods)
+ const { data: allNamespaces } = useNamespacesFromCluster(clusterId);
  const namespaceList = useMemo(() => {
+ if (allNamespaces && allNamespaces.length > 0) return allNamespaces.sort();
  return Array.from(new Set(fullPods.map(p => p.namespace))).sort();
- }, [fullPods]);
+ }, [allNamespaces, fullPods]);
 
  // Seed namespace filter from ?namespace=<ns> on initial load so views
  // navigated from Namespace detail are scoped correctly.
