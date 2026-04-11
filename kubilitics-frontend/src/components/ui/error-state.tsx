@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { motion } from "framer-motion";
 import { type LucideIcon } from "lucide-react";
 import {
@@ -6,6 +7,7 @@ import {
   ShieldX,
   Clock,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -170,7 +172,7 @@ export function ConnectionError({ onRetry }: { onRetry?: () => void }) {
 }
 ConnectionError.displayName = "ConnectionError";
 
-/** API / server error */
+/** API / server error — auto-retries "graph still building" 503s */
 export function ApiError({
   onRetry,
   message,
@@ -178,6 +180,42 @@ export function ApiError({
   onRetry?: () => void;
   message?: string;
 }) {
+  const isGraphBuilding = message != null && (
+    message.includes("still building") || message.includes("graph is still")
+  );
+
+  // Auto-retry every 3s while graph is building
+  useEffect(() => {
+    if (!isGraphBuilding || !onRetry) return;
+    const timer = setInterval(onRetry, 3000);
+    return () => clearInterval(timer);
+  }, [isGraphBuilding, onRetry]);
+
+  if (isGraphBuilding) {
+    return (
+      <motion.div
+        variants={fadeIn}
+        initial="hidden"
+        animate="visible"
+        role="status"
+        aria-label="Preparing data"
+        className="flex flex-col items-center justify-center text-center p-8 gap-3"
+      >
+        <div className="flex items-center justify-center rounded-full p-3 bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400">
+          <Loader2 className="h-12 w-12 animate-spin" strokeWidth={1.5} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <h3 className="text-base font-semibold text-foreground">
+            Building dependency graph...
+          </h3>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            Analyzing cluster resources and relationships. This usually takes a few seconds.
+          </p>
+        </div>
+      </motion.div>
+    );
+  }
+
   return (
     <ErrorState
       variant="api"
