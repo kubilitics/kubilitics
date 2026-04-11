@@ -23,6 +23,13 @@ import { captureFullTopologyPNG, captureFullTopologySVG, type ExportBounds } fro
 import { ZOOM_THRESHOLDS, CANVAS, EDGE_COLORS, fitViewMinZoom, minimapNodeColor } from "./constants/designTokens";
 import { useTopologyStore } from "./store/topologyStore";
 import type { TopologyResponse, ViewMode } from "./types/topology";
+import { useCausalChainStore } from "@/stores/causalChainStore";
+import {
+  getCausalChainNodeClassName,
+  getCausalChainNodeStyle,
+  getChainStepIndex,
+  getStepBadgeColor,
+} from "@/topology/overlays/CausalChainOverlay";
 
 export type ExportFormat = "png" | "svg";
 
@@ -315,6 +322,9 @@ function TopologyCanvasInner({
   // TopologyPage (store-driven) and ResourceTopologyV2View (local state).
   const focusDimming = useTopologyStore((s) => s.focusDimming);
 
+  // Causal chain overlay state
+  const { chainData, overlayEnabled, highlightedStep } = useCausalChainStore();
+
   const dimmedNodeIds = useMemo(() => {
     if (!focusDimming || !selectedNodeId) return null;
     const connectedIds = new Set<string>();
@@ -333,7 +343,8 @@ function TopologyCanvasInner({
     const hasSimulation = simulationAffectedNodes != null && simulationAffectedNodes.size > 0;
     const hasDiff = simulationDiff != null;
 
-    if (!selectedNodeId && highlightNodeIds.length === 0 && !hasDimming && !hasErrorChain && !hasSimulation && !hasDiff) return nodes;
+    const hasChainOverlay = overlayEnabled && chainData != null;
+    if (!selectedNodeId && highlightNodeIds.length === 0 && !hasDimming && !hasErrorChain && !hasSimulation && !hasDiff && !hasChainOverlay) return nodes;
 
     const highlightSet = new Set(highlightNodeIds);
     return nodes.map((n) => {
@@ -426,6 +437,23 @@ function TopologyCanvasInner({
         }
       }
 
+      // Causal chain overlay — only activates when blast radius is NOT active
+      if (overlayEnabled && chainData) {
+        const stepIndex = getChainStepIndex(n.id, chainData);
+        const totalSteps = chainData.links.length + 1;
+        const chainStepColor = stepIndex >= 0 ? getStepBadgeColor(stepIndex, totalSteps) : '';
+        return {
+          ...n,
+          className: getCausalChainNodeClassName(n.id, chainData, highlightedStep),
+          style: { ...n.style, ...getCausalChainNodeStyle(n.id, chainData, highlightedStep) },
+          data: {
+            ...(n.data as Record<string, unknown>),
+            chainStepIndex: stepIndex >= 0 ? stepIndex : undefined,
+            chainStepColor: stepIndex >= 0 ? chainStepColor : undefined,
+          },
+        };
+      }
+
       if (!isHighlighted && !isSelected && !isDimmed && !isInErrorChain) return n;
       return {
         ...n,
@@ -443,7 +471,7 @@ function TopologyCanvasInner({
         },
       };
     });
-  }, [nodes, selectedNodeId, highlightNodeIds, dimmedNodeIds, errorChainNodeIds, simulationAffectedNodes, simulatedFailureNodeId, simulationWaveDepths, simulationDiff]);
+  }, [nodes, selectedNodeId, highlightNodeIds, dimmedNodeIds, errorChainNodeIds, simulationAffectedNodes, simulatedFailureNodeId, simulationWaveDepths, simulationDiff, overlayEnabled, chainData, highlightedStep]);
 
   // Edge styling — ALWAYS show edges, just hide labels at low zoom
   const styledEdges = useMemo(() => {
