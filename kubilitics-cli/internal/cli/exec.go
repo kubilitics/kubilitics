@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -56,23 +57,22 @@ func newExecCmd(a *app) *cobra.Command {
 				}
 			}
 
-			// Guard against destructive commands run via exec without --yes.
-			// e.g. kcli exec pod-name -- rm -rf /data
-			if !a.force {
-				if cmd, ok := extractExecCommand(clean); ok && isDestructiveExecCmd(cmd) {
-					if !runner.IsTerminal() {
-						return fmt.Errorf(
-							"refusing to exec destructive command in non-interactive mode: %q\n"+
-								"  Rerun with --yes to bypass this check, or verify the command is safe.",
-							strings.Join(cmd, " "))
-					}
-					fmt.Fprintf(os.Stderr,
-						"kcli: WARNING — this exec command may be destructive:\n"+
-							"  kubectl exec %s\n"+
-							"  Command after --: %s\n"+
-							"Proceed? [y/N]: ",
-						strings.Join(clean, " "),
+			// Guard against destructive commands — always warn, --yes only skips prompt.
+			if cmd, ok := extractExecCommand(clean); ok && isDestructiveExecCmd(cmd) {
+				fmt.Fprintf(os.Stderr,
+					"⚠ WARNING — destructive command detected:\n"+
+						"  Command: %s\n",
+					strings.Join(cmd, " "))
+
+				if a.force {
+					fmt.Fprintf(os.Stderr, "  Proceeding (--yes flag set)\n")
+				} else if !runner.IsTerminal() {
+					return fmt.Errorf(
+						"refusing to exec destructive command in non-interactive mode: %q\n"+
+							"  Rerun with --yes to bypass this check.",
 						strings.Join(cmd, " "))
+				} else {
+					fmt.Fprintf(os.Stderr, "Proceed? [y/N]: ")
 					r := bufio.NewReader(os.Stdin)
 					line, _ := r.ReadString('\n')
 					ans := strings.ToLower(strings.TrimSpace(line))
@@ -167,7 +167,18 @@ func extractExecCommand(args []string) ([]string, bool) {
 // destructive-command heuristic pattern.
 func isDestructiveExecCmd(cmd []string) bool {
 	joined := strings.Join(cmd, " ")
-	return destructiveExecPattern.MatchString(joined)
+	if destructiveExecPattern.MatchString(joined) {
+		return true
+	}
+	// Shell wrapper: sh -c "...", bash -c "...", /bin/sh -c "..."
+	if len(cmd) >= 3 && cmd[1] == "-c" {
+		shell := filepath.Base(cmd[0])
+		if shell == "sh" || shell == "bash" || shell == "zsh" {
+			inner := strings.Join(cmd[2:], " ")
+			return destructiveExecPattern.MatchString(inner)
+		}
+	}
+	return false
 }
 
 func (a *app) selectContainer(namespace, pod, _ string) (string, error) {
