@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"math"
 	"testing"
 
 	"github.com/kubilitics/kubilitics-backend/internal/models"
@@ -125,7 +126,7 @@ func TestComputeBlastRadiusPercent(t *testing.T) {
 		{Classification: "degraded", Service: models.ResourceRef{Namespace: "default"}},
 		{Classification: "self-healing", Service: models.ResourceRef{Namespace: "default"}},
 	}
-	pct := computeBlastRadiusPercent(impacts, nil, nil, 10)
+	pct := computeBlastRadiusPercent(impacts, nil, nil, 10, nil)
 	expected := 15.0
 	if pct != expected {
 		t.Errorf("expected %.1f%%, got %.1f%%", expected, pct)
@@ -133,9 +134,55 @@ func TestComputeBlastRadiusPercent(t *testing.T) {
 }
 
 func TestComputeBlastRadiusPercent_ZeroDenominator(t *testing.T) {
-	pct := computeBlastRadiusPercent(nil, nil, nil, 0)
+	pct := computeBlastRadiusPercent(nil, nil, nil, 0, nil)
 	if pct != 0 {
 		t.Errorf("expected 0, got %f", pct)
+	}
+}
+
+func TestComputeBlastRadiusPercent_Amplification(t *testing.T) {
+	// Build a snapshot where svc-a and svc-c both depend on svc-b (svc-b has 2 upstream callers)
+	snap := &GraphSnapshot{}
+	snap.EnsureMaps()
+
+	svcA := models.ResourceRef{Kind: "Service", Namespace: "default", Name: "svc-a"}
+	svcB := models.ResourceRef{Kind: "Service", Namespace: "default", Name: "svc-b"}
+	svcC := models.ResourceRef{Kind: "Service", Namespace: "default", Name: "svc-c"}
+	dep := models.ResourceRef{Kind: "Deployment", Namespace: "default", Name: "dep-b"}
+
+	snap.Nodes[refKey(svcA)] = svcA
+	snap.Nodes[refKey(svcB)] = svcB
+	snap.Nodes[refKey(svcC)] = svcC
+	snap.Nodes[refKey(dep)] = dep
+
+	// svc-a and svc-c both depend on svc-b (reverse: svc-b has 2 upstream callers)
+	snap.Reverse[refKey(svcB)] = map[string]bool{refKey(svcA): true, refKey(svcC): true}
+
+	snap.TotalWorkloads = 4
+
+	// Broken service WITH upstream callers (amplified)
+	impactsAmplified := []models.ServiceImpact{
+		{Service: svcB, Classification: "broken", TotalEndpoints: 1, RemainingEndpoints: 0},
+	}
+	pctAmplified := computeBlastRadiusPercent(impactsAmplified, nil, nil, snap.TotalWorkloads, snap)
+
+	// Same broken service but NO upstream callers (not amplified)
+	snapNoUpstream := &GraphSnapshot{}
+	snapNoUpstream.EnsureMaps()
+	snapNoUpstream.TotalWorkloads = 4
+	pctFlat := computeBlastRadiusPercent(impactsAmplified, nil, nil, snapNoUpstream.TotalWorkloads, snapNoUpstream)
+
+	if pctAmplified <= pctFlat {
+		t.Errorf("amplified blast radius (%.1f%%) should be > flat (%.1f%%)", pctAmplified, pctFlat)
+	}
+
+	// Verify specific values: flat = 1.0/4 * 100 = 25%, amplified = 1.15/4 * 100 = 28.75%
+	if pctFlat != 25.0 {
+		t.Errorf("flat blast radius expected 25.0%%, got %.1f%%", pctFlat)
+	}
+	expectedAmplified := (1.0 * 1.15 / 4.0) * 100.0
+	if math.Abs(pctAmplified-expectedAmplified) > 0.01 {
+		t.Errorf("amplified blast radius expected %.2f%%, got %.2f%%", expectedAmplified, pctAmplified)
 	}
 }
 
