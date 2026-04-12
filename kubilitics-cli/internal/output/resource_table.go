@@ -218,6 +218,21 @@ func FormatStatus(status string) string {
 	return icon + " " + status
 }
 
+// CountColorFunc returns a ColorFunc that colors numeric counts — green for >0, muted for 0.
+func CountColorFunc() func(string) lipgloss.Style {
+	return func(value string) lipgloss.Style {
+		theme := GetTheme()
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return theme.Primary
+		}
+		if n > 0 {
+			return theme.StatusReady
+		}
+		return theme.Muted
+	}
+}
+
 // Print renders the table at auto-detected terminal width and prints it to stdout.
 func (t *Table) Print() {
 	fmt.Print(t.Render(0))
