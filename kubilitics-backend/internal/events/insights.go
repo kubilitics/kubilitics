@@ -488,8 +488,9 @@ func restartStorm(ctx context.Context, store *Store, clusterID string) *Insight 
 			for podName := range nsPods[ns] {
 				podRefs = append(podRefs, fmt.Sprintf("%s/%s", ns, podName))
 			}
-			detail := fmt.Sprintf("%d pod restart events in 5 minutes in namespace %s: %s",
-				count, ns, strings.Join(podRefs, ", "))
+			podCount := len(nsPods[ns])
+			detail := fmt.Sprintf("%d pod(s) restarting (%d restart events in 5 minutes) in namespace %s: %s",
+				podCount, count, ns, strings.Join(podRefs, ", "))
 
 			return &Insight{
 				InsightID: fmt.Sprintf("ins_%d_restartStorm", time.Now().UnixNano()),
@@ -497,7 +498,7 @@ func restartStorm(ctx context.Context, store *Store, clusterID string) *Insight 
 				ClusterID: clusterID,
 				Rule:      "restartStorm",
 				Severity:  "warning",
-				Title:     fmt.Sprintf("Restart storm in namespace %s", ns),
+				Title:     fmt.Sprintf("Restart storm in namespace %s — %d pod(s)", ns, podCount),
 				Detail:    detail,
 				Status:    "active",
 			}
