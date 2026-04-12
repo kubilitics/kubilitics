@@ -95,18 +95,42 @@ async function fetchInvestigateData(
   let podRefs = parsed.pods;
 
   // Fallback: if no individual pod names but a namespace is mentioned (e.g. "restart storm in namespace X"),
-  // list all pods in that namespace with restarts > 0
+  // list all pods in that namespace with restarts > 0 and build full info directly (skip re-fetch)
   if (podRefs.length === 0 && parsed.namespace) {
     try {
-      const result = await listResources(baseUrl, clusterId, 'pods', { namespace: parsed.namespace });
+      const result = await listResources(baseUrl, clusterId, 'pods', { namespace: parsed.namespace, limit: 200 });
+      const directPods: PodInvestigateInfo[] = [];
       for (const item of result.items) {
-        const meta = (item.metadata ?? {}) as Record<string, unknown>;
-        const status = (item.status ?? {}) as Record<string, unknown>;
-        const containerStatuses = (status.containerStatuses ?? []) as Array<Record<string, unknown>>;
-        const totalRestarts = containerStatuses.reduce((sum: number, cs: Record<string, unknown>) => sum + ((cs.restartCount as number) ?? 0), 0);
-        if (totalRestarts > 0) {
-          podRefs.push({ namespace: (meta.namespace as string) ?? parsed.namespace, name: (meta.name as string) ?? '' });
+        const info = extractPodInfo(item);
+        if (info.restartCount > 0) {
+          directPods.push({ ...info, logSnippet: null, errorSnippet: null });
         }
+      }
+      if (directPods.length > 0) {
+        directPods.sort((a, b) => b.restartCount - a.restartCount);
+        // Fetch logs for the worst pod
+        let rootCause: RootCauseResult = inferRootCause(insight.title + '\n' + insight.detail);
+        const worst = directPods[0];
+        try {
+          const logsUrl = getPodLogsUrl(baseUrl, clusterId, worst.namespace, worst.name, {
+            tail: 30, follow: false, container: worst.containerName ?? undefined,
+          });
+          const resp = await fetch(logsUrl);
+          if (resp.ok) {
+            const logText = await resp.text();
+            rootCause = inferRootCause(logText);
+            worst.logSnippet = logText;
+            worst.errorSnippet = extractErrorSnippet(logText);
+          }
+        } catch { /* logs unavailable */ }
+
+        return {
+          rootCause,
+          pods: directPods,
+          startedAgo: timeAgo(new Date(insight.timestamp * 1000).toISOString()),
+          lastRestartAgo: timeAgo(directPods.map(p => p.lastRestartTime).filter(Boolean).sort().reverse()[0] ?? null),
+          totalAffected: directPods.length,
+        };
       }
     } catch {
       // API error — fall through to empty
