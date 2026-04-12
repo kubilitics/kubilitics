@@ -58,8 +58,8 @@ func enhanceDeployments(kubeconfigPath, ctx, namespace string, modifiers []strin
 	table := output.NewResourceTable(output.ResourceTableOpts{Scope: output.ScopeNamespaced})
 	table.AddNameColumn()
 	table.AddReadyColumn()
-	table.AddColumn(output.Column{Name: "UP-TO-DATE", Priority: output.PrioritySecondary, MinWidth: 10, MaxWidth: 12, Align: output.Right})
-	table.AddColumn(output.Column{Name: "AVAILABLE", Priority: output.PrioritySecondary, MinWidth: 9, MaxWidth: 12, Align: output.Right})
+	table.AddColumn(output.Column{Name: "UP-TO-DATE", Priority: output.PrioritySecondary, MinWidth: 10, MaxWidth: 12, Align: output.Right, ColorFunc: output.CountColorFunc()})
+	table.AddColumn(output.Column{Name: "AVAILABLE", Priority: output.PrioritySecondary, MinWidth: 9, MaxWidth: 12, Align: output.Right, ColorFunc: output.CountColorFunc()})
 	table.AddAgeColumn()
 
 	modifierColumns := map[string][]output.Column{
