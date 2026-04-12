@@ -1,9 +1,12 @@
 package graph
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/otel"
 	policyv1 "k8s.io/api/policy/v1"
 )
 
@@ -200,5 +203,58 @@ func TestComputeConfidence_GraphOnly(t *testing.T) {
 	}
 	if note != "Graph topology only — no runtime data available" {
 		t.Errorf("unexpected note for empty snapshot: %s", note)
+	}
+}
+
+func TestComputeExposure_ErrorRate(t *testing.T) {
+	// Service with high dependency error rate
+	highError := computeExposure(ExposureInput{
+		IsIngressExposed:    false,
+		ConsumerCount:       2,
+		TraceDataAvailable:  true,
+		TotalCallsToTarget:  1000,
+		ClusterTotalCalls:   5000,
+		DependencyErrorRate: 0.5, // 50% errors
+	})
+
+	// Same service with no errors
+	noError := computeExposure(ExposureInput{
+		IsIngressExposed:    false,
+		ConsumerCount:       2,
+		TraceDataAvailable:  true,
+		TotalCallsToTarget:  1000,
+		ClusterTotalCalls:   5000,
+		DependencyErrorRate: 0.0,
+	})
+
+	if highError.Score <= noError.Score {
+		t.Errorf("50%% error rate service (%d) should score higher exposure than 0%% (%d)",
+			highError.Score, noError.Score)
+	}
+}
+
+func TestComputeConfidence_StaleTraces(t *testing.T) {
+	// Fresh snapshot (just built)
+	freshSnap := buildSnapshotScenario1()
+	freshSnap.OTelServiceMap = &otel.ServiceMap{
+		Edges: []otel.ServiceEdge{{Source: "a", Target: "b", Count: 10}},
+	}
+	freshSnap.BuiltAt = time.Now().UnixMilli() // fresh
+	freshScore, _ := computeConfidence(freshSnap)
+
+	// Stale snapshot (3 hours old)
+	staleSnap := buildSnapshotScenario1()
+	staleSnap.OTelServiceMap = &otel.ServiceMap{
+		Edges: []otel.ServiceEdge{{Source: "a", Target: "b", Count: 10}},
+	}
+	staleSnap.BuiltAt = time.Now().Add(-3 * time.Hour).UnixMilli() // 3 hours old
+	staleScore, staleNote := computeConfidence(staleSnap)
+
+	if staleScore >= freshScore {
+		t.Errorf("stale trace data (%d) should give lower confidence than fresh (%d)",
+			staleScore, freshScore)
+	}
+	if !strings.Contains(staleNote, "old") {
+		t.Errorf("stale note should mention age, got: %s", staleNote)
 	}
 }
