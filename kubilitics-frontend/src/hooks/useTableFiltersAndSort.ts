@@ -14,6 +14,25 @@ export interface TableFiltersSortConfig<T> {
   defaultSortOrder?: 'asc' | 'desc';
 }
 
+/** Parse age strings like "5h", "3d", "2wk", "45s", "12m" to seconds for sorting. Returns -1 if not an age string. */
+function ageToSeconds(val: string): number {
+  const trimmed = val.trim().toLowerCase();
+  if (trimmed === 'just now' || trimmed === '<1s') return 0;
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(s|m|h|d|wk|mo|y)$/);
+  if (!match) return -1;
+  const num = parseFloat(match[1]);
+  switch (match[2]) {
+    case 's': return num;
+    case 'm': return num * 60;
+    case 'h': return num * 3600;
+    case 'd': return num * 86400;
+    case 'wk': return num * 604800;
+    case 'mo': return num * 2592000;
+    case 'y': return num * 31536000;
+    default: return -1;
+  }
+}
+
 function defaultCompare<T>(getValue: (item: T) => string | number): (a: T, b: T) => number {
   return (a, b) => {
     const va = getValue(a);
@@ -24,6 +43,10 @@ function defaultCompare<T>(getValue: (item: T) => string | number): (a: T, b: T)
     const na = Number(va);
     const nb = Number(vb);
     if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+    // Try age-string comparison before falling back to locale
+    const ageA = ageToSeconds(sa);
+    const ageB = ageToSeconds(sb);
+    if (ageA >= 0 && ageB >= 0) return ageA - ageB;
     return sa.localeCompare(sb, undefined, { numeric: true });
   };
 }
