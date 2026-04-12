@@ -647,7 +647,7 @@ func computeConfidence(snap *GraphSnapshot) (int, string) {
 		score += 30
 		sources = append(sources, "endpoints")
 	}
-	if hasTraces {
+	if hasTraces && snap.BuiltAt > 0 {
 		// Freshness: full credit if data < 10 min, decays to half credit at 1 hour, minimal at 3+ hours
 		stalenessMs := time.Now().UnixMilli() - snap.BuiltAt
 		stalenessMin := float64(stalenessMs) / 60000.0
@@ -667,6 +667,10 @@ func computeConfidence(snap *GraphSnapshot) (int, string) {
 		} else {
 			sources = append(sources, "traces")
 		}
+	} else if hasTraces {
+		// Traces exist but no BuiltAt timestamp — half credit
+		score += 15
+		sources = append(sources, "traces (unknown age)")
 	}
 	if hasPDBs {
 		score += 15

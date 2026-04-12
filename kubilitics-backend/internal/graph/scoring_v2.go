@@ -114,7 +114,7 @@ func computeExposure(in ExposureInput) models.SubScoreDetail {
 			trafficRatio := float64(in.TotalCallsToTarget) / float64(in.ClusterTotalCalls)
 			// Scale: 0% traffic = 0 score, 100% traffic = 60 score
 			// A service handling 10% of cluster traffic scores 6, 50% scores 30
-			trafficScore := math.Min(trafficRatio*60.0*float64(in.ConsumerCount)/math.Max(float64(in.ConsumerCount), 1.0), 40)
+			trafficScore := math.Min(trafficRatio*60.0, 40)
 			// Blend: traffic weight (70%) + consumer count weight (30%)
 			consumerScore := math.Min(float64(in.ConsumerCount)*8, 30)
 			blended := trafficScore*0.7 + consumerScore*0.3

@@ -10,7 +10,7 @@ import { getEvents } from '@/services/backendApiClient';
 export interface HealthScore {
   score: number;
   grade: 'A' | 'B' | 'C' | 'D' | 'F';
-  status: 'excellent' | 'good' | 'fair' | 'poor' | 'critical';
+  status: 'excellent' | 'healthy' | 'good' | 'fair' | 'degraded' | 'poor' | 'unhealthy' | 'critical';
   breakdown: {
     podHealth: number;
     nodeHealth: number;
@@ -158,10 +158,11 @@ export function useHealthScore(): HealthScore {
 
     let grade: HealthScore['grade'];
     let status: HealthScore['status'];
+    // Grade boundaries aligned with backend scorer (healthscore/scorer.go gradeFromScore)
     if (score >= 90) { grade = 'A'; status = 'excellent'; if (details.length === 0) details.push('All systems operating normally'); }
-    else if (score >= 80) { grade = 'B'; status = 'good'; }
-    else if (score >= 70) { grade = 'C'; status = 'fair'; }
-    else if (score >= 60) { grade = 'D'; status = 'poor'; }
+    else if (score >= 75) { grade = 'B'; status = 'good'; }
+    else if (score >= 60) { grade = 'C'; status = 'fair'; }
+    else if (score >= 40) { grade = 'D'; status = 'poor'; }
     else { grade = 'F'; status = 'critical'; }
 
     const insight = score >= 90
@@ -179,7 +180,7 @@ export function useHealthScore(): HealthScore {
       breakdown: {
         podHealth: Math.round(podHealth),
         nodeHealth: Math.round(nodeHealth),
-        workloadHealth: 100,
+        workloadHealth: 100, // Direct K8s mode lacks deployment availability data; always 100 as acceptable fallback
         stability: Math.round(stability),
         eventHealth: Math.round(eventHealth),
       },
