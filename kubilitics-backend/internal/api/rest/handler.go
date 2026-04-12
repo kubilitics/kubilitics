@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 
 	"github.com/kubilitics/kubilitics-backend/internal/api/middleware"
+	"github.com/kubilitics/kubilitics-backend/internal/healthscore"
 	"github.com/kubilitics/kubilitics-backend/internal/auth"
 	"github.com/kubilitics/kubilitics-backend/internal/config"
 	"github.com/kubilitics/kubilitics-backend/internal/graph"
@@ -1046,7 +1047,7 @@ func (h *Handler) GetClusterSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Compute cluster health from actual resource states
-	healthStatus := computeClusterHealth(nodes, pods, deployments)
+	healthResult := computeClusterHealth(nodes, pods, deployments)
 
 	summary := &models.ClusterSummary{
 		ID:               clusterID,
@@ -1062,7 +1063,8 @@ func (h *Handler) GetClusterSummary(w http.ResponseWriter, r *http.Request) {
 		DaemonSetCount:   daemonsetCount,
 		JobCount:         jobCount,
 		CronJobCount:     cronjobCount,
-		HealthStatus:     healthStatus,
+		HealthStatus:     healthResult.Status,
+		HealthReason:     healthResult.Insight,
 
 		IngressCount:       ingressCount,
 		IngressClassCount:  ingressClassCount,
@@ -1097,64 +1099,85 @@ func (h *Handler) GetClusterSummary(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, summary)
 }
 
-// computeClusterHealth derives an overall cluster health status from live node, pod,
-// and deployment state. Returns "healthy", "degraded", or "unhealthy".
-//
-// Rules (evaluated in priority order):
-//  1. Any node not Ready → "degraded"
-//  2. Pod failure ratio >30% → "unhealthy", >10% → "degraded"
-//  3. Any deployment with unavailable replicas → "degraded"
-//  4. Otherwise → "healthy"
-func computeClusterHealth(nodes *corev1.NodeList, pods *corev1.PodList, deployments *appsv1.DeploymentList) string {
-	health := "healthy"
+// computeClusterHealth builds a ClusterState from raw K8s list data and delegates
+// to the enterprise healthscore.Score() engine.
+func computeClusterHealth(nodes *corev1.NodeList, pods *corev1.PodList, deployments *appsv1.DeploymentList) *healthscore.HealthResult {
+	var state healthscore.ClusterState
 
-	// Check nodes: any node not Ready → degraded
+	// Nodes: count ready, disk/memory/PID pressure
 	if nodes != nil {
+		state.TotalNodes = len(nodes.Items)
 		for i := range nodes.Items {
-			ready := false
 			for _, cond := range nodes.Items[i].Status.Conditions {
-				if cond.Type == corev1.NodeReady && cond.Status == corev1.ConditionTrue {
-					ready = true
-					break
+				switch cond.Type {
+				case corev1.NodeReady:
+					if cond.Status == corev1.ConditionTrue {
+						state.ReadyNodes++
+					}
+				case corev1.NodeDiskPressure:
+					if cond.Status == corev1.ConditionTrue {
+						state.DiskPressure++
+					}
+				case corev1.NodeMemoryPressure:
+					if cond.Status == corev1.ConditionTrue {
+						state.MemPressure++
+					}
+				case corev1.NodePIDPressure:
+					if cond.Status == corev1.ConditionTrue {
+						state.PIDPressure++
+					}
 				}
 			}
-			if !ready {
-				health = "degraded"
-				break
-			}
 		}
 	}
 
-	// Check pods: count non-healthy pods (Failed + Pending)
-	if pods != nil && len(pods.Items) > 0 {
-		total := len(pods.Items)
-		failing := 0
+	// Pods: phase counts, CrashLoopBackOff, OOMKilled, restarts
+	if pods != nil {
 		for i := range pods.Items {
-			phase := pods.Items[i].Status.Phase
-			if phase == corev1.PodFailed || phase == corev1.PodPending {
-				failing++
+			p := &pods.Items[i]
+			switch p.Status.Phase {
+			case corev1.PodRunning:
+				state.PodsRunning++
+			case corev1.PodPending:
+				state.PodsPending++
+			case corev1.PodFailed:
+				state.PodsFailed++
+			case corev1.PodSucceeded:
+				state.PodsSucceeded++
 			}
-		}
-		ratio := float64(failing) / float64(total)
-		if ratio > 0.3 {
-			return "unhealthy"
-		}
-		if ratio > 0.1 && health != "unhealthy" {
-			health = "degraded"
+			for _, cs := range p.Status.ContainerStatuses {
+				state.TotalRestarts += int(cs.RestartCount)
+				if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
+					state.PodsCrashLoop++
+				}
+				if cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Reason == "OOMKilled" {
+					state.PodsOOMKilled++
+				}
+			}
 		}
 	}
 
-	// Check deployments: any with unavailable replicas → degraded
-	if deployments != nil && health == "healthy" {
+	// Deployments: available vs unavailable
+	if deployments != nil {
+		state.DeploymentsTotal = len(deployments.Items)
 		for i := range deployments.Items {
-			if deployments.Items[i].Status.UnavailableReplicas > 0 {
-				health = "degraded"
-				break
+			d := &deployments.Items[i]
+			if d.Status.UnavailableReplicas > 0 {
+				state.DeploymentsUnavailable++
+			} else if d.Status.AvailableReplicas > 0 {
+				state.DeploymentsAvailable++
+			} else {
+				state.DeploymentsAvailable++ // no replicas requested or all satisfied
 			}
+		}
+		state.DeploymentsProgressing = state.DeploymentsTotal - state.DeploymentsAvailable - state.DeploymentsUnavailable
+		if state.DeploymentsProgressing < 0 {
+			state.DeploymentsProgressing = 0
 		}
 	}
 
-	return health
+	result := healthscore.Score(state)
+	return &result
 }
 
 // GetCapabilities returns backend capabilities (e.g. resource topology kinds). GET /api/v1/capabilities.

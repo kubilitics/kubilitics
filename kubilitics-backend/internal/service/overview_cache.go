@@ -7,8 +7,10 @@ import (
 	"log"
 	"sync"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/kubilitics/kubilitics-backend/internal/healthscore"
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 )
@@ -60,7 +62,13 @@ func (c *OverviewCache) StartClusterCache(ctx context.Context, clusterID string,
 	c.informers[clusterID] = im
 
 	overview := &models.ClusterOverview{
-		Health:    models.OverviewHealth{Score: 100, Grade: "A", Status: "excellent"},
+		Health: models.OverviewHealth{
+			Score:     100,
+			Grade:     "A",
+			Status:    "healthy",
+			Breakdown: map[string]int{},
+			Insight:   "Cluster is operating normally.",
+		},
 		Counts:    models.OverviewCounts{},
 		PodStatus: models.OverviewPodStatus{},
 		Alerts:    models.OverviewAlerts{Top3: []models.OverviewAlert{}},
@@ -84,6 +92,14 @@ func (c *OverviewCache) StartClusterCache(ctx context.Context, clusterID string,
 	})
 	im.RegisterHandler("Deployment", func(eventType string, obj interface{}) {
 		c.updateDeploymentCount(clusterID, eventType, obj)
+		c.notifyStream(clusterID)
+	})
+	im.RegisterHandler("DaemonSet", func(eventType string, obj interface{}) {
+		c.updateDaemonSetCount(clusterID, eventType, obj)
+		c.notifyStream(clusterID)
+	})
+	im.RegisterHandler("StatefulSet", func(eventType string, obj interface{}) {
+		c.updateStatefulSetCount(clusterID, eventType, obj)
 		c.notifyStream(clusterID)
 	})
 	im.RegisterHandler("Event", func(eventType string, obj interface{}) {
@@ -132,8 +148,21 @@ func (c *OverviewCache) notifyStream(clusterID string) {
 	}
 	// Deep-copy the overview under the lock to avoid sending a shared pointer
 	// that may be concurrently modified by another informer event handler.
+	healthCopy := ov.Health
+	// Deep-copy Breakdown map
+	if ov.Health.Breakdown != nil {
+		healthCopy.Breakdown = make(map[string]int, len(ov.Health.Breakdown))
+		for k, v := range ov.Health.Breakdown {
+			healthCopy.Breakdown[k] = v
+		}
+	}
+	// Deep-copy Findings slice
+	if len(ov.Health.Findings) > 0 {
+		healthCopy.Findings = make([]models.OverviewHealthFinding, len(ov.Health.Findings))
+		copy(healthCopy.Findings, ov.Health.Findings)
+	}
 	snapshot := &models.ClusterOverview{
-		Health:    ov.Health,
+		Health:    healthCopy,
 		Counts:    ov.Counts,
 		PodStatus: ov.PodStatus,
 		Alerts: models.OverviewAlerts{
@@ -316,7 +345,20 @@ func (c *OverviewCache) updateNodeCount(clusterID string, _ string, _ interface{
 	if !ok {
 		return
 	}
-	ov.Counts.Nodes = len(c.informers[clusterID].GetStore("Node").List())
+	nodeItems := c.informers[clusterID].GetStore("Node").List()
+	ov.Counts.Nodes = len(nodeItems)
+	readyNodes := 0
+	for _, obj := range nodeItems {
+		if node, ok := obj.(*corev1.Node); ok {
+			for _, cond := range node.Status.Conditions {
+				if cond.Type == corev1.NodeReady && cond.Status == corev1.ConditionTrue {
+					readyNodes++
+					break
+				}
+			}
+		}
+	}
+	ov.Counts.ReadyNodes = readyNodes
 	c.recalculateHealthRLocked(ov)
 }
 
@@ -337,7 +379,65 @@ func (c *OverviewCache) updateDeploymentCount(clusterID string, _ string, _ inte
 	if !ok {
 		return
 	}
-	ov.Counts.Deployments = len(c.informers[clusterID].GetStore("Deployment").List())
+	items := c.informers[clusterID].GetStore("Deployment").List()
+	ov.Counts.Deployments = len(items)
+	available, unavailable := 0, 0
+	for _, obj := range items {
+		if dep, ok := obj.(*appsv1.Deployment); ok {
+			if dep.Status.AvailableReplicas > 0 && dep.Status.UnavailableReplicas == 0 {
+				available++
+			} else if dep.Status.UnavailableReplicas > 0 {
+				unavailable++
+			} else {
+				available++ // no replicas requested or all satisfied
+			}
+		}
+	}
+	ov.Counts.DeploymentsAvailable = available
+	ov.Counts.DeploymentsUnavailable = unavailable
+	c.recalculateHealthRLocked(ov)
+}
+
+func (c *OverviewCache) updateDaemonSetCount(clusterID string, _ string, _ interface{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ov, ok := c.overviews[clusterID]
+	if !ok {
+		return
+	}
+	items := c.informers[clusterID].GetStore("DaemonSet").List()
+	ov.Counts.DaemonSetsTotal = len(items)
+	ready := 0
+	for _, obj := range items {
+		if ds, ok := obj.(*appsv1.DaemonSet); ok {
+			if ds.Status.NumberReady == ds.Status.DesiredNumberScheduled {
+				ready++
+			}
+		}
+	}
+	ov.Counts.DaemonSetsReady = ready
+	c.recalculateHealthRLocked(ov)
+}
+
+func (c *OverviewCache) updateStatefulSetCount(clusterID string, _ string, _ interface{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ov, ok := c.overviews[clusterID]
+	if !ok {
+		return
+	}
+	items := c.informers[clusterID].GetStore("StatefulSet").List()
+	ov.Counts.StatefulSetsTotal = len(items)
+	ready := 0
+	for _, obj := range items {
+		if sts, ok := obj.(*appsv1.StatefulSet); ok {
+			if sts.Status.ReadyReplicas == sts.Status.Replicas {
+				ready++
+			}
+		}
+	}
+	ov.Counts.StatefulSetsReady = ready
+	c.recalculateHealthRLocked(ov)
 }
 
 func (c *OverviewCache) updateAlerts(clusterID string, _ string, _ interface{}) {
@@ -402,72 +502,62 @@ func (c *OverviewCache) recalculateTotalRestarts(clusterID string, ov *models.Cl
 	ov.PodStatus.TotalRestarts = total
 }
 
-// recalculateHealthRLocked contains the mirroring of rest.computeHealth but for cached data
+// recalculateHealthRLocked builds a ClusterState from cached data and delegates
+// to the enterprise healthscore.Score() engine. Must be called under write lock.
 func (c *OverviewCache) recalculateHealthRLocked(ov *models.ClusterOverview) {
-	totalPods := ov.PodStatus.Running + ov.PodStatus.Pending + ov.PodStatus.Failed + ov.PodStatus.Succeeded
+	state := healthscore.ClusterState{
+		TotalNodes:    ov.Counts.Nodes,
+		ReadyNodes:    ov.Counts.ReadyNodes,
+		PodsRunning:   ov.PodStatus.Running,
+		PodsPending:   ov.PodStatus.Pending,
+		PodsFailed:    ov.PodStatus.Failed,
+		PodsSucceeded: ov.PodStatus.Succeeded,
+		TotalRestarts: ov.PodStatus.TotalRestarts,
+		WarningEvents: ov.Alerts.Warnings,
+		CriticalEvents: ov.Alerts.Critical,
 
-	// Pod health (40%)
-	podHealthRatio := 100.0
-	if totalPods > 0 {
-		podHealthRatio = float64(ov.PodStatus.Running+ov.PodStatus.Succeeded) / float64(totalPods) * 100
+		DeploymentsTotal:       ov.Counts.Deployments,
+		DeploymentsAvailable:   ov.Counts.DeploymentsAvailable,
+		DeploymentsUnavailable: ov.Counts.DeploymentsUnavailable,
+		DeploymentsProgressing: ov.Counts.Deployments - ov.Counts.DeploymentsAvailable - ov.Counts.DeploymentsUnavailable,
+
+		DaemonSetsTotal:   ov.Counts.DaemonSetsTotal,
+		DaemonSetsReady:   ov.Counts.DaemonSetsReady,
+		StatefulSetsTotal: ov.Counts.StatefulSetsTotal,
+		StatefulSetsReady: ov.Counts.StatefulSetsReady,
 	}
 
-	pendingPenalty := 0.0
-	if totalPods > 0 && ov.PodStatus.Pending > 0 {
-		pendingPenalty = float64(ov.PodStatus.Pending) / float64(totalPods) * 20
+	// Clamp progressing to 0 if negative (rounding)
+	if state.DeploymentsProgressing < 0 {
+		state.DeploymentsProgressing = 0
 	}
 
-	failedPenalty := 0.0
-	if totalPods > 0 && ov.PodStatus.Failed > 0 {
-		failedPenalty = float64(ov.PodStatus.Failed) / float64(totalPods) * 50
-	}
+	result := healthscore.Score(state)
 
-	podHealth := podHealthRatio - pendingPenalty - failedPenalty
-	if podHealth < 0 {
-		podHealth = 0
-	}
+	ov.Health.Score = result.Score
+	ov.Health.Grade = result.Grade
+	ov.Health.Status = result.Status
+	ov.Health.Insight = result.Insight
 
-	// Event health (10%)
-	eventHealth := 100.0 - float64(ov.Alerts.Warnings)*2 - float64(ov.Alerts.Critical)*10
-	if eventHealth < 0 {
-		eventHealth = 0
+	// Build breakdown map from category scores
+	breakdown := make(map[string]int, len(result.Categories))
+	for cat, cs := range result.Categories {
+		breakdown[string(cat)] = cs.Score
 	}
+	ov.Health.Breakdown = breakdown
 
-	// Node health (30%)
-	nodeHealth := 0.0
-	if ov.Counts.Nodes > 0 {
-		nodeHealth = 100.0
-	}
-
-	// Stability (20%) — derived from pod restart counts. Each restart decreases stability
-	// by 2 points (capped at 0). A cluster with 50+ total restarts scores 0% stability.
-	stability := 100.0
-	if ov.PodStatus.TotalRestarts > 0 {
-		stability = 100.0 - float64(ov.PodStatus.TotalRestarts)*2
-		if stability < 0 {
-			stability = 0
+	// Top 5 findings
+	findings := make([]models.OverviewHealthFinding, 0, 5)
+	for i, f := range result.Findings {
+		if i >= 5 {
+			break
 		}
+		findings = append(findings, models.OverviewHealthFinding{
+			Category: string(f.Category),
+			Severity: int(f.Severity),
+			Check:    f.Check,
+			Message:  f.Message,
+		})
 	}
-
-	score := int(podHealth*0.4 + nodeHealth*0.3 + stability*0.2 + eventHealth*0.1)
-	if score < 0 {
-		score = 0
-	}
-	if score > 100 {
-		score = 100
-	}
-
-	ov.Health.Score = score
-	switch {
-	case score >= 90:
-		ov.Health.Grade, ov.Health.Status = "A", "excellent"
-	case score >= 80:
-		ov.Health.Grade, ov.Health.Status = "B", "good"
-	case score >= 70:
-		ov.Health.Grade, ov.Health.Status = "C", "fair"
-	case score >= 60:
-		ov.Health.Grade, ov.Health.Status = "D", "poor"
-	default:
-		ov.Health.Grade, ov.Health.Status = "F", "critical"
-	}
+	ov.Health.Findings = findings
 }

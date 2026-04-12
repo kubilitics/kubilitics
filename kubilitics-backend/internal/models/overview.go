@@ -10,16 +10,34 @@ type ClusterOverview struct {
 }
 
 type OverviewHealth struct {
-	Score  int    `json:"score"`
-	Grade  string `json:"grade"`  // A, B, C, D, F
-	Status string `json:"status"` // excellent, good, fair, poor, critical
+	Score     int                     `json:"score"`
+	Grade     string                  `json:"grade"`  // A, B, C, D, F
+	Status    string                  `json:"status"` // healthy, good, degraded, unhealthy, critical
+	Breakdown map[string]int          `json:"breakdown"`
+	Findings  []OverviewHealthFinding `json:"findings,omitempty"`
+	Insight   string                  `json:"insight"`
+}
+
+type OverviewHealthFinding struct {
+	Category string `json:"category"`
+	Severity int    `json:"severity"`
+	Check    string `json:"check"`
+	Message  string `json:"message"`
 }
 
 type OverviewCounts struct {
 	Nodes       int `json:"nodes"`
+	ReadyNodes  int `json:"ready_nodes"`
 	Pods        int `json:"pods"`
 	Namespaces  int `json:"namespaces"`
 	Deployments int `json:"deployments"`
+
+	DeploymentsAvailable   int `json:"deployments_available"`
+	DeploymentsUnavailable int `json:"deployments_unavailable"`
+	DaemonSetsTotal        int `json:"daemonsets_total"`
+	DaemonSetsReady        int `json:"daemonsets_ready"`
+	StatefulSetsTotal      int `json:"statefulsets_total"`
+	StatefulSetsReady      int `json:"statefulsets_ready"`
 }
 
 type OverviewPodStatus struct {
