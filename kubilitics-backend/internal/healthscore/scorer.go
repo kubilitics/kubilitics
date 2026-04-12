@@ -85,9 +85,10 @@ func Score(state ClusterState) HealthResult {
 		score = 100
 	}
 
-	// Collect all findings.
+	// Collect all findings in deterministic category order.
 	var allFindings []Finding
-	for _, cs := range categories {
+	for _, cat := range []Category{CategoryNodes, CategoryWorkloads, CategoryPods, CategoryStability, CategoryEvents} {
+		cs := categories[cat]
 		allFindings = append(allFindings, cs.Findings...)
 	}
 

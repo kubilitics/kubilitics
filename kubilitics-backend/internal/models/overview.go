@@ -38,14 +38,20 @@ type OverviewCounts struct {
 	DaemonSetsReady        int `json:"daemonsets_ready"`
 	StatefulSetsTotal      int `json:"statefulsets_total"`
 	StatefulSetsReady      int `json:"statefulsets_ready"`
+
+	DiskPressureNodes   int `json:"disk_pressure_nodes"`
+	MemoryPressureNodes int `json:"memory_pressure_nodes"`
+	PIDPressureNodes    int `json:"pid_pressure_nodes"`
 }
 
 type OverviewPodStatus struct {
-	Running       int `json:"running"`
-	Pending       int `json:"pending"`
-	Failed        int `json:"failed"`
-	Succeeded     int `json:"succeeded"`
-	TotalRestarts int `json:"total_restarts"`
+	Running          int `json:"running"`
+	Pending          int `json:"pending"`
+	Failed           int `json:"failed"`
+	Succeeded        int `json:"succeeded"`
+	TotalRestarts    int `json:"total_restarts"`
+	CrashLoopBackOff int `json:"crashloop_backoff"`
+	OOMKilled        int `json:"oom_killed"`
 }
 
 type OverviewAlerts struct {

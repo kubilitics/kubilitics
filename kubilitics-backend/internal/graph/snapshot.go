@@ -348,9 +348,15 @@ func (s *GraphSnapshot) computeNodeDrain(target models.ResourceRef) (*models.Bla
 		waves = append(waves, wave)
 	}
 
+	// Compute criticality: use blast radius percent as a heuristic proxy
+	criticalityScore := cr.BlastRadiusPct
+	criticalityLevel := criticalityLevelV2(criticalityScore)
+
 	return &models.BlastRadiusResult{
 		TargetResource:     target,
 		FailureMode:        FailureModeNodeDrain,
+		CriticalityScore:   criticalityScore,
+		CriticalityLevel:   criticalityLevel,
 		BlastRadiusPercent: cr.BlastRadiusPct,
 		TotalAffected:      len(cr.LostPods),
 		AffectedNamespaces: len(affectedNS),

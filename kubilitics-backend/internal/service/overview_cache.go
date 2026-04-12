@@ -65,7 +65,7 @@ func (c *OverviewCache) StartClusterCache(ctx context.Context, clusterID string,
 		Health: models.OverviewHealth{
 			Score:     100,
 			Grade:     "A",
-			Status:    "excellent",
+			Status:    "healthy",
 			Breakdown: map[string]int{},
 			Insight:   "Cluster is operating normally.",
 		},
@@ -207,9 +207,35 @@ func (c *OverviewCache) Subscribe(clusterID string) (chan *models.ClusterOvervie
 	c.listeners[clusterID][ch] = struct{}{}
 	c.mu.Unlock()
 
-	// Initial push
+	// Initial push — deep-copy to avoid sending a shared pointer (same as notifyStream).
 	if ov, ok := c.GetOverview(clusterID); ok {
-		ch <- ov
+		healthCopy := ov.Health
+		if ov.Health.Breakdown != nil {
+			healthCopy.Breakdown = make(map[string]int, len(ov.Health.Breakdown))
+			for k, v := range ov.Health.Breakdown {
+				healthCopy.Breakdown[k] = v
+			}
+		}
+		if len(ov.Health.Findings) > 0 {
+			healthCopy.Findings = make([]models.OverviewHealthFinding, len(ov.Health.Findings))
+			copy(healthCopy.Findings, ov.Health.Findings)
+		}
+		snapshot := &models.ClusterOverview{
+			Health:    healthCopy,
+			Counts:    ov.Counts,
+			PodStatus: ov.PodStatus,
+			Alerts: models.OverviewAlerts{
+				Warnings: ov.Alerts.Warnings,
+				Critical: ov.Alerts.Critical,
+				Top3:     make([]models.OverviewAlert, len(ov.Alerts.Top3)),
+			},
+		}
+		copy(snapshot.Alerts.Top3, ov.Alerts.Top3)
+		if ov.Utilization != nil {
+			u := *ov.Utilization
+			snapshot.Utilization = &u
+		}
+		ch <- snapshot
 	}
 
 	unsubscribe := func() {
@@ -335,6 +361,7 @@ func (c *OverviewCache) updatePodStatus(clusterID string, eventType string, obj 
 		_ = newPhase // suppress unused warning for deleted pods
 	}
 
+	c.recalculatePodConditions(clusterID, ov)
 	c.recalculateHealthRLocked(ov)
 }
 
@@ -348,17 +375,37 @@ func (c *OverviewCache) updateNodeCount(clusterID string, _ string, _ interface{
 	nodeItems := c.informers[clusterID].GetStore("Node").List()
 	ov.Counts.Nodes = len(nodeItems)
 	readyNodes := 0
+	diskPressure := 0
+	memPressure := 0
+	pidPressure := 0
 	for _, obj := range nodeItems {
 		if node, ok := obj.(*corev1.Node); ok {
 			for _, cond := range node.Status.Conditions {
-				if cond.Type == corev1.NodeReady && cond.Status == corev1.ConditionTrue {
-					readyNodes++
-					break
+				switch cond.Type {
+				case corev1.NodeReady:
+					if cond.Status == corev1.ConditionTrue {
+						readyNodes++
+					}
+				case corev1.NodeDiskPressure:
+					if cond.Status == corev1.ConditionTrue {
+						diskPressure++
+					}
+				case corev1.NodeMemoryPressure:
+					if cond.Status == corev1.ConditionTrue {
+						memPressure++
+					}
+				case corev1.NodePIDPressure:
+					if cond.Status == corev1.ConditionTrue {
+						pidPressure++
+					}
 				}
 			}
 		}
 	}
 	ov.Counts.ReadyNodes = readyNodes
+	ov.Counts.DiskPressureNodes = diskPressure
+	ov.Counts.MemoryPressureNodes = memPressure
+	ov.Counts.PIDPressureNodes = pidPressure
 	c.recalculateHealthRLocked(ov)
 }
 
@@ -502,16 +549,54 @@ func (c *OverviewCache) recalculateTotalRestarts(clusterID string, ov *models.Cl
 	ov.PodStatus.TotalRestarts = total
 }
 
+// recalculatePodConditions recomputes CrashLoopBackOff and OOMKilled counts from the Pod informer store.
+// Called under write lock from updatePodStatus for accuracy.
+func (c *OverviewCache) recalculatePodConditions(clusterID string, ov *models.ClusterOverview) {
+	im, ok := c.informers[clusterID]
+	if !ok {
+		return
+	}
+	store := im.GetStore("Pod")
+	if store == nil {
+		return
+	}
+	crashLoop := 0
+	oomKilled := 0
+	for _, obj := range store.List() {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			continue
+		}
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
+				crashLoop++
+				break
+			}
+			if cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Reason == "OOMKilled" {
+				oomKilled++
+				break
+			}
+		}
+	}
+	ov.PodStatus.CrashLoopBackOff = crashLoop
+	ov.PodStatus.OOMKilled = oomKilled
+}
+
 // recalculateHealthRLocked builds a ClusterState from cached data and delegates
 // to the enterprise healthscore.Score() engine. Must be called under write lock.
 func (c *OverviewCache) recalculateHealthRLocked(ov *models.ClusterOverview) {
 	state := healthscore.ClusterState{
 		TotalNodes:    ov.Counts.Nodes,
 		ReadyNodes:    ov.Counts.ReadyNodes,
+		DiskPressure:  ov.Counts.DiskPressureNodes,
+		MemPressure:   ov.Counts.MemoryPressureNodes,
+		PIDPressure:   ov.Counts.PIDPressureNodes,
 		PodsRunning:   ov.PodStatus.Running,
 		PodsPending:   ov.PodStatus.Pending,
 		PodsFailed:    ov.PodStatus.Failed,
 		PodsSucceeded: ov.PodStatus.Succeeded,
+		PodsCrashLoop: ov.PodStatus.CrashLoopBackOff,
+		PodsOOMKilled: ov.PodStatus.OOMKilled,
 		TotalRestarts: ov.PodStatus.TotalRestarts,
 		WarningEvents: ov.Alerts.Warnings,
 		CriticalEvents: ov.Alerts.Critical,

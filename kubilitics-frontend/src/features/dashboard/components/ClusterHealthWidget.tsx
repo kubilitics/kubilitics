@@ -20,7 +20,9 @@ const STATUS_CONFIG: Record<string, { badge: string; icon: typeof CheckCircle2 }
   healthy: { badge: "bg-success/10 border-success/20 text-success", icon: CheckCircle2 },
   good: { badge: "bg-success/10 border-success/20 text-success", icon: CheckCircle2 },
   fair: { badge: "bg-amber-100 dark:bg-amber-900/30 border-amber-200 text-amber-700 dark:text-amber-400", icon: AlertTriangle },
+  degraded: { badge: "bg-amber-100 dark:bg-amber-900/30 border-amber-200 text-amber-700 dark:text-amber-400", icon: AlertTriangle },
   poor: { badge: "bg-amber-100 dark:bg-amber-900/30 border-amber-200 text-amber-700 dark:text-amber-400", icon: AlertTriangle },
+  unhealthy: { badge: "bg-rose-100 dark:bg-rose-900/30 border-rose-200 text-rose-700 dark:text-rose-400", icon: AlertCircle },
   critical: { badge: "bg-rose-100 dark:bg-rose-900/30 border-rose-200 text-rose-700 dark:text-rose-400", icon: AlertCircle },
 };
 
@@ -55,7 +57,10 @@ export const ClusterHealthWidget = () => {
     { name: "Issues", value: 100 - score, color: "hsl(var(--muted))" },
   ];
 
-  const statusLabel = status === "excellent" || status === "good" || status === "healthy" ? "Good State" : status === "fair" ? "Needs Attention" : "At Risk";
+  const statusLabel =
+    ["excellent", "good", "healthy"].includes(status) ? "Good State" :
+    ["fair", "degraded"].includes(status) ? "Needs Attention" :
+    "At Risk";
   const hasData = activeCluster || clusterId;
 
   return (
@@ -172,7 +177,7 @@ export const ClusterHealthWidget = () => {
             {insight && (
               <div className="mt-4 pt-3 border-t border-border/50">
                 <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">{insight}</p>
-                {(status === "fair" || status === "poor" || status === "critical") && (
+                {(["fair", "degraded", "poor", "unhealthy", "critical"].includes(status)) && (
                   <Link
                     to="/events"
                     className="inline-flex items-center gap-1 mt-2 text-xs font-medium text-primary hover:underline"
