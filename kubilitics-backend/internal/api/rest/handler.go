@@ -33,8 +33,17 @@ import (
 	topologyv2 "github.com/kubilitics/kubilitics-backend/internal/topology/v2"
 	topologyv2builder "github.com/kubilitics/kubilitics-backend/internal/topology/v2/builder"
 	"golang.org/x/time/rate"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -873,39 +882,74 @@ func (h *Handler) GetClusterSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fetch all resource counts — original 10 types
-	pods, _ := client.Clientset.CoreV1().Pods("").List(r.Context(), metav1.ListOptions{})
-	deployments, _ := client.Clientset.AppsV1().Deployments("").List(r.Context(), metav1.ListOptions{})
-	services, _ := client.Clientset.CoreV1().Services("").List(r.Context(), metav1.ListOptions{})
-	statefulsets, _ := client.Clientset.AppsV1().StatefulSets("").List(r.Context(), metav1.ListOptions{})
-	replicasets, _ := client.Clientset.AppsV1().ReplicaSets("").List(r.Context(), metav1.ListOptions{})
-	daemonsets, _ := client.Clientset.AppsV1().DaemonSets("").List(r.Context(), metav1.ListOptions{})
-	jobs, _ := client.Clientset.BatchV1().Jobs("").List(r.Context(), metav1.ListOptions{})
-	cronjobs, _ := client.Clientset.BatchV1().CronJobs("").List(r.Context(), metav1.ListOptions{})
+	// Fetch all resource counts in parallel — 27 API calls via goroutines
+	ctx := r.Context()
+	listOpts := metav1.ListOptions{}
+	var wg sync.WaitGroup
 
-	// Extended resource counts — networking, config, storage, RBAC, policy, scheduling
-	ingresses, _ := client.Clientset.NetworkingV1().Ingresses("").List(r.Context(), metav1.ListOptions{})
-	ingressClasses, _ := client.Clientset.NetworkingV1().IngressClasses().List(r.Context(), metav1.ListOptions{})
-	endpoints, _ := client.Clientset.CoreV1().Endpoints("").List(r.Context(), metav1.ListOptions{})
-	endpointSlices, _ := client.Clientset.DiscoveryV1().EndpointSlices("").List(r.Context(), metav1.ListOptions{})
-	networkPolicies, _ := client.Clientset.NetworkingV1().NetworkPolicies("").List(r.Context(), metav1.ListOptions{})
-	configmaps, _ := client.Clientset.CoreV1().ConfigMaps("").List(r.Context(), metav1.ListOptions{})
-	secrets, _ := client.Clientset.CoreV1().Secrets("").List(r.Context(), metav1.ListOptions{})
-	pvs, _ := client.Clientset.CoreV1().PersistentVolumes().List(r.Context(), metav1.ListOptions{})
-	pvcs, _ := client.Clientset.CoreV1().PersistentVolumeClaims("").List(r.Context(), metav1.ListOptions{})
-	storageClasses, _ := client.Clientset.StorageV1().StorageClasses().List(r.Context(), metav1.ListOptions{})
-	serviceAccounts, _ := client.Clientset.CoreV1().ServiceAccounts("").List(r.Context(), metav1.ListOptions{})
-	roles, _ := client.Clientset.RbacV1().Roles("").List(r.Context(), metav1.ListOptions{})
-	clusterRoles, _ := client.Clientset.RbacV1().ClusterRoles().List(r.Context(), metav1.ListOptions{})
-	roleBindings, _ := client.Clientset.RbacV1().RoleBindings("").List(r.Context(), metav1.ListOptions{})
-	clusterRoleBindings, _ := client.Clientset.RbacV1().ClusterRoleBindings().List(r.Context(), metav1.ListOptions{})
-	hpas, _ := client.Clientset.AutoscalingV2().HorizontalPodAutoscalers("").List(r.Context(), metav1.ListOptions{})
-	limitRanges, _ := client.Clientset.CoreV1().LimitRanges("").List(r.Context(), metav1.ListOptions{})
-	resourceQuotas, _ := client.Clientset.CoreV1().ResourceQuotas("").List(r.Context(), metav1.ListOptions{})
-	pdbs, _ := client.Clientset.PolicyV1().PodDisruptionBudgets("").List(r.Context(), metav1.ListOptions{})
-	priorityClasses, _ := client.Clientset.SchedulingV1().PriorityClasses().List(r.Context(), metav1.ListOptions{})
-	mutatingWebhooks, _ := client.Clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().List(r.Context(), metav1.ListOptions{})
-	validatingWebhooks, _ := client.Clientset.AdmissionregistrationV1().ValidatingWebhookConfigurations().List(r.Context(), metav1.ListOptions{})
+	var pods *corev1.PodList
+	var deployments *appsv1.DeploymentList
+	var services *corev1.ServiceList
+	var statefulsets *appsv1.StatefulSetList
+	var replicasets *appsv1.ReplicaSetList
+	var daemonsets *appsv1.DaemonSetList
+	var jobs *batchv1.JobList
+	var cronjobs *batchv1.CronJobList
+	var ingresses *networkingv1.IngressList
+	var ingressClasses *networkingv1.IngressClassList
+	var endpoints *corev1.EndpointsList
+	var endpointSlices *discoveryv1.EndpointSliceList
+	var networkPolicies *networkingv1.NetworkPolicyList
+	var configmaps *corev1.ConfigMapList
+	var secrets *corev1.SecretList
+	var pvs *corev1.PersistentVolumeList
+	var pvcs *corev1.PersistentVolumeClaimList
+	var storageClasses *storagev1.StorageClassList
+	var serviceAccounts *corev1.ServiceAccountList
+	var roles *rbacv1.RoleList
+	var clusterRoles *rbacv1.ClusterRoleList
+	var roleBindings *rbacv1.RoleBindingList
+	var clusterRoleBindings *rbacv1.ClusterRoleBindingList
+	var hpas *autoscalingv2.HorizontalPodAutoscalerList
+	var limitRanges *corev1.LimitRangeList
+	var resourceQuotas *corev1.ResourceQuotaList
+	var pdbs *policyv1.PodDisruptionBudgetList
+	var priorityClasses *schedulingv1.PriorityClassList
+	var mutatingWebhooks *admissionregistrationv1.MutatingWebhookConfigurationList
+	var validatingWebhooks *admissionregistrationv1.ValidatingWebhookConfigurationList
+
+	wg.Add(30)
+	go func() { defer wg.Done(); pods, _ = client.Clientset.CoreV1().Pods("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); deployments, _ = client.Clientset.AppsV1().Deployments("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); services, _ = client.Clientset.CoreV1().Services("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); statefulsets, _ = client.Clientset.AppsV1().StatefulSets("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); replicasets, _ = client.Clientset.AppsV1().ReplicaSets("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); daemonsets, _ = client.Clientset.AppsV1().DaemonSets("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); jobs, _ = client.Clientset.BatchV1().Jobs("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); cronjobs, _ = client.Clientset.BatchV1().CronJobs("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); ingresses, _ = client.Clientset.NetworkingV1().Ingresses("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); ingressClasses, _ = client.Clientset.NetworkingV1().IngressClasses().List(ctx, listOpts) }()
+	go func() { defer wg.Done(); endpoints, _ = client.Clientset.CoreV1().Endpoints("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); endpointSlices, _ = client.Clientset.DiscoveryV1().EndpointSlices("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); networkPolicies, _ = client.Clientset.NetworkingV1().NetworkPolicies("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); configmaps, _ = client.Clientset.CoreV1().ConfigMaps("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); secrets, _ = client.Clientset.CoreV1().Secrets("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); pvs, _ = client.Clientset.CoreV1().PersistentVolumes().List(ctx, listOpts) }()
+	go func() { defer wg.Done(); pvcs, _ = client.Clientset.CoreV1().PersistentVolumeClaims("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); storageClasses, _ = client.Clientset.StorageV1().StorageClasses().List(ctx, listOpts) }()
+	go func() { defer wg.Done(); serviceAccounts, _ = client.Clientset.CoreV1().ServiceAccounts("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); roles, _ = client.Clientset.RbacV1().Roles("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); clusterRoles, _ = client.Clientset.RbacV1().ClusterRoles().List(ctx, listOpts) }()
+	go func() { defer wg.Done(); roleBindings, _ = client.Clientset.RbacV1().RoleBindings("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); clusterRoleBindings, _ = client.Clientset.RbacV1().ClusterRoleBindings().List(ctx, listOpts) }()
+	go func() { defer wg.Done(); hpas, _ = client.Clientset.AutoscalingV2().HorizontalPodAutoscalers("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); limitRanges, _ = client.Clientset.CoreV1().LimitRanges("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); resourceQuotas, _ = client.Clientset.CoreV1().ResourceQuotas("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); pdbs, _ = client.Clientset.PolicyV1().PodDisruptionBudgets("").List(ctx, listOpts) }()
+	go func() { defer wg.Done(); priorityClasses, _ = client.Clientset.SchedulingV1().PriorityClasses().List(ctx, listOpts) }()
+	go func() { defer wg.Done(); mutatingWebhooks, _ = client.Clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().List(ctx, listOpts) }()
+	go func() { defer wg.Done(); validatingWebhooks, _ = client.Clientset.AdmissionregistrationV1().ValidatingWebhookConfigurations().List(ctx, listOpts) }()
+	wg.Wait()
 
 	// Nil-safe count helper
 	safeCount := func(items interface{}) int {
