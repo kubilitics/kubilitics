@@ -47,7 +47,7 @@ func TestClassifyServiceImpact_Broken(t *testing.T) {
 		},
 	}
 	lostPods := map[string]bool{"Pod/default/pod-1": true}
-	impacts := classifyServiceImpact(endpoints, lostPods, nil)
+	impacts := classifyServiceImpact(endpoints, lostPods, nil, nil)
 	if len(impacts) != 1 {
 		t.Fatalf("expected 1 impact, got %d", len(impacts))
 	}
@@ -66,7 +66,7 @@ func TestClassifyServiceImpact_SelfHealing(t *testing.T) {
 		},
 	}
 	lostPods := map[string]bool{"Pod/default/pod-1": true}
-	impacts := classifyServiceImpact(endpoints, lostPods, nil)
+	impacts := classifyServiceImpact(endpoints, lostPods, nil, nil)
 	if len(impacts) != 1 {
 		t.Fatalf("expected 1 impact, got %d", len(impacts))
 	}
@@ -94,7 +94,7 @@ func TestClassifyServiceImpact_DegradedWithPDB(t *testing.T) {
 		},
 	}
 	lostPods := map[string]bool{"Pod/default/pod-1": true, "Pod/default/pod-2": true}
-	impacts := classifyServiceImpact(endpoints, lostPods, pdbs)
+	impacts := classifyServiceImpact(endpoints, lostPods, pdbs, nil)
 	if len(impacts) != 1 {
 		t.Fatalf("expected 1 impact, got %d", len(impacts))
 	}
@@ -113,7 +113,7 @@ func TestClassifyServiceImpact_NoImpact(t *testing.T) {
 		},
 	}
 	lostPods := map[string]bool{"Pod/default/pod-1": true}
-	impacts := classifyServiceImpact(endpoints, lostPods, nil)
+	impacts := classifyServiceImpact(endpoints, lostPods, nil, nil)
 	if len(impacts) != 0 {
 		t.Errorf("expected 0 impacts, got %d", len(impacts))
 	}
@@ -136,5 +136,30 @@ func TestComputeBlastRadiusPercent_ZeroDenominator(t *testing.T) {
 	pct := computeBlastRadiusPercent(nil, nil, nil, 0)
 	if pct != 0 {
 		t.Errorf("expected 0, got %f", pct)
+	}
+}
+
+func TestFindMatchingPDBByLabels_MatchesLabels(t *testing.T) {
+	minAvail := intstr.FromInt32(1)
+	pdbs := []policyv1.PodDisruptionBudget{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-pdb", Namespace: "default"},
+			Spec: policyv1.PodDisruptionBudgetSpec{
+				MinAvailable: &minAvail,
+				Selector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"app": "payment"},
+				},
+			},
+		},
+	}
+	svcRef := models.ResourceRef{Kind: "Service", Namespace: "default", Name: "totally-different-name"}
+	podLabels := map[string]string{"app": "payment", "version": "v2"}
+
+	pdb, found := findMatchingPDBByLabels(pdbs, svcRef, podLabels, 3)
+	if !found {
+		t.Fatal("expected PDB match via labels even though service name doesn't contain 'payment'")
+	}
+	if pdb.Name != "my-pdb" {
+		t.Errorf("expected my-pdb, got %s", pdb.Name)
 	}
 }

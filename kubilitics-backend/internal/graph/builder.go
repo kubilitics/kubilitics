@@ -226,6 +226,30 @@ func BuildSnapshot(res *ClusterResources, hasIstio bool, virtualServices, destin
 		}
 	}
 
+	// --- Step 5c: Build Service -> representative pod labels map ---
+	servicePodLabels := make(map[string]map[string]string)
+	for _, ep := range res.Endpoints {
+		svcKey := fmt.Sprintf("Service/%s/%s", ep.Namespace, ep.Name)
+		for _, subset := range ep.Subsets {
+			for _, addr := range subset.Addresses {
+				if addr.TargetRef != nil && addr.TargetRef.Kind == "Pod" {
+					for _, pod := range res.Pods {
+						if pod.Name == addr.TargetRef.Name && pod.Namespace == addr.TargetRef.Namespace {
+							servicePodLabels[svcKey] = pod.Labels
+							break
+						}
+					}
+					if servicePodLabels[svcKey] != nil {
+						break
+					}
+				}
+			}
+			if servicePodLabels[svcKey] != nil {
+				break
+			}
+		}
+	}
+
 	// --- Step 6: Count total workloads ---
 
 	totalWorkloads := len(res.Deployments) + len(res.StatefulSets) + len(res.DaemonSets) +
@@ -248,6 +272,7 @@ func BuildSnapshot(res *ClusterResources, hasIstio bool, virtualServices, destin
 
 		PodOwners:        podOwnersMap,
 		ServiceEndpoints: serviceEndpoints,
+		ServicePodLabels: servicePodLabels,
 		PDBs:             res.PDBs,
 
 		TotalWorkloads: totalWorkloads,

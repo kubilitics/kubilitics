@@ -37,6 +37,7 @@ type GraphSnapshot struct {
 
 	PodOwners        map[string]string                  // podKey -> owning workload key (resolved through RS)
 	ServiceEndpoints map[string][]corev1.EndpointAddress // svcKey -> ready addresses
+	ServicePodLabels map[string]map[string]string        // svcKey -> representative pod labels
 	OTelServiceMap   *otel.ServiceMap                    // nullable, from trace data
 	PDBs             []policyv1.PodDisruptionBudget      // cluster PDBs for threshold computation
 
@@ -85,6 +86,9 @@ func (s *GraphSnapshot) EnsureMaps() {
 	}
 	if s.ServiceEndpoints == nil {
 		s.ServiceEndpoints = make(map[string][]corev1.EndpointAddress)
+	}
+	if s.ServicePodLabels == nil {
+		s.ServicePodLabels = make(map[string]map[string]string)
 	}
 }
 
