@@ -430,6 +430,18 @@ func (s *GraphSnapshot) computeSingleResourceBlast(target models.ResourceRef, fa
 		}
 	}
 
+	// Compute traffic data from OTel service map
+	totalCallsToTarget := 0
+	clusterTotalCalls := 0
+	if traceAvailable {
+		for _, edge := range s.OTelServiceMap.Edges {
+			clusterTotalCalls += edge.Count
+			if strings.EqualFold(edge.Target, target.Name) {
+				totalCallsToTarget += edge.Count
+			}
+		}
+	}
+
 	// Cross-namespace count
 	crossNsCount := 0
 	nsSet := make(map[string]bool)
@@ -445,6 +457,8 @@ func (s *GraphSnapshot) computeSingleResourceBlast(target models.ResourceRef, fa
 		K8sFanIn:           fanIn,
 		TraceDataAvailable: traceAvailable,
 		IsCriticalSystem:   isCriticalSystem,
+		TotalCallsToTarget: totalCallsToTarget,
+		ClusterTotalCalls:  clusterTotalCalls,
 	})
 
 	recoveryDetail := computeRecovery(RecoveryInput{

@@ -24,6 +24,8 @@ type ExposureInput struct {
 	K8sFanIn           int
 	TraceDataAvailable bool
 	IsCriticalSystem   bool
+	TotalCallsToTarget int // total OTel calls TO this service (sum of inbound edge counts)
+	ClusterTotalCalls  int // total calls across the entire cluster (for normalization)
 }
 
 type RecoveryInput struct {
@@ -106,12 +108,31 @@ func computeExposure(in ExposureInput) models.SubScoreDetail {
 		})
 	}
 	if in.TraceDataAvailable {
-		consumerScore := math.Min(float64(in.ConsumerCount)*8, 30)
-		score += consumerScore
-		factors = append(factors, models.ScoringFactor{
-			Name: "consumers", Value: fmt.Sprintf("%d", in.ConsumerCount),
-			Effect: consumerScore, Note: fmt.Sprintf("%d service(s) call this (from traces)", in.ConsumerCount),
-		})
+		if in.TotalCallsToTarget > 0 && in.ClusterTotalCalls > 0 {
+			// Traffic-weighted: what fraction of cluster traffic flows through this service?
+			trafficRatio := float64(in.TotalCallsToTarget) / float64(in.ClusterTotalCalls)
+			// Scale: 0% traffic = 0 score, 100% traffic = 60 score
+			// A service handling 10% of cluster traffic scores 6, 50% scores 30
+			trafficScore := math.Min(trafficRatio*60.0*float64(in.ConsumerCount)/math.Max(float64(in.ConsumerCount), 1.0), 40)
+			// Blend: traffic weight (70%) + consumer count weight (30%)
+			consumerScore := math.Min(float64(in.ConsumerCount)*8, 30)
+			blended := trafficScore*0.7 + consumerScore*0.3
+			score += blended
+			factors = append(factors, models.ScoringFactor{
+				Name:   "traffic_weighted_consumers",
+				Value:  fmt.Sprintf("%d calls from %d consumers", in.TotalCallsToTarget, in.ConsumerCount),
+				Effect: blended,
+				Note:   fmt.Sprintf("%.1f%% of cluster traffic, %d consumer(s)", trafficRatio*100, in.ConsumerCount),
+			})
+		} else {
+			// Have trace data but no call counts — fall back to consumer count
+			consumerScore := math.Min(float64(in.ConsumerCount)*8, 30)
+			score += consumerScore
+			factors = append(factors, models.ScoringFactor{
+				Name: "consumers", Value: fmt.Sprintf("%d", in.ConsumerCount),
+				Effect: consumerScore, Note: fmt.Sprintf("%d service(s) call this (from traces)", in.ConsumerCount),
+			})
+		}
 		source = "otel"
 		confidence = "high"
 	} else {
