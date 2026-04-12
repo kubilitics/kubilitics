@@ -19,7 +19,6 @@ coverage.html
 vendor/
 
 # Go workspace file
-go.work
 
 # IDE
 .idea/
