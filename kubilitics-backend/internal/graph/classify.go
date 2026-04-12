@@ -46,7 +46,7 @@ func classifyImpact(snap *GraphSnapshot, target models.ResourceRef, failureMode 
 	applyInfrastructureOverrides(snap, svcImpacts)
 
 	// Step 6: Compute blast radius percentage
-	blastPct := computeBlastRadiusPercent(svcImpacts, ingImpacts, consumerImpacts, snap.TotalWorkloads)
+	blastPct := computeBlastRadiusPercent(svcImpacts, ingImpacts, consumerImpacts, snap.TotalWorkloads, snap)
 
 	// Step 7: Control-plane override
 	blastPct = applyControlPlaneOverride(snap, target, lostPods, svcImpacts, blastPct)
@@ -352,12 +352,14 @@ func applyControlPlaneOverride(
 
 // computeBlastRadiusPercent computes a weighted blast radius percentage.
 // Each impacted service contributes its classification weight (broken=1.0, degraded=0.5, self-healing=0.0).
-// Non-critical kube-system resources get a 1.5x multiplier.
+// Broken/degraded services with upstream callers get cascading amplification
+// (retry storms, blocking call cascades). Non-critical kube-system resources get a 1.5x multiplier.
 func computeBlastRadiusPercent(
 	svcImpacts []models.ServiceImpact,
 	ingImpacts []models.IngressImpact,
 	consumerImpacts []models.ConsumerImpact,
 	totalWorkloads int,
+	snap *GraphSnapshot,
 ) float64 {
 	if totalWorkloads == 0 {
 		return 0
@@ -367,7 +369,56 @@ func computeBlastRadiusPercent(
 
 	for _, si := range svcImpacts {
 		weight := classificationWeight(si.Classification)
-		if weight > 0 && isKubeSystemResource(si.Service.Namespace) {
+		if weight == 0 {
+			continue
+		}
+
+		// Cascading amplification: broken/degraded services with upstream callers
+		// experience retry storms and blocking call cascades.
+		if si.Classification == "broken" || si.Classification == "degraded" {
+			svcKey := refKey(si.Service)
+			amplification := 1.0
+
+			// Count upstream callers (services that depend on this one)
+			if snap != nil {
+				upstreamCount := 0
+				for depKey := range snap.Reverse[svcKey] {
+					if depRef, ok := snap.Nodes[depKey]; ok {
+						if depRef.Kind == "Service" || depRef.Kind == "Deployment" || depRef.Kind == "StatefulSet" {
+							upstreamCount++
+						}
+					}
+				}
+				if upstreamCount >= 3 {
+					amplification += 0.3
+				} else if upstreamCount >= 1 {
+					amplification += 0.15
+				}
+			}
+
+			// Traffic hotspot amplification from OTel data
+			if snap != nil && snap.OTelServiceMap != nil && len(snap.OTelServiceMap.Edges) > 0 {
+				totalCalls := 0
+				serviceCalls := 0
+				for _, edge := range snap.OTelServiceMap.Edges {
+					totalCalls += edge.Count
+					if edge.Target == si.Service.Name {
+						serviceCalls += edge.Count
+					}
+				}
+				if totalCalls > 0 {
+					avgCalls := totalCalls / len(snap.OTelServiceMap.Edges)
+					if serviceCalls > avgCalls*2 {
+						amplification += 0.2
+					}
+				}
+			}
+
+			weight *= amplification
+		}
+
+		// Existing kube-system multiplier
+		if isKubeSystemResource(si.Service.Namespace) {
 			if _, isCritical := matchCriticalComponent(si.Service.Namespace, si.Service.Name); !isCritical {
 				weight *= 1.5
 			}
