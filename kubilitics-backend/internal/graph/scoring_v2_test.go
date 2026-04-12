@@ -133,3 +133,42 @@ func TestComputeExposure_CrossNamespace(t *testing.T) {
 		t.Errorf("expected CrossNsCount=2 to give exposure >= 10, got %d", detail.Score)
 	}
 }
+
+func TestComputeExposure_TrafficWeighted(t *testing.T) {
+	// High-traffic service: 10000 calls out of 50000 total = 20% of cluster traffic
+	highTraffic := computeExposure(ExposureInput{
+		IsIngressExposed:   false,
+		ConsumerCount:      2,
+		TraceDataAvailable: true,
+		TotalCallsToTarget: 10000,
+		ClusterTotalCalls:  50000,
+	})
+
+	// Low-traffic service: same consumer count but only 100 calls
+	lowTraffic := computeExposure(ExposureInput{
+		IsIngressExposed:   false,
+		ConsumerCount:      2,
+		TraceDataAvailable: true,
+		TotalCallsToTarget: 100,
+		ClusterTotalCalls:  50000,
+	})
+
+	if highTraffic.Score <= lowTraffic.Score {
+		t.Errorf("high-traffic service (%d) should score higher than low-traffic (%d)",
+			highTraffic.Score, lowTraffic.Score)
+	}
+}
+
+func TestComputeExposure_TrafficWeighted_NoCallData(t *testing.T) {
+	// Trace available but no call counts — should fall back to consumer count
+	detail := computeExposure(ExposureInput{
+		IsIngressExposed:   false,
+		ConsumerCount:      3,
+		TraceDataAvailable: true,
+		TotalCallsToTarget: 0,
+		ClusterTotalCalls:  0,
+	})
+	if detail.Score < 20 {
+		t.Errorf("fallback to consumer count should give decent score, got %d", detail.Score)
+	}
+}
