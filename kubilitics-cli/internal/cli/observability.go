@@ -91,12 +91,13 @@ type HealthIssue struct {
 
 // healthResult is the structured output for `kcli health`.
 type healthResult struct {
-	Context   string            `json:"context,omitempty"`
-	Timestamp time.Time         `json:"timestamp"`
-	Score     int               `json:"score"`
-	Pods      podHealthSummary  `json:"pods"`
-	Nodes     nodeHealthSummary `json:"nodes"`
-	Issues    []HealthIssue     `json:"issues"`
+	Context      string            `json:"context,omitempty"`
+	Timestamp    time.Time         `json:"timestamp"`
+	Score        int               `json:"score"`
+	ApiReachable bool              `json:"apiReachable"`
+	Pods         podHealthSummary  `json:"pods"`
+	Nodes        nodeHealthSummary `json:"nodes"`
+	Issues       []HealthIssue     `json:"issues"`
 }
 
 func newMetricsCmd(a *app) *cobra.Command {
@@ -532,14 +533,20 @@ func printOverallHealth(a *app, cmd *cobra.Command, ofmt output.Format) error {
 	}
 
 	score := healthScore(pods, nodes)
+	apiReachable := true
+	if pods.Total == 0 && nodes.Total == 0 {
+		apiReachable = false
+		score = -1
+	}
 	issues := collectHealthIssues(cmd.Context(), a, pods, nodes)
 	result := healthResult{
-		Context:   a.context,
-		Timestamp: time.Now().UTC(),
-		Score:     score,
-		Pods:      pods,
-		Nodes:     nodes,
-		Issues:    issues,
+		Context:      a.context,
+		Timestamp:    time.Now().UTC(),
+		Score:        score,
+		ApiReachable: apiReachable,
+		Pods:         pods,
+		Nodes:        nodes,
+		Issues:       issues,
 	}
 
 	if ofmt == output.FormatJSON || ofmt == output.FormatYAML {
@@ -547,12 +554,22 @@ func printOverallHealth(a *app, cmd *cobra.Command, ofmt output.Format) error {
 	}
 
 	w := cmd.OutOrStdout()
-	label := "HEALTHY"
-	if score < 80 {
-		label = "DEGRADED"
-	}
-	if score < 50 {
+	var label string
+	if score < 0 {
+		label = "UNKNOWN (no data)"
+	} else if score < 50 {
 		label = "UNHEALTHY"
+	} else if score < 80 {
+		label = "DEGRADED"
+	} else {
+		label = "HEALTHY"
+	}
+
+	var scoreText string
+	if score < 0 {
+		scoreText = label
+	} else {
+		scoreText = fmt.Sprintf("%d/100 (%s)", score, label)
 	}
 
 	// Score table
@@ -560,7 +577,7 @@ func printOverallHealth(a *app, cmd *cobra.Command, ofmt output.Format) error {
 	scoreTable.Style = output.Rounded
 	scoreTable.AddColumn(output.Column{Name: "METRIC", Priority: output.PriorityAlways, MinWidth: 15, MaxWidth: 25, Align: output.Left})
 	scoreTable.AddColumn(output.Column{Name: "VALUE", Priority: output.PriorityAlways, MinWidth: 10, MaxWidth: 30, Align: output.Left})
-	scoreTable.AddRow([]string{"Health Score", fmt.Sprintf("%d/100 (%s)", score, label)})
+	scoreTable.AddRow([]string{"Health Score", scoreText})
 	scoreTable.PrintTo(w)
 
 	printPodHealthSummary(cmd, pods)
