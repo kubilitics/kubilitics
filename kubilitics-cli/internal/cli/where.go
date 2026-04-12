@@ -106,12 +106,20 @@ func showPodLocation(ctx context.Context, clientset kubernetes.Interface, namesp
 		return fmt.Errorf("failed to get pod: %w", err)
 	}
 
-	var zone, region string
+	zone := "—"
+	region := "—"
 	if pod.Spec.NodeName != "" {
 		nodeObj, err := clientset.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
-		if err == nil {
-			zone = nodeObj.Labels["topology.kubernetes.io/zone"]
-			region = nodeObj.Labels["topology.kubernetes.io/region"]
+		if err != nil {
+			zone = "? (error)"
+			region = "? (error)"
+		} else {
+			if z, ok := nodeObj.Labels["topology.kubernetes.io/zone"]; ok {
+				zone = z
+			}
+			if r, ok := nodeObj.Labels["topology.kubernetes.io/region"]; ok {
+				region = r
+			}
 		}
 	}
 
@@ -138,12 +146,8 @@ func showPodLocation(ctx context.Context, clientset kubernetes.Interface, namesp
 
 	table.AddRow([]string{"Namespace", namespace})
 	table.AddRow([]string{"Node", pod.Spec.NodeName})
-	if zone != "" {
-		table.AddRow([]string{"Zone", zone})
-	}
-	if region != "" {
-		table.AddRow([]string{"Region", region})
-	}
+	table.AddRow([]string{"Zone", zone})
+	table.AddRow([]string{"Region", region})
 	if pod.Status.PodIP != "" {
 		table.AddRow([]string{"IP", pod.Status.PodIP})
 	}
@@ -171,12 +175,13 @@ func showDeploymentLocation(ctx context.Context, clientset kubernetes.Interface,
 			for _, pod := range podList.Items {
 				if len(pod.OwnerReferences) > 0 && pod.OwnerReferences[0].Name == rs.Name {
 					totalPods++
-					zone := "unknown"
+					zone := "—"
 					if pod.Spec.NodeName != "" {
-						if nodeObj, err := clientset.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{}); err == nil {
-							if z, exists := nodeObj.Labels["topology.kubernetes.io/zone"]; exists {
-								zone = z
-							}
+						nodeObj, err := clientset.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
+						if err != nil {
+							zone = "? (error)"
+						} else if z, exists := nodeObj.Labels["topology.kubernetes.io/zone"]; exists {
+							zone = z
 						}
 					}
 					zoneMap[zone] = append(zoneMap[zone], pod.Spec.NodeName)
@@ -205,12 +210,13 @@ func showStatefulSetLocation(ctx context.Context, clientset kubernetes.Interface
 	for _, pod := range podList.Items {
 		if len(pod.OwnerReferences) > 0 && pod.OwnerReferences[0].Name == stsName {
 			totalPods++
-			zone := "unknown"
+			zone := "—"
 			if pod.Spec.NodeName != "" {
-				if nodeObj, err := clientset.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{}); err == nil {
-					if z, exists := nodeObj.Labels["topology.kubernetes.io/zone"]; exists {
-						zone = z
-					}
+				nodeObj, err := clientset.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
+				if err != nil {
+					zone = "? (error)"
+				} else if z, exists := nodeObj.Labels["topology.kubernetes.io/zone"]; exists {
+					zone = z
 				}
 			}
 			zoneMap[zone] = append(zoneMap[zone], pod.Spec.NodeName)
@@ -237,12 +243,13 @@ func showDaemonSetLocation(ctx context.Context, clientset kubernetes.Interface, 
 	for _, pod := range podList.Items {
 		if len(pod.OwnerReferences) > 0 && pod.OwnerReferences[0].Name == dsName {
 			totalPods++
-			zone := "unknown"
+			zone := "—"
 			if pod.Spec.NodeName != "" {
-				if nodeObj, err := clientset.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{}); err == nil {
-					if z, exists := nodeObj.Labels["topology.kubernetes.io/zone"]; exists {
-						zone = z
-					}
+				nodeObj, err := clientset.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
+				if err != nil {
+					zone = "? (error)"
+				} else if z, exists := nodeObj.Labels["topology.kubernetes.io/zone"]; exists {
+					zone = z
 				}
 			}
 			zoneMap[zone] = append(zoneMap[zone], pod.Spec.NodeName)
@@ -320,7 +327,7 @@ func listAllDeploymentLocations(ctx context.Context, clientset kubernetes.Interf
 				for _, pod := range podList.Items {
 					if len(pod.OwnerReferences) > 0 && pod.OwnerReferences[0].Name == rs.Name {
 						ni := resolveNodeInfo(ctx, clientset, pod.Spec.NodeName, nodeCache)
-						if ni.zone != "" {
+						if ni.zone != "" && ni.zone != "—" {
 							zones[ni.zone] = true
 						}
 					}
@@ -363,7 +370,7 @@ func listAllStatefulSetLocations(ctx context.Context, clientset kubernetes.Inter
 		for _, pod := range podList.Items {
 			if len(pod.OwnerReferences) > 0 && pod.OwnerReferences[0].Name == sts.Name {
 				ni := resolveNodeInfo(ctx, clientset, pod.Spec.NodeName, nodeCache)
-				if ni.zone != "" {
+				if ni.zone != "" && ni.zone != "—" {
 					zones[ni.zone] = true
 				}
 			}
@@ -405,7 +412,7 @@ func listAllDaemonSetLocations(ctx context.Context, clientset kubernetes.Interfa
 		for _, pod := range podList.Items {
 			if len(pod.OwnerReferences) > 0 && pod.OwnerReferences[0].Name == ds.Name {
 				ni := resolveNodeInfo(ctx, clientset, pod.Spec.NodeName, nodeCache)
-				if ni.zone != "" {
+				if ni.zone != "" && ni.zone != "—" {
 					zones[ni.zone] = true
 				}
 			}
@@ -479,11 +486,18 @@ func resolveNodeInfo(ctx context.Context, clientset kubernetes.Interface, nodeNa
 	if ni, ok := cache[nodeName]; ok {
 		return ni
 	}
-	ni := nodeInfo{}
+	ni := nodeInfo{zone: "—", region: "—"}
 	nodeObj, err := clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-	if err == nil {
-		ni.zone = nodeObj.Labels["topology.kubernetes.io/zone"]
-		ni.region = nodeObj.Labels["topology.kubernetes.io/region"]
+	if err != nil {
+		ni.zone = "? (error)"
+		ni.region = "? (error)"
+	} else {
+		if z, ok := nodeObj.Labels["topology.kubernetes.io/zone"]; ok {
+			ni.zone = z
+		}
+		if r, ok := nodeObj.Labels["topology.kubernetes.io/region"]; ok {
+			ni.region = r
+		}
 	}
 	cache[nodeName] = ni
 	return ni
