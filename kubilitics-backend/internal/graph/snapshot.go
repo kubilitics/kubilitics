@@ -456,15 +456,27 @@ func (s *GraphSnapshot) computeSingleResourceBlast(target models.ResourceRef, fa
 	}
 	crossNsCount = len(nsSet)
 
+	// Compute dependency error rate from OTel ServiceNode data
+	dependencyErrorRate := 0.0
+	if traceAvailable {
+		for _, node := range s.OTelServiceMap.Nodes {
+			if node.Name == target.Name && node.SpanCount > 0 {
+				dependencyErrorRate = float64(node.ErrorCount) / float64(node.SpanCount)
+				break
+			}
+		}
+	}
+
 	exposureDetail := computeExposure(ExposureInput{
-		IsIngressExposed:   len(ingressHosts) > 0,
-		ConsumerCount:      consumerCount,
-		CrossNsCount:       crossNsCount,
-		K8sFanIn:           fanIn,
-		TraceDataAvailable: traceAvailable,
-		IsCriticalSystem:   isCriticalSystem,
-		TotalCallsToTarget: totalCallsToTarget,
-		ClusterTotalCalls:  clusterTotalCalls,
+		IsIngressExposed:    len(ingressHosts) > 0,
+		ConsumerCount:       consumerCount,
+		CrossNsCount:        crossNsCount,
+		K8sFanIn:            fanIn,
+		TraceDataAvailable:  traceAvailable,
+		IsCriticalSystem:    isCriticalSystem,
+		TotalCallsToTarget:  totalCallsToTarget,
+		ClusterTotalCalls:   clusterTotalCalls,
+		DependencyErrorRate: dependencyErrorRate,
 	})
 
 	recoveryDetail := computeRecovery(RecoveryInput{

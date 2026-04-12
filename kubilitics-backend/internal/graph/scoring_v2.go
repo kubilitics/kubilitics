@@ -24,8 +24,9 @@ type ExposureInput struct {
 	K8sFanIn           int
 	TraceDataAvailable bool
 	IsCriticalSystem   bool
-	TotalCallsToTarget int // total OTel calls TO this service (sum of inbound edge counts)
-	ClusterTotalCalls  int // total calls across the entire cluster (for normalization)
+	TotalCallsToTarget  int     // total OTel calls TO this service (sum of inbound edge counts)
+	ClusterTotalCalls   int     // total calls across the entire cluster (for normalization)
+	DependencyErrorRate float64 // 0.0-1.0: error rate of THIS service's outbound calls (from OTel)
 }
 
 type RecoveryInput struct {
@@ -143,6 +144,19 @@ func computeExposure(in ExposureInput) models.SubScoreDetail {
 			Effect: fanInScore, Note: fmt.Sprintf("%d K8s-level dependent(s)", in.K8sFanIn),
 		})
 	}
+	if in.DependencyErrorRate > 0 {
+		// A service already experiencing errors has elevated blast radius
+		// 10% error rate = +5 exposure, 50% = +25, 100% = +50
+		errorPenalty := math.Min(in.DependencyErrorRate*50, 50)
+		score += errorPenalty
+		factors = append(factors, models.ScoringFactor{
+			Name:   "dependency_error_rate",
+			Value:  fmt.Sprintf("%.1f%%", in.DependencyErrorRate*100),
+			Effect: errorPenalty,
+			Note:   fmt.Sprintf("%.1f%% error rate on outbound calls", in.DependencyErrorRate*100),
+		})
+	}
+
 	if in.CrossNsCount > 1 {
 		crossNsScore := math.Min(float64(in.CrossNsCount)*5, 15)
 		score += crossNsScore

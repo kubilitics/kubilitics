@@ -3,6 +3,7 @@ package graph
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 	"github.com/kubilitics/kubilitics-backend/internal/otel"
@@ -647,8 +648,25 @@ func computeConfidence(snap *GraphSnapshot) (int, string) {
 		sources = append(sources, "endpoints")
 	}
 	if hasTraces {
-		score += 30
-		sources = append(sources, "traces")
+		// Freshness: full credit if data < 10 min, decays to half credit at 1 hour, minimal at 3+ hours
+		stalenessMs := time.Now().UnixMilli() - snap.BuiltAt
+		stalenessMin := float64(stalenessMs) / 60000.0
+
+		traceCredit := 30.0
+		if stalenessMin > 180 { // > 3 hours
+			traceCredit = 5.0
+		} else if stalenessMin > 60 { // > 1 hour
+			traceCredit = 15.0
+		} else if stalenessMin > 10 { // > 10 minutes
+			traceCredit = 25.0
+		}
+		score += int(traceCredit)
+
+		if stalenessMin > 60 {
+			sources = append(sources, fmt.Sprintf("traces (%.0fm old, reduced weight)", stalenessMin))
+		} else {
+			sources = append(sources, "traces")
+		}
 	}
 	if hasPDBs {
 		score += 15
