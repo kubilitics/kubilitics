@@ -485,21 +485,23 @@ export function useServerPaginatedResourceList<T extends KubernetesResource>(
   const pageSize = Math.max(1, Math.min(100, options?.pageSize ?? 10));
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Reset to page 1 when search, sort, pageSize, or fieldSelector changes
+  // Reset to page 1 when search, sort, pageSize, fieldSelector, or namespace changes
   const searchRef = useRef(options?.search);
   const sortRef = useRef(`${options?.sortBy}-${options?.sortOrder}`);
   const pageSizeRef = useRef(pageSize);
   const fieldSelectorRef = useRef(options?.fieldSelector);
+  const namespaceRef = useRef(namespace);
   useEffect(() => {
     const newSort = `${options?.sortBy}-${options?.sortOrder}`;
-    if (searchRef.current !== options?.search || sortRef.current !== newSort || pageSizeRef.current !== pageSize || fieldSelectorRef.current !== options?.fieldSelector) {
+    if (searchRef.current !== options?.search || sortRef.current !== newSort || pageSizeRef.current !== pageSize || fieldSelectorRef.current !== options?.fieldSelector || namespaceRef.current !== namespace) {
       searchRef.current = options?.search;
       sortRef.current = newSort;
       pageSizeRef.current = pageSize;
       fieldSelectorRef.current = options?.fieldSelector;
+      namespaceRef.current = namespace;
       setCurrentPage(1);
     }
-  }, [options?.search, options?.sortBy, options?.sortOrder, pageSize, options?.fieldSelector]);
+  }, [options?.search, options?.sortBy, options?.sortOrder, pageSize, options?.fieldSelector, namespace]);
 
   const offset = (currentPage - 1) * pageSize;
 
@@ -545,6 +547,13 @@ export function useServerPaginatedResourceList<T extends KubernetesResource>(
 
   const total = query.data?.metadata?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  // Auto-clamp page when total decreases (e.g. items deleted server-side)
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const pagination: UsePaginatedResourceListPagination = {
     hasPrev: currentPage > 1,
