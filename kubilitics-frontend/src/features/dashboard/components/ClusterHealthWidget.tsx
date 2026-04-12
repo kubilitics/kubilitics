@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 
 const STATUS_CONFIG: Record<string, { badge: string; icon: typeof CheckCircle2 }> = {
   excellent: { badge: "bg-success/10 border-success/20 text-success", icon: CheckCircle2 },
+  healthy: { badge: "bg-success/10 border-success/20 text-success", icon: CheckCircle2 },
   good: { badge: "bg-success/10 border-success/20 text-success", icon: CheckCircle2 },
   fair: { badge: "bg-amber-100 dark:bg-amber-900/30 border-amber-200 text-amber-700 dark:text-amber-400", icon: AlertTriangle },
   poor: { badge: "bg-amber-100 dark:bg-amber-900/30 border-amber-200 text-amber-700 dark:text-amber-400", icon: AlertTriangle },
@@ -54,7 +55,7 @@ export const ClusterHealthWidget = () => {
     { name: "Issues", value: 100 - score, color: "hsl(var(--muted))" },
   ];
 
-  const statusLabel = status === "excellent" || status === "good" ? "Good State" : status === "fair" ? "Needs Attention" : "At Risk";
+  const statusLabel = status === "excellent" || status === "good" || status === "healthy" ? "Good State" : status === "fair" ? "Needs Attention" : "At Risk";
   const hasData = activeCluster || clusterId;
 
   return (

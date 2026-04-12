@@ -65,7 +65,7 @@ func (c *OverviewCache) StartClusterCache(ctx context.Context, clusterID string,
 		Health: models.OverviewHealth{
 			Score:     100,
 			Grade:     "A",
-			Status:    "healthy",
+			Status:    "excellent",
 			Breakdown: map[string]int{},
 			Insight:   "Cluster is operating normally.",
 		},
