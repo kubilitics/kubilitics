@@ -32,7 +32,7 @@ func classifyImpact(snap *GraphSnapshot, target models.ResourceRef, failureMode 
 	lostPods := computeLostPods(snap, target, failureMode)
 
 	// Step 2: Classify service impact
-	svcImpacts := classifyServiceImpact(snap.ServiceEndpoints, lostPods, snap.PDBs)
+	svcImpacts := classifyServiceImpact(snap.ServiceEndpoints, lostPods, snap.PDBs, snap.ServicePodLabels)
 
 	// Step 3: Classify ingress impact
 	ingImpacts := classifyIngressImpact(snap, svcImpacts)
@@ -110,6 +110,7 @@ func classifyServiceImpact(
 	endpoints map[string][]corev1.EndpointAddress,
 	lostPods map[string]bool,
 	pdbs []policyv1.PodDisruptionBudget,
+	servicePodLabels map[string]map[string]string,
 ) []models.ServiceImpact {
 	var impacts []models.ServiceImpact
 
@@ -141,7 +142,8 @@ func classifyServiceImpact(
 		threshold := 0.5
 		thresholdSource := "default:50%"
 
-		if pdb, found := findMatchingPDB(pdbs, svcRef, total); found {
+		podLabels := servicePodLabels[svcKey]
+		if pdb, found := findMatchingPDBByLabels(pdbs, svcRef, podLabels, total); found {
 			threshold = resolveIntOrPercent(*pdb.Spec.MinAvailable, total)
 			thresholdSource = fmt.Sprintf("pdb:%s", pdb.Name)
 		}
@@ -514,12 +516,12 @@ func resolveIntOrPercent(val intstr.IntOrString, total int) float64 {
 	}
 }
 
-// findMatchingPDB finds a PDB whose selector could match a service's pods.
-// This is a heuristic: we check if any PDB in the same namespace has a selector
-// label that appears in the service name.
-func findMatchingPDB(
+// findMatchingPDBByLabels finds a PDB whose selector matches the actual pod labels
+// backing a service. Falls back to a name-contains heuristic if pod labels are unavailable.
+func findMatchingPDBByLabels(
 	pdbs []policyv1.PodDisruptionBudget,
 	svcRef models.ResourceRef,
+	podLabels map[string]string,
 	totalEndpoints int,
 ) (*policyv1.PodDisruptionBudget, bool) {
 	for i := range pdbs {
@@ -530,12 +532,26 @@ func findMatchingPDB(
 		if pdb.Spec.MinAvailable == nil {
 			continue
 		}
-		// Heuristic: check if any selector label value is contained in the service name
-		if pdb.Spec.Selector != nil {
-			for _, v := range pdb.Spec.Selector.MatchLabels {
-				if strings.Contains(svcRef.Name, v) {
-					return pdb, true
+		if pdb.Spec.Selector == nil {
+			continue
+		}
+		// Primary: match PDB selector against actual pod labels
+		if podLabels != nil && len(pdb.Spec.Selector.MatchLabels) > 0 {
+			allMatch := true
+			for k, v := range pdb.Spec.Selector.MatchLabels {
+				if podLabels[k] != v {
+					allMatch = false
+					break
 				}
+			}
+			if allMatch {
+				return pdb, true
+			}
+		}
+		// Fallback: name heuristic
+		for _, v := range pdb.Spec.Selector.MatchLabels {
+			if strings.Contains(svcRef.Name, v) {
+				return pdb, true
 			}
 		}
 	}
