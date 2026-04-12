@@ -200,27 +200,221 @@ func TestScenario_SingleReplicaPodCrash(t *testing.T) {
 		"blast radius should be >0%% when the single replica is lost")
 }
 
-// TestScenario_ServiceLosingAllEndpoints is a placeholder for future implementation.
+// buildSnapshotScenarioIngress creates a cluster with:
+//   - 1 Deployment "web" with 1 replica
+//   - 1 Pod "web-pod-1" owned by the Deployment
+//   - 1 Service "web-svc" with 1 endpoint pointing to the pod
+//   - 1 Ingress "web-ing" with host "app.example.com" depending on "web-svc"
+func buildSnapshotScenarioIngress() *GraphSnapshot {
+	dep := models.ResourceRef{Kind: "Deployment", Namespace: "default", Name: "web"}
+	pod := models.ResourceRef{Kind: "Pod", Namespace: "default", Name: "web-pod-1"}
+	svc := models.ResourceRef{Kind: "Service", Namespace: "default", Name: "web-svc"}
+	ing := models.ResourceRef{Kind: "Ingress", Namespace: "default", Name: "web-ing"}
+
+	depKey := refKey(dep)
+	podKey := refKey(pod)
+	svcKey := refKey(svc)
+	ingKey := refKey(ing)
+
+	snap := &GraphSnapshot{}
+	snap.EnsureMaps()
+
+	snap.Nodes[depKey] = dep
+	snap.Nodes[podKey] = pod
+	snap.Nodes[svcKey] = svc
+	snap.Nodes[ingKey] = ing
+
+	snap.PodOwners[podKey] = depKey
+	snap.NodeReplicas[depKey] = 1
+
+	snap.ServiceEndpoints[svcKey] = []corev1.EndpointAddress{
+		{
+			IP: "10.0.0.1",
+			TargetRef: &corev1.ObjectReference{
+				Kind:      "Pod",
+				Namespace: "default",
+				Name:      "web-pod-1",
+			},
+		},
+	}
+
+	// Ingress -> Service -> Deployment
+	snap.Forward[ingKey] = map[string]bool{svcKey: true}
+	snap.Forward[svcKey] = map[string]bool{depKey: true}
+	snap.Reverse[svcKey] = map[string]bool{ingKey: true}
+	snap.Reverse[depKey] = map[string]bool{svcKey: true}
+
+	snap.NodeIngress[ingKey] = []string{"app.example.com"}
+
+	snap.Edges = []models.BlastDependencyEdge{
+		{Source: ing, Target: svc, Type: "routes-to"},
+		{Source: svc, Target: dep, Type: "selects"},
+	}
+
+	snap.TotalWorkloads = 3
+	snap.BuiltAt = time.Now().UnixMilli()
+	snap.Namespaces["default"] = true
+
+	return snap
+}
+
+// buildSnapshotScenarioStatefulSet creates a cluster with:
+//   - 1 StatefulSet "db" with 1 replica
+//   - 1 Pod "db-0" owned by the StatefulSet
+//   - 1 Service "db-svc" with 1 endpoint pointing to the pod
+func buildSnapshotScenarioStatefulSet() *GraphSnapshot {
+	sts := models.ResourceRef{Kind: "StatefulSet", Namespace: "default", Name: "db"}
+	pod := models.ResourceRef{Kind: "Pod", Namespace: "default", Name: "db-0"}
+	svc := models.ResourceRef{Kind: "Service", Namespace: "default", Name: "db-svc"}
+
+	stsKey := refKey(sts)
+	podKey := refKey(pod)
+	svcKey := refKey(svc)
+
+	snap := &GraphSnapshot{}
+	snap.EnsureMaps()
+
+	snap.Nodes[stsKey] = sts
+	snap.Nodes[podKey] = pod
+	snap.Nodes[svcKey] = svc
+
+	snap.PodOwners[podKey] = stsKey
+	snap.NodeReplicas[stsKey] = 1
+
+	snap.ServiceEndpoints[svcKey] = []corev1.EndpointAddress{
+		{
+			IP: "10.0.1.1",
+			TargetRef: &corev1.ObjectReference{
+				Kind:      "Pod",
+				Namespace: "default",
+				Name:      "db-0",
+			},
+		},
+	}
+
+	snap.Forward[svcKey] = map[string]bool{stsKey: true}
+	snap.Reverse[stsKey] = map[string]bool{svcKey: true}
+
+	snap.Edges = []models.BlastDependencyEdge{
+		{Source: svc, Target: sts, Type: "selects"},
+	}
+
+	snap.TotalWorkloads = 2
+	snap.BuiltAt = time.Now().UnixMilli()
+	snap.Namespaces["default"] = true
+
+	return snap
+}
+
+// TestScenario_ServiceLosingAllEndpoints tests that deleting a single-replica workload
+// causes the service to lose all endpoints and be classified as "broken".
 func TestScenario_ServiceLosingAllEndpoints(t *testing.T) {
-	t.Skip("TODO: implement scenario — service loses all endpoints via workload deletion")
+	snap := buildSnapshotScenario2()
+	dep := models.ResourceRef{Kind: "Deployment", Namespace: "default", Name: "api"}
+	result, err := snap.ComputeBlastRadiusWithMode(dep, FailureModeWorkloadDeletion)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	found := false
+	for _, si := range result.AffectedServices {
+		if si.Service.Name == "api-svc" {
+			found = true
+			assert.Equal(t, "broken", si.Classification)
+			assert.Equal(t, 0, si.RemainingEndpoints)
+		}
+	}
+	assert.True(t, found, "api-svc should appear in AffectedServices")
+	assert.Greater(t, result.BlastRadiusPercent, 0.0)
 }
 
-// TestScenario_IngressLosingBackend is a placeholder for future implementation.
+// TestScenario_IngressLosingBackend tests that deleting a workload behind a service
+// causes the ingress to be classified as "broken" when all backend endpoints are lost.
 func TestScenario_IngressLosingBackend(t *testing.T) {
-	t.Skip("TODO: implement scenario — ingress loses all backend services")
+	snap := buildSnapshotScenarioIngress()
+	dep := models.ResourceRef{Kind: "Deployment", Namespace: "default", Name: "web"}
+	result, err := snap.ComputeBlastRadiusWithMode(dep, FailureModeWorkloadDeletion)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	require.NotEmpty(t, result.AffectedIngresses, "ingress should be affected")
+	assert.Equal(t, "broken", result.AffectedIngresses[0].Classification)
 }
 
-// TestScenario_NamespaceDeletion is a placeholder for future implementation.
+// TestScenario_NamespaceDeletion tests that deleting a namespace cascades to all
+// workloads within it and reports non-zero affected resources.
 func TestScenario_NamespaceDeletion(t *testing.T) {
-	t.Skip("TODO: implement scenario — namespace deletion cascades to all workloads")
+	snap := buildSnapshotScenario1()
+	ns := models.ResourceRef{Kind: "Namespace", Namespace: "", Name: "default"}
+	result, err := snap.ComputeBlastRadiusWithMode(ns, FailureModeNamespaceDeletion)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	assert.Equal(t, FailureModeNamespaceDeletion, result.FailureMode)
+	assert.Greater(t, result.TotalAffected, 0)
 }
 
-// TestScenario_StatefulSetFailure is a placeholder for future implementation.
+// TestScenario_StatefulSetFailure tests that deleting a StatefulSet causes its
+// headless service to lose all endpoints and be classified as "broken".
 func TestScenario_StatefulSetFailure(t *testing.T) {
-	t.Skip("TODO: implement scenario — StatefulSet pod failure with PVC dependency")
+	snap := buildSnapshotScenarioStatefulSet()
+	sts := models.ResourceRef{Kind: "StatefulSet", Namespace: "default", Name: "db"}
+	result, err := snap.ComputeBlastRadiusWithMode(sts, FailureModeWorkloadDeletion)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	found := false
+	for _, si := range result.AffectedServices {
+		if si.Service.Name == "db-svc" {
+			found = true
+			assert.Equal(t, "broken", si.Classification)
+		}
+	}
+	assert.True(t, found)
+	assert.Greater(t, result.BlastRadiusPercent, 0.0)
 }
 
-// TestScenario_ControlPlaneComponent is a placeholder for future implementation.
+// TestScenario_ControlPlaneComponent tests that a control-plane component (kube-apiserver
+// in kube-system) triggers the 100% blast radius override.
 func TestScenario_ControlPlaneComponent(t *testing.T) {
-	t.Skip("TODO: implement scenario — control-plane component failure triggers 100%% blast radius override")
+	snap := &GraphSnapshot{}
+	snap.EnsureMaps()
+
+	apiserver := models.ResourceRef{Kind: "Deployment", Namespace: "kube-system", Name: "kube-apiserver"}
+	pod := models.ResourceRef{Kind: "Pod", Namespace: "kube-system", Name: "kube-apiserver-pod-1"}
+
+	snap.Nodes[refKey(apiserver)] = apiserver
+	snap.Nodes[refKey(pod)] = pod
+	snap.PodOwners[refKey(pod)] = refKey(apiserver)
+	snap.NodeReplicas[refKey(apiserver)] = 1
+	snap.TotalWorkloads = 1
+	snap.BuiltAt = time.Now().UnixMilli()
+	snap.Namespaces["kube-system"] = true
+
+	result, err := snap.ComputeBlastRadiusWithMode(apiserver, FailureModeWorkloadDeletion)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Control-plane component should trigger 100% blast radius
+	assert.Equal(t, 100.0, result.BlastRadiusPercent)
+}
+
+// TestScenario_NodeDrain tests that draining a node evicts all pods scheduled on it
+// and reports the correct number of affected pods.
+func TestScenario_NodeDrain(t *testing.T) {
+	snap := buildSnapshotScenario1()
+	snap.PodNodes = map[string]string{
+		"Pod/default/pod-1": "worker-1",
+		"Pod/default/pod-2": "worker-1",
+		"Pod/default/pod-3": "worker-2",
+	}
+
+	node := models.ResourceRef{Kind: "Node", Namespace: "", Name: "worker-1"}
+	snap.Nodes[refKey(node)] = node
+
+	result, err := snap.ComputeBlastRadiusWithMode(node, FailureModeNodeDrain)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	assert.Equal(t, FailureModeNodeDrain, result.FailureMode)
+	assert.Equal(t, 2, result.TotalAffected, "should lose 2 pods on worker-1")
 }
