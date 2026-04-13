@@ -50,7 +50,12 @@ export function InstallCommandBlock({ commands, className, dimmed }: InstallComm
     <div
       className={cn(
         'rounded-lg border border-border/60 bg-card overflow-hidden transition-opacity duration-300',
-        dimmed && 'opacity-50 pointer-events-none',
+        // When the install is already complete the host page passes dimmed=true
+        // as a visual hint that the command is no longer needed for THIS cluster.
+        // It must NOT disable interaction — users still need to switch tabs to
+        // view the kubectl/Kustomize variants for air-gap or other-cluster use,
+        // and the Copy button must remain functional.
+        dimmed && 'opacity-60 hover:opacity-100 focus-within:opacity-100',
         className,
       )}
     >
