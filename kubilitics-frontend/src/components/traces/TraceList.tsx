@@ -114,28 +114,31 @@ export function TraceList() {
   const [isLoading, setIsLoading] = useState(true);
   const [fetchTick, setFetchTick] = useState(0);
 
-  // Auto-refresh every 10s when tracing is enabled but no traces yet
+  // Auto-refresh: poll faster (10s) while waiting for first traces,
+  // slower (30s) once we have data.
   useEffect(() => {
-    if (!tracingStatusData?.enabled || traces.length > 0) return;
-    const interval = setInterval(() => setFetchTick((t) => t + 1), 10_000);
+    if (!tracingStatusData?.enabled) return;
+    const intervalMs = traces.length === 0 ? 10_000 : 30_000;
+    const interval = setInterval(() => setFetchTick((t) => t + 1), intervalMs);
     return () => clearInterval(interval);
   }, [tracingStatusData?.enabled, traces.length]);
 
   useEffect(() => {
+    if (!clusterId) {
+      setTraces([]);
+      setIsLoading(false);
+      return;
+    }
     let cancelled = false;
     async function load() {
       try {
         const base = getBackendBase();
-        const clustersRes = await fetch(`${base}/api/v1/clusters`);
-        const clusters: Array<{ id: string; status: string }> = await clustersRes.json();
-        const connected = clusters.find((c) => c.status === 'connected');
-        if (!connected) { setTraces([]); setIsLoading(false); return; }
         const qs = new URLSearchParams({ limit: '100' });
         if (queryParams.from) qs.set('from', String(queryParams.from));
         if (queryParams.service) qs.set('service', queryParams.service);
         if (queryParams.status) qs.set('status', queryParams.status);
         if (queryParams.min_duration) qs.set('min_duration', String(queryParams.min_duration));
-        const res = await fetch(`${base}/api/v1/clusters/${connected.id}/traces?${qs}`);
+        const res = await fetch(`${base}/api/v1/clusters/${clusterId}/traces?${qs}`);
         const data = await res.json();
         if (!cancelled) { setTraces(Array.isArray(data) ? data : []); setIsLoading(false); }
       } catch {
@@ -144,7 +147,7 @@ export function TraceList() {
     }
     load();
     return () => { cancelled = true; };
-  }, [queryParams.from, queryParams.service, queryParams.status, queryParams.min_duration, fetchTick]);
+  }, [clusterId, queryParams.from, queryParams.service, queryParams.status, queryParams.min_duration, fetchTick]);
 
   // Reset page when filters change
   useEffect(() => { setPage(1); }, [queryParams.from, queryParams.service, queryParams.status, queryParams.min_duration]);
