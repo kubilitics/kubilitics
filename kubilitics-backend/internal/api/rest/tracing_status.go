@@ -9,6 +9,8 @@ import (
 	"github.com/gorilla/mux"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 )
 
 // TracingComponent is one row in the live status dashboard.
@@ -179,10 +181,11 @@ func (h *TracingHandler) computeTracingStatus(
 func (h *TracingHandler) GetTracingStatus(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	clusterID := vars["clusterId"]
+	requestID := logger.FromContext(r.Context())
 
 	client, err := h.clusterService.GetClient(clusterID)
 	if err != nil {
-		http.Error(w, "cluster not found: "+err.Error(), http.StatusNotFound)
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, "Cluster not found: "+err.Error(), requestID)
 		return
 	}
 

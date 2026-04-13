@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -27,11 +29,55 @@ type TracingHandler struct {
 }
 
 // NewTracingHandler creates a new TracingHandler.
+//
+// The helm chart path is resolved at construction time via resolveChartPath,
+// which tries (in order): the KUBILITICS_CHART_PATH env var, then several
+// common locations relative to CWD and the backend binary. If no chart is
+// found, the renderer is still constructed with a best-effort fallback so the
+// handler can return a helpful error at request time instead of a nil panic.
 func NewTracingHandler(cs service.ClusterService) *TracingHandler {
 	return &TracingHandler{
 		clusterService: cs,
-		helmRenderer:   otel.NewHelmRenderer("../charts/kubilitics-otel"),
+		helmRenderer:   otel.NewHelmRenderer(resolveChartPath()),
 	}
+}
+
+// resolveChartPath returns the first directory containing a Chart.yaml for the
+// kubilitics-otel chart that it can find. Order:
+//
+//  1. $KUBILITICS_CHART_PATH (explicit operator override, highest priority)
+//  2. ./charts/kubilitics-otel            (running from repo root)
+//  3. ../charts/kubilitics-otel           (running from kubilitics-backend/)
+//  4. ../../charts/kubilitics-otel        (running from a test subdirectory)
+//  5. <executable dir>/charts/kubilitics-otel   (bundled sidecar next to binary)
+//  6. <executable dir>/../charts/kubilitics-otel (sidecar one level below)
+//
+// If none match, the first candidate is returned as a fallback so Render()
+// produces a helpful "chart not found at X" error rather than a silent failure.
+func resolveChartPath() string {
+	candidates := []string{}
+	if env := strings.TrimSpace(os.Getenv("KUBILITICS_CHART_PATH")); env != "" {
+		candidates = append(candidates, env)
+	}
+	candidates = append(candidates,
+		"./charts/kubilitics-otel",
+		"../charts/kubilitics-otel",
+		"../../charts/kubilitics-otel",
+	)
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "charts", "kubilitics-otel"),
+			filepath.Join(exeDir, "..", "charts", "kubilitics-otel"),
+		)
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(filepath.Join(c, "Chart.yaml")); err == nil {
+			return c
+		}
+	}
+	// Fallback so Render() produces a useful error instead of panicking.
+	return candidates[0]
 }
 
 // languageSupportsAuto reports whether the OTel Operator can auto-inject

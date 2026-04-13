@@ -86,3 +86,78 @@ func testChartPath(t *testing.T) string {
 	// The test runs from kubilitics-backend/internal/otel/. Walk up to repo root.
 	return "../../../charts/kubilitics-otel"
 }
+
+// --- Input validation tests (injection prevention) -------------------------
+
+func TestRender_RejectsClusterIDWithComma(t *testing.T) {
+	r := NewHelmRenderer(testChartPath(t))
+	_, err := r.Render(RenderOptions{
+		ClusterID:  "evil,image.repository=attacker/malware",
+		BackendURL: "http://example.com",
+	})
+	if err == nil {
+		t.Fatal("expected error for cluster ID containing comma (helm --set injection vector)")
+	}
+	if !strings.Contains(err.Error(), "invalid characters") {
+		t.Errorf("expected 'invalid characters' error, got: %v", err)
+	}
+}
+
+func TestRender_RejectsClusterIDWithEquals(t *testing.T) {
+	r := NewHelmRenderer(testChartPath(t))
+	_, err := r.Render(RenderOptions{
+		ClusterID:  "cid=injected",
+		BackendURL: "http://example.com",
+	})
+	if err == nil {
+		t.Fatal("expected error for cluster ID containing equals")
+	}
+}
+
+func TestRender_RejectsClusterIDOverLength(t *testing.T) {
+	r := NewHelmRenderer(testChartPath(t))
+	long := strings.Repeat("a", 200)
+	_, err := r.Render(RenderOptions{
+		ClusterID:  long,
+		BackendURL: "http://example.com",
+	})
+	if err == nil {
+		t.Fatal("expected error for oversized cluster ID")
+	}
+}
+
+func TestRender_RejectsBackendURLWithComma(t *testing.T) {
+	r := NewHelmRenderer(testChartPath(t))
+	_, err := r.Render(RenderOptions{
+		ClusterID:  "abc",
+		BackendURL: "http://example.com,image.repository=evil/img",
+	})
+	if err == nil {
+		t.Fatal("expected error for backend URL containing comma")
+	}
+}
+
+func TestRender_RejectsBackendURLWithBadScheme(t *testing.T) {
+	r := NewHelmRenderer(testChartPath(t))
+	_, err := r.Render(RenderOptions{
+		ClusterID:  "abc",
+		BackendURL: "file:///etc/passwd",
+	})
+	if err == nil {
+		t.Fatal("expected error for non-http(s) backend URL")
+	}
+	if !strings.Contains(err.Error(), "http or https") {
+		t.Errorf("expected 'http or https' error, got: %v", err)
+	}
+}
+
+func TestRender_AcceptsUUIDClusterID(t *testing.T) {
+	r := NewHelmRenderer(testChartPath(t))
+	_, err := r.Render(RenderOptions{
+		ClusterID:  "bfe72621-8163-4a8f-8161-1568f8eb5b35",
+		BackendURL: "https://kubilitics.example.com",
+	})
+	if err != nil {
+		t.Fatalf("expected UUID cluster ID to be valid, got error: %v", err)
+	}
+}
