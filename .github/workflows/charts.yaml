@@ -25,6 +25,21 @@ jobs:
       - name: Lint chart
         run: helm lint charts/kubilitics-otel/ --set kubilitics.clusterId=test --set kubilitics.backendUrl=http://example.com
 
+      - name: Verify embedded chart copy is in sync
+        # The backend embeds the chart via go:embed (kubilitics-backend/internal/otel/chart/).
+        # If a contributor edits charts/kubilitics-otel/ but forgets to run
+        # `go generate ./internal/otel/...`, the binary ships a stale chart.
+        # This step regenerates the embed copy and fails the workflow if the
+        # working tree changed — forcing the contributor to commit the sync.
+        run: |
+          bash kubilitics-backend/internal/otel/sync_chart.sh
+          if ! git diff --quiet kubilitics-backend/internal/otel/chart/; then
+            echo "::error::Embedded chart is out of sync with charts/kubilitics-otel/."
+            echo "Run 'cd kubilitics-backend && go generate ./internal/otel/...' and commit the result."
+            git diff --stat kubilitics-backend/internal/otel/chart/
+            exit 1
+          fi
+
       - name: Package chart
         run: |
           mkdir -p _publish
