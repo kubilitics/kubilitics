@@ -1,6 +1,10 @@
 /**
- * Tracing API client — enable/disable distributed tracing, query agent status,
- * and instrument deployments via the Kubilitics backend tracing endpoints.
+ * Tracing API client — query agent status and per-deployment instrumentation state.
+ *
+ * Mutation functions (enableTracing, instrumentDeployment, uninstrumentDeployment,
+ * installOperator) were removed. The install flow now lives in the dedicated
+ * Observability Setup page (/clusters/:id/setup/observability). Per-deployment
+ * instrumentation is now a read-only command display via observability.ts.
  */
 import { backendRequest } from './client';
 
@@ -48,21 +52,6 @@ export interface PreflightChecks {
   checks: PreflightCheck[];
 }
 
-export interface InstrumentRequest {
-  deployments: Array<{ name: string; namespace: string }>;
-}
-
-export async function enableTracing(
-  baseUrl: string,
-  clusterId: string,
-): Promise<{ status: string; message: string }> {
-  return backendRequest(
-    baseUrl,
-    `clusters/${encodeURIComponent(clusterId)}/tracing/enable`,
-    { method: 'POST' },
-  );
-}
-
 export async function getTracingStatus(
   baseUrl: string,
   clusterId: string,
@@ -73,101 +62,18 @@ export async function getTracingStatus(
   );
 }
 
-export async function instrumentDeployments(
-  baseUrl: string,
-  clusterId: string,
-  req: InstrumentRequest,
-): Promise<{ instrumented: string[]; restarting: boolean }> {
-  return backendRequest(
-    baseUrl,
-    `clusters/${encodeURIComponent(clusterId)}/tracing/instrument`,
-    {
-      method: 'POST',
-      body: JSON.stringify(req),
-      headers: { 'Content-Type': 'application/json' },
-    },
-  );
-}
-
-export interface InstrumentationStatus {
-  instrumented: boolean;
-  language?: string;
-  detected_language: string;
-  annotation?: string;
-  otel_operator_ready: boolean;
-  supports_language: boolean;
-  // NEW fields (optional until backend catches up)
-  containers?: ContainerInstrumentation[];
-  preflight_checks?: PreflightChecks;
-}
-
-export async function getInstrumentationStatus(
-  baseUrl: string,
-  clusterId: string,
-  namespace: string,
-  deployment: string,
-): Promise<InstrumentationStatus> {
-  return backendRequest(
-    baseUrl,
-    `clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(deployment)}/instrumentation-status`,
-  );
-}
-
-export async function instrumentDeployment(
-  baseUrl: string,
-  clusterId: string,
-  namespace: string,
-  deployment: string,
-  options?: { language?: string; container?: string },
-): Promise<{
-  instrumented: boolean;
-  language: string;
-  rollout_started?: boolean;
-  already?: boolean;
-  rollback_reason?: string;
-}> {
-  return backendRequest(
-    baseUrl,
-    `clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(deployment)}/instrument`,
-    {
-      method: 'POST',
-      body: JSON.stringify(options ?? {}),
-      headers: { 'Content-Type': 'application/json' },
-    },
-  );
-}
-
-export async function installOperator(
+/**
+ * @deprecated Use the Observability Setup page (/clusters/:id/setup/observability)
+ * with the generated helm install command instead of this one-click mutation.
+ * Kept only to avoid breaking TracingSetup.tsx until that dialog is retired.
+ */
+export async function enableTracing(
   baseUrl: string,
   clusterId: string,
 ): Promise<{ status: string; message: string }> {
   return backendRequest(
     baseUrl,
-    `clusters/${encodeURIComponent(clusterId)}/tracing/operator/install`,
-    { method: 'POST' },
-  );
-}
-
-export async function uninstrumentDeployment(
-  baseUrl: string,
-  clusterId: string,
-  namespace: string,
-  deployment: string,
-): Promise<{ instrumented: boolean }> {
-  return backendRequest(
-    baseUrl,
-    `clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(deployment)}/uninstrument`,
-    { method: 'POST' },
-  );
-}
-
-export async function disableTracing(
-  baseUrl: string,
-  clusterId: string,
-): Promise<{ status: string }> {
-  return backendRequest(
-    baseUrl,
-    `clusters/${encodeURIComponent(clusterId)}/tracing/disable`,
+    `clusters/${encodeURIComponent(clusterId)}/tracing/enable`,
     { method: 'POST' },
   );
 }
