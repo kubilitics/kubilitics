@@ -58,7 +58,8 @@ func (th *TracingHandler) EnableTracing(w http.ResponseWriter, r *http.Request) 
 	// TODO(cluster-aware): backendURL should be derived from how the cluster
 	// reaches the backend (host.docker.internal vs ingress vs nodeport).
 	// For now we hardcode the Docker Desktop case — improve in a follow-up.
-	backendURL := "http://host.docker.internal:8190/v1/traces"
+	// NOTE: otlphttp exporter auto-appends /v1/traces — pass base URL only.
+	backendURL := "http://host.docker.internal:8190"
 	_, err = client.ApplyYAML(ctx, otel.AgentManifestYAML(clusterID, backendURL))
 	if err != nil {
 		respondErrorWithCode(w, http.StatusInternalServerError, ErrCodeInternalError, "Failed to deploy otel-collector: "+err.Error(), requestID)
