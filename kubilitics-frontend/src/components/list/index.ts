@@ -9,12 +9,13 @@ export {
 } from './ResourceExportDropdown';
 export { ListViewSegmentedControl, type ListViewOption } from './ListViewSegmentedControl';
 export { StatusPill, type StatusPillProps, type StatusPillVariant } from './StatusPill';
+export { ResourceTableRow, type ResourceTableRowProps } from './ResourceTableRow';
 export {
-  ResourceTableRow,
   resourceTableRowClassName,
   ROW_MOTION,
-  type ResourceTableRowProps,
-} from './ResourceTableRow';
+  rowEntranceClass,
+  rowEntranceStyle,
+} from './resourceTableRowStyles';
 export { ListPagination, type ListPaginationProps } from './ListPagination';
 export { ListPageStatCard, type ListPageStatCardProps } from './ListPageStatCard';
 export { ListPageHeader, type ListPageHeaderProps } from './ListPageHeader';
