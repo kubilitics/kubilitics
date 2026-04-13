@@ -11,10 +11,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// TracingComponentV2 is one row in the live status dashboard.
-// NOTE: V2 suffix is temporary during the refactor — Task 14 renames to TracingComponent
-// after the old type in tracing.go is deleted.
-type TracingComponentV2 struct {
+// TracingComponent is one row in the live status dashboard.
+type TracingComponent struct {
 	Key              string  `json:"key"`            // "cert-manager" | "otel-operator" | "kubilitics-collector" | "trace-ingestion"
 	Name             string  `json:"name"`           // human-readable label
 	Status           string  `json:"status"`         // "missing" | "installing" | "ready" | "no-data"
@@ -38,14 +36,13 @@ type TracingInstallCommands struct {
 	KustomizeURL string `json:"kustomize_url"`
 }
 
-// TracingStatusResponseV2 is what GET /clusters/{id}/tracing/status will return
-// once the rewrite completes. NOTE: V2 suffix is temporary — Task 14 renames.
-type TracingStatusResponseV2 struct {
+// TracingStatusResponse is what GET /clusters/{id}/tracing/status returns.
+type TracingStatusResponse struct {
 	ClusterID   string                 `json:"cluster_id"`
 	ClusterName string                 `json:"cluster_name"`
 	BackendURL  string                 `json:"backend_url"`
 	AllReady    bool                   `json:"all_ready"`
-	Components  []TracingComponentV2   `json:"components"`
+	Components  []TracingComponent     `json:"components"`
 	Install     TracingInstallCommands `json:"install"`
 }
 
@@ -58,12 +55,12 @@ func (h *TracingHandler) computeTracingStatus(
 	clusterID string,
 	clusterName string,
 	backendURL string,
-) TracingStatusResponseV2 {
-	resp := TracingStatusResponseV2{
+) TracingStatusResponse {
+	resp := TracingStatusResponse{
 		ClusterID:   clusterID,
 		ClusterName: clusterName,
 		BackendURL:  backendURL,
-		Components:  make([]TracingComponentV2, 0, 4),
+		Components:  make([]TracingComponent, 0, 4),
 	}
 
 	// Component 1: cert-manager
@@ -77,7 +74,7 @@ func (h *TracingHandler) computeTracingStatus(
 			cmStatus = "installing"
 		}
 	}
-	resp.Components = append(resp.Components, TracingComponentV2{
+	resp.Components = append(resp.Components, TracingComponent{
 		Key:             "cert-manager",
 		Name:            "cert-manager",
 		Status:          cmStatus,
@@ -96,7 +93,7 @@ func (h *TracingHandler) computeTracingStatus(
 			opStatus = "installing"
 		}
 	}
-	resp.Components = append(resp.Components, TracingComponentV2{
+	resp.Components = append(resp.Components, TracingComponent{
 		Key:             "otel-operator",
 		Name:            "OpenTelemetry Operator",
 		Status:          opStatus,
@@ -126,7 +123,7 @@ func (h *TracingHandler) computeTracingStatus(
 			}
 		}
 	}
-	resp.Components = append(resp.Components, TracingComponentV2{
+	resp.Components = append(resp.Components, TracingComponent{
 		Key:              "kubilitics-collector",
 		Name:             "Kubilitics OTel Collector",
 		Status:           collectorStatus,
@@ -145,7 +142,7 @@ func (h *TracingHandler) computeTracingStatus(
 		ingestionStatus = "no-data"
 		// TODO(future): plumb real last-span timestamp from the receiver and flip to "ready".
 	}
-	resp.Components = append(resp.Components, TracingComponentV2{
+	resp.Components = append(resp.Components, TracingComponent{
 		Key:    "trace-ingestion",
 		Name:   "Trace ingestion",
 		Status: ingestionStatus,
@@ -177,10 +174,9 @@ func (h *TracingHandler) computeTracingStatus(
 	return resp
 }
 
-// GetTracingStatusV2 is the new HTTP handler. It coexists with the old
-// GetTracingStatus in tracing.go until Task 14 deletes the old one and
-// renames this to GetTracingStatus.
-func (h *TracingHandler) GetTracingStatusV2(w http.ResponseWriter, r *http.Request) {
+// GetTracingStatus handles GET /clusters/{clusterId}/tracing/status.
+// Returns the live status of all observability components without mutating the cluster.
+func (h *TracingHandler) GetTracingStatus(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	clusterID := vars["clusterId"]
 

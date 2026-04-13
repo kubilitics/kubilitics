@@ -63,7 +63,7 @@ func TestGetTracingStatus_RendersInstallCommand(t *testing.T) {
 }
 
 // callTracingStatus calls the pure computeTracingStatus helper directly.
-func callTracingStatus(t *testing.T, clientset *fake.Clientset, clusterID, backendURL string) TracingStatusResponseV2 {
+func callTracingStatus(t *testing.T, clientset *fake.Clientset, clusterID, backendURL string) TracingStatusResponse {
 	t.Helper()
 	h := &TracingHandler{}
 	resp := h.computeTracingStatus(context.Background(), clientset, clusterID, "test-cluster", backendURL)
