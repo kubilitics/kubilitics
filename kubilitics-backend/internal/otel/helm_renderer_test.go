@@ -43,6 +43,42 @@ func TestRenderKubiliticsOtelChart_FailsWithoutClusterID(t *testing.T) {
 	}
 }
 
+func TestRenderKubiliticsOtelChart_IncludesInstrumentationCR(t *testing.T) {
+	r := NewHelmRenderer(testChartPath(t))
+	out, err := r.Render(RenderOptions{
+		ClusterID:  "abc",
+		BackendURL: "http://example.com",
+	})
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	if !strings.Contains(out, "kind: Instrumentation") {
+		t.Errorf("expected Instrumentation CR in rendered output")
+	}
+	if !strings.Contains(out, "kubilitics-auto") {
+		t.Errorf("expected Instrumentation CR named kubilitics-auto")
+	}
+	if !strings.Contains(out, "kind: ClusterRole") {
+		t.Errorf("expected ClusterRole for k8sattributes processor")
+	}
+}
+
+func TestRenderKubiliticsOtelChart_AirGapImageOverride(t *testing.T) {
+	r := NewHelmRenderer(testChartPath(t))
+	out, err := r.Render(RenderOptions{
+		ClusterID:       "abc",
+		BackendURL:      "http://example.com",
+		ImageRepository: "my-registry.internal/otel-collector-contrib",
+		ImageTag:        "0.118.0",
+	})
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	if !strings.Contains(out, "my-registry.internal/otel-collector-contrib:0.118.0") {
+		t.Errorf("expected air-gap image override in rendered output")
+	}
+}
+
 // testChartPath finds the chart relative to the repo root regardless of
 // where tests are invoked from.
 func testChartPath(t *testing.T) string {
