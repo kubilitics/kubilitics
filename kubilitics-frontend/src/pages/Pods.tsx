@@ -88,7 +88,7 @@ interface Pod {
  uid?: string;
  name: string;
  namespace: string;
- status: 'Running' | 'Pending' | 'Succeeded' | 'Failed' | 'Unknown' | 'CrashLoopBackOff' | 'ContainerCreating' | 'Terminating';
+ status: 'Running' | 'NotReady' | 'Pending' | 'Succeeded' | 'Failed' | 'Unknown' | 'CrashLoopBackOff' | 'ContainerCreating' | 'ImagePullBackOff' | 'CreateContainerError' | 'OOMKilled' | 'Terminating';
  ready: string;
  restarts: number;
  cpu: string;
@@ -182,8 +182,20 @@ function transformResource(resource: PodResource): Pod {
  status = 'CrashLoopBackOff';
  break;
  }
+ if (c.state.waiting?.reason === 'ImagePullBackOff' || c.state.waiting?.reason === 'ErrImagePull') {
+ status = 'ImagePullBackOff';
+ break;
+ }
  if (c.state.waiting?.reason === 'ContainerCreating') {
  status = 'ContainerCreating';
+ break;
+ }
+ if (c.state.waiting?.reason === 'CreateContainerConfigError' || c.state.waiting?.reason === 'CreateContainerError') {
+ status = 'CreateContainerError';
+ break;
+ }
+ if (c.lastState?.terminated?.reason === 'OOMKilled') {
+ status = 'OOMKilled';
  break;
  }
  }
@@ -191,6 +203,13 @@ function transformResource(resource: PodResource): Pod {
 
  const readyContainers = containerStatuses.filter((c) => c.ready).length;
  const totalContainers = resource.spec?.containers?.length || 0;
+
+ // Detect "Running but Not Ready" — phase is Running, no container errors,
+ // but readiness probes are failing. Critical for honest UX.
+ if (status === 'Running' && totalContainers > 0 && readyContainers < totalContainers) {
+ status = 'NotReady';
+ }
+
  const restarts = containerStatuses.reduce((acc, c) => acc + c.restartCount, 0);
 
  return {
