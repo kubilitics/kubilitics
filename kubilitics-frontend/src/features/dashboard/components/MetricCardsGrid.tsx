@@ -177,7 +177,7 @@ export const MetricCardsGrid = () => {
                       /* Layout */
                       "p-4 flex flex-col gap-3",
                       /* Hover — spring lift */
-                      "transition-all duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)]",
+                      "transition-all duration-300 ease-[var(--ease-in-out)]",
                       "hover:-translate-y-[2px]",
                       "hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_8px_24px_rgba(0,0,0,0.06)]",
                       "dark:hover:shadow-[0_2px_4px_rgba(0,0,0,0.3),0_8px_24px_rgba(0,0,0,0.2)]",
@@ -193,7 +193,7 @@ export const MetricCardsGrid = () => {
                           "h-11 w-11 rounded-[13px] flex items-center justify-center shrink-0",
                           "bg-gradient-to-br", tile.gradient,
                           "shadow-sm", tile.shadowTint,
-                          "transition-transform duration-500 ease-[cubic-bezier(0.175,0.885,0.32,1.275)]",
+                          "transition-transform duration-500 ease-[var(--ease-spring)]",
                           "group-hover:scale-110",
                         )}
                       >

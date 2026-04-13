@@ -1099,7 +1099,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="w-72 h-full flex flex-col border-r border-border/40 bg-white/95 dark:bg-[hsl(228,14%,9%)] backdrop-blur-3xl shrink-0 z-40 transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]" role="navigation" aria-label="Main navigation">
+    <aside className="w-72 h-full flex flex-col border-r border-border/40 bg-white/95 dark:bg-[hsl(228,14%,9%)] backdrop-blur-3xl shrink-0 z-40 transition-[width] duration-300 ease-[var(--ease-out-expo)]" role="navigation" aria-label="Main navigation">
       {fullContent}
     </aside>
   );

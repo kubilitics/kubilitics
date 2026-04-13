@@ -15,10 +15,12 @@ import (
 // is spawned from, or whether the repo is even checked out on the machine.
 //
 // The source files live at kubilitics-backend/internal/otel/chart/, which is
-// a verbatim copy of the top-level charts/kubilitics-otel/ directory. A
-// pre-commit/CI check should keep them in sync (see the charts-sync Makefile
-// target or the publish workflow).
+// a verbatim copy of the top-level charts/kubilitics-otel/ directory. The
+// `go generate` directive below keeps them in sync — run `go generate
+// ./internal/otel/...` from kubilitics-backend/ before building, or as part
+// of CI. The publish workflow at .github/workflows/charts.yaml runs it too.
 //
+//go:generate bash sync_chart.sh
 //go:embed all:chart
 var embeddedChart embed.FS
 
