@@ -162,9 +162,10 @@ export function useAutoConnect(): UseAutoConnectReturn {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
-      toast.error('Connection failed', {
+      toast.error(`Couldn't connect to ${target}`, {
         id: 'cluster-connect-status',
         description: message,
+        duration: 8000,
       });
     } finally {
       setIsAutoConnecting(false);
