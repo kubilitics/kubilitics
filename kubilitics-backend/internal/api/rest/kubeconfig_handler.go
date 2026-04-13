@@ -102,5 +102,15 @@ func (h *Handler) getClientFromRequest(ctx context.Context, r *http.Request, clu
 	if err != nil {
 		return nil, err
 	}
+	client, err := h.clusterService.GetClient(resolvedID)
+	if err == nil {
+		return client, nil
+	}
+	// Lazy reconnect: clusters persisted in the repo but unreachable at startup have no
+	// client in the in-memory pool. Before giving up, try to build a fresh client on demand
+	// so a cluster that's now reachable (Docker Desktop, VPN, kind cluster started) just works.
+	if _, rerr := h.clusterService.ReconnectCluster(ctx, resolvedID); rerr != nil {
+		return nil, rerr
+	}
 	return h.clusterService.GetClient(resolvedID)
 }
