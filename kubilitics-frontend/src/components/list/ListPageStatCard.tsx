@@ -139,7 +139,7 @@ export function ListPageStatCard({
         <CardContent className={size === 'sm' ? 'p-4' : 'p-5'}>
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <p className={cn(labelClass, 'truncate mb-1.5')}>{label}</p>
+              <p className={cn(labelClass, 'line-clamp-2 mb-1.5')} title={label}>{label}</p>
               <AnimatedNumber
                 value={value}
                 className={cn('text-2xl font-bold tabular-nums tracking-tight', valueClassName)}
