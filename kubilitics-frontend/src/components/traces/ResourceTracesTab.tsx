@@ -23,6 +23,7 @@ import {
   getEffectiveBackendBaseUrl,
   useBackendConfigStore,
 } from '@/stores/backendConfigStore';
+import { TraceGroupList } from './TraceGroupList';
 
 /* ---- Time range presets ------------------------------------------------- */
 
@@ -32,28 +33,6 @@ const TIME_RANGES: { label: string; value: string; ms: number }[] = [
   { label: 'Last 24h', value: '24h', ms: 86_400_000 },
   { label: 'Last 7d', value: '7d', ms: 604_800_000 },
 ];
-
-/* ---- Helpers ------------------------------------------------------------ */
-
-function formatDuration(ns: number): string {
-  const ms = ns / 1_000_000;
-  if (ms < 1) return `${(ns / 1_000).toFixed(0)}us`;
-  if (ms < 1000) return `${ms.toFixed(0)}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function formatTimeAgo(unixNs: number): string {
-  const now = Date.now();
-  const ms = now - unixNs / 1_000_000;
-  if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
-  return `${Math.floor(ms / 86_400_000)}d ago`;
-}
-
-function truncateId(id: string): string {
-  return id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : id;
-}
 
 /* ---- Props -------------------------------------------------------------- */
 
@@ -112,16 +91,10 @@ export function ResourceTracesTab({
   // Show skeleton only when actually fetching, not when disabled/idle.
   const isLoading = queryLoading && fetchStatus !== 'idle';
 
-  const PAGE_SIZE = 10;
-  const [page, setPage] = useState(1);
-
   const sortedTraces = useMemo(
     () => (traces ?? []).slice().sort((a, b) => b.start_time - a.start_time),
     [traces],
   );
-
-  const totalPages = Math.max(1, Math.ceil(sortedTraces.length / PAGE_SIZE));
-  const pagedTraces = sortedTraces.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Link to the full Traces page filtered for this resource
   const tracesPageLink = useMemo(() => {
@@ -252,113 +225,22 @@ OTEL_SERVICE_NAME=${resourceName}`}
             </div>
           )
         ) : (
-          <div>
-            {pagedTraces.map((trace) => (
-              <Link
-                key={trace.trace_id}
-                to={`/traces?traceId=${encodeURIComponent(trace.trace_id)}`}
-                className="flex items-center gap-3 px-4 py-2.5 border-b border-border/40 hover:bg-muted/50 transition-colors group"
-              >
-                {/* Status dot */}
-                <div
-                  className={cn(
-                    'w-2 h-2 rounded-full shrink-0',
-                    trace.status === 'ERROR'
-                      ? 'bg-red-500'
-                      : trace.status === 'OK'
-                        ? 'bg-green-500'
-                        : 'bg-muted-foreground/40',
-                  )}
-                />
-
-                {/* Trace ID */}
-                <span className="font-mono text-xs text-muted-foreground/70 shrink-0 w-28 truncate">
-                  {truncateId(trace.trace_id)}
-                </span>
-
-                {/* Service + Operation */}
-                <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                  {(() => {
-                    const services = (trace.services as string[] | undefined) ?? [];
-                    const primaryService = trace.root_service || services[0] || '?';
-                    const otherServiceCount = Math.max(0, services.length - 1);
-                    return (
-                      <>
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] px-1.5 py-0 h-4 shrink-0 bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20"
-                        >
-                          {primaryService}
-                        </Badge>
-                        {otherServiceCount > 0 && (
-                          <Badge
-                            variant="outline"
-                            className="text-[10px] px-1.5 py-0 h-4 shrink-0 text-muted-foreground"
-                            title={services.join(', ')}
-                          >
-                            +{otherServiceCount}
-                          </Badge>
-                        )}
-                      </>
-                    );
-                  })()}
-                  <span className="text-xs truncate text-muted-foreground">
-                    {trace.root_operation || '—'}
-                  </span>
-                </div>
-
-                {/* Duration */}
-                <span className="text-xs font-mono text-muted-foreground shrink-0">
-                  {formatDuration(trace.duration_ns)}
-                </span>
-
-                {/* Span count */}
-                <Badge
-                  variant="secondary"
-                  className="text-[10px] h-4 px-1.5 shrink-0"
-                >
-                  {trace.span_count} spans
-                </Badge>
-
-                {/* Error count */}
-                {trace.error_count > 0 && (
-                  <Badge
-                    variant="destructive"
-                    className="text-[10px] h-4 px-1.5 shrink-0"
-                  >
-                    {trace.error_count} err
-                  </Badge>
-                )}
-
-                {/* Time ago */}
-                <span className="text-[10px] text-muted-foreground/60 shrink-0 w-14 text-right">
-                  {formatTimeAgo(trace.start_time)}
-                </span>
-              </Link>
-            ))}
-          </div>
+          <TraceGroupList traces={sortedTraces} />
         )}
       </CardContent>
 
-      {/* Pagination + Footer */}
-      <div className="px-4 py-3 border-t border-border/40 flex items-center justify-between">
+      {/* Footer link — single line, minimal chrome */}
+      <div className="px-4 py-2.5 border-t border-border/40 flex items-center justify-end">
         <Link
           to={tracesPageLink}
           className={cn(
-            'inline-flex items-center gap-1.5 text-xs font-medium',
+            'inline-flex items-center gap-1.5 text-[11px] font-medium',
             'text-primary hover:text-primary/80 transition-colors',
           )}
         >
-          View in Traces Explorer
+          Open in Traces Explorer
           <ExternalLink className="h-3 w-3" />
         </Link>
-        {sortedTraces.length > PAGE_SIZE && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sortedTraces.length)} of {sortedTraces.length}</span>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>‹</Button>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>›</Button>
-          </div>
-        )}
       </div>
     </Card>
   );
