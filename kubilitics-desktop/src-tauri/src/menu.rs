@@ -1,5 +1,5 @@
 // Native app menu (R1.4): File, Edit, View, Help
-use tauri::menu::{MenuBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 
 pub fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<tauri::menu::Menu<R>, Box<dyn std::error::Error + Send + Sync>> {
     let quit = PredefinedMenuItem::quit(app, Some("Quit"))?;
@@ -18,8 +18,19 @@ pub fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<ta
         .item(&paste)
         .build()?;
 
+    // Hard reload — bypasses HTTP cache so stale modules can't stick around.
+    // Accelerator Cmd+Shift+R is used to force reload (Cmd+R does a soft reload).
+    let reload = MenuItemBuilder::with_id("reload", "Reload")
+        .accelerator("CmdOrCtrl+R")
+        .build(app)?;
+    let force_reload = MenuItemBuilder::with_id("force_reload", "Force Reload")
+        .accelerator("CmdOrCtrl+Shift+R")
+        .build(app)?;
     let view_menu = SubmenuBuilder::new(app, "View")
         .text("refresh", "Refresh")
+        .separator()
+        .item(&reload)
+        .item(&force_reload)
         .build()?;
 
     let help_menu = SubmenuBuilder::new(app, "Help")
