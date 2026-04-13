@@ -59,6 +59,18 @@ fn main() {
                         "refresh" => {
                             let _ = app_handle.emit("menu-refresh", ());
                         }
+                        "reload" | "force_reload" => {
+                            // Reload the main webview window. Force reload cache-busts the
+                            // top-level HTML so a stale HMR module cannot stick around.
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let script = if event.id().0.as_str() == "force_reload" {
+                                    "location.href = location.pathname + '?_=' + Date.now()"
+                                } else {
+                                    "window.location.reload()"
+                                };
+                                let _ = window.eval(script);
+                            }
+                        }
                         "docs" => {
                             let _ = app_handle.emit("menu-docs", ());
                         }
