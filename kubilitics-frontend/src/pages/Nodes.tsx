@@ -378,6 +378,18 @@ export default function Nodes() {
  );
  }, [filteredItems, debouncedSearch]);
 
+ const totalPages = Math.max(1, Math.ceil(searchFiltered.length / pageSize));
+ const safePageIndex = Math.min(pageIndex, totalPages - 1);
+ const pageStart = safePageIndex * pageSize;
+ const itemsOnPage = useMemo(
+ () => searchFiltered.slice(pageStart, pageStart + pageSize),
+ [searchFiltered, pageStart, pageSize]
+ );
+
+ useEffect(() => {
+ setPageIndex(0);
+ }, [debouncedSearch, columnFilters, listView]);
+
  const stats = useMemo(() => {
  const total = nodesWithMetrics.length;
  const ready = nodesWithMetrics.filter((n) => n.status === 'Ready').length;
@@ -391,12 +403,12 @@ export default function Nodes() {
 
  const itemsToRender = useMemo<NodeListItem[]>(() => {
  if (listView === 'flat') {
- return searchFiltered.map(n => ({ type: 'node', data: n }));
+ return itemsOnPage.map(n => ({ type: 'node', data: n }));
  }
 
  const groupByKey = (item: Node) => (item.roles.some((r) => r === 'control-plane' || r === 'master') ? 'control-plane' : 'worker');
  const map = new Map<string, Node[]>();
- for (const item of searchFiltered) {
+ for (const item of itemsOnPage) {
  const k = groupByKey(item);
  const list = map.get(k) ?? [];
  list.push(item);
@@ -423,7 +435,7 @@ export default function Nodes() {
  }
  }
  return result;
- }, [searchFiltered, listView, collapsedGroups]);
+ }, [itemsOnPage, listView, collapsedGroups]);
 
  const toggleStatFilter = (columnId: 'status' | 'roleType', value: string) => {
  const current = columnFilters[columnId];
@@ -701,8 +713,43 @@ export default function Nodes() {
  onColumnToggle={columnVisibility.setColumnVisible}
  isLoading={isLoading && isConnected}
  footer={
- <div className="flex items-center justify-between flex-wrap gap-2 text-sm text-muted-foreground px-1">
- <span>Showing {searchFiltered.length} nodes</span>
+ <div className="flex items-center justify-between flex-wrap gap-3 text-sm text-muted-foreground px-1">
+ <span>
+ Showing {searchFiltered.length === 0 ? 0 : pageStart + 1}
+ –{Math.min(pageStart + pageSize, searchFiltered.length)} of {searchFiltered.length} nodes
+ </span>
+ <div className="flex items-center gap-3">
+ <DropdownMenu>
+ <DropdownMenuTrigger asChild>
+ <Button variant="outline" size="sm" className="gap-1 press-effect">
+ {pageSize} per page
+ <ChevronDown className="h-3.5 w-3.5" />
+ </Button>
+ </DropdownMenuTrigger>
+ <DropdownMenuContent align="end">
+ {PAGE_SIZE_OPTIONS.map((size) => (
+ <DropdownMenuItem
+ key={size}
+ onClick={() => {
+ setPageSize(size);
+ setPageIndex(0);
+ }}
+ >
+ {size} per page
+ </DropdownMenuItem>
+ ))}
+ </DropdownMenuContent>
+ </DropdownMenu>
+ <ListPagination
+ hasPrev={safePageIndex > 0}
+ hasNext={safePageIndex < totalPages - 1}
+ onPrev={() => setPageIndex((p) => Math.max(0, p - 1))}
+ onNext={() => setPageIndex((p) => Math.min(totalPages - 1, p + 1))}
+ currentPage={safePageIndex + 1}
+ totalPages={totalPages}
+ onPageChange={(p) => setPageIndex(p - 1)}
+ />
+ </div>
  </div>
  }
  >
