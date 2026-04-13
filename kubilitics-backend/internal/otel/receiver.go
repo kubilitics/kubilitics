@@ -39,14 +39,19 @@ type ScopeSpans struct {
 }
 
 // OTLPSpan is a single span in the OTLP JSON format.
+//
+// Per the OTLP/HTTP JSON spec int64 fields like startTimeUnixNano should be
+// serialized as strings to avoid JS number precision loss above 2^53. In
+// practice many SDKs and the otel-collector contrib still emit them as JSON
+// numbers. Use json.Number so the decoder accepts both.
 type OTLPSpan struct {
 	TraceID           string      `json:"traceId"`
 	SpanID            string      `json:"spanId"`
 	ParentSpanID      string      `json:"parentSpanId"`
 	Name              string      `json:"name"`
 	Kind              int         `json:"kind"`
-	StartTimeUnixNano string      `json:"startTimeUnixNano"`
-	EndTimeUnixNano   string      `json:"endTimeUnixNano"`
+	StartTimeUnixNano json.Number `json:"startTimeUnixNano"`
+	EndTimeUnixNano   json.Number `json:"endTimeUnixNano"`
 	Attributes        []Attribute `json:"attributes"`
 	Status            SpanStatus  `json:"status"`
 	Events            []SpanEvent `json:"events"`
@@ -59,10 +64,19 @@ type Attribute struct {
 }
 
 // AttributeValue holds one of the OTLP value types.
+//
+// Per the OTLP/HTTP JSON spec, int64 values should be encoded as strings to
+// avoid JS number precision loss. However, in practice many OpenTelemetry
+// SDKs and the otel-collector emit small int values as JSON numbers.
+// Use json.Number so the decoder accepts both "200" and 200.
 type AttributeValue struct {
-	StringValue string `json:"stringValue,omitempty"`
-	IntValue    string `json:"intValue,omitempty"`
-	BoolValue   bool   `json:"boolValue,omitempty"`
+	StringValue string      `json:"stringValue,omitempty"`
+	IntValue    json.Number `json:"intValue,omitempty"`
+	BoolValue   bool        `json:"boolValue,omitempty"`
+	DoubleValue json.Number `json:"doubleValue,omitempty"`
+	// ArrayValue and KvlistValue are accepted but ignored (we only persist scalars).
+	ArrayValue  json.RawMessage `json:"arrayValue,omitempty"`
+	KvlistValue json.RawMessage `json:"kvlistValue,omitempty"`
 }
 
 // SpanStatus holds the span status code and optional message.
@@ -73,9 +87,9 @@ type SpanStatus struct {
 
 // SpanEvent is a timestamped annotation on a span.
 type SpanEvent struct {
-	Name              string      `json:"name"`
-	TimeUnixNano      string      `json:"timeUnixNano"`
-	Attributes        []Attribute `json:"attributes"`
+	Name         string      `json:"name"`
+	TimeUnixNano json.Number `json:"timeUnixNano"`
+	Attributes   []Attribute `json:"attributes"`
 }
 
 // ---------------------------------------------------------------------------
@@ -376,7 +390,9 @@ func attributeMap(attrs []Attribute) map[string]string {
 		if a.Value.StringValue != "" {
 			m[a.Key] = a.Value.StringValue
 		} else if a.Value.IntValue != "" {
-			m[a.Key] = a.Value.IntValue
+			m[a.Key] = string(a.Value.IntValue)
+		} else if a.Value.DoubleValue != "" {
+			m[a.Key] = string(a.Value.DoubleValue)
 		} else if a.Key != "" {
 			// Bool attribute — store as string (handles both true and false)
 			m[a.Key] = fmt.Sprintf("%t", a.Value.BoolValue)
@@ -385,10 +401,10 @@ func attributeMap(attrs []Attribute) map[string]string {
 	return m
 }
 
-// parseNano parses a nanosecond timestamp string to int64.
-func parseNano(s string) int64 {
-	n, _ := strconv.ParseInt(s, 10, 64)
-	return n
+// parseNano parses a nanosecond timestamp (json.Number — string or number) to int64.
+func parseNano(n json.Number) int64 {
+	v, _ := strconv.ParseInt(string(n), 10, 64)
+	return v
 }
 
 // spanKindString maps OTLP SpanKind int to human string.

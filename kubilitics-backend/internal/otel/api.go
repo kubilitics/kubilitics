@@ -1,10 +1,14 @@
 package otel
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"io"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -42,14 +46,46 @@ func SetupOTLPStandardRoute(rootRouter *mux.Router, handler *OTelHandler) {
 	rootRouter.HandleFunc("/v1/traces", handler.ReceiveTraces).Methods("POST")
 }
 
-// ReceiveTraces handles POST /v1/traces (OTLP JSON).
+// ReceiveTraces handles POST /v1/traces (OTLP/HTTP JSON, optionally gzipped).
 func (h *OTelHandler) ReceiveTraces(w http.ResponseWriter, r *http.Request) {
 	// Limit request body to 10MB to prevent OOM from oversized payloads.
 	r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
 
+	contentType := r.Header.Get("Content-Type")
+
+	// Reject protobuf with a clear error — we only support JSON for now.
+	if strings.Contains(contentType, "protobuf") || strings.Contains(contentType, "octet-stream") {
+		log.Printf("[otel/receiver] rejected protobuf payload: %s", contentType)
+		http.Error(w, `{"error":"protobuf encoding not supported, please use Content-Type: application/json"}`, http.StatusUnsupportedMediaType)
+		return
+	}
+
+	// Decompress gzip if present (otel-collector contrib enables gzip by default).
+	var bodyReader io.Reader = r.Body
+	if r.Header.Get("Content-Encoding") == "gzip" {
+		gz, err := gzip.NewReader(r.Body)
+		if err != nil {
+			log.Printf("[otel/receiver] gzip decode error: %v", err)
+			http.Error(w, `{"error":"failed to decompress gzip"}`, http.StatusBadRequest)
+			return
+		}
+		defer gz.Close()
+		bodyReader = gz
+	}
+
+	// Read the body into memory so we can both decode and (on error) log it.
+	body, err := io.ReadAll(bodyReader)
+	if err != nil {
+		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
+		return
+	}
+
 	var req OTLPTraceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON or payload too large"}`, http.StatusBadRequest)
+	dec := json.NewDecoder(strings.NewReader(string(body)))
+	dec.UseNumber()
+	if err := dec.Decode(&req); err != nil {
+		log.Printf("[otel/receiver] JSON decode error: %v (body=%d bytes)", err, len(body))
+		http.Error(w, `{"error":"invalid JSON: `+err.Error()+`"}`, http.StatusBadRequest)
 		return
 	}
 
