@@ -17,10 +17,6 @@ import {
   AlertCircle,
   Hourglass,
   Radio,
-  Zap,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,7 +31,9 @@ import {
   getInstrumentationStatus,
   instrumentDeployment,
   uninstrumentDeployment,
+  installOperator,
 } from '@/services/api/tracing';
+import { InstrumentationPanel } from './InstrumentationPanel';
 import {
   getEffectiveBackendBaseUrl,
   useBackendConfigStore,
@@ -106,15 +104,24 @@ export function ResourceTracesTab({
     retry: 1,
   });
 
+  const [lastRollbackReason, setLastRollbackReason] = useState<string | undefined>();
+
   const instrumentMutation = useMutation({
-    mutationFn: () =>
-      instrumentDeployment(baseUrl, clusterId!, namespace, resourceName),
+    mutationFn: (opts?: { language?: string; container?: string }) =>
+      instrumentDeployment(baseUrl, clusterId!, namespace, resourceName, opts),
     onSuccess: (res) => {
-      if (res.already) {
+      if (res.rollback_reason) {
+        setLastRollbackReason(res.rollback_reason);
+        toast.error('Instrumentation reverted', {
+          description: res.rollback_reason,
+        });
+      } else if (res.already) {
+        setLastRollbackReason(undefined);
         toast.info('Already instrumented', {
           description: `Language: ${res.language}`,
         });
       } else {
+        setLastRollbackReason(undefined);
         toast.success('Instrumentation enabled', {
           description: `Injecting OTel SDK (${res.language}). Pods will roll out.`,
         });
@@ -123,6 +130,17 @@ export function ResourceTracesTab({
     },
     onError: (err: Error) => {
       toast.error('Failed to instrument', { description: err.message });
+    },
+  });
+
+  const installOperatorMutation = useMutation({
+    mutationFn: () => installOperator(baseUrl, clusterId!),
+    onSuccess: () => {
+      toast.success('Operator install triggered');
+      queryClient.invalidateQueries({ queryKey: ['tracing-status', clusterId] });
+    },
+    onError: (err: Error) => {
+      toast.error('Failed to install operator', { description: err.message });
     },
   });
 
@@ -205,92 +223,22 @@ export function ResourceTracesTab({
         </div>
       </CardHeader>
 
-      {/* Instrumentation status panel (Deployments only, cluster tracing on) */}
-      {isDeployment && tracingStatus?.enabled && instrStatus && (
-        <div className="px-4 pt-3">
-          {!instrStatus.otel_operator_ready ? (
-            <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs">
-              <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-              <span className="text-muted-foreground">
-                OpenTelemetry Operator is still installing...
-              </span>
-            </div>
-          ) : instrStatus.instrumented ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                <span className="text-foreground font-medium">
-                  Instrumented
-                  {instrStatus.language && (
-                    <span className="text-muted-foreground font-normal">
-                      {' '}({instrStatus.language})
-                    </span>
-                  )}
-                </span>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs"
-                disabled={uninstrumentMutation.isPending}
-                onClick={() => uninstrumentMutation.mutate()}
-              >
-                {uninstrumentMutation.isPending ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  'Disable instrumentation'
-                )}
-              </Button>
-            </div>
-          ) : !instrStatus.supports_language ? (
-            <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-              <div className="text-muted-foreground leading-relaxed">
-                <div className="text-foreground font-medium">
-                  Auto-instrumentation not available for this image
-                </div>
-                Manually set{' '}
-                <code className="font-mono text-[10px] px-1 py-0.5 rounded bg-muted">
-                  OTEL_EXPORTER_OTLP_ENDPOINT
-                </code>{' '}
-                in your container.
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-3 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs">
-              <div className="flex items-center gap-2">
-                <Zap className="h-4 w-4 text-primary shrink-0" />
-                <span className="text-foreground">
-                  This deployment is not instrumented
-                  <span className="text-muted-foreground">
-                    {' '}• detected language:{' '}
-                    <span className="font-medium text-foreground">
-                      {instrStatus.detected_language}
-                    </span>
-                  </span>
-                </span>
-              </div>
-              <Button
-                size="sm"
-                className="h-7 gap-1.5 text-xs"
-                disabled={instrumentMutation.isPending}
-                onClick={() => instrumentMutation.mutate()}
-              >
-                {instrumentMutation.isPending ? (
-                  <>
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Instrumenting...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="h-3 w-3" />
-                    Instrument with OpenTelemetry
-                  </>
-                )}
-              </Button>
-            </div>
-          )}
-        </div>
+      {/* Instrumentation panel (Deployments only, cluster tracing on) */}
+      {isDeployment && tracingStatus?.enabled && instrStatus && clusterId && (
+        <InstrumentationPanel
+          clusterId={clusterId}
+          namespace={namespace}
+          resourceName={resourceName}
+          instrStatus={instrStatus}
+          tracingStatus={tracingStatus}
+          onInstrument={(opts) => instrumentMutation.mutate(opts)}
+          onUninstrument={() => uninstrumentMutation.mutate()}
+          onInstallOperator={() => installOperatorMutation.mutate()}
+          instrumentPending={instrumentMutation.isPending}
+          uninstrumentPending={uninstrumentMutation.isPending}
+          installOperatorPending={installOperatorMutation.isPending}
+          lastRollbackReason={lastRollbackReason}
+        />
       )}
 
       {/* Trace list */}
