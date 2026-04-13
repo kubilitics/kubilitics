@@ -15,7 +15,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import {
   Search, RefreshCw, MoreHorizontal, Loader2, WifiOff, Plus, ChevronDown,
-  ChevronLeft, ChevronRight, List, Layers,
+  List, Layers,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -209,6 +209,7 @@ export function ResourceListPage({
       setSortKey(colId);
       setSortDir('asc');
     }
+    setPage(1);
   }, [sortKey]);
 
   const handleRowClick = useCallback((resource: KubernetesResource) => {
@@ -473,25 +474,19 @@ export function ResourceListPage({
       )}
 
       {/* Pagination */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <p className="text-sm text-muted-foreground">
-          Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, sorted.length)} of {sorted.length}
+          Showing {sorted.length === 0 ? 0 : ((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, sorted.length)} of {sorted.length}
         </p>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline" size="sm" disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="text-sm text-muted-foreground">{page} / {totalPages}</span>
-          <Button
-            variant="outline" size="sm" disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
+        <ListPagination
+          hasPrev={page > 1}
+          hasNext={page < totalPages}
+          onPrev={() => setPage((p) => Math.max(1, p - 1))}
+          onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+          currentPage={page}
+          totalPages={totalPages}
+          onPageChange={(p) => setPage(p)}
+        />
       </div>
     </div>
   );

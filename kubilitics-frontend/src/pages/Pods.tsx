@@ -372,7 +372,9 @@ export default function Pods() {
  // Stats: use backend summary counts (accurate across all pages) when available,
  // fall back to counting from loaded page data.
  const stats = useMemo(() => {
- if (isBackendAvailable && summaryData?.pod_status) {
+ const hasFilter = !!debouncedSearch || selectedNamespaces.size > 0 || !!statusPhaseFilter;
+
+ if (isBackendAvailable && summaryData?.pod_status && !hasFilter) {
  const ps = summaryData.pod_status;
  return {
  total: summaryData.pod_count,
@@ -382,15 +384,18 @@ export default function Pods() {
  failed: ps.failed,
  };
  }
+ // Filter-aware: compute per-status from the loaded pods. In backend mode
+ // with filters, the per-status counts reflect only the current page; the
+ // total uses serverTotal (filter-aware) to show the real count.
  const pods = currentFilteredPods;
  return {
- total: pods.length,
+ total: isBackendAvailable && hasFilter ? serverTotal : pods.length,
  running: pods.filter((p) => p.status === 'Running').length,
  succeeded: pods.filter((p) => p.status === 'Succeeded').length,
  pending: pods.filter((p) => p.status === 'Pending').length,
  failed: pods.filter((p) => p.status === 'Failed' || p.status === 'CrashLoopBackOff').length,
  };
- }, [isBackendAvailable, summaryData, currentFilteredPods]);
+ }, [isBackendAvailable, summaryData, currentFilteredPods, debouncedSearch, selectedNamespaces, statusPhaseFilter, serverTotal]);
 
  // Use raw data for initial filter/sort to avoid expensive metrics merging on every render
  const filteredUnsorted = useMemo(() => {
