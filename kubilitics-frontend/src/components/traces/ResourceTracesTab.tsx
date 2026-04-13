@@ -278,14 +278,32 @@ OTEL_SERVICE_NAME=${resourceName}`}
 
                 {/* Service + Operation */}
                 <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] px-1.5 py-0 h-4 shrink-0 bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20"
-                  >
-                    {trace.root_service || 'unknown'}
-                  </Badge>
-                  <span className="text-xs truncate">
-                    {trace.root_operation || '-'}
+                  {(() => {
+                    const services = (trace.services as string[] | undefined) ?? [];
+                    const primaryService = trace.root_service || services[0] || '?';
+                    const otherServiceCount = Math.max(0, services.length - 1);
+                    return (
+                      <>
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0 h-4 shrink-0 bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20"
+                        >
+                          {primaryService}
+                        </Badge>
+                        {otherServiceCount > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-1.5 py-0 h-4 shrink-0 text-muted-foreground"
+                            title={services.join(', ')}
+                          >
+                            +{otherServiceCount}
+                          </Badge>
+                        )}
+                      </>
+                    );
+                  })()}
+                  <span className="text-xs truncate text-muted-foreground">
+                    {trace.root_operation || '—'}
                   </span>
                 </div>
 

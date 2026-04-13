@@ -67,9 +67,20 @@ func (s *Store) InsertSpans(ctx context.Context, spans []Span) error {
 }
 
 // InsertTraceSummary upserts a trace summary record.
+//
+// Spans for the same trace can arrive in multiple batches (e.g. parent in
+// batch 1, children in batch 2). We use ON CONFLICT to merge intelligently:
+//   - root_service/root_operation: prefer the new value if non-empty, else
+//     keep existing (the root span may not be in the current batch)
+//   - span_count/error_count: accumulate (sum)
+//   - start_time: take the minimum (earliest)
+//   - duration_ns: extend if a later end_time arrives
+//   - service_count/services: take the larger one (good enough until we
+//     do proper set merging)
+//   - status: ERROR sticks (any error in any batch → trace is ERROR)
 func (s *Store) InsertTraceSummary(ctx context.Context, t *TraceSummary) error {
 	const q = `
-		INSERT OR REPLACE INTO traces (
+		INSERT INTO traces (
 			trace_id, root_service, root_operation,
 			start_time, duration_ns, span_count, error_count, service_count,
 			status, cluster_id, services, updated_at
@@ -77,7 +88,19 @@ func (s *Store) InsertTraceSummary(ctx context.Context, t *TraceSummary) error {
 			:trace_id, :root_service, :root_operation,
 			:start_time, :duration_ns, :span_count, :error_count, :service_count,
 			:status, :cluster_id, :services, :updated_at
-		)`
+		)
+		ON CONFLICT(trace_id) DO UPDATE SET
+			root_service = CASE WHEN excluded.root_service != '' THEN excluded.root_service ELSE traces.root_service END,
+			root_operation = CASE WHEN excluded.root_operation != '' THEN excluded.root_operation ELSE traces.root_operation END,
+			start_time = MIN(traces.start_time, excluded.start_time),
+			duration_ns = MAX(traces.duration_ns, excluded.duration_ns),
+			span_count = traces.span_count + excluded.span_count,
+			error_count = traces.error_count + excluded.error_count,
+			service_count = MAX(traces.service_count, excluded.service_count),
+			status = CASE WHEN traces.status = 'ERROR' OR excluded.status = 'ERROR' THEN 'ERROR' ELSE excluded.status END,
+			services = CASE WHEN length(excluded.services) > length(traces.services) THEN excluded.services ELSE traces.services END,
+			updated_at = excluded.updated_at
+	`
 	_, err := s.db.NamedExecContext(ctx, q, t)
 	if err != nil {
 		return fmt.Errorf("upsert trace summary %s: %w", t.TraceID, err)

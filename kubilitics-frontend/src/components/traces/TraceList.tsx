@@ -341,6 +341,10 @@ function WaitingForTraces({ onInstrumentClick }: { onInstrumentClick: () => void
 
 function TraceRow({ trace, onClick }: { trace: TraceSummary; onClick: () => void }) {
   const isError = trace.status === 'ERROR' || trace.error_count > 0;
+  const services = (trace.services as string[] | undefined) ?? [];
+  const primaryService = trace.root_service || services[0] || '?';
+  const otherServiceCount = Math.max(0, services.length - 1);
+  const operation = trace.root_operation || '—';
 
   return (
     <tr
@@ -351,15 +355,22 @@ function TraceRow({ trace, onClick }: { trace: TraceSummary; onClick: () => void
       onClick={onClick}
     >
       <td className="px-4 py-3 font-mono text-[11px] text-muted-foreground select-all max-w-[200px] truncate" title={trace.trace_id}>
-        {trace.trace_id}
+        {trace.trace_id.slice(0, 16)}…
       </td>
       <td className="px-4 py-3">
-        <Badge variant="outline" className={cn('text-xs font-medium', SERVICE_COLORS[serviceColorIndex(trace.root_service)])}>
-          {trace.root_service}
-        </Badge>
+        <div className="flex items-center gap-1.5">
+          <Badge variant="outline" className={cn('text-xs font-medium', SERVICE_COLORS[serviceColorIndex(primaryService)])}>
+            {primaryService}
+          </Badge>
+          {otherServiceCount > 0 && (
+            <Badge variant="outline" className="text-xs font-medium text-muted-foreground" title={services.join(', ')}>
+              +{otherServiceCount}
+            </Badge>
+          )}
+        </div>
       </td>
-      <td className="px-4 py-3 font-mono text-xs truncate max-w-[200px]" title={trace.root_operation}>
-        {trace.root_operation}
+      <td className="px-4 py-3 font-mono text-xs truncate max-w-[280px] text-muted-foreground" title={operation}>
+        {operation}
       </td>
       <td className="px-4 py-3 text-right font-mono text-xs font-medium">
         {formatDuration(trace.duration_ns)}
