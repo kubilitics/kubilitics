@@ -9,30 +9,22 @@
  */
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
   GitBranch,
   ExternalLink,
   Loader2,
-  AlertCircle,
   Hourglass,
-  Radio,
+  Activity,
+  ChevronRight,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { useResourceTraces } from '@/hooks/useTraces';
-import {
-  getTracingStatus,
-  enableTracing,
-  getInstrumentationStatus,
-  instrumentDeployment,
-  uninstrumentDeployment,
-  installOperator,
-} from '@/services/api/tracing';
+import { getTracingStatus } from '@/services/api/observability';
 import { InstrumentationPanel } from './InstrumentationPanel';
 import {
   getEffectiveBackendBaseUrl,
@@ -69,7 +61,6 @@ export function ResourceTracesTab({
   const [timeRange, setTimeRange] = useState('24h');
   const storedUrl = useBackendConfigStore((s) => s.backendBaseUrl);
   const baseUrl = getEffectiveBackendBaseUrl(storedUrl);
-  const queryClient = useQueryClient();
 
   // Tracing status — drives the intelligent empty state below.
   const { data: tracingStatus } = useQuery({
@@ -80,81 +71,7 @@ export function ResourceTracesTab({
     retry: 1,
   });
 
-  const enableMutation = useMutation({
-    mutationFn: () => enableTracing(baseUrl, clusterId!),
-    onSuccess: (res) => {
-      toast.success('Tracing enabled', { description: res.message });
-      queryClient.invalidateQueries({ queryKey: ['tracing-status', clusterId] });
-    },
-    onError: (err: Error) => {
-      toast.error('Failed to enable tracing', { description: err.message });
-    },
-  });
-
-  // Per-deployment instrumentation status (only fetched for Deployments).
   const isDeployment = resourceKind.toLowerCase() === 'deployment';
-  const instrStatusKey = ['instrumentation-status', clusterId, namespace, resourceName];
-  const { data: instrStatus } = useQuery({
-    queryKey: instrStatusKey,
-    queryFn: () =>
-      getInstrumentationStatus(baseUrl, clusterId!, namespace, resourceName),
-    enabled: !!clusterId && !!baseUrl && isDeployment && !!tracingStatus?.enabled,
-    staleTime: 30_000,
-    refetchInterval: 30_000,
-    retry: 1,
-  });
-
-  const [lastRollbackReason, setLastRollbackReason] = useState<string | undefined>();
-
-  const instrumentMutation = useMutation({
-    mutationFn: (opts?: { language?: string; container?: string }) =>
-      instrumentDeployment(baseUrl, clusterId!, namespace, resourceName, opts),
-    onSuccess: (res) => {
-      if (res.rollback_reason) {
-        setLastRollbackReason(res.rollback_reason);
-        toast.error('Instrumentation reverted', {
-          description: res.rollback_reason,
-        });
-      } else if (res.already) {
-        setLastRollbackReason(undefined);
-        toast.info('Already instrumented', {
-          description: `Language: ${res.language}`,
-        });
-      } else {
-        setLastRollbackReason(undefined);
-        toast.success('Instrumentation enabled', {
-          description: `Injecting OTel SDK (${res.language}). Pods will roll out.`,
-        });
-      }
-      queryClient.invalidateQueries({ queryKey: instrStatusKey });
-    },
-    onError: (err: Error) => {
-      toast.error('Failed to instrument', { description: err.message });
-    },
-  });
-
-  const installOperatorMutation = useMutation({
-    mutationFn: () => installOperator(baseUrl, clusterId!),
-    onSuccess: () => {
-      toast.success('Operator install triggered');
-      queryClient.invalidateQueries({ queryKey: ['tracing-status', clusterId] });
-    },
-    onError: (err: Error) => {
-      toast.error('Failed to install operator', { description: err.message });
-    },
-  });
-
-  const uninstrumentMutation = useMutation({
-    mutationFn: () =>
-      uninstrumentDeployment(baseUrl, clusterId!, namespace, resourceName),
-    onSuccess: () => {
-      toast.success('Instrumentation disabled');
-      queryClient.invalidateQueries({ queryKey: instrStatusKey });
-    },
-    onError: (err: Error) => {
-      toast.error('Failed to disable instrumentation', { description: err.message });
-    },
-  });
 
   const timeRangeMs = TIME_RANGES.find((t) => t.value === timeRange)?.ms ?? 86_400_000;
   // Stabilize the time window — only recalculate when timeRange changes,
@@ -223,21 +140,12 @@ export function ResourceTracesTab({
         </div>
       </CardHeader>
 
-      {/* Instrumentation panel (Deployments only, cluster tracing on) */}
-      {isDeployment && tracingStatus?.enabled && instrStatus && clusterId && (
+      {/* Instrumentation panel (Deployments only) */}
+      {isDeployment && clusterId && (
         <InstrumentationPanel
           clusterId={clusterId}
           namespace={namespace}
           resourceName={resourceName}
-          instrStatus={instrStatus}
-          tracingStatus={tracingStatus}
-          onInstrument={(opts) => instrumentMutation.mutate(opts)}
-          onUninstrument={() => uninstrumentMutation.mutate()}
-          onInstallOperator={() => installOperatorMutation.mutate()}
-          instrumentPending={instrumentMutation.isPending}
-          uninstrumentPending={uninstrumentMutation.isPending}
-          installOperatorPending={installOperatorMutation.isPending}
-          lastRollbackReason={lastRollbackReason}
         />
       )}
 
@@ -254,7 +162,7 @@ export function ResourceTracesTab({
             ))}
           </div>
         ) : sortedTraces.length === 0 ? (
-          tracingStatus && tracingStatus.enabled ? (
+          tracingStatus?.all_ready ? (
             // State 2: collector deployed and ready, but no spans for this resource yet.
             <div className="flex flex-col items-center justify-center py-12 px-4 text-muted-foreground">
               <Hourglass className="h-10 w-10 mb-3 text-primary/40" />
@@ -283,43 +191,22 @@ OTEL_SERVICE_NAME=${resourceName}`}
               </Link>
             </div>
           ) : (
-            // State 1: collector not deployed — offer one-click enable.
+            // State 1: collector not deployed — link to setup page.
             <div className="flex flex-col items-center justify-center py-12 px-4 text-muted-foreground">
-              <AlertCircle className="h-10 w-10 mb-3 text-amber-500/70" />
+              <Activity className="h-10 w-10 mb-3 text-muted-foreground/50" />
               <p className="text-sm font-medium mb-1 text-foreground">
-                Tracing not enabled
+                Tracing not configured for this cluster
               </p>
               <p className="text-xs mt-1 max-w-md text-center leading-relaxed">
-                Install the OpenTelemetry Collector to start collecting traces
-                from instrumented apps in this cluster.
+                Run a single helm command to install the OpenTelemetry collector and start collecting traces.
               </p>
-              <div className="mt-4 flex items-center gap-3">
-                <Button
-                  size="sm"
-                  className="h-8 gap-1.5 text-xs"
-                  disabled={!clusterId || enableMutation.isPending}
-                  onClick={() => enableMutation.mutate()}
-                >
-                  {enableMutation.isPending ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Installing...
-                    </>
-                  ) : (
-                    <>
-                      <Radio className="h-3.5 w-3.5" />
-                      Enable Tracing
-                    </>
-                  )}
-                </Button>
-                <Link
-                  to="/traces"
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-                >
-                  Learn more
-                  <ExternalLink className="h-3 w-3" />
-                </Link>
-              </div>
+              <Link
+                to={`/clusters/${clusterId}/setup/observability`}
+                className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+              >
+                Set up tracing
+                <ChevronRight className="h-3 w-3" />
+              </Link>
             </div>
           )
         ) : (
