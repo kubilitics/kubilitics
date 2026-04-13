@@ -2,8 +2,9 @@
  * TraceList — Filterable table of distributed traces.
  * Shows trace summaries with service badges, duration, span/error counts.
  */
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Clock, Filter, GitBranch, Radio } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { ListPagination } from '@/components/list/ListPagination';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -16,10 +17,8 @@ import { useTracesStore } from '@/stores/tracesStore';
 import { getBackendBase } from '@/lib/backendUrl';
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getTracingStatus } from '@/services/api/tracing';
-import { TracingStatus } from './TracingStatus';
-import { TracingSetup } from './TracingSetup';
+import { useQuery } from '@tanstack/react-query';
+import { getTracingStatus } from '@/services/api/observability';
 import type { TraceSummary, TraceQueryParams } from '@/services/api/traces';
 
 /* ─── Helpers ──────────────────────────────────────────────────────────── */
@@ -75,8 +74,6 @@ function serviceColorIndex(name: string): number {
 
 export function TraceList() {
   const store = useTracesStore();
-  const queryClient = useQueryClient();
-  const [setupOpen, setSetupOpen] = useState(false);
 
   // Get tracing status to know if tracing is enabled
   const clusterId = useActiveClusterId();
@@ -117,11 +114,11 @@ export function TraceList() {
   // Auto-refresh: poll faster (10s) while waiting for first traces,
   // slower (30s) once we have data.
   useEffect(() => {
-    if (!tracingStatusData?.enabled) return;
+    if (!tracingStatusData?.all_ready) return;
     const intervalMs = traces.length === 0 ? 10_000 : 30_000;
     const interval = setInterval(() => setFetchTick((t) => t + 1), intervalMs);
     return () => clearInterval(interval);
-  }, [tracingStatusData?.enabled, traces.length]);
+  }, [tracingStatusData?.all_ready, traces.length]);
 
   useEffect(() => {
     if (!clusterId) {
@@ -248,10 +245,10 @@ export function TraceList() {
               {!isLoading && traces?.length === 0 && (
                 <tr>
                   <td colSpan={8} className="p-0">
-                    {tracingStatusData?.enabled ? (
-                      <WaitingForTraces onInstrumentClick={() => setSetupOpen(true)} />
+                    {tracingStatusData?.all_ready ? (
+                      <WaitingForTraces />
                     ) : (
-                      <EnableTracingPrompt onSetupClick={() => setSetupOpen(true)} />
+                      <SetupTracingPrompt clusterId={clusterId} />
                     )}
                   </td>
                 </tr>
@@ -276,24 +273,14 @@ export function TraceList() {
           </div>
         )}
       </CardContent>
-
-      <TracingSetup
-        open={setupOpen}
-        onOpenChange={setSetupOpen}
-        onComplete={() => {
-          setSetupOpen(false);
-          // Force refetch tracing status + traces so UI updates immediately
-          queryClient.invalidateQueries({ queryKey: ['tracing-status'] });
-        }}
-      />
     </Card>
   );
 }
 
 /* ─── Empty States ────────────────────────────────────────────────────── */
 
-/** Shown when tracing is NOT yet enabled — prompts user to set it up */
-function EnableTracingPrompt({ onSetupClick }: { onSetupClick: () => void }) {
+/** Shown when tracing is NOT yet set up — links user to the setup page */
+function SetupTracingPrompt({ clusterId }: { clusterId: string | null }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center max-w-lg mx-auto px-4">
       <div className="h-14 w-14 rounded-full bg-purple-500/10 flex items-center justify-center mb-4">
@@ -304,16 +291,22 @@ function EnableTracingPrompt({ onSetupClick }: { onSetupClick: () => void }) {
         Traces show how requests flow across your services — which service called which,
         how long each step took, and where errors originated.
       </p>
-      <Button onClick={onSetupClick}>
-        <Radio className="h-4 w-4 mr-2" />
-        Enable Distributed Tracing
-      </Button>
+      {clusterId ? (
+        <Button asChild>
+          <Link to={`/clusters/${clusterId}/setup/observability`}>
+            <Radio className="h-4 w-4 mr-2" />
+            Set up tracing
+          </Link>
+        </Button>
+      ) : (
+        <p className="text-sm text-muted-foreground">Connect a cluster to get started.</p>
+      )}
     </div>
   );
 }
 
-/** Shown when tracing IS enabled but no traces have arrived yet */
-function WaitingForTraces({ onInstrumentClick }: { onInstrumentClick: () => void }) {
+/** Shown when tracing IS ready but no traces have arrived yet */
+function WaitingForTraces() {
   const [dots, setDots] = useState('');
 
   // Animate ellipsis to show activity

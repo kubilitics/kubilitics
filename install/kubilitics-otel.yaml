@@ -1,0 +1,292 @@
+---
+# Source: kubilitics-otel/templates/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubilitics-system
+  labels:
+    helm.sh/chart: kubilitics-otel-0.1.0
+    app.kubernetes.io/name: kubilitics-otel
+    app.kubernetes.io/instance: kubilitics-otel
+    app.kubernetes.io/version: "0.119.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubilitics
+---
+# Source: kubilitics-otel/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: kubilitics-system
+  labels:
+    helm.sh/chart: kubilitics-otel-0.1.0
+    app.kubernetes.io/name: kubilitics-otel
+    app.kubernetes.io/instance: kubilitics-otel
+    app.kubernetes.io/version: "0.119.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubilitics
+---
+# Source: kubilitics-otel/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: kubilitics-system
+  labels:
+    helm.sh/chart: kubilitics-otel-0.1.0
+    app.kubernetes.io/name: kubilitics-otel
+    app.kubernetes.io/instance: kubilitics-otel
+    app.kubernetes.io/version: "0.119.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubilitics
+data:
+  collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        timeout: 5s
+        send_batch_size: 100
+      k8sattributes:
+        auth_type: serviceAccount
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.deployment.name
+            - k8s.node.name
+            - k8s.container.name
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.ip
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.uid
+          - sources:
+              - from: connection
+      resource:
+        attributes:
+          - key: kubilitics.cluster.id
+            value: "REPLACE_WITH_YOUR_CLUSTER_ID"
+            action: upsert
+
+    exporters:
+      otlphttp:
+        endpoint: "REPLACE_WITH_YOUR_BACKEND_URL"
+        # Kubilitics receiver expects JSON encoding (gzip is fine).
+        encoding: json
+        tls:
+          insecure: true
+      debug:
+        verbosity: basic
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [k8sattributes, resource, batch]
+          exporters: [otlphttp, debug]
+---
+# Source: kubilitics-otel/templates/rbac.yaml
+# ClusterRole gives the collector read access to the resources the
+# k8sattributes processor needs to enrich spans with k8s metadata.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+  labels:
+    helm.sh/chart: kubilitics-otel-0.1.0
+    app.kubernetes.io/name: kubilitics-otel
+    app.kubernetes.io/instance: kubilitics-otel
+    app.kubernetes.io/version: "0.119.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubilitics
+rules:
+  - apiGroups: [""]
+    resources:
+      - namespaces
+      - nodes
+      - pods
+      - replicationcontrollers
+      - services
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - replicasets
+      - deployments
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["extensions"]
+    resources:
+      - replicasets
+    verbs: ["get", "list", "watch"]
+---
+# Source: kubilitics-otel/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+  labels:
+    helm.sh/chart: kubilitics-otel-0.1.0
+    app.kubernetes.io/name: kubilitics-otel
+    app.kubernetes.io/instance: kubilitics-otel
+    app.kubernetes.io/version: "0.119.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubilitics
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+  - kind: ServiceAccount
+    name: otel-collector
+    namespace: kubilitics-system
+---
+# Source: kubilitics-otel/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: kubilitics-system
+  labels:
+    helm.sh/chart: kubilitics-otel-0.1.0
+    app.kubernetes.io/name: kubilitics-otel
+    app.kubernetes.io/instance: kubilitics-otel
+    app.kubernetes.io/version: "0.119.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubilitics
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kubilitics-otel
+    app.kubernetes.io/instance: kubilitics-otel
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+---
+# Source: kubilitics-otel/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: kubilitics-system
+  labels:
+    helm.sh/chart: kubilitics-otel-0.1.0
+    app.kubernetes.io/name: kubilitics-otel
+    app.kubernetes.io/instance: kubilitics-otel
+    app.kubernetes.io/version: "0.119.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubilitics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubilitics-otel
+      app.kubernetes.io/instance: kubilitics-otel
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubilitics-otel
+        app.kubernetes.io/instance: kubilitics-otel
+      annotations:
+        # Force a pod restart when the ConfigMap changes.
+        checksum/config: 7e4014f1646e7f21cfb25fef446c65a0f3fc0e43d1490d7c18136f32ab8c31c2
+    spec:
+      serviceAccountName: otel-collector
+      securityContext:
+        fsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: otel-collector
+          image: "otel/opentelemetry-collector-contrib:0.119.0"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
+          args:
+            - --config=/conf/collector.yaml
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+          env:
+            - name: KUBILITICS_CLUSTER_ID
+              value: "REPLACE_WITH_YOUR_CLUSTER_ID"
+            - name: KUBILITICS_BACKEND_URL
+              value: "REPLACE_WITH_YOUR_BACKEND_URL"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
+---
+# Source: kubilitics-otel/templates/instrumentation.yaml
+# OTel Operator Instrumentation CR — referenced by the
+# instrumentation.opentelemetry.io/inject-<lang> annotation that users add to
+# their deployments. Languages are configurable via .Values.instrumentation.languages.
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: kubilitics-auto
+  namespace: kubilitics-system
+  labels:
+    helm.sh/chart: kubilitics-otel-0.1.0
+    app.kubernetes.io/name: kubilitics-otel
+    app.kubernetes.io/instance: kubilitics-otel
+    app.kubernetes.io/version: "0.119.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubilitics
+spec:
+  exporter:
+    endpoint: http://otel-collector.kubilitics-system:4318
+  propagators:
+    - tracecontext
+    - baggage
+  sampler:
+    type: parentbased_traceidratio
+    argument: "1"
+  env:
+    - name: OTEL_EXPORTER_OTLP_PROTOCOL
+      value: http/json
+  java:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:latest
+  python:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python:latest
+  nodejs:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-nodejs:latest
+  go:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-go:latest
+  dotnet:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-dotnet:latest

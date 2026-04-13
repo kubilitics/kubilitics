@@ -1,0 +1,58 @@
+name: Publish Helm chart
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Lint chart
+        run: helm lint charts/kubilitics-otel/ --set kubilitics.clusterId=test --set kubilitics.backendUrl=http://example.com
+
+      - name: Package chart
+        run: |
+          mkdir -p _publish
+          helm package charts/kubilitics-otel/ -d _publish
+
+      - name: Generate static manifest
+        run: |
+          helm template kubilitics-otel charts/kubilitics-otel/ \
+            --namespace kubilitics-system \
+            --set kubilitics.clusterId=REPLACE_WITH_YOUR_CLUSTER_ID \
+            --set kubilitics.backendUrl=REPLACE_WITH_YOUR_BACKEND_URL \
+            > install/kubilitics-otel.yaml
+
+      - name: Update Helm repo index
+        run: |
+          if [ -f gh-pages/index.yaml ]; then
+            helm repo index _publish --merge gh-pages/index.yaml --url https://charts.kubilitics.io
+          else
+            helm repo index _publish --url https://charts.kubilitics.io
+          fi
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _publish
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4

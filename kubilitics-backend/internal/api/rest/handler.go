@@ -393,18 +393,20 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 	router.Handle("/clusters/{clusterId}/simulation/validate", h.wrapWithRBAC(h.PostSimulationValidate, auth.RoleViewer)).Methods("POST")
 	router.Handle("/clusters/{clusterId}/simulation/scenarios", h.wrapWithRBAC(h.GetSimulationScenarios, auth.RoleViewer)).Methods("GET")
 
-	// Distributed Tracing lifecycle (enable/disable/instrument/status)
+	// Distributed Tracing — read-only API only. Kubilitics never mutates the
+	// user's cluster; users run the install commands themselves with their
+	// own credentials. See docs/architecture/cluster-mutation-policy.md.
 	if h.tracingHandler != nil {
-		router.Handle("/clusters/{clusterId}/tracing/enable", h.wrapWithRBAC(h.tracingHandler.EnableTracing, auth.RoleOperator)).Methods("POST")
-		router.Handle("/clusters/{clusterId}/tracing/disable", h.wrapWithRBAC(h.tracingHandler.DisableTracing, auth.RoleOperator)).Methods("POST")
+		// Live status dashboard for the setup page.
 		router.Handle("/clusters/{clusterId}/tracing/status", h.wrapWithRBAC(h.tracingHandler.GetTracingStatus, auth.RoleViewer)).Methods("GET")
-		router.Handle("/clusters/{clusterId}/tracing/instrument", h.wrapWithRBAC(h.tracingHandler.InstrumentDeployments, auth.RoleOperator)).Methods("POST")
-		router.Handle("/clusters/{clusterId}/tracing/operator/install", h.wrapWithRBAC(h.tracingHandler.InstallOperator, auth.RoleOperator)).Methods("POST")
-
-		// Per-deployment one-click auto-instrumentation.
+		// Self-diagnosis: check ladder + likely causes.
+		router.Handle("/clusters/{clusterId}/tracing/diagnostics", h.wrapWithRBAC(h.tracingHandler.GetTracingDiagnostics, auth.RoleViewer)).Methods("GET")
+		// Per-cluster rendered Helm chart YAML for kubectl-apply users.
+		router.Handle("/clusters/{clusterId}/install/kubilitics-otel.yaml", h.wrapWithRBAC(h.tracingHandler.GetInstallYAML, auth.RoleViewer)).Methods("GET")
+		// Per-deployment instrument command + preflight preview.
+		router.Handle("/clusters/{clusterId}/deployments/{namespace}/{deployment}/instrument-command", h.wrapWithRBAC(h.tracingHandler.GetInstrumentCommand, auth.RoleViewer)).Methods("GET")
+		// Legacy: still used to detect existing instrumentation state.
 		router.Handle("/clusters/{clusterId}/deployments/{namespace}/{deployment}/instrumentation-status", h.wrapWithRBAC(h.tracingHandler.GetInstrumentationStatus, auth.RoleViewer)).Methods("GET")
-		router.Handle("/clusters/{clusterId}/deployments/{namespace}/{deployment}/instrument", h.wrapWithRBAC(h.tracingHandler.InstrumentDeployment, auth.RoleOperator)).Methods("POST")
-		router.Handle("/clusters/{clusterId}/deployments/{namespace}/{deployment}/uninstrument", h.wrapWithRBAC(h.tracingHandler.UninstrumentDeployment, auth.RoleOperator)).Methods("POST")
 	}
 
 	// Architectural Auto-Pilot (Pillar 4)
