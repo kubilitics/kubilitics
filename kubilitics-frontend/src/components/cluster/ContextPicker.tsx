@@ -135,6 +135,27 @@ function detectProviderFromContext(context: string, server: string): string | nu
   return null;
 }
 
+/** Return a practical hint based on the raw error message. */
+function connectionHint(errorMessage: string): string {
+  const lower = errorMessage.toLowerCase();
+  if (lower.includes('connection refused') || lower.includes('connect: connection refused')) {
+    return 'Is your cluster running? Try `kubectl get nodes` in a terminal.';
+  }
+  if (lower.includes('no such host') || lower.includes('lookup ') || lower.includes('dns')) {
+    return 'Check the kubeconfig server URL — the hostname could not be resolved.';
+  }
+  if (lower.includes('timeout') || lower.includes('deadline exceeded')) {
+    return 'The cluster API server did not respond in time. Check your VPN or firewall.';
+  }
+  if (lower.includes('unauthorized') || lower.includes('403') || lower.includes('401')) {
+    return 'Authentication failed. Your kubeconfig credentials may be expired.';
+  }
+  if (lower.includes('certificate') || lower.includes('tls') || lower.includes('x509')) {
+    return 'TLS certificate error. Check if your cluster CA certificate is valid.';
+  }
+  return 'Check that the cluster is reachable and your kubeconfig is up to date.';
+}
+
 export interface ContextPickerProps {
   contexts: DiscoveredContext[];
   selectedContext: string | null;
@@ -393,14 +414,33 @@ export function ContextPicker({
           </div>
         </motion.div>
 
-        {/* Error */}
+        {/* Connection error — shows after a failed Connect attempt */}
         {error && (
           <motion.div
-            variants={item}
-            className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200/60 dark:border-red-800/40 text-sm text-red-700 dark:text-red-300 font-medium"
+            key={error}
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="mb-4 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200/60 dark:border-red-800/40 px-4 py-3"
+            role="alert"
+            aria-live="assertive"
           >
-            <AlertCircle size={14} className="shrink-0" />
-            {error}
+            {/* Headline */}
+            <div className="flex items-center gap-2 mb-1.5">
+              <AlertCircle size={14} className="shrink-0 text-red-500 dark:text-red-400" />
+              <span className="text-sm font-semibold text-red-700 dark:text-red-300">
+                Couldn&apos;t connect
+                {selectedContext ? ` to ${friendlyName(selectedContext)}` : ''}
+              </span>
+            </div>
+            {/* Raw error message */}
+            <p className="text-xs text-red-600 dark:text-red-400 font-mono break-all pl-5 mb-1.5">
+              {error}
+            </p>
+            {/* Contextual hint */}
+            <p className="text-xs text-red-500/80 dark:text-red-400/70 pl-5 leading-relaxed">
+              {connectionHint(error)}
+            </p>
           </motion.div>
         )}
 
