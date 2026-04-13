@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -52,6 +53,29 @@ func respondK8sError(w http.ResponseWriter, err error, requestID string) {
 
 // DestructiveConfirmHeader (D1.2): clients must send this for DELETE resource and POST /apply.
 const DestructiveConfirmHeader = "X-Confirm-Destructive"
+
+// sortUnstructuredList sorts a slice of unstructured items in-place by the given
+// field and order. Used to re-sort merged multi-namespace results before pagination.
+func sortUnstructuredList(items []unstructured.Unstructured, sortBy, sortOrder string) {
+	sort.Slice(items, func(i, j int) bool {
+		var vi, vj string
+		switch sortBy {
+		case "namespace":
+			vi = items[i].GetNamespace()
+			vj = items[j].GetNamespace()
+		case "creationTimestamp":
+			vi = items[i].GetCreationTimestamp().String()
+			vj = items[j].GetCreationTimestamp().String()
+		default: // "name" or empty
+			vi = items[i].GetName()
+			vj = items[j].GetName()
+		}
+		if sortOrder == "desc" {
+			return vi > vj
+		}
+		return vi < vj
+	})
+}
 
 // ListResources handles GET /clusters/{clusterId}/resources/{kind}
 // Query: namespace (single) or namespaces (comma-separated, max 20) for multi-namespace list; limit, continue, labelSelector, fieldSelector.
@@ -183,6 +207,10 @@ func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
 					merged.Items = append(merged.Items, result.Items...)
 				}
 				if allHit {
+					// Re-sort merged results across all namespaces
+					if len(merged.Items) > 1 {
+						sortUnstructuredList(merged.Items, sortBy, sortOrder)
+					}
 					// Apply global limit/offset across merged results
 					cacheTotal = mergedTotal
 					if offset > 0 {
@@ -257,6 +285,10 @@ func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				merged.Items = append(merged.Items, part.Items...)
+			}
+			// Re-sort merged results across all namespaces
+			if len(merged.Items) > 1 && (sortBy != "" || sortOrder != "") {
+				sortUnstructuredList(merged.Items, sortBy, sortOrder)
 			}
 			if int64(len(merged.Items)) > opts.Limit {
 				merged.Items = merged.Items[:opts.Limit]
