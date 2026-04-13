@@ -15,19 +15,19 @@ type SQLiteSnapshotStore struct {
 }
 
 // NewSQLiteSnapshotStore creates a new SQLite-backed snapshot store.
-// It auto-creates the topology_snapshots table if it does not exist.
+// It auto-creates the topology_diff_snapshots table if it does not exist.
 func NewSQLiteSnapshotStore(db *sql.DB) (*SQLiteSnapshotStore, error) {
 	s := &SQLiteSnapshotStore{db: db}
 	if err := s.ensureTable(); err != nil {
-		return nil, fmt.Errorf("failed to ensure topology_snapshots table: %w", err)
+		return nil, fmt.Errorf("failed to ensure topology_diff_snapshots table: %w", err)
 	}
 	return s, nil
 }
 
-// ensureTable creates the topology_snapshots table and index if they don't exist.
+// ensureTable creates the topology_diff_snapshots table and index if they don't exist.
 func (s *SQLiteSnapshotStore) ensureTable() error {
 	ddl := `
-		CREATE TABLE IF NOT EXISTS topology_snapshots (
+		CREATE TABLE IF NOT EXISTS topology_diff_snapshots (
 			id            TEXT PRIMARY KEY,
 			cluster_id    TEXT NOT NULL,
 			namespace     TEXT NOT NULL DEFAULT '',
@@ -37,7 +37,7 @@ func (s *SQLiteSnapshotStore) ensureTable() error {
 			created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE INDEX IF NOT EXISTS idx_snapshots_cluster_ns_time
-			ON topology_snapshots(cluster_id, namespace, created_at);
+			ON topology_diff_snapshots(cluster_id, namespace, created_at);
 	`
 	_, err := s.db.Exec(ddl)
 	return err
@@ -62,7 +62,7 @@ func (s *SQLiteSnapshotStore) Save(snapshot TopologySnapshot) error {
 	}
 
 	query := `
-		INSERT INTO topology_snapshots (id, cluster_id, namespace, nodes_json, edges_json, metadata_json, created_at)
+		INSERT INTO topology_diff_snapshots (id, cluster_id, namespace, nodes_json, edges_json, metadata_json, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err = s.db.Exec(query,
@@ -84,7 +84,7 @@ func (s *SQLiteSnapshotStore) Save(snapshot TopologySnapshot) error {
 func (s *SQLiteSnapshotStore) Get(id string) (*TopologySnapshot, error) {
 	query := `
 		SELECT id, cluster_id, namespace, nodes_json, edges_json, metadata_json, created_at
-		FROM topology_snapshots
+		FROM topology_diff_snapshots
 		WHERE id = ?
 	`
 	row := s.db.QueryRow(query, id)
@@ -103,7 +103,7 @@ func (s *SQLiteSnapshotStore) Get(id string) (*TopologySnapshot, error) {
 func (s *SQLiteSnapshotStore) GetLatest(clusterID, namespace string) (*TopologySnapshot, error) {
 	query := `
 		SELECT id, cluster_id, namespace, nodes_json, edges_json, metadata_json, created_at
-		FROM topology_snapshots
+		FROM topology_diff_snapshots
 		WHERE cluster_id = ? AND namespace = ?
 		ORDER BY created_at DESC
 		LIMIT 1
@@ -124,7 +124,7 @@ func (s *SQLiteSnapshotStore) GetLatest(clusterID, namespace string) (*TopologyS
 func (s *SQLiteSnapshotStore) GetByDateRange(clusterID, namespace string, from, to time.Time) ([]TopologySnapshot, error) {
 	query := `
 		SELECT id, cluster_id, namespace, nodes_json, edges_json, metadata_json, created_at
-		FROM topology_snapshots
+		FROM topology_diff_snapshots
 		WHERE cluster_id = ? AND namespace = ? AND created_at >= ? AND created_at <= ?
 		ORDER BY created_at ASC
 	`
@@ -160,7 +160,7 @@ func (s *SQLiteSnapshotStore) DeleteOlderThan(retention time.Duration) (int, err
 	cutoff := time.Now().Add(-retention).UTC()
 
 	result, err := s.db.Exec(
-		`DELETE FROM topology_snapshots WHERE created_at < ?`,
+		`DELETE FROM topology_diff_snapshots WHERE created_at < ?`,
 		cutoff,
 	)
 	if err != nil {

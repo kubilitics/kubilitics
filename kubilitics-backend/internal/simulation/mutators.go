@@ -122,14 +122,22 @@ func nodeFailure(snap *graph.GraphSnapshot, nodeName string) error {
 		}
 	}
 	// Also try scanning all Node-kind entries for a name match (handles any key format)
+	// and simultaneously note whether the graph models Node objects at all.
+	graphHasAnyNodes := false
 	if !nodeInGraph {
 		for k, ref := range snap.Nodes {
-			if ref.Kind == "Node" && ref.Name == nodeName {
+			if ref.Kind != "Node" {
+				continue
+			}
+			graphHasAnyNodes = true
+			if ref.Name == nodeName {
 				nodeKey = k
 				nodeInGraph = true
 				break
 			}
 		}
+	} else {
+		graphHasAnyNodes = true
 	}
 
 	for key, ref := range snap.Nodes {
@@ -157,10 +165,15 @@ func nodeFailure(snap *graph.GraphSnapshot, nodeName string) error {
 	}
 
 	if len(podsToRemove) == 0 && !nodeInGraph {
-		// Non-fatal: the node may exist in the cluster but not in the graph
-		// (e.g., graph doesn't include Node objects at this depth level).
-		// Return nil to allow the simulation to proceed with whatever other
-		// scenarios are in the chain.
+		// If the graph models Node objects but none match by name, this is a
+		// user error — the scenario refers to a node that doesn't exist and
+		// the simulation has nothing to do. Return an error so the UI can
+		// surface it.
+		if graphHasAnyNodes {
+			return fmt.Errorf("node %q not found in cluster graph", nodeName)
+		}
+		// Otherwise the graph doesn't model Nodes at all (e.g., namespace-scoped
+		// depth level). Non-fatal: return nil so the simulation chain proceeds.
 		return nil
 	}
 

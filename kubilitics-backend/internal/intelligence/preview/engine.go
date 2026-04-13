@@ -87,14 +87,21 @@ func (e *Engine) AnalyzeManifest(manifest string, snap *graph.GraphSnapshot) (*P
 
 		if existsInGraph {
 			impact = "modified"
-			// Compute blast radius for the existing resource using the snapshot.
-			br, err := snap.ComputeBlastRadius(models.ResourceRef{
-				Kind:      kind,
-				Name:      name,
-				Namespace: namespace,
-			})
-			if err == nil {
-				blastScore = br.CriticalityScore
+			// Prefer the pre-computed NodeScore (the canonical score used by
+			// the blast-radius UI and other subsystems). Fall back to a full
+			// ComputeBlastRadius only if no pre-computed score is available,
+			// so the preview engine stays consistent with the rest of the app.
+			if preComputed, ok := snap.NodeScores[key]; ok && preComputed > 0 {
+				blastScore = preComputed
+			} else {
+				br, err := snap.ComputeBlastRadius(models.ResourceRef{
+					Kind:      kind,
+					Name:      name,
+					Namespace: namespace,
+				})
+				if err == nil {
+					blastScore = br.CriticalityScore
+				}
 			}
 		}
 
