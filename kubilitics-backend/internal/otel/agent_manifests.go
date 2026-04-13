@@ -119,6 +119,8 @@ data:
     exporters:
       otlphttp:
         endpoint: ${env:KUBILITICS_BACKEND_URL}
+        # Kubilitics receiver currently expects OTLP/HTTP JSON encoding.
+        encoding: json
         tls:
           insecure: true
       debug:

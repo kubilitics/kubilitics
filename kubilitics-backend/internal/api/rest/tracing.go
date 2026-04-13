@@ -8,10 +8,13 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/mux"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -23,11 +26,56 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/service"
 )
 
+// Operator install state values used by TracingHandler.operatorState.
+const (
+	OperatorStateNotInstalled = "not_installed"
+	OperatorStateInstalling   = "installing"
+	OperatorStateReady        = "ready"
+	OperatorStateFailed       = "failed"
+)
+
 // TracingHandler provides REST endpoints for enabling, disabling, and
 // managing distributed tracing in connected Kubernetes clusters.
 type TracingHandler struct {
 	clusterService service.ClusterService
 	puller         *otel.TracePuller
+
+	// operatorState tracks the cert-manager + OTel Operator install state
+	// per cluster ID. Values are strings: OperatorState* constants.
+	operatorState   sync.Map // clusterID -> *atomic.Value(string)
+	operatorMessage sync.Map // clusterID -> string (last error / status msg)
+	// installMu serializes concurrent install requests per cluster.
+	installMu sync.Mutex
+	installing sync.Map // clusterID -> bool (true while install goroutine is running)
+}
+
+// getOperatorState returns the current install state for a cluster.
+func (th *TracingHandler) getOperatorState(clusterID string) (string, string) {
+	v, ok := th.operatorState.Load(clusterID)
+	state := OperatorStateNotInstalled
+	if ok {
+		if av, ok2 := v.(*atomic.Value); ok2 {
+			if s, ok3 := av.Load().(string); ok3 && s != "" {
+				state = s
+			}
+		}
+	}
+	msg := ""
+	if m, ok := th.operatorMessage.Load(clusterID); ok {
+		if s, ok2 := m.(string); ok2 {
+			msg = s
+		}
+	}
+	return state, msg
+}
+
+// setOperatorState updates the install state and optional message.
+func (th *TracingHandler) setOperatorState(clusterID, state, msg string) {
+	v, _ := th.operatorState.LoadOrStore(clusterID, &atomic.Value{})
+	if av, ok := v.(*atomic.Value); ok {
+		av.Store(state)
+	}
+	th.operatorMessage.Store(clusterID, msg)
 }
 
 // NewTracingHandler creates a new TracingHandler.
@@ -81,7 +129,29 @@ func (th *TracingHandler) EnableTracing(w http.ResponseWriter, r *http.Request) 
 	// Step 2: Install cert-manager + OTel Operator + Instrumentation CRs ASYNC
 	// These are large manifests (1.8MB+) that take minutes to download and apply.
 	// We return success immediately so the UI doesn't hang.
+	th.startOperatorInstall(clusterID, client)
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "enabled",
+		"message": "Trace agent deployed. cert-manager and OTel Operator installing in background (~2 minutes).",
+	})
+}
+
+// startOperatorInstall kicks off the cert-manager + OTel Operator install
+// in a background goroutine. It is idempotent — concurrent calls for the
+// same cluster while an install is already in progress are no-ops. The
+// handler tracks the install state per-cluster so the status endpoint and
+// UI can surface progress.
+func (th *TracingHandler) startOperatorInstall(clusterID string, client *k8s.Client) {
+	// Guard against concurrent starts for the same cluster.
+	if _, loaded := th.installing.LoadOrStore(clusterID, true); loaded {
+		return
+	}
+
+	th.setOperatorState(clusterID, OperatorStateInstalling, "")
+
 	go func() {
+		defer th.installing.Delete(clusterID)
 		bgCtx := context.Background()
 
 		// cert-manager
@@ -90,6 +160,7 @@ func (th *TracingHandler) EnableTracing(w http.ResponseWriter, r *http.Request) 
 			log.Printf("[tracing] installing cert-manager...")
 			if installErr := installViaKubectl(bgCtx, client, "https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml"); installErr != nil {
 				log.Printf("[tracing] cert-manager install failed: %v", installErr)
+				th.setOperatorState(clusterID, OperatorStateFailed, "cert-manager install failed: "+installErr.Error())
 				return
 			}
 			waitForDeployment(bgCtx, client.Clientset, "cert-manager", "cert-manager-webhook", 120*time.Second)
@@ -101,6 +172,7 @@ func (th *TracingHandler) EnableTracing(w http.ResponseWriter, r *http.Request) 
 			log.Printf("[tracing] installing OTel Operator...")
 			if installErr := installViaKubectl(bgCtx, client, "https://github.com/open-telemetry/opentelemetry-operator/releases/latest/download/opentelemetry-operator.yaml"); installErr != nil {
 				log.Printf("[tracing] OTel Operator install failed: %v", installErr)
+				th.setOperatorState(clusterID, OperatorStateFailed, "OTel Operator install failed: "+installErr.Error())
 				return
 			}
 			waitForDeployment(bgCtx, client.Clientset, "opentelemetry-operator-system", "opentelemetry-operator-controller-manager", 120*time.Second)
@@ -109,14 +181,45 @@ func (th *TracingHandler) EnableTracing(w http.ResponseWriter, r *http.Request) 
 		// Instrumentation CRs
 		if _, instrErr := client.ApplyYAML(bgCtx, otel.InstrumentationCRsYAML()); instrErr != nil {
 			log.Printf("[tracing] Instrumentation CR apply failed (will retry on next enable): %v", instrErr)
-		} else {
-			log.Printf("[tracing] auto-instrumentation configured")
+			th.setOperatorState(clusterID, OperatorStateFailed, "Instrumentation CR apply failed: "+instrErr.Error())
+			return
 		}
+		log.Printf("[tracing] auto-instrumentation configured")
+		th.setOperatorState(clusterID, OperatorStateReady, "")
 	}()
+}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"status":  "enabled",
-		"message": "Trace agent deployed. cert-manager and OTel Operator installing in background (~2 minutes).",
+// InstallOperator handles POST /clusters/{clusterId}/tracing/operator/install
+// Idempotent retry endpoint — re-runs the cert-manager + OTel Operator install
+// flow. If the operator is already ready, returns success immediately.
+func (th *TracingHandler) InstallOperator(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	clusterID := vars["clusterId"]
+	requestID := logger.FromContext(r.Context())
+
+	client, err := th.clusterService.GetClient(clusterID)
+	if err != nil {
+		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, "Cluster not found: "+err.Error(), requestID)
+		return
+	}
+
+	// Fast path: if the operator is already installed and reachable, mark
+	// ready and return success.
+	if isOTelOperatorReady(r.Context(), client.Clientset) {
+		th.setOperatorState(clusterID, OperatorStateReady, "")
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"operator_state": OperatorStateReady,
+			"message":        "OTel Operator already installed and ready",
+		})
+		return
+	}
+
+	th.startOperatorInstall(clusterID, client)
+	state, msg := th.getOperatorState(clusterID)
+	respondJSON(w, http.StatusAccepted, map[string]interface{}{
+		"operator_state":   state,
+		"operator_message": msg,
+		"message":          "Operator install started in background",
 	})
 }
 
@@ -162,6 +265,11 @@ type TracingStatusResponse struct {
 	AgentDeployed        bool                   `json:"agent_deployed"`
 	Instrumented         []InstrumentedWorkload `json:"instrumented"`
 	AvailableDeployments []AvailableDeployment  `json:"available_deployments"`
+	// OperatorState surfaces the cert-manager + OTel Operator install state
+	// so the UI can show "installing" / "failed" / "ready" without polling
+	// individual deployments. One of: not_installed|installing|ready|failed.
+	OperatorState   string `json:"operator_state"`
+	OperatorMessage string `json:"operator_message,omitempty"`
 }
 
 // InstrumentedWorkload describes a deployment that has OTel auto-instrumentation enabled.
@@ -195,6 +303,17 @@ func (th *TracingHandler) GetTracingStatus(w http.ResponseWriter, r *http.Reques
 
 	ctx := r.Context()
 	status := TracingStatusResponse{}
+
+	// Populate operator state up-front so callers see install progress even
+	// when the collector isn't deployed yet.
+	state, msg := th.getOperatorState(clusterID)
+	// If we haven't tracked state yet but the operator is actually ready,
+	// reflect that on the fly.
+	if state == OperatorStateNotInstalled && isOTelOperatorReady(ctx, client.Clientset) {
+		state = OperatorStateReady
+	}
+	status.OperatorState = state
+	status.OperatorMessage = msg
 
 	// Check if deployment exists
 	ns, depName, _, _ := otel.CleanupManifestNames()
@@ -427,31 +546,132 @@ func (th *TracingHandler) DisableTracing(w http.ResponseWriter, r *http.Request)
 }
 
 // detectLanguage infers the programming language from a container image name.
+// Kept for the multi-deployment legacy endpoint; callers that want confidence
+// and source should use detectContainerLanguage instead.
 func detectLanguage(image string) string {
-	lower := strings.ToLower(image)
-
-	switch {
-	case containsAny(lower, "java", "jdk", "jre", "spring", "maven", "gradle", "tomcat", "quarkus"):
-		return "java"
-	case containsAny(lower, "node", "npm", "yarn", "next", "express", "nestjs", "bun"):
-		return "nodejs"
-	case containsAny(lower, "python", "pip", "django", "flask", "fastapi", "uvicorn", "gunicorn"):
-		return "python"
-	case containsAny(lower, "golang", "/go", "go-"):
-		return "go"
-	case containsAny(lower, "dotnet", "aspnet", "csharp"):
-		return "dotnet"
-	default:
+	lang := detectLanguageFromImage(image)
+	if lang == "unknown" {
 		return "java"
 	}
+	return lang
 }
 
 // supportedLanguages lists the languages the OTel Operator Instrumentation
 // CR can auto-inject via annotations.
 var supportedLanguages = []string{"java", "python", "nodejs", "go", "dotnet"}
 
+// languageSupportsAuto reports whether the OTel Operator can auto-inject
+// instrumentation for the given language. Languages like rust, ruby, php
+// and cpp currently need manual instrumentation.
+func languageSupportsAuto(lang string) bool {
+	switch lang {
+	case "java", "python", "nodejs", "go", "dotnet":
+		return true
+	default:
+		return false
+	}
+}
+
+// LanguageDetection is the result of a layered language-detection pass over
+// a single container. Confidence and source capture why the detector reached
+// its conclusion, so the UI can surface uncertainty to the operator.
+type LanguageDetection struct {
+	Language     string `json:"language"`  // java|python|nodejs|go|dotnet|rust|ruby|php|cpp|unknown
+	Confidence   string `json:"confidence"` // high|medium|low
+	Source       string `json:"source"`     // command|env|image-label|image-name|none
+	SupportsAuto bool   `json:"supports_auto"`
+}
+
+// detectContainerLanguage examines a single container with a layered cascade:
+//  1. Command/args (highest confidence)
+//  2. Env vars (medium confidence)
+//  3. Image labels / image name (low confidence)
+func detectContainerLanguage(c *corev1.Container) LanguageDetection {
+	// 1. Command / args
+	if lang := langFromCmdline(c); lang != "" {
+		return LanguageDetection{Language: lang, Confidence: "high", Source: "command", SupportsAuto: languageSupportsAuto(lang)}
+	}
+	// 2. Env vars
+	if lang := langFromEnv(c); lang != "" {
+		return LanguageDetection{Language: lang, Confidence: "medium", Source: "env", SupportsAuto: languageSupportsAuto(lang)}
+	}
+	// 3. Image name substring
+	if lang := detectLanguageFromImage(c.Image); lang != "unknown" {
+		return LanguageDetection{Language: lang, Confidence: "low", Source: "image-name", SupportsAuto: languageSupportsAuto(lang)}
+	}
+	return LanguageDetection{Language: "unknown", Confidence: "low", Source: "none", SupportsAuto: false}
+}
+
+// langFromCmdline inspects the container's command and args for a runtime hint.
+func langFromCmdline(c *corev1.Container) string {
+	parts := append([]string{}, c.Command...)
+	parts = append(parts, c.Args...)
+	cmdline := strings.ToLower(strings.Join(parts, " "))
+	if cmdline == "" {
+		return ""
+	}
+	switch {
+	case strings.HasPrefix(cmdline, "python"),
+		strings.Contains(cmdline, " python"),
+		strings.Contains(cmdline, "/python"):
+		return "python"
+	case strings.HasPrefix(cmdline, "node"),
+		strings.Contains(cmdline, " node "),
+		strings.Contains(cmdline, "/node "),
+		strings.HasSuffix(cmdline, "/node"),
+		strings.Contains(cmdline, " node."),
+		strings.Contains(cmdline, "npm "),
+		strings.Contains(cmdline, "yarn "):
+		return "nodejs"
+	case strings.HasPrefix(cmdline, "java"),
+		strings.Contains(cmdline, " java "),
+		strings.Contains(cmdline, "/java "),
+		strings.Contains(cmdline, ".jar"):
+		return "java"
+	case strings.HasPrefix(cmdline, "dotnet"),
+		strings.Contains(cmdline, " dotnet"),
+		strings.Contains(cmdline, ".dll"):
+		return "dotnet"
+	case strings.HasPrefix(cmdline, "ruby"),
+		strings.Contains(cmdline, " ruby"),
+		strings.Contains(cmdline, ".rb"),
+		strings.Contains(cmdline, "rails "),
+		strings.Contains(cmdline, "bundle exec"):
+		return "ruby"
+	case strings.HasPrefix(cmdline, "php"),
+		strings.Contains(cmdline, " php"):
+		return "php"
+	}
+	return ""
+}
+
+// langFromEnv inspects environment variables for runtime-specific hints.
+func langFromEnv(c *corev1.Container) string {
+	for _, e := range c.Env {
+		switch e.Name {
+		case "JAVA_HOME", "JAVA_OPTS", "JVM_OPTS", "CATALINA_HOME":
+			return "java"
+		case "PYTHON_VERSION", "PYTHONPATH", "PYTHONUNBUFFERED":
+			return "python"
+		case "NODE_VERSION", "NODE_ENV", "NODE_OPTIONS":
+			return "nodejs"
+		case "DOTNET_VERSION", "DOTNET_ROOT", "ASPNETCORE_URLS":
+			return "dotnet"
+		case "GOPATH", "GO_VERSION", "GOROOT":
+			return "go"
+		case "BUNDLE_PATH", "RUBY_VERSION", "RAILS_ENV", "GEM_HOME":
+			return "ruby"
+		case "PHP_VERSION", "PHP_INI_DIR":
+			return "php"
+		}
+	}
+	return ""
+}
+
 // detectLanguageFromImage returns one of: "java", "python", "nodejs", "go",
-// "dotnet", or "unknown" based on substring matching of a container image.
+// "dotnet", "rust", "ruby", "php", "cpp", or "unknown" based on substring
+// matching of a container image name. Lowest-confidence signal — use
+// detectContainerLanguage when higher signals are available.
 func detectLanguageFromImage(image string) string {
 	img := strings.ToLower(image)
 	switch {
@@ -461,15 +681,22 @@ func detectLanguageFromImage(image string) string {
 		strings.Contains(img, "jdk"),
 		strings.Contains(img, "tomcat"),
 		strings.Contains(img, "maven"),
-		strings.Contains(img, "gradle"):
+		strings.Contains(img, "gradle"),
+		strings.Contains(img, "quarkus"),
+		strings.Contains(img, "spring"):
 		return "java"
 	case strings.Contains(img, "python"),
 		strings.Contains(img, "py-"),
-		strings.Contains(img, "/py"):
+		strings.Contains(img, "/py"),
+		strings.Contains(img, "django"),
+		strings.Contains(img, "flask"),
+		strings.Contains(img, "fastapi"):
 		return "python"
 	case strings.Contains(img, "node:"),
 		strings.Contains(img, "nodejs"),
-		strings.Contains(img, "/node-"):
+		strings.Contains(img, "/node-"),
+		strings.Contains(img, "nestjs"),
+		strings.Contains(img, "next.js"):
 		return "nodejs"
 	case strings.Contains(img, "golang"),
 		strings.Contains(img, "/go-"):
@@ -478,17 +705,26 @@ func detectLanguageFromImage(image string) string {
 		strings.Contains(img, "aspnet"),
 		strings.Contains(img, "/dotnet-"):
 		return "dotnet"
+	case strings.Contains(img, "rust"), strings.Contains(img, "/rust-"):
+		return "rust"
+	case strings.Contains(img, "ruby"), strings.Contains(img, "/ruby-"), strings.Contains(img, "rails"):
+		return "ruby"
+	case strings.Contains(img, "php"), strings.Contains(img, "wordpress"):
+		return "php"
+	case strings.Contains(img, "/cpp-"), strings.Contains(img, "gcc"), strings.Contains(img, "clang"):
+		return "cpp"
 	default:
 		return "unknown"
 	}
 }
 
 // detectLanguageFromDeployment walks the deployment's containers and returns
-// the first detected language, or "unknown".
+// the first detected language, or "unknown". Preserved for backwards compat —
+// multi-container callers should iterate detectContainerLanguage themselves.
 func detectLanguageFromDeployment(dep *appsv1.Deployment) string {
 	for _, c := range dep.Spec.Template.Spec.Containers {
-		if lang := detectLanguageFromImage(c.Image); lang != "unknown" {
-			return lang
+		if d := detectContainerLanguage(&c); d.Language != "unknown" {
+			return d.Language
 		}
 	}
 	return "unknown"
@@ -518,14 +754,132 @@ func isOTelOperatorReady(ctx context.Context, clientset kubernetes.Interface) bo
 	return dep.Status.ReadyReplicas > 0
 }
 
+// ContainerInstrumentation is per-container detection + instrumentation info.
+type ContainerInstrumentation struct {
+	Name             string `json:"name"`
+	Image            string `json:"image"`
+	DetectedLanguage string `json:"detected_language"`
+	Confidence       string `json:"confidence"`
+	DetectionSource  string `json:"detection_source"`
+	SupportsAuto     bool   `json:"supports_auto"`
+	Instrumented     bool   `json:"instrumented"`
+}
+
+// PreflightCheck is a single preflight diagnostic result.
+type PreflightCheck struct {
+	Name     string `json:"name"`
+	Severity string `json:"severity"` // blocking | warning | info
+	Passed   bool   `json:"passed"`
+	Message  string `json:"message"`
+	Detail   string `json:"detail,omitempty"`
+}
+
+// PreflightChecks is the aggregate result of running preflight checks on a
+// deployment/container pair. Passed is false if any blocking check failed.
+type PreflightChecks struct {
+	Passed bool             `json:"passed"`
+	Checks []PreflightCheck `json:"checks"`
+}
+
 // InstrumentationStatus is the response for GET instrumentation-status.
 type InstrumentationStatus struct {
-	Instrumented      bool   `json:"instrumented"`
-	Language          string `json:"language,omitempty"`
-	DetectedLanguage  string `json:"detected_language"`
-	Annotation        string `json:"annotation,omitempty"`
-	OTelOperatorReady bool   `json:"otel_operator_ready"`
-	SupportsLanguage  bool   `json:"supports_language"`
+	Instrumented      bool                       `json:"instrumented"`
+	Language          string                     `json:"language,omitempty"`
+	DetectedLanguage  string                     `json:"detected_language"`
+	Annotation        string                     `json:"annotation,omitempty"`
+	OTelOperatorReady bool                       `json:"otel_operator_ready"`
+	SupportsLanguage  bool                       `json:"supports_language"`
+	Containers        []ContainerInstrumentation `json:"containers"`
+	PreflightChecks   PreflightChecks            `json:"preflight_checks"`
+}
+
+// runPreflightChecks evaluates the deployment + chosen container for common
+// issues that break OTel auto-instrumentation. Blocking failures should
+// prevent the instrument endpoint from patching.
+func runPreflightChecks(dep *appsv1.Deployment, container *corev1.Container) PreflightChecks {
+	var checks []PreflightCheck
+
+	if container != nil {
+		// 1. runAsNonRoot — info only, OTel init container respects it
+		psc := dep.Spec.Template.Spec.SecurityContext
+		csc := container.SecurityContext
+		runAsNonRoot := false
+		if psc != nil && psc.RunAsNonRoot != nil {
+			runAsNonRoot = *psc.RunAsNonRoot
+		}
+		if csc != nil && csc.RunAsNonRoot != nil {
+			runAsNonRoot = *csc.RunAsNonRoot
+		}
+		if runAsNonRoot {
+			checks = append(checks, PreflightCheck{
+				Name: "Pod security context", Severity: "warning", Passed: true,
+				Message: "Pod runs as non-root — OTel Operator init container will respect this",
+			})
+		}
+
+		// 2. readOnlyRootFilesystem — blocking
+		if csc != nil && csc.ReadOnlyRootFilesystem != nil && *csc.ReadOnlyRootFilesystem {
+			checks = append(checks, PreflightCheck{
+				Name: "Read-only root filesystem", Severity: "blocking", Passed: false,
+				Message: "Container has readOnlyRootFilesystem: true",
+				Detail: "OTel auto-instrumentation needs to write the SDK agent files to the container filesystem. " +
+					"Either disable readOnlyRootFilesystem or add an emptyDir volume mount at the SDK install path.",
+			})
+		} else {
+			checks = append(checks, PreflightCheck{
+				Name: "Filesystem writable", Severity: "blocking", Passed: true,
+				Message: "Container filesystem allows writes",
+			})
+		}
+
+		// 3. Memory headroom — warning if < 256Mi
+		if container.Resources.Limits != nil {
+			if memLimit, ok := container.Resources.Limits[corev1.ResourceMemory]; ok {
+				if memLimit.Value() < 256*1024*1024 {
+					checks = append(checks, PreflightCheck{
+						Name: "Memory headroom", Severity: "warning", Passed: false,
+						Message: fmt.Sprintf("Container memory limit is %s — OTel SDK adds 50-200MB overhead", memLimit.String()),
+						Detail:  "Consider increasing memory limit to at least 256Mi to avoid OOMKilled.",
+					})
+				} else {
+					checks = append(checks, PreflightCheck{
+						Name: "Memory headroom", Severity: "info", Passed: true,
+						Message: fmt.Sprintf("Memory limit %s is sufficient", memLimit.String()),
+					})
+				}
+			}
+		}
+	}
+
+	// 4. Existing service-mesh instrumentation
+	annotations := dep.Spec.Template.GetAnnotations()
+	if annotations != nil {
+		for k := range annotations {
+			if strings.HasPrefix(k, "sidecar.istio.io/inject") || strings.HasPrefix(k, "linkerd.io/inject") {
+				checks = append(checks, PreflightCheck{
+					Name: "Service mesh detected", Severity: "info", Passed: true,
+					Message: fmt.Sprintf("Detected service mesh annotation: %s", k),
+					Detail:  "Service mesh sidecars (Istio/Linkerd) coexist with OTel auto-instrumentation but generate spans of their own. You may see duplicate spans.",
+				})
+			}
+		}
+	}
+
+	// 5. Single replica — warn about downtime
+	if dep.Spec.Replicas != nil && *dep.Spec.Replicas == 1 {
+		checks = append(checks, PreflightCheck{
+			Name: "Replica count", Severity: "warning", Passed: true,
+			Message: "Single-replica deployment — instrumentation will cause brief downtime during rolling restart",
+		})
+	}
+
+	passed := true
+	for _, c := range checks {
+		if c.Severity == "blocking" && !c.Passed {
+			passed = false
+		}
+	}
+	return PreflightChecks{Passed: passed, Checks: checks}
 }
 
 // GetInstrumentationStatus handles
@@ -557,12 +911,55 @@ func (th *TracingHandler) GetInstrumentationStatus(w http.ResponseWriter, r *htt
 	lang, annKey, instrumented := findInjectAnnotation(dep)
 	detected := detectLanguageFromDeployment(dep)
 
+	// Per-container detection
+	var containers []ContainerInstrumentation
+	// Determine which container(s) are instrumented. If the OTel
+	// inject-container-names annotation is present, only those are; otherwise
+	// the operator defaults to the first container.
+	annotations := dep.Spec.Template.GetAnnotations()
+	injectContainerNames := map[string]bool{}
+	if v := annotations["instrumentation.opentelemetry.io/container-names"]; v != "" {
+		for _, n := range strings.Split(v, ",") {
+			injectContainerNames[strings.TrimSpace(n)] = true
+		}
+	}
+	for i := range dep.Spec.Template.Spec.Containers {
+		c := dep.Spec.Template.Spec.Containers[i]
+		det := detectContainerLanguage(&c)
+		containerInstrumented := false
+		if instrumented {
+			if len(injectContainerNames) > 0 {
+				containerInstrumented = injectContainerNames[c.Name]
+			} else {
+				containerInstrumented = i == 0
+			}
+		}
+		containers = append(containers, ContainerInstrumentation{
+			Name:             c.Name,
+			Image:            c.Image,
+			DetectedLanguage: det.Language,
+			Confidence:       det.Confidence,
+			DetectionSource:  det.Source,
+			SupportsAuto:     det.SupportsAuto,
+			Instrumented:     containerInstrumented,
+		})
+	}
+
+	// Preflight checks against the first container (most common injection target)
+	var firstContainer *corev1.Container
+	if len(dep.Spec.Template.Spec.Containers) > 0 {
+		firstContainer = &dep.Spec.Template.Spec.Containers[0]
+	}
+	preflight := runPreflightChecks(dep, firstContainer)
+
 	status := InstrumentationStatus{
 		Instrumented:      instrumented,
 		Language:          lang,
 		DetectedLanguage:  detected,
 		OTelOperatorReady: isOTelOperatorReady(ctx, client.Clientset),
-		SupportsLanguage:  detected != "unknown",
+		SupportsLanguage:  detected != "unknown" && languageSupportsAuto(detected),
+		Containers:        containers,
+		PreflightChecks:   preflight,
 	}
 	if instrumented {
 		status.Annotation = fmt.Sprintf("%s=%s", annKey, dep.Spec.Template.GetAnnotations()[annKey])
@@ -573,7 +970,92 @@ func (th *TracingHandler) GetInstrumentationStatus(w http.ResponseWriter, r *htt
 
 // instrumentOneRequest is the body for POST instrument.
 type instrumentOneRequest struct {
-	Language string `json:"language,omitempty"`
+	Language  string `json:"language,omitempty"`
+	Container string `json:"container,omitempty"`
+}
+
+// removeInjectAnnotations strips all known instrumentation.opentelemetry.io
+// inject-* annotations and the container-names annotation from a deployment's
+// pod template via strategic merge patch. Used by UninstrumentDeployment and
+// the auto-rollback path.
+func (th *TracingHandler) removeInjectAnnotations(ctx context.Context, client *k8s.Client, ns, depName string) error {
+	nullAnn := map[string]interface{}{}
+	for _, l := range supportedLanguages {
+		nullAnn["instrumentation.opentelemetry.io/inject-"+l] = nil
+	}
+	nullAnn["instrumentation.opentelemetry.io/container-names"] = nil
+	patch := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"annotations": nullAnn,
+				},
+			},
+		},
+	}
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return err
+	}
+	_, err = client.Clientset.AppsV1().Deployments(ns).Patch(
+		ctx, depName, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{},
+	)
+	return err
+}
+
+// watchRolloutAndRollback waits up to 2 minutes for a deployment rollout to
+// reach Available + Ready. If the rollout fails (ProgressDeadlineExceeded)
+// or times out, it reverts the OTel inject annotations and returns an error
+// describing the failure. Paused deployments return nil immediately because
+// the rollout will not progress without user action.
+func (th *TracingHandler) watchRolloutAndRollback(ctx context.Context, client *k8s.Client, ns, depName string) error {
+	// Respect paused deployments — don't wait or rollback.
+	if dep, err := client.Clientset.AppsV1().Deployments(ns).Get(ctx, depName, metav1.GetOptions{}); err == nil {
+		if dep.Spec.Paused {
+			return nil
+		}
+	}
+
+	timeout := 120 * time.Second
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		dep, err := client.Clientset.AppsV1().Deployments(ns).Get(ctx, depName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		desired := int32(1)
+		if dep.Spec.Replicas != nil {
+			desired = *dep.Spec.Replicas
+		}
+		// Success path
+		for _, cond := range dep.Status.Conditions {
+			if cond.Type == appsv1.DeploymentAvailable && cond.Status == corev1.ConditionTrue {
+				if dep.Status.UpdatedReplicas == desired && dep.Status.ReadyReplicas == desired && dep.Status.ObservedGeneration >= dep.Generation {
+					return nil
+				}
+			}
+			if cond.Type == appsv1.DeploymentProgressing && cond.Status == corev1.ConditionFalse && cond.Reason == "ProgressDeadlineExceeded" {
+				_ = th.removeInjectAnnotations(ctx, client, ns, depName)
+				return fmt.Errorf("rollout failed: %s — instrumentation reverted", cond.Message)
+			}
+		}
+		time.Sleep(3 * time.Second)
+	}
+
+	// Timeout — examine final state
+	dep, _ := client.Clientset.AppsV1().Deployments(ns).Get(ctx, depName, metav1.GetOptions{})
+	if dep != nil {
+		desired := int32(1)
+		if dep.Spec.Replicas != nil {
+			desired = *dep.Spec.Replicas
+		}
+		if dep.Status.ReadyReplicas < desired {
+			_ = th.removeInjectAnnotations(ctx, client, ns, depName)
+			return fmt.Errorf("rollout did not complete in 2 minutes (%d/%d ready) — instrumentation reverted", dep.Status.ReadyReplicas, desired)
+		}
+	}
+	return nil
 }
 
 // InstrumentDeployment handles
@@ -619,9 +1101,33 @@ func (th *TracingHandler) InstrumentDeployment(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Resolve target container. If the caller specified one, find it;
+	// otherwise default to the first container.
+	var targetContainer *corev1.Container
+	containerName := strings.TrimSpace(req.Container)
+	if containerName != "" {
+		for i := range dep.Spec.Template.Spec.Containers {
+			if dep.Spec.Template.Spec.Containers[i].Name == containerName {
+				targetContainer = &dep.Spec.Template.Spec.Containers[i]
+				break
+			}
+		}
+		if targetContainer == nil {
+			respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest,
+				"Container not found in deployment: "+containerName, requestID)
+			return
+		}
+	} else if len(dep.Spec.Template.Spec.Containers) > 0 {
+		targetContainer = &dep.Spec.Template.Spec.Containers[0]
+	}
+
 	lang := strings.ToLower(strings.TrimSpace(req.Language))
 	if lang == "" {
-		lang = detectLanguageFromDeployment(dep)
+		if targetContainer != nil {
+			lang = detectContainerLanguage(targetContainer).Language
+		} else {
+			lang = detectLanguageFromDeployment(dep)
+		}
 	}
 	if lang == "unknown" || lang == "" {
 		respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest,
@@ -637,18 +1143,32 @@ func (th *TracingHandler) InstrumentDeployment(w http.ResponseWriter, r *http.Re
 	}
 	if !valid {
 		respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest,
-			"Unsupported language: "+lang, requestID)
+			"Unsupported language for auto-instrumentation: "+lang, requestID)
 		return
 	}
 
-	// Strategic merge patch on the pod template annotations only.
+	// Run preflight checks and refuse if any blocking check fails.
+	preflight := runPreflightChecks(dep, targetContainer)
+	if !preflight.Passed {
+		respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":            "Preflight checks failed",
+			"preflight_checks": preflight,
+		})
+		return
+	}
+
+	// Build strategic merge patch on the pod template annotations.
+	annPatch := map[string]interface{}{
+		"instrumentation.opentelemetry.io/inject-" + lang: "kubilitics-system/kubilitics-auto",
+	}
+	if containerName != "" {
+		annPatch["instrumentation.opentelemetry.io/container-names"] = containerName
+	}
 	patch := map[string]interface{}{
 		"spec": map[string]interface{}{
 			"template": map[string]interface{}{
 				"metadata": map[string]interface{}{
-					"annotations": map[string]string{
-						"instrumentation.opentelemetry.io/inject-" + lang: "kubilitics-system/kubilitics-auto",
-					},
+					"annotations": annPatch,
 				},
 			},
 		},
@@ -666,11 +1186,32 @@ func (th *TracingHandler) InstrumentDeployment(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	log.Printf("[tracing] instrumented %s/%s with language=%s", ns, name, lang)
+	log.Printf("[tracing] instrumented %s/%s with language=%s container=%q", ns, name, lang, containerName)
+
+	// Synchronously watch the rollout and auto-rollback on failure. The
+	// client just clicked a button and is waiting — they want the result.
+	// This is bounded to ~2 minutes by watchRolloutAndRollback.
+	rolloutErr := th.watchRolloutAndRollback(ctx, client, ns, name)
+	if rolloutErr != nil {
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"instrumented":    false,
+			"language":        lang,
+			"container":       containerName,
+			"rollout_started": true,
+			"rolled_back":     true,
+			"error":           rolloutErr.Error(),
+			"preflight_checks": preflight,
+		})
+		return
+	}
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"instrumented":    true,
-		"language":        lang,
-		"rollout_started": true,
+		"instrumented":     true,
+		"language":         lang,
+		"container":        containerName,
+		"rollout_started":  true,
+		"rollout_complete": true,
+		"preflight_checks": preflight,
 	})
 }
 
@@ -690,31 +1231,7 @@ func (th *TracingHandler) UninstrumentDeployment(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Use a strategic merge patch that sets each known inject-* annotation
-	// to null, which removes it. We remove all supported languages so a
-	// single call cleans up no matter what was set.
-	nullAnn := map[string]interface{}{}
-	for _, l := range supportedLanguages {
-		nullAnn["instrumentation.opentelemetry.io/inject-"+l] = nil
-	}
-	patch := map[string]interface{}{
-		"spec": map[string]interface{}{
-			"template": map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"annotations": nullAnn,
-				},
-			},
-		},
-	}
-	patchBytes, err := json.Marshal(patch)
-	if err != nil {
-		respondErrorWithCode(w, http.StatusInternalServerError, ErrCodeInternalError, "Failed to marshal patch: "+err.Error(), requestID)
-		return
-	}
-
-	if _, err := client.Clientset.AppsV1().Deployments(ns).Patch(
-		ctx, name, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{},
-	); err != nil {
+	if err := th.removeInjectAnnotations(ctx, client, ns, name); err != nil {
 		if apierrors.IsNotFound(err) {
 			respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, "Deployment not found", requestID)
 			return

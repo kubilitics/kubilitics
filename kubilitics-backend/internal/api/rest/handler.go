@@ -399,6 +399,7 @@ func SetupRoutes(router *mux.Router, h *Handler) {
 		router.Handle("/clusters/{clusterId}/tracing/disable", h.wrapWithRBAC(h.tracingHandler.DisableTracing, auth.RoleOperator)).Methods("POST")
 		router.Handle("/clusters/{clusterId}/tracing/status", h.wrapWithRBAC(h.tracingHandler.GetTracingStatus, auth.RoleViewer)).Methods("GET")
 		router.Handle("/clusters/{clusterId}/tracing/instrument", h.wrapWithRBAC(h.tracingHandler.InstrumentDeployments, auth.RoleOperator)).Methods("POST")
+		router.Handle("/clusters/{clusterId}/tracing/operator/install", h.wrapWithRBAC(h.tracingHandler.InstallOperator, auth.RoleOperator)).Methods("POST")
 
 		// Per-deployment one-click auto-instrumentation.
 		router.Handle("/clusters/{clusterId}/deployments/{namespace}/{deployment}/instrumentation-status", h.wrapWithRBAC(h.tracingHandler.GetInstrumentationStatus, auth.RoleViewer)).Methods("GET")

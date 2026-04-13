@@ -19,6 +19,33 @@ export interface TracingStatus {
   agent_span_count: number;
   instrumented_deployments: string[];
   available_deployments: DeploymentInfo[];
+  // NEW: operator lifecycle (backend may not yet return these)
+  agent_deployed?: boolean;
+  operator_state?: 'not_installed' | 'installing' | 'ready' | 'failed';
+  operator_message?: string;
+}
+
+export interface ContainerInstrumentation {
+  name: string;
+  image: string;
+  detected_language: string;
+  confidence: 'high' | 'medium' | 'low';
+  detection_source: 'command' | 'env' | 'image-label' | 'image-name' | 'none';
+  supports_auto: boolean;
+  instrumented: boolean;
+}
+
+export interface PreflightCheck {
+  name: string;
+  severity: 'blocking' | 'warning' | 'info';
+  passed: boolean;
+  message: string;
+  detail?: string;
+}
+
+export interface PreflightChecks {
+  passed: boolean;
+  checks: PreflightCheck[];
 }
 
 export interface InstrumentRequest {
@@ -69,6 +96,9 @@ export interface InstrumentationStatus {
   annotation?: string;
   otel_operator_ready: boolean;
   supports_language: boolean;
+  // NEW fields (optional until backend catches up)
+  containers?: ContainerInstrumentation[];
+  preflight_checks?: PreflightChecks;
 }
 
 export async function getInstrumentationStatus(
@@ -88,16 +118,33 @@ export async function instrumentDeployment(
   clusterId: string,
   namespace: string,
   deployment: string,
-  language?: string,
-): Promise<{ instrumented: boolean; language: string; rollout_started: boolean; already?: boolean }> {
+  options?: { language?: string; container?: string },
+): Promise<{
+  instrumented: boolean;
+  language: string;
+  rollout_started?: boolean;
+  already?: boolean;
+  rollback_reason?: string;
+}> {
   return backendRequest(
     baseUrl,
     `clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(deployment)}/instrument`,
     {
       method: 'POST',
-      body: JSON.stringify(language ? { language } : {}),
+      body: JSON.stringify(options ?? {}),
       headers: { 'Content-Type': 'application/json' },
     },
+  );
+}
+
+export async function installOperator(
+  baseUrl: string,
+  clusterId: string,
+): Promise<{ status: string; message: string }> {
+  return backendRequest(
+    baseUrl,
+    `clusters/${encodeURIComponent(clusterId)}/tracing/operator/install`,
+    { method: 'POST' },
   );
 }
 
