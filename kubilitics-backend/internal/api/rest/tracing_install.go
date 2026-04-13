@@ -3,6 +3,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -206,7 +207,13 @@ func (h *TracingHandler) GetInstallYAML(w http.ResponseWriter, r *http.Request) 
 		BackendURL: backendURL,
 	})
 	if err != nil {
-		respondErrorWithCode(w, http.StatusInternalServerError, ErrCodeInternalError, "Failed to render chart: "+err.Error(), requestID)
+		// Validation errors are the user's fault (400); renderer/helm
+		// failures are the server's fault (500).
+		if errors.Is(err, otel.ErrInvalidRenderOptions) {
+			respondErrorWithCode(w, http.StatusBadRequest, ErrCodeInvalidRequest, err.Error(), requestID)
+		} else {
+			respondErrorWithCode(w, http.StatusInternalServerError, ErrCodeInternalError, "Failed to render chart: "+err.Error(), requestID)
+		}
 		return
 	}
 
