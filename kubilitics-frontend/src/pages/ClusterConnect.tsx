@@ -280,7 +280,9 @@ export default function ClusterConnect() {
     */
 
     // Priority 2: Session restore (if currentClusterId is set and single-cluster auto-connect doesn't apply)
-    if (cid && !sessionRestoreDoneRef.current) {
+    // In desktop (Tauri), useAutoConnect owns the connect flow — skip session restore to avoid
+    // racing with it and clobbering state via signOut() when a stale cluster ID 404s.
+    if (cid && !sessionRestoreDoneRef.current && !isTauri()) {
       sessionRestoreDoneRef.current = true;
       const backendItem = clustersFromBackend.data.find((c) => c.id === cid);
 
@@ -290,22 +292,22 @@ export default function ClusterConnect() {
           const backendBaseUrl = getEffectiveBackendBaseUrl(storedBackendUrl);
           return getClusterOverview(backendBaseUrl, cid);
         }).then(() => {
-          // Cluster is accessible - restore session
+          // If the user already connected to a different cluster while we were checking, leave it alone.
+          if (useClusterStore.getState().activeCluster) return;
           setClusters(clustersFromBackend.data.map(backendClusterToCluster));
           setActiveCluster(backendClusterToCluster(backendItem));
           setDemo(false);
           navigate(postConnectPath, { replace: true });
         }).catch((error) => {
-          // Cluster exists but is not accessible - clear it
+          // Stale cluster id — just clear it. Do NOT signOut(): that wipes appMode and
+          // bounces the user out of the picker mid-connect.
           console.warn(`[ClusterConnect] Session restore failed: cluster ${cid} is not accessible (${error instanceof Error ? error.message : 'unknown error'})`);
+          if (useClusterStore.getState().activeCluster) return;
           setCurrentClusterId(null);
-          signOut();
-          // Ensure UI is shown even if session restore fails
         });
       } else {
-        // Cluster ID doesn't exist in backend list - clear it
+        // Cluster ID doesn't exist in backend list — clear it, but don't signOut().
         setCurrentClusterId(null);
-        signOut();
       }
     }
   }, [
