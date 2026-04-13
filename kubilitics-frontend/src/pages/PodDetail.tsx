@@ -684,7 +684,25 @@ export default function PodDetail() {
       resourceIcon={Box}
       loadingCardCount={4}
       customTabs={customTabs}
-      deriveStatus={(pod) => (pod.status?.phase as ResourceStatus) || 'Unknown'}
+      deriveStatus={(pod) => {
+        // Honest status detection: phase + container states + readiness
+        if (pod.metadata?.deletionTimestamp) return 'Terminating' as ResourceStatus;
+        const containerStatuses = pod.status?.containerStatuses || [];
+        for (const c of containerStatuses) {
+          if (c.state?.waiting?.reason === 'CrashLoopBackOff') return 'CrashLoopBackOff' as ResourceStatus;
+          if (c.state?.waiting?.reason === 'ImagePullBackOff' || c.state?.waiting?.reason === 'ErrImagePull') return 'ImagePullBackOff' as ResourceStatus;
+          if (c.state?.waiting?.reason === 'CreateContainerConfigError' || c.state?.waiting?.reason === 'CreateContainerError') return 'CreateContainerError' as ResourceStatus;
+          if (c.state?.waiting?.reason === 'ContainerCreating') return 'ContainerCreating' as ResourceStatus;
+          if (c.lastState?.terminated?.reason === 'OOMKilled') return 'OOMKilled' as ResourceStatus;
+        }
+        const phase = pod.status?.phase;
+        // Running but readiness probe failing → NotReady
+        if (phase === 'Running' && containerStatuses.length > 0) {
+          const ready = containerStatuses.filter((c) => c.ready).length;
+          if (ready < containerStatuses.length) return 'NotReady' as ResourceStatus;
+        }
+        return (phase as ResourceStatus) || 'Unknown';
+      }}
       headerMetadata={(ctx) => {
         const pod = ctx.resource;
         return (

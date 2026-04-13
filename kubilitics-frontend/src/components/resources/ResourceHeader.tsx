@@ -9,7 +9,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { toast } from '@/components/ui/sonner';
 import { cn } from '@/lib/utils';
 
-export type ResourceStatus = 'Running' | 'Pending' | 'Succeeded' | 'Failed' | 'Unknown' | 'Healthy' | 'Warning' | 'Error';
+export type ResourceStatus =
+  | 'Running' | 'Pending' | 'Succeeded' | 'Failed' | 'Unknown'
+  | 'Healthy' | 'Warning' | 'Error'
+  | 'NotReady' | 'CrashLoopBackOff' | 'ContainerCreating'
+  | 'ImagePullBackOff' | 'CreateContainerError' | 'OOMKilled' | 'Terminating';
 
 export interface ResourceAction {
   label: string;
@@ -43,6 +47,14 @@ const statusConfig: Record<ResourceStatus, { bg: string; text: string; icon: str
   Failed: { bg: 'bg-[hsl(var(--error)/0.1)]', text: 'text-[hsl(var(--error))]', icon: '✗' },
   Error: { bg: 'bg-[hsl(var(--error)/0.1)]', text: 'text-[hsl(var(--error))]', icon: '✗' },
   Unknown: { bg: 'bg-muted', text: 'text-muted-foreground', icon: '?' },
+  // Unhealthy/transitional states — amber (warning) for not-yet-ready, red (error) for crashing/failed
+  NotReady: { bg: 'bg-[hsl(var(--warning)/0.1)]', text: 'text-[hsl(var(--warning))]', icon: '⚠' },
+  ContainerCreating: { bg: 'bg-[hsl(var(--warning)/0.1)]', text: 'text-[hsl(var(--warning))]', icon: '◔' },
+  Terminating: { bg: 'bg-muted', text: 'text-muted-foreground', icon: '⏳' },
+  CrashLoopBackOff: { bg: 'bg-[hsl(var(--error)/0.1)]', text: 'text-[hsl(var(--error))]', icon: '↻' },
+  ImagePullBackOff: { bg: 'bg-[hsl(var(--error)/0.1)]', text: 'text-[hsl(var(--error))]', icon: '⬇' },
+  CreateContainerError: { bg: 'bg-[hsl(var(--error)/0.1)]', text: 'text-[hsl(var(--error))]', icon: '✗' },
+  OOMKilled: { bg: 'bg-[hsl(var(--error)/0.1)]', text: 'text-[hsl(var(--error))]', icon: '💥' },
 };
 
 export function ResourceHeader({
