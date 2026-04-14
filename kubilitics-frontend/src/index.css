@@ -539,7 +539,7 @@
 
   .page-inner {
     @apply flex flex-col gap-0 w-full mx-auto;
-    max-width: 1440px;
+    max-width: 1600px;
   }
 
   /* Tablet (768-1024px): tighter horizontal padding */

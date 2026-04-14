@@ -18,7 +18,9 @@ interface VirtualTableBodyProps<T> {
 export function VirtualTableBody<T>({
     data,
     renderRow,
-    rowHeight = 48,
+    // 40 matches the resourceTableRowClassName density (py-2 cells, ~40px row).
+    // Only drives the virtualizer's initial estimate — actual row sizes self-measure.
+    rowHeight = 40,
     tableContainerRef,
     emptyState,
 }: VirtualTableBodyProps<T>) {

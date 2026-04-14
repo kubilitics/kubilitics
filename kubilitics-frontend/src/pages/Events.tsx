@@ -448,7 +448,7 @@ export default function Events() {
  <VirtualTableBody
  data={paginatedRows}
  tableContainerRef={tableContainerRef}
- rowHeight={48}
+ rowHeight={40}
  emptyState={
   <EmptyState
    icon={CalendarClock}
