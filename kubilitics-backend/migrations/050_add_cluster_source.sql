@@ -8,4 +8,5 @@ ALTER TABLE clusters ADD COLUMN source TEXT NOT NULL DEFAULT 'kubeconfig';
 -- the first sync pass after upgrade doesn't auto-remove them.
 UPDATE clusters
    SET source = 'upload'
- WHERE kubeconfig_path LIKE '%/.kubilitics/kubeconfigs/%';
+ WHERE kubeconfig_path LIKE '%/.kubilitics/kubeconfigs/%'
+    OR kubeconfig_path LIKE '%\.kubilitics\kubeconfigs\%';
