@@ -168,6 +168,21 @@ func readShellPATH() string {
 }
 
 func main() {
+	// Subcommand dispatch. Recognized subcommands handle their own config
+	// loading and call os.Exit — they never return to main's normal server
+	// wiring.
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "restore-snapshot":
+			if len(os.Args) < 3 {
+				fmt.Fprintln(os.Stderr, "usage: kubilitics-backend restore-snapshot <path>")
+				os.Exit(2)
+			}
+			runRestoreSnapshot(os.Args[2])
+			os.Exit(0)
+		}
+	}
+
 	// Enrich PATH for macOS GUI apps (Tauri sidecar).
 	// macOS GUI apps don't inherit the user's shell PATH, so exec-based
 	// credential plugins (aws, gcloud, azure) are not found.
