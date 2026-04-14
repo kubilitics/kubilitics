@@ -2,6 +2,14 @@
  * Vitest global setup — runs before each test file.
  * Patches missing browser APIs that jsdom does not provide.
  */
+import { afterEach } from 'vitest';
+import { cleanup } from '@testing-library/react';
+
+// Automatically unmount components after each test so DOM doesn't accumulate
+// across tests within the same file.
+afterEach(() => {
+  cleanup();
+});
 
 // Monaco-editor calls document.queryCommandSupported at module-eval time
 if (typeof document !== 'undefined' && !document.queryCommandSupported) {
