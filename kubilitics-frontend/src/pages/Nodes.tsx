@@ -809,7 +809,7 @@ export default function Nodes() {
  <VirtualTableBody
  data={itemsToRender}
  tableContainerRef={tableContainerRef}
- rowHeight={48}
+ rowHeight={40}
  renderRow={(item) => {
  if (item.type === 'header') {
  return (

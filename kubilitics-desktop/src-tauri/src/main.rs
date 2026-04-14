@@ -61,10 +61,13 @@ fn main() {
                         }
                         "reload" | "force_reload" => {
                             // Reload the main webview window. Force reload cache-busts the
-                            // top-level HTML so a stale HMR module cannot stick around.
+                            // top-level HTML so a stale HMR module cannot stick around, but
+                            // preserves existing query params and hash (URL state like tabs,
+                            // filters, pagination, returnUrl is encoded there and shouldn't
+                            // be nuked by a reload).
                             if let Some(window) = app_handle.get_webview_window("main") {
                                 let script = if event.id().0.as_str() == "force_reload" {
-                                    "location.href = location.pathname + '?_=' + Date.now()"
+                                    "(function(){var u=new URL(location.href);u.searchParams.set('_',Date.now());location.href=u.toString();})()"
                                 } else {
                                     "window.location.reload()"
                                 };
