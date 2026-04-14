@@ -40,6 +40,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/intelligence/diff"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
+	"github.com/kubilitics/kubilitics-backend/internal/kubeconfigwatch"
 	"github.com/kubilitics/kubilitics-backend/internal/metrics"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/topologycache"
@@ -345,6 +346,37 @@ func main() {
 	} else {
 		log.Info("No clusters registered yet", "hint", "add via Connect (POST /api/v1/clusters) or ensure kubeconfig_auto_load and default kubeconfig are set")
 	}
+	// Kubeconfig watcher — auto-syncs the cluster registry with the user's
+	// kubeconfig file. Gated off in in-cluster deployment mode (no user
+	// kubeconfig exists there) and behind the KUBILITICS_KUBECONFIG_SYNC_ENABLED
+	// kill switch for paranoid enterprise operators.
+	if cfg.KubeconfigSyncEnabled && cfg.DeploymentMode != config.ModeInCluster {
+		paths := kubeconfigwatch.DefaultPaths()
+		if len(paths) == 0 {
+			log.Info("kubeconfig watcher not started", "reason", "no kubeconfig paths resolved")
+		} else {
+			home, _ := os.UserHomeDir()
+			snapshotDir := filepath.Join(home, ".kubilitics", "snapshots")
+			w, err := kubeconfigwatch.New(clusterService, repo, paths, snapshotDir, cfg)
+			if err != nil {
+				log.Warn("kubeconfig watcher disabled", "err", err)
+			} else {
+				go w.Start(ctx)
+				log.Info("kubeconfig watcher started",
+					"paths", paths,
+					"snapshot_dir", snapshotDir,
+					"health_interval_sec", cfg.KubeconfigSyncHealthIntervalSec,
+					"poll_interval_sec", cfg.KubeconfigSyncPollIntervalSec,
+					"max_absolute_removals", cfg.KubeconfigSyncMaxAbsoluteRemovals,
+					"max_removal_ratio", cfg.KubeconfigSyncMaxRemovalRatio)
+			}
+		}
+	} else {
+		log.Info("kubeconfig sync disabled",
+			"enabled", cfg.KubeconfigSyncEnabled,
+			"deployment_mode", cfg.DeploymentMode)
+	}
+
 	var topologyCache *topologycache.Cache
 	if cfg != nil && cfg.TopologyCacheTTLSec > 0 {
 		topologyCache = topologycache.New(time.Duration(cfg.TopologyCacheTTLSec) * time.Second)
