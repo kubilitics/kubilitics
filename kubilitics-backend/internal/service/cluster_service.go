@@ -481,6 +481,7 @@ func (s *clusterService) AddCluster(ctx context.Context, kubeconfigPath, context
 		Version:        version,
 		Status:         status,
 		Provider:       provider,
+		Source:         "kubeconfig",
 		LastConnected:  time.Now(),
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
@@ -551,7 +552,16 @@ func (s *clusterService) AddClusterFromBytes(ctx context.Context, kubeconfigByte
 	}
 
 	fmt.Printf("[AddClusterFromBytes] Written kubeconfig to %s for context %s\n", kubeconfigPath, contextName)
-	return s.AddCluster(ctx, kubeconfigPath, contextName)
+	cluster, err := s.AddCluster(ctx, kubeconfigPath, contextName)
+	if err != nil {
+		return nil, err
+	}
+	cluster.Source = "upload"
+	cluster.UpdatedAt = time.Now()
+	if err := s.repo.Update(ctx, cluster); err != nil {
+		return nil, fmt.Errorf("failed to update cluster source: %w", err)
+	}
+	return cluster, nil
 }
 
 // sanitizeContextForFilename maps a Kubernetes context name to a safe filesystem name.
