@@ -122,10 +122,13 @@ func (r *SQLiteRepository) createCluster(ctx context.Context, cluster *models.Cl
 	if cluster.Provider == "" {
 		cluster.Provider = "on-prem"
 	}
+	if cluster.Source == "" {
+		cluster.Source = "kubeconfig"
+	}
 
 	query := `
-		INSERT INTO clusters (id, name, context, kubeconfig_path, server_url, version, status, provider, last_connected, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO clusters (id, name, context, kubeconfig_path, server_url, version, status, provider, source, last_connected, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	_, err := r.db.ExecContext(ctx, query,
@@ -137,6 +140,7 @@ func (r *SQLiteRepository) createCluster(ctx context.Context, cluster *models.Cl
 		cluster.Version,
 		cluster.Status,
 		cluster.Provider,
+		cluster.Source,
 		cluster.LastConnected,
 		time.Now(),
 		time.Now(),
@@ -169,7 +173,7 @@ func (r *SQLiteRepository) updateCluster(ctx context.Context, cluster *models.Cl
 	query := `
 		UPDATE clusters
 		SET name = ?, context = ?, kubeconfig_path = ?, server_url = ?, version = ?,
-		    status = ?, provider = ?, last_connected = ?, updated_at = ?
+		    status = ?, provider = ?, source = ?, last_connected = ?, updated_at = ?
 		WHERE id = ?
 	`
 
@@ -181,6 +185,7 @@ func (r *SQLiteRepository) updateCluster(ctx context.Context, cluster *models.Cl
 		cluster.Version,
 		cluster.Status,
 		cluster.Provider,
+		cluster.Source,
 		cluster.LastConnected,
 		time.Now(),
 		cluster.ID,

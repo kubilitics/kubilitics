@@ -12,6 +12,7 @@ type Cluster struct {
 	Version        string    `json:"version" db:"version"`
 	Status         string    `json:"status" db:"status"`     // connected, disconnected, error
 	Provider       string    `json:"provider" db:"provider"` // EKS, GKE, AKS, OpenShift, Rancher, k3s, Kind, Minikube, Docker Desktop, on-prem
+	Source         string    `json:"source" db:"source"`     // "kubeconfig" (watched) | "upload" (Kubilitics-managed) | "manual" (future)
 	IsCurrent      bool      `json:"is_current" db:"is_current"`
 	NodeCount      int       `json:"node_count" db:"-"`
 	NamespaceCount int       `json:"namespace_count" db:"-"`

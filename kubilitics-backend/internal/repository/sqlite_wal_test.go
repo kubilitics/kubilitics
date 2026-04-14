@@ -34,6 +34,7 @@ func TestSQLiteWAL_ConcurrentWrites(t *testing.T) {
 		version TEXT,
 		status TEXT,
 		provider TEXT,
+		source TEXT DEFAULT 'kubeconfig',
 		last_connected DATETIME,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -141,6 +142,7 @@ func TestSQLiteWAL_ConcurrentReadsAndWrites(t *testing.T) {
 		version TEXT,
 		status TEXT,
 		provider TEXT,
+		source TEXT DEFAULT 'kubeconfig',
 		last_connected DATETIME,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -257,6 +259,7 @@ func TestSQLiteWAL_ConnectionPool(t *testing.T) {
 		version TEXT,
 		status TEXT,
 		provider TEXT,
+		source TEXT DEFAULT 'kubeconfig',
 		last_connected DATETIME,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -264,7 +267,7 @@ func TestSQLiteWAL_ConnectionPool(t *testing.T) {
 	if err := repo.RunMigrations(migrationSQL); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
-	
+
 	// Verify connection pool by performing operations
 	testCluster := &models.Cluster{
 		ID:      "test-pool",
