@@ -398,12 +398,21 @@ jobs:
           cargo tauri build --target x86_64-unknown-linux-gnu --bundles appimage,deb,rpm
 
       # ── Upload artifacts ────────────────────────────────────────────────
+      # Upload ONLY installer files and their signatures, not the full
+      # bundle/ tree. Previously, uploading bundle/ captured the uncompressed
+      # AppDir / .app tree (~200MB) alongside the real installers, so a
+      # workflow artifact for Linux was 496MB even though the .AppImage is
+      # only 118MB. The "Create GitHub Release" job later globs the same
+      # extensions anyway, so nothing downstream depends on the full tree.
       - name: Upload desktop artifacts (macOS)
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v7
         with:
           name: kubilitics-desktop-${{ matrix.name }}-${{ github.ref_name }}
-          path: kubilitics-desktop/src-tauri/target/universal-apple-darwin/release/bundle/
+          path: |
+            kubilitics-desktop/src-tauri/target/universal-apple-darwin/release/bundle/**/*.dmg
+            kubilitics-desktop/src-tauri/target/universal-apple-darwin/release/bundle/**/*.app.tar.gz
+            kubilitics-desktop/src-tauri/target/universal-apple-darwin/release/bundle/**/*.sig
           compression-level: 1
 
       - name: Upload desktop artifacts (Linux)
@@ -411,7 +420,12 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: kubilitics-desktop-${{ matrix.name }}-${{ github.ref_name }}
-          path: kubilitics-desktop/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/
+          path: |
+            kubilitics-desktop/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**/*.AppImage
+            kubilitics-desktop/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**/*.AppImage.tar.gz
+            kubilitics-desktop/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**/*.deb
+            kubilitics-desktop/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**/*.rpm
+            kubilitics-desktop/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**/*.sig
           compression-level: 1
 
       - name: Upload desktop artifacts (Windows)
@@ -419,7 +433,11 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: kubilitics-desktop-${{ matrix.name }}-${{ github.ref_name }}
-          path: kubilitics-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/
+          path: |
+            kubilitics-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**/*.msi
+            kubilitics-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**/*-setup.exe
+            kubilitics-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**/*.nsis.zip
+            kubilitics-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**/*.sig
           compression-level: 1
 
   # ── Create GitHub Release ──────────────────────────────────────────────
