@@ -362,7 +362,16 @@ func (s *clusterService) GetCluster(ctx context.Context, id string) (*models.Clu
 	return c, nil
 }
 
+// AddCluster registers a cluster loaded from the user's kubeconfig at the
+// given path and context. Convenience wrapper around addClusterWithSource
+// that forces source="kubeconfig" — the right value for every code path
+// that reaches here (picker, API, auto-connect). For the upload flow,
+// AddClusterFromBytes calls addClusterWithSource directly with source="upload".
 func (s *clusterService) AddCluster(ctx context.Context, kubeconfigPath, contextName string) (*models.Cluster, error) {
+	return s.addClusterWithSource(ctx, kubeconfigPath, contextName, "kubeconfig")
+}
+
+func (s *clusterService) addClusterWithSource(ctx context.Context, kubeconfigPath, contextName, source string) (*models.Cluster, error) {
 	fmt.Printf("[AddCluster] Starting for context: %s, path: %s\n", contextName, kubeconfigPath)
 
 	if kubeconfigPath == "" {
@@ -481,7 +490,7 @@ func (s *clusterService) AddCluster(ctx context.Context, kubeconfigPath, context
 		Version:        version,
 		Status:         status,
 		Provider:       provider,
-		Source:         "kubeconfig",
+		Source:         source,
 		LastConnected:  time.Now(),
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
@@ -552,16 +561,7 @@ func (s *clusterService) AddClusterFromBytes(ctx context.Context, kubeconfigByte
 	}
 
 	fmt.Printf("[AddClusterFromBytes] Written kubeconfig to %s for context %s\n", kubeconfigPath, contextName)
-	cluster, err := s.AddCluster(ctx, kubeconfigPath, contextName)
-	if err != nil {
-		return nil, err
-	}
-	cluster.Source = "upload"
-	cluster.UpdatedAt = time.Now()
-	if err := s.repo.Update(ctx, cluster); err != nil {
-		return nil, fmt.Errorf("failed to update cluster source: %w", err)
-	}
-	return cluster, nil
+	return s.addClusterWithSource(ctx, kubeconfigPath, contextName, "upload")
 }
 
 // sanitizeContextForFilename maps a Kubernetes context name to a safe filesystem name.

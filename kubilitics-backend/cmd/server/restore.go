@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/kubilitics/kubilitics-backend/internal/config"
 	"github.com/kubilitics/kubilitics-backend/internal/kubeconfigwatch"
@@ -96,4 +97,27 @@ func runRestoreSnapshot(snapshotPath string) {
 
 	fmt.Println()
 	fmt.Printf("Restore complete: %d restored, %d skipped (already present)\n", restored, skipped)
+
+	// Write a single audit entry per invocation so incident timelines can match
+	// auto-removals to their subsequent restores.
+	details := map[string]string{
+		"snapshot_path":      snapshotPath,
+		"snapshot_timestamp": snap.Timestamp.UTC().Format(time.RFC3339),
+		"snapshot_trigger":   snap.Trigger,
+		"restored_count":     fmt.Sprintf("%d", restored),
+		"skipped_count":      fmt.Sprintf("%d", skipped),
+		"total_in_snapshot":  fmt.Sprintf("%d", len(snap.AllClusters)),
+	}
+	detailsJSON, _ := json.Marshal(details)
+
+	entry := &models.AuditLogEntry{
+		Action:    "cluster_restored_from_snapshot",
+		Username:  "kubeconfig-sync",
+		RequestIP: "system",
+		Timestamp: time.Now(),
+		Details:   string(detailsJSON),
+	}
+	if err := repo.CreateAuditLog(ctx, entry); err != nil {
+		fmt.Fprintf(os.Stderr, "restore-snapshot: warning: failed to write audit entry: %v\n", err)
+	}
 }
