@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -809,22 +810,34 @@ func (s *clusterService) ReconnectCluster(ctx context.Context, id string) (*mode
 	}
 
 	// Build a fresh client (re-reads kubeconfig, fresh TLS handshake, new circuit breaker).
+	//
+	// Strict path validation: a missing or unreadable stored kubeconfig means
+	// the cluster is gone. We must NEVER fall back to the user's system
+	// ~/.kube/config — that would silently build a client against whatever
+	// context is currently active (e.g. docker-desktop) while the DB row and
+	// the frontend still identify this cluster as the original (e.g. AWS).
+	// Silent identity substitution is a P0 data-integrity bug.
 	path := c.KubeconfigPath
-	if path != "" {
-		if _, err := os.Stat(path); err != nil {
-			path = ""
-		}
-	}
-	if path == "" {
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			path = filepath.Join(home, ".kube", "config")
-		}
-	}
 	if path == "" {
 		c.Status = "disconnected"
 		_ = s.repo.Update(ctx, c)
-		return c, fmt.Errorf("no kubeconfig available for cluster %s", id)
+		return c, fmt.Errorf("cluster %s has no stored kubeconfig path — reconnect or remove it", id)
+	}
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		if errors.Is(statErr, fs.ErrNotExist) {
+			c.Status = "disconnected"
+			_ = s.repo.Update(ctx, c)
+			return c, fmt.Errorf("cluster %s kubeconfig file no longer exists at %s — reconnect or remove it", id, path)
+		}
+		// Transient I/O error (permission, network-mount unreachable). Report but do
+		// not mark disconnected — the next retry may succeed.
+		return c, fmt.Errorf("cluster %s kubeconfig file unreadable at %s: %w", id, path, statErr)
+	}
+	if info.IsDir() {
+		c.Status = "disconnected"
+		_ = s.repo.Update(ctx, c)
+		return c, fmt.Errorf("cluster %s kubeconfig path is a directory, not a file: %s", id, path)
 	}
 
 	client, err := k8s.NewClient(path, c.Context)
