@@ -97,7 +97,7 @@ function OverviewTab({ resource: replicaSet }: ResourceContext<ReplicaSetResourc
   });
 
   const diagnosis = useMemo(
-    () => diagnoseWorkload(replicaSet as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: childPods }),
+    () => diagnoseWorkload({ ...replicaSet, kind: 'ReplicaSet' } as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: childPods }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [replicaSet?.metadata?.uid, replicaSet?.metadata?.resourceVersion, childPods],
   );

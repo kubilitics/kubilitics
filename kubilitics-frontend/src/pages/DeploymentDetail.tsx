@@ -142,7 +142,7 @@ function OverviewTab({ resource: deployment }: ResourceContext<DeploymentResourc
   });
 
   const diagnosis = useMemo(
-    () => diagnoseWorkload(deployment as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: childPods }),
+    () => diagnoseWorkload({ ...deployment, kind: 'Deployment' } as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: childPods }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [deployment?.metadata?.uid, deployment?.metadata?.resourceVersion, childPods],
   );

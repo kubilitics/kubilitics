@@ -234,7 +234,7 @@ function PodOverviewTab({ resource: pod, onAction }: { resource: PodResource; on
   const { namespace } = useParams();
 
   const diagnosis = useMemo(
-    () => diagnoseWorkload(pod as unknown as Parameters<typeof diagnoseWorkload>[0], { events: [] }),
+    () => diagnoseWorkload({ ...pod, kind: 'Pod' } as unknown as Parameters<typeof diagnoseWorkload>[0], { events: [] }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [pod?.metadata?.uid, pod?.metadata?.resourceVersion],
   );

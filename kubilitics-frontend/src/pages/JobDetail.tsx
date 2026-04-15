@@ -113,7 +113,7 @@ function OverviewTab({ resource: job }: ResourceContext<JobResource>) {
   );
 
   const diagnosis = useMemo(
-    () => diagnoseWorkload(job as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: jobPods }),
+    () => diagnoseWorkload({ ...job, kind: 'Job' } as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: jobPods }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [job?.metadata?.uid, job?.metadata?.resourceVersion, jobPods],
   );
