@@ -1,5 +1,8 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { diagnoseWorkload } from '@/lib/diagnose';
+import type { DiagnoseAction } from '@/lib/diagnose/types';
+import { DiagnosePanel } from '@/components/diagnose/DiagnosePanel';
 import {
   Database,
   Clock,
@@ -92,14 +95,38 @@ interface StatefulSetResource extends KubernetesResource {
 function OverviewTab({ resource: statefulSet }: ResourceContext<StatefulSetResource>) {
   const navigate = useNavigate();
   const { namespace } = useParams();
+  const [, setSearchParams] = useSearchParams();
   const desired = statefulSet.spec?.replicas || 0;
   const ready = statefulSet.status?.readyReplicas || 0;
   const current = statefulSet.status?.currentReplicas || 0;
   const updated = statefulSet.status?.updatedReplicas || 0;
   const volumeClaimTemplates = statefulSet.spec?.volumeClaimTemplates || [];
 
+  const matchLabels = statefulSet.spec?.selector?.matchLabels ?? {};
+  const labelSelector = Object.entries(matchLabels).map(([k, v]) => `${k}=${v}`).join(',');
+  const { data: childPodsList } = useK8sResourceList<KubernetesResource>(
+    'pods',
+    namespace ?? undefined,
+    { enabled: !!namespace && !!labelSelector, staleTime: 30000 },
+  );
+  const childPods = (childPodsList?.items ?? []).filter((pod) => {
+    const podLabels = pod.metadata?.labels ?? {};
+    return Object.entries(matchLabels).every(([k, v]) => podLabels[k] === v);
+  });
+
+  const diagnosis = useMemo(
+    () => diagnoseWorkload(statefulSet as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: childPods }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [statefulSet?.metadata?.uid, statefulSet?.metadata?.resourceVersion, childPods],
+  );
+
+  const handleDiagnoseAction = (action: DiagnoseAction) => {
+    if (action.type === 'jump_to_tab') setSearchParams({ tab: action.tab });
+  };
+
   return (
     <div className="space-y-6">
+      <DiagnosePanel diagnosis={diagnosis} resource={statefulSet} onAction={handleDiagnoseAction} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <SectionCard icon={Database} title="StatefulSet Information" tooltip={<p className="text-xs text-muted-foreground">Configuration and update strategy</p>}>
             <div className="grid grid-cols-2 gap-x-8 gap-y-3">

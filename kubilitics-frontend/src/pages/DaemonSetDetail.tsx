@@ -1,5 +1,8 @@
 import { useState, useCallback, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { diagnoseWorkload } from '@/lib/diagnose';
+import type { DiagnoseAction } from '@/lib/diagnose/types';
+import { DiagnosePanel } from '@/components/diagnose/DiagnosePanel';
 import {
   Cpu,
   Clock,
@@ -82,6 +85,8 @@ interface DaemonSetResource extends KubernetesResource {
 // ---------------------------------------------------------------------------
 
 function OverviewTab({ resource: daemonSet }: ResourceContext<DaemonSetResource>) {
+  const { namespace } = useParams();
+  const [, setSearchParams] = useSearchParams();
   const desired = daemonSet.status?.desiredNumberScheduled || 0;
   const current = daemonSet.status?.currentNumberScheduled || 0;
   const ready = daemonSet.status?.numberReady || 0;
@@ -90,8 +95,31 @@ function OverviewTab({ resource: daemonSet }: ResourceContext<DaemonSetResource>
   const tolerations = daemonSet.spec?.template?.spec?.tolerations || [];
   const nodeSelector = daemonSet.spec?.template?.spec?.nodeSelector || {};
 
+  const matchLabels = daemonSet.spec?.selector?.matchLabels ?? {};
+  const labelSelector = Object.entries(matchLabels).map(([k, v]) => `${k}=${v}`).join(',');
+  const { data: childPodsList } = useK8sResourceList<KubernetesResource>(
+    'pods',
+    namespace ?? undefined,
+    { enabled: !!namespace && !!labelSelector, staleTime: 30000 },
+  );
+  const childPods = (childPodsList?.items ?? []).filter((pod) => {
+    const podLabels = pod.metadata?.labels ?? {};
+    return Object.entries(matchLabels).every(([k, v]) => podLabels[k] === v);
+  });
+
+  const diagnosis = useMemo(
+    () => diagnoseWorkload(daemonSet as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: childPods }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [daemonSet?.metadata?.uid, daemonSet?.metadata?.resourceVersion, childPods],
+  );
+
+  const handleDiagnoseAction = (action: DiagnoseAction) => {
+    if (action.type === 'jump_to_tab') setSearchParams({ tab: action.tab });
+  };
+
   return (
     <div className="space-y-6">
+      <DiagnosePanel diagnosis={diagnosis} resource={daemonSet} onAction={handleDiagnoseAction} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <SectionCard icon={Server} title="DaemonSet Information" tooltip={<p className="text-xs text-muted-foreground">Configuration and update strategy</p>}>
             <div className="grid grid-cols-2 gap-x-8 gap-y-3">

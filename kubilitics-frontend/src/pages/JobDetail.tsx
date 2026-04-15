@@ -1,5 +1,8 @@
 import { useState, useCallback, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { diagnoseWorkload } from '@/lib/diagnose';
+import type { DiagnoseAction } from '@/lib/diagnose/types';
+import { DiagnosePanel } from '@/components/diagnose/DiagnosePanel';
 import {
   Workflow,
   Clock,
@@ -91,14 +94,37 @@ type PodLike = KubernetesResource & { metadata?: { name?: string; labels?: Recor
 // ---------------------------------------------------------------------------
 
 function OverviewTab({ resource: job }: ResourceContext<JobResource>) {
+  const { namespace } = useParams();
+  const [, setSearchParams] = useSearchParams();
   const succeeded = job.status?.succeeded || 0;
   const failed = job.status?.failed || 0;
   const active = job.status?.active || 0;
   const completions = job.spec?.completions || 1;
   const conditions = job.status?.conditions || [];
 
+  const jobName = job.metadata?.name;
+  const { data: podsList } = useK8sResourceList<PodLike>(
+    'pods',
+    namespace ?? undefined,
+    { enabled: !!namespace && !!jobName, staleTime: 30000 },
+  );
+  const jobPods = (podsList?.items ?? []).filter(
+    (pod) => (pod.metadata?.labels?.['job-name'] ?? '') === jobName,
+  );
+
+  const diagnosis = useMemo(
+    () => diagnoseWorkload(job as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: jobPods }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [job?.metadata?.uid, job?.metadata?.resourceVersion, jobPods],
+  );
+
+  const handleDiagnoseAction = (action: DiagnoseAction) => {
+    if (action.type === 'jump_to_tab') setSearchParams({ tab: action.tab });
+  };
+
   return (
     <div className="space-y-6">
+      <DiagnosePanel diagnosis={diagnosis} resource={job} onAction={handleDiagnoseAction} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <SectionCard icon={Settings} title="Job Configuration" tooltip={<p className="text-xs text-muted-foreground">Execution settings and limits</p>}>
             <div className="grid grid-cols-2 gap-x-8 gap-y-3">
