@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Copy, Download, Edit3, CheckCircle2, AlertCircle, AlertTriangle, RotateCcw, RefreshCw, ShieldAlert, Save, X, FileCode, Search, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,7 @@ import { CodeEditor } from '@/components/editor/CodeEditor';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/sonner';
 import yamlParser from 'js-yaml';
+import { filterYaml, type YamlPreset } from '@/lib/yaml/filterYaml';
 import { isConflictError } from '@/lib/conflictDetection';
 
 export interface YamlValidationError {
@@ -18,6 +19,8 @@ export interface YamlValidationError {
 
 export interface YamlViewerProps {
   yaml: string;
+  /** Parsed K8s resource object. When provided, enables the Clean/Raw filter. */
+  resource?: unknown;
   resourceName: string;
   editable?: boolean;
   onSave?: (yaml: string) => Promise<void> | void;
@@ -60,7 +63,7 @@ function validateYaml(yaml: string): YamlValidationError[] {
   return errors;
 }
 
-export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFetchLatest, warning }: YamlViewerProps) {
+export function YamlViewer({ yaml, resource, resourceName, editable = false, onSave, onFetchLatest, warning }: YamlViewerProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedYaml, setEditedYaml] = useState(yaml);
   const [errors, setErrors] = useState<YamlValidationError[]>([]);
@@ -68,6 +71,24 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
   const [editorKey, setEditorKey] = useState(0);
   const [copied, setCopied] = useState(false);
   const [conflictDetected, setConflictDetected] = useState(false);
+  const [preset, setPreset] = useState<YamlPreset>('clean');
+  const previousPresetRef = useRef<YamlPreset>('clean');
+
+  const displayYaml = useMemo(() => {
+    if (!resource || preset === 'raw') return yaml;
+    try {
+      return yamlParser.dump(filterYaml(resource, 'clean'), {
+        indent: 2,
+        noArrayIndent: false,
+        skipInvalid: true,
+        flowLevel: -1,
+        noRefs: true,
+        lineWidth: -1,
+      });
+    } catch {
+      return yaml;
+    }
+  }, [preset, resource, yaml]);
 
   // Auto-enter edit mode when ?edit=1 is in URL (triggered by header Edit button)
   useEffect(() => {
@@ -89,14 +110,14 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
   }, [yaml, isEditing]);
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(isEditing ? editedYaml : yaml);
+    navigator.clipboard.writeText(isEditing ? editedYaml : displayYaml);
     setCopied(true);
     toast.success('YAML copied to clipboard');
     setTimeout(() => setCopied(false), 2000);
-  }, [isEditing, editedYaml, yaml]);
+  }, [isEditing, editedYaml, displayYaml]);
 
   const handleDownload = useCallback(() => {
-    const content = isEditing ? editedYaml : yaml;
+    const content = isEditing ? editedYaml : displayYaml;
     const blob = new Blob([content], { type: 'text/yaml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -107,12 +128,14 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 30_000);
     toast.success(`Downloaded ${resourceName}.yaml`);
-  }, [isEditing, editedYaml, yaml, resourceName]);
+  }, [isEditing, editedYaml, displayYaml, resourceName]);
 
   const handleEdit = () => {
+    previousPresetRef.current = preset;
     setEditedYaml(yaml);
     setErrors([]);
     setEditorKey((k) => k + 1);
+    setPreset('raw');
     setIsEditing(true);
   };
 
@@ -120,6 +143,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
     setEditedYaml(yaml);
     setErrors([]);
     setIsEditing(false);
+    setPreset(previousPresetRef.current);
   };
 
   const handleReset = () => {
@@ -140,6 +164,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
     try {
       await onSave(editedYaml);
       setIsEditing(false);
+      setPreset(previousPresetRef.current);
       setConflictDetected(false);
       toast.success('Changes applied successfully');
     } catch (error) {
@@ -165,6 +190,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
       const forcedYaml = replaceResourceVersion(editedYaml, latestYaml);
       await onSave(forcedYaml);
       setIsEditing(false);
+      setPreset(previousPresetRef.current);
       setConflictDetected(false);
       toast.success('Changes force-applied successfully');
     } catch (error) {
@@ -237,6 +263,35 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
 
         {/* ── Toolbar actions ── */}
         <div className="flex items-center gap-1">
+          {resource && (
+            <>
+              <div className="inline-flex items-center rounded-md border border-border bg-background p-0.5 mr-1">
+                <Button
+                  variant={preset === 'clean' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-6 text-[11px] font-medium px-2.5 rounded-sm"
+                  onClick={() => setPreset('clean')}
+                  disabled={isEditing}
+                  aria-pressed={preset === 'clean'}
+                  aria-label="Clean (hide managedFields)"
+                >
+                  Clean
+                </Button>
+                <Button
+                  variant={preset === 'raw' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-6 text-[11px] font-medium px-2.5 rounded-sm"
+                  onClick={() => setPreset('raw')}
+                  disabled={isEditing}
+                  aria-pressed={preset === 'raw'}
+                  aria-label="Raw (show full YAML)"
+                >
+                  Raw
+                </Button>
+              </div>
+              <Separator orientation="vertical" className="h-4 mx-1" />
+            </>
+          )}
           {isEditing ? (
             <>
               <Tooltip>
@@ -249,7 +304,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCancel}>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCancel} aria-label="Cancel editing">
                     <X className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
@@ -274,7 +329,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
             <>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCopy}>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCopy} aria-label="Copy YAML">
                     {copied ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
                   </Button>
                 </TooltipTrigger>
@@ -311,6 +366,12 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
       {warning && (
         <div className="px-4 py-2 text-xs text-muted-foreground bg-amber-500/5 border-b border-amber-500/20">
           {warning}
+        </div>
+      )}
+
+      {!isEditing && preset === 'raw' && resource && (
+        <div className="px-4 py-1.5 text-[11px] text-muted-foreground bg-muted/20 border-b border-border">
+          Showing full YAML including <code className="font-mono">managedFields</code>.
         </div>
       )}
 
@@ -407,7 +468,7 @@ export function YamlViewer({ yaml, resourceName, editable = false, onSave, onFet
         </div>
       ) : (
         <CodeEditor
-          value={yaml}
+          value={displayYaml}
           readOnly
           minHeight="600px"
           className="rounded-none border-0"

@@ -2,6 +2,9 @@
  * Vitest global setup — runs before each test file.
  * Patches missing browser APIs that jsdom does not provide.
  */
+import { expect } from 'vitest';
+import * as matchers from '@testing-library/jest-dom/matchers';
+expect.extend(matchers);
 import { afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 
