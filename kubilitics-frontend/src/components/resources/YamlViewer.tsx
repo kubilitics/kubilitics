@@ -133,6 +133,15 @@ function validateYaml(yaml: string): YamlValidationError[] {
   return errors;
 }
 
+// Segmented-control pill styling. Shared between the preset (Clean/Apply-ready/Raw)
+// and mode (YAML/JSON) segmented groups so the selected-state contrast is
+// unmistakable — the previous `variant="secondary"` vs `variant="ghost"` switch
+// was too subtle in the light theme and users couldn't tell which pill was active.
+const pillClass =
+  'h-6 text-[11px] font-medium px-2.5 rounded-sm text-muted-foreground hover:text-foreground';
+const pillActiveClass =
+  'bg-background text-primary shadow-sm ring-1 ring-primary/30 hover:bg-background';
+
 export function YamlViewer({ yaml, resource, resourceName, editable = false, onSave, onFetchLatest, warning }: YamlViewerProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedYaml, setEditedYaml] = useState(yaml);
@@ -174,13 +183,14 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
     (range: { startLine: number; endLine: number } | null) => {
       const editor = editorInstanceRef.current;
       if (!editor || !range) return;
-      editor.setSelection({
-        startLineNumber: range.startLine,
-        startColumn: 1,
-        endLineNumber: range.endLine,
-        endColumn: 1,
-      } as unknown as monacoEditor.IRange);
-      editor.getAction('editor.foldSelected')?.run();
+      // Use editor.trigger('editor.fold', { selectionLines }) — it folds the
+      // region starting at the given 1-indexed lines regardless of cursor
+      // position. The older setSelection + foldSelected approach silently
+      // no-ops unless the cursor happens to land on a fold region's header,
+      // which isn't guaranteed after setSelection lands it at endLine.
+      editor.trigger('yaml-viewer', 'editor.fold', {
+        selectionLines: [range.startLine],
+      });
     },
     [],
   );
@@ -427,11 +437,11 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
         <div className="flex items-center gap-1">
           {resource && (
             <>
-              <div className="inline-flex items-center rounded-md border border-border bg-background p-0.5 mr-1">
+              <div className="inline-flex items-center rounded-md border border-border bg-muted/40 p-0.5 mr-1">
                 <Button
-                  variant={preset === 'clean' ? 'secondary' : 'ghost'}
+                  variant="ghost"
                   size="sm"
-                  className="h-6 text-[11px] font-medium px-2.5 rounded-sm"
+                  className={cn(pillClass, preset === 'clean' && pillActiveClass)}
                   onClick={() => setPreset('clean')}
                   disabled={isEditing}
                   aria-pressed={preset === 'clean'}
@@ -440,9 +450,9 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
                   Clean
                 </Button>
                 <Button
-                  variant={preset === 'apply-ready' ? 'secondary' : 'ghost'}
+                  variant="ghost"
                   size="sm"
-                  className="h-6 text-[11px] font-medium px-2.5 rounded-sm"
+                  className={cn(pillClass, preset === 'apply-ready' && pillActiveClass)}
                   onClick={() => setPreset('apply-ready')}
                   disabled={isEditing}
                   aria-pressed={preset === 'apply-ready'}
@@ -451,9 +461,9 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
                   Apply-ready
                 </Button>
                 <Button
-                  variant={preset === 'raw' ? 'secondary' : 'ghost'}
+                  variant="ghost"
                   size="sm"
-                  className="h-6 text-[11px] font-medium px-2.5 rounded-sm"
+                  className={cn(pillClass, preset === 'raw' && pillActiveClass)}
                   onClick={() => setPreset('raw')}
                   disabled={isEditing}
                   aria-pressed={preset === 'raw'}
@@ -462,11 +472,11 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
                   Raw
                 </Button>
               </div>
-              <div className="inline-flex items-center rounded-md border border-border bg-background p-0.5 mr-1">
+              <div className="inline-flex items-center rounded-md border border-border bg-muted/40 p-0.5 mr-1">
                 <Button
-                  variant={mode === 'yaml' ? 'secondary' : 'ghost'}
+                  variant="ghost"
                   size="sm"
-                  className="h-6 text-[11px] font-medium px-2.5 rounded-sm"
+                  className={cn(pillClass, mode === 'yaml' && pillActiveClass)}
                   onClick={() => setMode('yaml')}
                   disabled={isEditing}
                   aria-pressed={mode === 'yaml'}
@@ -474,9 +484,9 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
                   YAML
                 </Button>
                 <Button
-                  variant={mode === 'json' ? 'secondary' : 'ghost'}
+                  variant="ghost"
                   size="sm"
-                  className="h-6 text-[11px] font-medium px-2.5 rounded-sm"
+                  className={cn(pillClass, mode === 'json' && pillActiveClass)}
                   onClick={() => setMode('json')}
                   disabled={isEditing}
                   aria-pressed={mode === 'json'}

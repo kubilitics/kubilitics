@@ -38,8 +38,8 @@ vi.mock('./YamlCopyMenu', async (importOriginal) => {
 interface FakeEditorCalls {
   foldAllCalled: number;
   unfoldAllCalled: number;
-  foldSelectedCalled: number;
-  lastSelection?: { startLine: number; endLine: number };
+  /** Most recent `editor.fold` trigger — what line range was requested to fold. */
+  lastFoldSelectionLines?: number[];
   cursorListeners: Array<(e: { position: { lineNumber: number } }) => void>;
 }
 
@@ -51,14 +51,13 @@ function createFakeEditor(calls: FakeEditorCalls) {
       run: () => {
         if (id === 'editor.foldAll') calls.foldAllCalled++;
         else if (id === 'editor.unfoldAll') calls.unfoldAllCalled++;
-        else if (id === 'editor.foldSelected') calls.foldSelectedCalled++;
         return Promise.resolve();
       },
     }),
-    setSelection: (range: { startLineNumber?: number; endLineNumber?: number } | unknown) => {
-      const r = range as { startLineNumber?: number; endLineNumber?: number };
-      if (r.startLineNumber !== undefined && r.endLineNumber !== undefined) {
-        calls.lastSelection = { startLine: r.startLineNumber, endLine: r.endLineNumber };
+    trigger: (_source: string, handlerId: string, payload: unknown) => {
+      if (handlerId === 'editor.fold') {
+        const p = payload as { selectionLines?: number[] } | undefined;
+        calls.lastFoldSelectionLines = p?.selectionLines;
       }
     },
     onDidChangeCursorPosition: (listener: (e: { position: { lineNumber: number } }) => void) => {
@@ -147,7 +146,7 @@ describe('YamlViewer — Clean/Raw filter', () => {
     fakeEditorCalls = {
       foldAllCalled: 0,
       unfoldAllCalled: 0,
-      foldSelectedCalled: 0,
+      
       cursorListeners: [],
     };
   });
@@ -277,7 +276,7 @@ describe('YamlViewer — YamlCopyMenu integration', () => {
     fakeEditorCalls = {
       foldAllCalled: 0,
       unfoldAllCalled: 0,
-      foldSelectedCalled: 0,
+      
       cursorListeners: [],
     };
   });
@@ -354,7 +353,7 @@ describe('YamlViewer — fold menu', () => {
     fakeEditorCalls = {
       foldAllCalled: 0,
       unfoldAllCalled: 0,
-      foldSelectedCalled: 0,
+      
       cursorListeners: [],
     };
   });
@@ -382,8 +381,8 @@ describe('YamlViewer — fold menu', () => {
     await user.click(screen.getByRole('button', { name: /^raw$/i }));
     await user.click(screen.getByRole('button', { name: /fold menu/i }));
     await user.click(screen.getByRole('menuitem', { name: /fold status/i }));
-    expect(fakeEditorCalls.lastSelection?.startLine).toBeGreaterThan(0);
-    expect(fakeEditorCalls.foldSelectedCalled).toBe(1);
+    expect(fakeEditorCalls.lastFoldSelectionLines).toBeDefined();
+    expect(fakeEditorCalls.lastFoldSelectionLines![0]).toBeGreaterThan(0);
   });
 
   it('Fold managedFields item is disabled in Clean preset', async () => {
@@ -402,7 +401,7 @@ describe('YamlViewer — breadcrumb', () => {
     fakeEditorCalls = {
       foldAllCalled: 0,
       unfoldAllCalled: 0,
-      foldSelectedCalled: 0,
+      
       cursorListeners: [],
     };
   });
@@ -432,7 +431,7 @@ describe('YamlViewer — large-resource guard', () => {
     fakeEditorCalls = {
       foldAllCalled: 0,
       unfoldAllCalled: 0,
-      foldSelectedCalled: 0,
+      
       cursorListeners: [],
     };
   });
