@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -143,12 +145,32 @@ func (s *Syncer) readContexts() (map[string]struct{}, error) {
 
 func partition(persisted []*models.Cluster, contextSet map[string]struct{}) (eligible []*models.Cluster, orphans []*models.Cluster) {
 	for _, c := range persisted {
-		if c.Source != "kubeconfig" {
+		// Kubeconfig-sourced clusters: orphan when their context no longer
+		// exists in any watched kubeconfig file. Unchanged from prior behavior.
+		if c.Source == "kubeconfig" {
+			eligible = append(eligible, c)
+			if _, ok := contextSet[c.Context]; !ok {
+				orphans = append(orphans, c)
+			}
 			continue
 		}
-		eligible = append(eligible, c)
-		if _, ok := contextSet[c.Context]; !ok {
+		// Non-kubeconfig sources (upload, etc.): orphan when the stored
+		// kubeconfig file on disk is missing. This closes the gap where
+		// upload-sourced rows were permanently sticky even after their
+		// backing file was deleted, which fed the cluster-identity bug
+		// in ReconnectCluster (see cluster_service.go).
+		if c.KubeconfigPath == "" {
+			eligible = append(eligible, c)
 			orphans = append(orphans, c)
+			continue
+		}
+		if _, err := os.Stat(c.KubeconfigPath); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				eligible = append(eligible, c)
+				orphans = append(orphans, c)
+			}
+			// Transient I/O error (permission, network mount unreachable) →
+			// leave alone, next sync will re-check.
 		}
 	}
 	return eligible, orphans
