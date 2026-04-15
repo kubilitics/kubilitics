@@ -223,7 +223,7 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
 
   const isValid = errors.length === 0;
   const hasChanges = editedYaml !== yaml;
-  const lineCount = (isEditing ? editedYaml : yaml).split('\n').length;
+  const lineCount = (isEditing ? editedYaml : displayYaml).split('\n').length;
 
   return (
     <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-[var(--shadow-1)]">
@@ -337,7 +337,7 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleDownload}>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleDownload} aria-label="Download YAML">
                     <Download className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
