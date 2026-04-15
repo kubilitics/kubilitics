@@ -242,7 +242,7 @@ describe('GenericResourceDetail', () => {
     expect(screen.getByTestId('resource-type')).toHaveTextContent('ConfigMap');
   });
 
-  it('renders standard tabs (events, traces, yaml, compare, topology, actions)', () => {
+  it('renders standard tabs (events, traces, yaml, compare, topology, blast-radius, actions)', () => {
     mockResource = {
       metadata: { name: 'my-config', namespace: 'default' },
     };
@@ -254,6 +254,7 @@ describe('GenericResourceDetail', () => {
     expect(screen.getByTestId('tab-yaml')).toBeInTheDocument();
     expect(screen.getByTestId('tab-compare')).toBeInTheDocument();
     expect(screen.getByTestId('tab-topology')).toBeInTheDocument();
+    expect(screen.getByTestId('tab-blast-radius')).toBeInTheDocument();
     expect(screen.getByTestId('tab-actions')).toBeInTheDocument();
   });
 
