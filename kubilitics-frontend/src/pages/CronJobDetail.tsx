@@ -1,5 +1,8 @@
 import { useState, useCallback, useMemo } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { diagnoseWorkload } from '@/lib/diagnose';
+import type { DiagnoseAction } from '@/lib/diagnose/types';
+import { DiagnosePanel } from '@/components/diagnose/DiagnosePanel';
 import {
   Clock,
   Play,
@@ -179,13 +182,27 @@ function getNextRunTimes(schedule: string, count: number): Date[] {
 
 function OverviewTab({ resource: cronJob, age }: ResourceContext<CronJobResource>) {
   const navigate = useNavigate();
+  const [, setSearchParams] = useSearchParams();
   const isSuspended = cronJob.spec?.suspend || false;
   const containers: ContainerInfo[] = (cronJob.spec?.jobTemplate?.spec?.template?.spec?.containers || []).map(c => ({
     name: c.name, image: c.image, ready: true, restartCount: 0, state: 'running', ports: [], resources: c.resources || {},
   }));
 
+  const { childJobsSorted } = useChildJobs(cronJob.metadata?.namespace, cronJob.metadata?.name);
+
+  const diagnosis = useMemo(
+    () => diagnoseWorkload(cronJob as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedJobs: childJobsSorted }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cronJob?.metadata?.uid, cronJob?.metadata?.resourceVersion, childJobsSorted],
+  );
+
+  const handleDiagnoseAction = (action: DiagnoseAction) => {
+    if (action.type === 'jump_to_tab') setSearchParams({ tab: action.tab });
+  };
+
   return (
     <div className="space-y-6">
+      <DiagnosePanel diagnosis={diagnosis} resource={cronJob} onAction={handleDiagnoseAction} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <SectionCard icon={Workflow} title="CronJob Configuration" tooltip={<p className="text-xs text-muted-foreground">Schedule and execution settings</p>}>
           <div className="grid grid-cols-2 gap-x-8 gap-y-3">

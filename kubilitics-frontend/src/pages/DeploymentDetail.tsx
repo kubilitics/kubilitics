@@ -1,5 +1,8 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { diagnoseWorkload } from '@/lib/diagnose';
+import type { DiagnoseAction } from '@/lib/diagnose/types';
+import { DiagnosePanel } from '@/components/diagnose/DiagnosePanel';
 import {
   Container,
   Clock,
@@ -118,14 +121,39 @@ interface VpaListItem extends KubernetesResource {
 // ---------------------------------------------------------------------------
 
 function OverviewTab({ resource: deployment }: ResourceContext<DeploymentResource>) {
+  const { namespace } = useParams();
+  const [, setSearchParams] = useSearchParams();
   const desired = deployment.spec?.replicas || 0;
   const ready = deployment.status?.readyReplicas || 0;
   const updated = deployment.status?.updatedReplicas || 0;
   const available = deployment.status?.availableReplicas || 0;
   const conditions = deployment.status?.conditions || [];
 
+  const matchLabels = deployment.spec?.selector?.matchLabels ?? {};
+  const labelSelector = Object.entries(matchLabels).map(([k, v]) => `${k}=${v}`).join(',');
+  const { data: childPodsList } = useK8sResourceList<KubernetesResource>(
+    'pods',
+    namespace ?? undefined,
+    { enabled: !!namespace && !!labelSelector, staleTime: 30000 },
+  );
+  const childPods = (childPodsList?.items ?? []).filter((pod) => {
+    const podLabels = pod.metadata?.labels ?? {};
+    return Object.entries(matchLabels).every(([k, v]) => podLabels[k] === v);
+  });
+
+  const diagnosis = useMemo(
+    () => diagnoseWorkload(deployment as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: childPods }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deployment?.metadata?.uid, deployment?.metadata?.resourceVersion, childPods],
+  );
+
+  const handleDiagnoseAction = (action: DiagnoseAction) => {
+    if (action.type === 'jump_to_tab') setSearchParams({ tab: action.tab });
+  };
+
   return (
     <div className="space-y-6">
+      <DiagnosePanel diagnosis={diagnosis} resource={deployment} onAction={handleDiagnoseAction} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <SectionCard icon={Info} title="Deployment Information" tooltip={<p className="text-xs text-muted-foreground">Configuration and status details</p>}>
           <div className="grid grid-cols-2 gap-x-8 gap-y-3">

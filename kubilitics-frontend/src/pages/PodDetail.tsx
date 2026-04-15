@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
@@ -59,6 +59,9 @@ import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useTrackRecentResource } from '@/hooks/useTrackRecentResource';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { cn } from '@/lib/utils';
+import { diagnoseWorkload } from '@/lib/diagnose';
+import type { DiagnoseAction } from '@/lib/diagnose/types';
+import { DiagnosePanel } from '@/components/diagnose/DiagnosePanel';
 
 /**
  * TerminalAndFiles — two centered toggle buttons inside the Terminal tab.
@@ -223,6 +226,257 @@ interface PodResource extends KubernetesResource {
 }
 
 // ---------------------------------------------------------------------------
+// Overview tab component (extracted so hooks like useMemo can be used)
+// ---------------------------------------------------------------------------
+
+function PodOverviewTab({ resource: pod, onAction }: { resource: PodResource; onAction?: (action: DiagnoseAction) => void }) {
+  const navigate = useNavigate();
+  const { namespace } = useParams();
+
+  const diagnosis = useMemo(
+    () => diagnoseWorkload(pod as unknown as Parameters<typeof diagnoseWorkload>[0], { events: [] }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pod?.metadata?.uid, pod?.metadata?.resourceVersion],
+  );
+
+  const conditions = pod.status?.conditions || [];
+  const ownerRef = pod.metadata?.ownerReferences?.[0];
+  const ownerKindToPath: Record<string, string> = {
+    ReplicaSet: 'replicasets', Deployment: 'deployments', StatefulSet: 'statefulsets',
+    DaemonSet: 'daemonsets', Job: 'jobs', CronJob: 'cronjobs',
+  };
+  const ownerPath = ownerRef ? ownerKindToPath[ownerRef.kind] : null;
+
+  const podIPsList = (pod.status?.podIPs?.map((p) => p.ip).filter(Boolean) as string[]) ?? (pod.status?.podIP ? [pod.status.podIP] : []);
+  const hostIPsList = pod.status?.hostIP ? [pod.status.hostIP] : [];
+
+  const volumes = (pod.spec?.volumes || []).map((v) => {
+    const kind = v.configMap ? 'ConfigMap' : v.secret ? 'Secret' : v.persistentVolumeClaim ? 'PVC' : v.emptyDir ? 'EmptyDir' : v.projected ? 'Projected' : 'Other';
+    const source = v.configMap?.name || v.secret?.secretName || v.persistentVolumeClaim?.claimName || 'N/A';
+    const projectedSources = v.projected?.sources?.map((s) => {
+      if (s.serviceAccountToken) return 'serviceAccountToken';
+      if (s.configMap) return `configMap:${s.configMap.name}`;
+      if (s.downwardAPI) return 'downwardAPI';
+      return 'unknown';
+    });
+    return {
+      name: v.name, kind, source,
+      defaultMode: v.projected?.defaultMode,
+      projectedSources: projectedSources?.join(', ') || undefined,
+    };
+  });
+
+  return (
+    <div className="space-y-6">
+      <DiagnosePanel diagnosis={diagnosis} resource={pod} onAction={onAction} />
+      {/* Pod overview */}
+      <SectionCard
+        icon={LayoutDashboard}
+        title="Pod overview"
+        tooltip={
+          <>
+            <p className="font-medium">Pod overview</p>
+            <p className="mt-1 text-muted-foreground text-xs">Scheduling, networking, and ownership</p>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+            {ownerRef && ownerPath && (
+              <DetailRow
+                label="Controlled by"
+                value={
+                  <span className="flex items-center gap-1.5">
+                    <Button
+                      variant="link"
+                      className="h-auto p-0 font-mono text-left"
+                      onClick={() => navigate(`/${ownerPath}/${ownerRef.name}${namespace ? `?namespace=${namespace}` : ''}`)}
+                    >
+                      {ownerRef.kind}: {ownerRef.name}
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(ownerRef.name); toast.success('Copied'); }}>
+                      <Copy className="h-3 w-3" />
+                    </Button>
+                  </span>
+                }
+              />
+            )}
+            <DetailRow
+              label="Node"
+              value={
+                pod.spec?.nodeName ? (
+                  <span className="flex items-center gap-1.5">
+                    <Button variant="link" className="h-auto p-0 font-mono" onClick={() => navigate(`/nodes/${pod.spec!.nodeName}`)}>
+                      {pod.spec.nodeName}
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(pod.spec!.nodeName!); toast.success('Copied'); }}>
+                      <Copy className="h-3 w-3" />
+                    </Button>
+                  </span>
+                ) : '-'
+              }
+            />
+            <DetailRow
+              label="Service Account"
+              value={
+                <span className="flex items-center gap-1.5 font-mono">
+                  {pod.spec?.serviceAccountName || 'default'}
+                  <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(pod.spec?.serviceAccountName || 'default'); toast.success('Copied'); }}>
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </span>
+              }
+            />
+            <div className="space-y-1">
+              <DetailRow
+                label="Pod IP(s)"
+                value={
+                  podIPsList.length > 0 ? (
+                    <span className="flex items-center gap-1.5 flex-wrap">
+                      {podIPsList.map((ip) => (
+                        <span key={ip} className="flex items-center gap-1 font-mono">
+                          {ip}
+                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(ip); toast.success('Copied'); }}>
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </span>
+                      ))}
+                    </span>
+                  ) : '-'
+                }
+              />
+            </div>
+            <div className="space-y-1">
+              <DetailRow
+                label="Host IP(s)"
+                value={
+                  hostIPsList.length > 0 ? (
+                    <span className="flex items-center gap-1.5 flex-wrap">
+                      {hostIPsList.map((ip) => (
+                        <span key={ip} className="flex items-center gap-1 font-mono">
+                          {ip}
+                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(ip); toast.success('Copied'); }}>
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </span>
+                      ))}
+                    </span>
+                  ) : '-'
+                }
+              />
+            </div>
+            <DetailRow label="Priority" value={pod.spec?.priority ?? 0} tooltip={TOOLTIP_PRIORITY} />
+          </div>
+        </div>
+      </SectionCard>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Runtime Configuration */}
+        <SectionCard icon={Info} title="Runtime Configuration" tooltip={<p className="text-xs text-muted-foreground">Restart policy, DNS, and termination settings</p>}>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <DetailRow label="Restart Policy" value={<Badge variant="outline">{pod.spec?.restartPolicy || 'Always'}</Badge>} tooltip={TOOLTIP_RESTART_POLICY} />
+            <DetailRow label="DNS Policy" value={<Badge variant="outline">{pod.spec?.dnsPolicy || 'ClusterFirst'}</Badge>} tooltip={TOOLTIP_DNS_POLICY} />
+            <DetailRow label="Termination Grace" value={`${pod.spec?.terminationGracePeriodSeconds ?? 30}s`} tooltip={TOOLTIP_TERMINATION_GRACE} />
+          </div>
+        </SectionCard>
+
+        {/* Conditions */}
+        <SectionCard icon={Activity} title="Conditions" tooltip={<><p className="font-medium">Conditions</p><p className="mt-1 text-muted-foreground text-xs">Current pod condition status</p></>}>
+          <div className="space-y-3">
+            {conditions.map((condition) => {
+              const isTrue = condition.status === 'True';
+              const transitionExact = new Date(condition.lastTransitionTime).toLocaleString();
+              const transitionRelative = calculateAge(condition.lastTransitionTime);
+              const tooltipParts = [transitionExact];
+              if (condition.reason) tooltipParts.push(`Reason: ${condition.reason}`);
+              if (condition.message) tooltipParts.push(condition.message);
+              const tooltipContent = tooltipParts.join('\n');
+              return (
+                <div key={condition.type} className="flex items-center justify-between gap-4 p-3 rounded-lg bg-muted/50 flex-wrap">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <Badge variant="secondary" className="font-medium text-xs bg-background">{condition.type}</Badge>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        isTrue && 'bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30',
+                        !isTrue && 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30'
+                      )}
+                    >
+                      {condition.status}
+                    </Badge>
+                    {condition.message && <p className="text-xs text-muted-foreground">{condition.message}</p>}
+                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-xs text-muted-foreground cursor-help underline decoration-dotted decoration-muted-foreground underline-offset-2 shrink-0">{transitionRelative}</span>
+                    </TooltipTrigger>
+                    <TooltipContent side="left" className="max-w-xs whitespace-pre-line">{tooltipContent}</TooltipContent>
+                  </Tooltip>
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+      </div>
+
+      {/* Labels */}
+      <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <LabelList labels={pod.metadata?.labels ?? {}} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Volumes */}
+        <SectionCard icon={HardDrive} title="Volumes" tooltip={<p className="text-xs text-muted-foreground">Volume definitions for this pod</p>}>
+          {volumes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No volumes configured</p>
+          ) : (
+            <div className="space-y-3">
+              {volumes.map((volume) => (
+                <div key={volume.name} className="p-3 rounded-lg bg-muted/50 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <p className="font-medium text-sm">{volume.name}</p>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Badge variant="secondary" className="text-xs cursor-help">{volume.kind}</Badge>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        {TOOLTIP_VOLUME_KIND[volume.kind] ?? volume.kind}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Source: <span className="font-mono">{volume.source}</span></p>
+                  {volume.projectedSources && <p className="text-xs text-muted-foreground">Sources: <span className="font-mono">{volume.projectedSources}</span></p>}
+                  {volume.defaultMode != null && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className="text-xs text-muted-foreground cursor-help">defaultMode: <span className="font-mono">{volume.defaultMode}</span></p>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">{TOOLTIP_VOLUME_DEFAULT_MODE}</TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      </div>
+
+      {/* Tolerations */}
+      {pod.spec?.tolerations && pod.spec.tolerations.length > 0 && (
+        <TolerationsList tolerations={pod.spec.tolerations} />
+      )}
+
+      {/* Annotations */}
+      <div className="lg:col-span-2">
+        <AnnotationList annotations={pod.metadata?.annotations ?? {}} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -321,243 +575,14 @@ export default function PodDetail() {
       id: 'overview',
       label: 'Overview',
       icon: LayoutDashboard,
-      render: (ctx) => {
-        const pod = ctx.resource;
-        const conditions = pod.status?.conditions || [];
-        const ownerRef = pod.metadata?.ownerReferences?.[0];
-        const ownerKindToPath: Record<string, string> = {
-          ReplicaSet: 'replicasets', Deployment: 'deployments', StatefulSet: 'statefulsets',
-          DaemonSet: 'daemonsets', Job: 'jobs', CronJob: 'cronjobs',
-        };
-        const ownerPath = ownerRef ? ownerKindToPath[ownerRef.kind] : null;
-
-        const podIPsList = (pod.status?.podIPs?.map((p) => p.ip).filter(Boolean) as string[]) ?? (pod.status?.podIP ? [pod.status.podIP] : []);
-        const hostIPsList = pod.status?.hostIP ? [pod.status.hostIP] : [];
-
-        const volumes = (pod.spec?.volumes || []).map((v) => {
-          const kind = v.configMap ? 'ConfigMap' : v.secret ? 'Secret' : v.persistentVolumeClaim ? 'PVC' : v.emptyDir ? 'EmptyDir' : v.projected ? 'Projected' : 'Other';
-          const source = v.configMap?.name || v.secret?.secretName || v.persistentVolumeClaim?.claimName || 'N/A';
-          const projectedSources = v.projected?.sources?.map((s) => {
-            if (s.serviceAccountToken) return 'serviceAccountToken';
-            if (s.configMap) return `configMap:${s.configMap.name}`;
-            if (s.downwardAPI) return 'downwardAPI';
-            return 'unknown';
-          });
-          return {
-            name: v.name, kind, source,
-            defaultMode: v.projected?.defaultMode,
-            projectedSources: projectedSources?.join(', ') || undefined,
-          };
-        });
-
-        return (
-          <div className="space-y-6">
-            {/* Pod overview */}
-            <SectionCard
-              icon={LayoutDashboard}
-              title="Pod overview"
-              tooltip={
-                <>
-                  <p className="font-medium">Pod overview</p>
-                  <p className="mt-1 text-muted-foreground text-xs">Scheduling, networking, and ownership</p>
-                </>
-              }
-            >
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-                  {ownerRef && ownerPath && (
-                    <DetailRow
-                      label="Controlled by"
-                      value={
-                        <span className="flex items-center gap-1.5">
-                          <Button
-                            variant="link"
-                            className="h-auto p-0 font-mono text-left"
-                            onClick={() => navigate(`/${ownerPath}/${ownerRef.name}${namespace ? `?namespace=${namespace}` : ''}`)}
-                          >
-                            {ownerRef.kind}: {ownerRef.name}
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(ownerRef.name); toast.success('Copied'); }}>
-                            <Copy className="h-3 w-3" />
-                          </Button>
-                        </span>
-                      }
-                    />
-                  )}
-                  <DetailRow
-                    label="Node"
-                    value={
-                      pod.spec?.nodeName ? (
-                        <span className="flex items-center gap-1.5">
-                          <Button variant="link" className="h-auto p-0 font-mono" onClick={() => navigate(`/nodes/${pod.spec!.nodeName}`)}>
-                            {pod.spec.nodeName}
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(pod.spec!.nodeName!); toast.success('Copied'); }}>
-                            <Copy className="h-3 w-3" />
-                          </Button>
-                        </span>
-                      ) : '-'
-                    }
-                  />
-                  <DetailRow
-                    label="Service Account"
-                    value={
-                      <span className="flex items-center gap-1.5 font-mono">
-                        {pod.spec?.serviceAccountName || 'default'}
-                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(pod.spec?.serviceAccountName || 'default'); toast.success('Copied'); }}>
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </span>
-                    }
-                  />
-                  <div className="space-y-1">
-                    <DetailRow
-                      label="Pod IP(s)"
-                      value={
-                        podIPsList.length > 0 ? (
-                          <span className="flex items-center gap-1.5 flex-wrap">
-                            {podIPsList.map((ip) => (
-                              <span key={ip} className="flex items-center gap-1 font-mono">
-                                {ip}
-                                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(ip); toast.success('Copied'); }}>
-                                  <Copy className="h-3 w-3" />
-                                </Button>
-                              </span>
-                            ))}
-                          </span>
-                        ) : '-'
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <DetailRow
-                      label="Host IP(s)"
-                      value={
-                        hostIPsList.length > 0 ? (
-                          <span className="flex items-center gap-1.5 flex-wrap">
-                            {hostIPsList.map((ip) => (
-                              <span key={ip} className="flex items-center gap-1 font-mono">
-                                {ip}
-                                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(ip); toast.success('Copied'); }}>
-                                  <Copy className="h-3 w-3" />
-                                </Button>
-                              </span>
-                            ))}
-                          </span>
-                        ) : '-'
-                      }
-                    />
-                  </div>
-                  <DetailRow label="Priority" value={pod.spec?.priority ?? 0} tooltip={TOOLTIP_PRIORITY} />
-                </div>
-              </div>
-            </SectionCard>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Runtime Configuration */}
-              <SectionCard icon={Info} title="Runtime Configuration" tooltip={<p className="text-xs text-muted-foreground">Restart policy, DNS, and termination settings</p>}>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <DetailRow label="Restart Policy" value={<Badge variant="outline">{pod.spec?.restartPolicy || 'Always'}</Badge>} tooltip={TOOLTIP_RESTART_POLICY} />
-                  <DetailRow label="DNS Policy" value={<Badge variant="outline">{pod.spec?.dnsPolicy || 'ClusterFirst'}</Badge>} tooltip={TOOLTIP_DNS_POLICY} />
-                  <DetailRow label="Termination Grace" value={`${pod.spec?.terminationGracePeriodSeconds ?? 30}s`} tooltip={TOOLTIP_TERMINATION_GRACE} />
-                </div>
-              </SectionCard>
-
-              {/* Conditions */}
-              <SectionCard icon={Activity} title="Conditions" tooltip={<><p className="font-medium">Conditions</p><p className="mt-1 text-muted-foreground text-xs">Current pod condition status</p></>}>
-                <div className="space-y-3">
-                  {conditions.map((condition) => {
-                    const isTrue = condition.status === 'True';
-                    const transitionExact = new Date(condition.lastTransitionTime).toLocaleString();
-                    const transitionRelative = calculateAge(condition.lastTransitionTime);
-                    const tooltipParts = [transitionExact];
-                    if (condition.reason) tooltipParts.push(`Reason: ${condition.reason}`);
-                    if (condition.message) tooltipParts.push(condition.message);
-                    const tooltipContent = tooltipParts.join('\n');
-                    return (
-                      <div key={condition.type} className="flex items-center justify-between gap-4 p-3 rounded-lg bg-muted/50 flex-wrap">
-                        <div className="flex items-center gap-3 flex-wrap">
-                          <Badge variant="secondary" className="font-medium text-xs bg-background">{condition.type}</Badge>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              isTrue && 'bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30',
-                              !isTrue && 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30'
-                            )}
-                          >
-                            {condition.status}
-                          </Badge>
-                          {condition.message && <p className="text-xs text-muted-foreground">{condition.message}</p>}
-                        </div>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="text-xs text-muted-foreground cursor-help underline decoration-dotted decoration-muted-foreground underline-offset-2 shrink-0">{transitionRelative}</span>
-                          </TooltipTrigger>
-                          <TooltipContent side="left" className="max-w-xs whitespace-pre-line">{tooltipContent}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    );
-                  })}
-                </div>
-              </SectionCard>
-            </div>
-
-            {/* Labels */}
-            <div className="lg:col-span-2">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <LabelList labels={pod.metadata?.labels ?? {}} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Volumes */}
-              <SectionCard icon={HardDrive} title="Volumes" tooltip={<p className="text-xs text-muted-foreground">Volume definitions for this pod</p>}>
-                {volumes.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No volumes configured</p>
-                ) : (
-                  <div className="space-y-3">
-                    {volumes.map((volume) => (
-                      <div key={volume.name} className="p-3 rounded-lg bg-muted/50 space-y-2">
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <p className="font-medium text-sm">{volume.name}</p>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Badge variant="secondary" className="text-xs cursor-help">{volume.kind}</Badge>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-xs">
-                              {TOOLTIP_VOLUME_KIND[volume.kind] ?? volume.kind}
-                            </TooltipContent>
-                          </Tooltip>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Source: <span className="font-mono">{volume.source}</span></p>
-                        {volume.projectedSources && <p className="text-xs text-muted-foreground">Sources: <span className="font-mono">{volume.projectedSources}</span></p>}
-                        {volume.defaultMode != null && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <p className="text-xs text-muted-foreground cursor-help">defaultMode: <span className="font-mono">{volume.defaultMode}</span></p>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-xs">{TOOLTIP_VOLUME_DEFAULT_MODE}</TooltipContent>
-                          </Tooltip>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </SectionCard>
-            </div>
-
-            {/* Tolerations */}
-            {pod.spec?.tolerations && pod.spec.tolerations.length > 0 && (
-              <TolerationsList tolerations={pod.spec.tolerations} />
-            )}
-
-            {/* Annotations */}
-            <div className="lg:col-span-2">
-              <AnnotationList annotations={pod.metadata?.annotations ?? {}} />
-            </div>
-          </div>
-        );
-      },
+      render: (ctx) => (
+        <PodOverviewTab
+          resource={ctx.resource as PodResource}
+          onAction={(action) => {
+            if (action.type === 'jump_to_tab') switchToTab(action.tab);
+          }}
+        />
+      ),
     },
     {
       id: 'containers',
