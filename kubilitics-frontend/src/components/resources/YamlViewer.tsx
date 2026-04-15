@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Copy, Download, Edit3, CheckCircle2, AlertCircle, AlertTriangle, RotateCcw, RefreshCw, ShieldAlert, Save, X, FileCode, Search, Loader2 } from 'lucide-react';
+import { Download, Edit3, CheckCircle2, AlertCircle, AlertTriangle, RotateCcw, RefreshCw, ShieldAlert, Save, X, FileCode, Search, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -11,6 +11,7 @@ import { toast } from '@/components/ui/sonner';
 import yamlParser from 'js-yaml';
 import { filterYaml, toJson, type YamlPreset } from '@/lib/yaml/filterYaml';
 import { isConflictError } from '@/lib/conflictDetection';
+import { YamlCopyMenu } from './YamlCopyMenu';
 
 export interface YamlValidationError {
   line: number;
@@ -69,7 +70,6 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
   const [errors, setErrors] = useState<YamlValidationError[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
-  const [copied, setCopied] = useState(false);
   const [conflictDetected, setConflictDetected] = useState(false);
   const [preset, setPreset] = useState<YamlPreset>('clean');
   const previousPresetRef = useRef<YamlPreset>('clean');
@@ -96,6 +96,42 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
     }
   }, [preset, mode, resource, yaml]);
 
+  const cleanYaml = useMemo(() => {
+    if (!resource) return yaml;
+    try {
+      return yamlParser.dump(filterYaml(resource, 'clean'), {
+        indent: 2, noArrayIndent: false, skipInvalid: true, flowLevel: -1, noRefs: true, lineWidth: -1,
+      });
+    } catch {
+      return yaml;
+    }
+  }, [resource, yaml]);
+
+  const applyReadyYaml = useMemo(() => {
+    if (!resource) return yaml;
+    try {
+      return yamlParser.dump(filterYaml(resource, 'apply-ready'), {
+        indent: 2, noArrayIndent: false, skipInvalid: true, flowLevel: -1, noRefs: true, lineWidth: -1,
+      });
+    } catch {
+      return yaml;
+    }
+  }, [resource, yaml]);
+
+  const jsonText = useMemo(() => {
+    if (!resource) return yaml;
+    try {
+      return toJson(filterYaml(resource, 'apply-ready'), { indent: 2 });
+    } catch {
+      return yaml;
+    }
+  }, [resource, yaml]);
+
+  const kubectlApplyCommand = useMemo(
+    () => `cat <<'EOF' | kubectl apply -f -\n${applyReadyYaml.trimEnd()}\nEOF`,
+    [applyReadyYaml],
+  );
+
   // Auto-enter edit mode when ?edit=1 is in URL (triggered by header Edit button)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -115,12 +151,10 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
     }
   }, [yaml, isEditing]);
 
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(isEditing ? editedYaml : displayYaml);
-    setCopied(true);
-    toast.success('YAML copied to clipboard');
-    setTimeout(() => setCopied(false), 2000);
-  }, [isEditing, editedYaml, displayYaml]);
+  const handleMenuCopy = useCallback((label: string, text: string) => {
+    void window.navigator.clipboard?.writeText(text);
+    toast.success(`Copied ${label}`);
+  }, []);
 
   const handleDownload = useCallback(() => {
     const content = isEditing ? editedYaml : displayYaml;
@@ -371,14 +405,14 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
             </>
           ) : (
             <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCopy} aria-label="Copy YAML">
-                    {copied ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{copied ? 'Copied!' : 'Copy YAML'}</TooltipContent>
-              </Tooltip>
+              <YamlCopyMenu
+                cleanYaml={cleanYaml}
+                applyReadyYaml={applyReadyYaml}
+                rawYaml={yaml}
+                jsonText={jsonText}
+                kubectlApplyCommand={kubectlApplyCommand}
+                onCopy={handleMenuCopy}
+              />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleDownload} aria-label="Download YAML">
