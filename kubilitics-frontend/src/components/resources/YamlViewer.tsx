@@ -22,6 +22,66 @@ import { YamlCopyMenu } from './YamlCopyMenu';
 import { findFoldRange } from './yamlFoldRanges';
 import type { editor as monacoEditor } from 'monaco-editor';
 
+/**
+ * Walk backward through YAML lines from the given 1-indexed cursor line to
+ * compute a dot-path string (e.g. "spec.containers[0].env[3]"). Uses indent
+ * tracking — every ancestor is the last key at a strictly smaller indent.
+ * Returns "" when the cursor is at the document root or outside the file.
+ */
+function computeBreadcrumbPath(yaml: string, lineNumber: number): string {
+  if (!yaml || lineNumber < 1) return '';
+  const lines = yaml.split('\n');
+  if (lineNumber > lines.length) return '';
+
+  // Walk backward collecting ancestor keys by indent level.
+  // Stack contains { key, indent, arrayIdx? } from outermost to innermost.
+  const stack: Array<{ key: string; indent: number; arrayIdx?: number }> = [];
+  const cursorIdx = lineNumber - 1;
+  let lastSeenIndent = indentOfLine(lines[cursorIdx]);
+
+  for (let i = cursorIdx; i >= 0; i--) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    const ind = indentOfLine(line);
+    if (i !== cursorIdx && ind >= lastSeenIndent) continue;
+
+    const stripped = line.slice(ind);
+
+    // Array item marker: "- " at this indent. Compute index by counting
+    // sibling "- " lines above at the same indent, stopping if indent drops.
+    if (stripped.startsWith('- ')) {
+      let count = 0;
+      for (let j = i - 1; j >= 0; j--) {
+        const jLine = lines[j];
+        if (!jLine.trim()) continue;
+        const jInd = indentOfLine(jLine);
+        if (jInd < ind) break;
+        if (jInd === ind && jLine.slice(jInd).startsWith('- ')) count++;
+      }
+      if (stack.length > 0) stack[0].arrayIdx = count;
+      lastSeenIndent = ind;
+      continue;
+    }
+
+    // Key line: "<ident>: ..."
+    const keyMatch = stripped.match(/^([A-Za-z_][A-Za-z0-9_-]*):/);
+    if (keyMatch) {
+      stack.unshift({ key: keyMatch[1], indent: ind });
+      lastSeenIndent = ind;
+    }
+  }
+
+  return stack
+    .map((s) => (s.arrayIdx !== undefined ? `${s.key}[${s.arrayIdx}]` : s.key))
+    .join('.');
+}
+
+function indentOfLine(line: string): number {
+  let i = 0;
+  while (i < line.length && line[i] === ' ') i++;
+  return i;
+}
+
 export interface YamlValidationError {
   line: number;
   message: string;
@@ -85,6 +145,7 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
   const [mode, setMode] = useState<'yaml' | 'json'>('yaml');
   const previousModeRef = useRef<'yaml' | 'json'>('yaml');
   const editorInstanceRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
+  const [breadcrumbPath, setBreadcrumbPath] = useState('');
 
   const displayYaml = useMemo(() => {
     if (!resource) return yaml;
@@ -163,6 +224,15 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
     () => `cat <<'EOF' | kubectl apply -f -\n${applyReadyYaml.trimEnd()}\nEOF`,
     [applyReadyYaml],
   );
+
+  useEffect(() => {
+    const editor = editorInstanceRef.current;
+    if (!editor) return;
+    const disposable = editor.onDidChangeCursorPosition((evt) => {
+      setBreadcrumbPath(computeBreadcrumbPath(displayYaml, evt.position.lineNumber));
+    });
+    return () => disposable.dispose();
+  }, [displayYaml]);
 
   // Auto-enter edit mode when ?edit=1 is in URL (triggered by header Edit button)
   useEffect(() => {
@@ -518,6 +588,17 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
       {!isEditing && preset === 'raw' && resource && (
         <div className="px-4 py-1.5 text-[11px] text-muted-foreground bg-muted/20 border-b border-border">
           Showing full YAML including <code className="font-mono">managedFields</code>.
+        </div>
+      )}
+
+      {!isEditing && breadcrumbPath && resource && (
+        <div className="px-4 py-1 text-[11px] text-muted-foreground bg-slate-50 dark:bg-slate-900/50 border-b border-border flex items-center gap-1 font-mono overflow-x-auto">
+          {breadcrumbPath.split('.').map((seg, i, arr) => (
+            <span key={i} className="flex items-center gap-1 whitespace-nowrap">
+              <span>{seg}</span>
+              {i < arr.length - 1 && <span className="text-muted-foreground/40">›</span>}
+            </span>
+          ))}
         </div>
       )}
 
