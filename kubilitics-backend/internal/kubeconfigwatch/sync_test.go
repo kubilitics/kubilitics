@@ -144,8 +144,20 @@ func TestSync_RemovesOrphanedKubeconfigClusters(t *testing.T) {
 }
 
 func TestSync_PreservesUploadedClusters(t *testing.T) {
+	// Upload-sourced clusters with a PRESENT stored kubeconfig must never be
+	// removed by the watcher, even when the watched kubeconfigs list contains
+	// different contexts. Use a real temp file so the partition() file-exists
+	// check passes.
+	uploadDir := t.TempDir()
+	uploadPath := filepath.Join(uploadDir, "uploaded-ctx.yaml")
+	if err := os.WriteFile(uploadPath, []byte("apiVersion: v1\n"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	upload := uploadCluster("id-uploaded", "uploaded-ctx")
+	upload.KubeconfigPath = uploadPath
+
 	s, svc, _, _ := newSyncFixture(t,
-		[]*models.Cluster{uploadCluster("id-uploaded", "uploaded-ctx")},
+		[]*models.Cluster{upload},
 		[]string{"foo"},
 	)
 
@@ -425,4 +437,68 @@ func TestSync_SafetyCapAuditIncludesOrphanList(t *testing.T) {
 		t.Errorf("orphans_detected: got %q, want %q", d["orphans_detected"], "4")
 	}
 	_ = time.Now()
+}
+
+// ─── partition: upload-sourced orphan detection (v0.2.6 cluster-identity fix) ───
+
+func TestPartition_OrphansUploadSourcedClusterWithMissingFile(t *testing.T) {
+	t.Parallel()
+	missing := filepath.Join(t.TempDir(), "gone.yaml")
+	persisted := []*models.Cluster{
+		{ID: "u1", Context: "some-upload", Source: "upload", KubeconfigPath: missing},
+	}
+	eligible, orphans := partition(persisted, map[string]struct{}{})
+	if len(eligible) != 1 || eligible[0].ID != "u1" {
+		t.Errorf("upload-sourced with missing file should be eligible; got %+v", eligible)
+	}
+	if len(orphans) != 1 || orphans[0].ID != "u1" {
+		t.Errorf("upload-sourced with missing file should be orphaned; got %+v", orphans)
+	}
+}
+
+func TestPartition_KeepsUploadSourcedClusterWithPresentFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	present := filepath.Join(dir, "real.yaml")
+	if err := os.WriteFile(present, []byte("apiVersion: v1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	persisted := []*models.Cluster{
+		{ID: "u2", Context: "some-upload", Source: "upload", KubeconfigPath: present},
+	}
+	eligible, orphans := partition(persisted, map[string]struct{}{})
+	if len(eligible) != 0 {
+		t.Errorf("upload-sourced with present file should NOT be eligible; got %+v", eligible)
+	}
+	if len(orphans) != 0 {
+		t.Errorf("upload-sourced with present file should NOT be orphaned; got %+v", orphans)
+	}
+}
+
+func TestPartition_OrphansUploadSourcedClusterWithEmptyPath(t *testing.T) {
+	t.Parallel()
+	persisted := []*models.Cluster{
+		{ID: "u3", Context: "some-upload", Source: "upload", KubeconfigPath: ""},
+	}
+	eligible, orphans := partition(persisted, map[string]struct{}{})
+	if len(eligible) != 1 || len(orphans) != 1 || orphans[0].ID != "u3" {
+		t.Errorf("upload-sourced with empty path should be orphaned; got eligible=%+v orphans=%+v", eligible, orphans)
+	}
+}
+
+func TestPartition_KubeconfigSourcedBehaviorUnchanged(t *testing.T) {
+	t.Parallel()
+	// Regression safeguard: existing kubeconfig-sourced behavior must not change.
+	persisted := []*models.Cluster{
+		{ID: "k1", Context: "alive", Source: "kubeconfig", KubeconfigPath: "/irrelevant"},
+		{ID: "k2", Context: "orphan", Source: "kubeconfig", KubeconfigPath: "/irrelevant"},
+	}
+	ctxSet := map[string]struct{}{"alive": {}}
+	eligible, orphans := partition(persisted, ctxSet)
+	if len(eligible) != 2 {
+		t.Errorf("both kubeconfig-sourced should be eligible; got %+v", eligible)
+	}
+	if len(orphans) != 1 || orphans[0].ID != "k2" {
+		t.Errorf("only k2 should be orphaned; got %+v", orphans)
+	}
 }
