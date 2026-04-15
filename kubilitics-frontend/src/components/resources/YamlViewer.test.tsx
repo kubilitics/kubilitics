@@ -1,7 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { YamlViewer } from './YamlViewer';
+import type { YamlCopyMenuProps } from './YamlCopyMenu';
+
+// ── Module-level spy to capture what YamlViewer passes to YamlCopyMenu ────────
+// We wrap the real YamlCopyMenu so we can intercept onCopy calls and inspect
+// the pre-computed strings (cleanYaml, applyReadyYaml, rawYaml, jsonText,
+// kubectlApplyCommand) that YamlViewer computes before handing them down.
+// This avoids relying on navigator.clipboard (unreliable in vitest's vm context).
+
+// Holds the most-recent props passed to YamlCopyMenu by YamlViewer.
+let capturedMenuProps: YamlCopyMenuProps | null = null;
+// Spy called whenever YamlCopyMenu's onCopy fires.
+const copyMenuOnCopySpy = vi.fn<[string, string], void>();
+
+vi.mock('./YamlCopyMenu', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./YamlCopyMenu')>();
+  return {
+    ...actual,
+    YamlCopyMenu: (props: YamlCopyMenuProps) => {
+      capturedMenuProps = props;
+      const wrappedOnCopy = (label: string, text: string) => {
+        copyMenuOnCopySpy(label, text);
+        props.onCopy(label, text);
+      };
+      return <actual.YamlCopyMenu {...props} onCopy={wrappedOnCopy} />;
+    },
+  };
+});
 
 // Mock CodeEditor so tests don't need Monaco — it just renders its `value` prop
 // into a textarea. That's enough to assert what the user sees.
@@ -61,9 +89,8 @@ function renderViewer(props: Partial<Parameters<typeof YamlViewer>[0]> = {}) {
 
 describe('YamlViewer — Clean/Raw filter', () => {
   beforeEach(() => {
-    Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
-    });
+    capturedMenuProps = null;
+    copyMenuOnCopySpy.mockClear();
   });
 
   it('default render hides managedFields', () => {
@@ -90,11 +117,12 @@ describe('YamlViewer — Clean/Raw filter', () => {
     expect(editor.value).not.toContain('managedFields');
   });
 
-  it('Copy button copies the currently-displayed filtered YAML in Clean mode', () => {
+  it('Copy menu Clean item copies filtered YAML in Clean mode', async () => {
+    const user = userEvent.setup();
     renderViewer();
-    const copyButtons = screen.getAllByRole('button', { name: /copy yaml/i });
-    fireEvent.click(copyButtons[0]);
-    const written = (navigator.clipboard.writeText as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    await user.click(screen.getByRole('button', { name: /copy menu/i }));
+    await user.click(screen.getByRole('menuitem', { name: /copy as yaml \(clean\)/i }));
+    const written = copyMenuOnCopySpy.mock.calls[0][1];
     expect(written).not.toContain('managedFields');
     expect(written).toContain('name: nginx');
   });
@@ -180,5 +208,76 @@ describe('YamlViewer — Clean/Raw filter', () => {
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
     expect(screen.getByRole('button', { name: /apply-ready/i })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: /^json$/i })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('YamlViewer — YamlCopyMenu integration', () => {
+  beforeEach(() => {
+    capturedMenuProps = null;
+    copyMenuOnCopySpy.mockClear();
+  });
+
+  it('copy menu Clean item copies filtered YAML without managedFields', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+    await user.click(screen.getByRole('button', { name: /copy menu/i }));
+    await user.click(screen.getByRole('menuitem', { name: /copy as yaml \(clean\)/i }));
+    const written = copyMenuOnCopySpy.mock.calls[0][1];
+    expect(written).not.toContain('managedFields');
+    expect(written).toContain('name: nginx');
+  });
+
+  it('copy menu Apply-ready item copies stripped YAML', async () => {
+    const user = userEvent.setup();
+    renderViewer({
+      resource: {
+        ...podResource,
+        metadata: { ...podResource.metadata, uid: 'abc', resourceVersion: '42' },
+      },
+    });
+    await user.click(screen.getByRole('button', { name: /copy menu/i }));
+    await user.click(screen.getByRole('menuitem', { name: /copy as yaml \(apply-ready\)/i }));
+    const written = copyMenuOnCopySpy.mock.calls[0][1];
+    expect(written).not.toContain('status:');
+    expect(written).not.toContain('uid:');
+    expect(written).not.toContain('resourceVersion:');
+    expect(written).toContain('name: nginx');
+  });
+
+  it('copy menu Raw item copies unfiltered YAML with managedFields', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+    await user.click(screen.getByRole('button', { name: /copy menu/i }));
+    await user.click(screen.getByRole('menuitem', { name: /copy as yaml \(raw\)/i }));
+    const written = copyMenuOnCopySpy.mock.calls[0][1];
+    expect(written).toContain('managedFields');
+  });
+
+  it('copy menu JSON item copies valid apply-ready JSON', async () => {
+    const user = userEvent.setup();
+    renderViewer({
+      resource: {
+        ...podResource,
+        metadata: { ...podResource.metadata, uid: 'abc' },
+      },
+    });
+    await user.click(screen.getByRole('button', { name: /copy menu/i }));
+    await user.click(screen.getByRole('menuitem', { name: /copy as json/i }));
+    const written = copyMenuOnCopySpy.mock.calls[0][1];
+    const parsed = JSON.parse(written);
+    expect(parsed.kind).toBe('Pod');
+    expect(parsed.metadata).not.toHaveProperty('uid');
+    expect(parsed).not.toHaveProperty('status');
+  });
+
+  it('copy menu kubectl apply item copies heredoc command', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+    await user.click(screen.getByRole('button', { name: /copy menu/i }));
+    await user.click(screen.getByRole('menuitem', { name: /kubectl apply/i }));
+    const written = copyMenuOnCopySpy.mock.calls[0][1];
+    expect(written).toContain("cat <<'EOF' | kubectl apply -f -");
+    expect(written).toContain('EOF');
+    expect(written).toContain('name: nginx');
   });
 });
