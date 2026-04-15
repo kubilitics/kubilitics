@@ -11,8 +11,10 @@ import { renderHook } from '@testing-library/react';
 let mockIsConnected = false;
 let mockIsBackendConfigured = false;
 let mockCurrentClusterId: string | null = null;
+let mockActiveClusterId: string | null = null;
 let mockSummaryData: Record<string, number> | null = null;
 let mockK8sData: Record<string, unknown> = {};
+let summaryCalledWith: string | undefined = undefined;
 
 vi.mock('@/hooks/useConnectionStatus', () => ({
   useConnectionStatus: () => ({ isConnected: mockIsConnected }),
@@ -30,10 +32,17 @@ vi.mock('@/stores/backendConfigStore', () => ({
 }));
 
 vi.mock('@/hooks/useClusterSummary', () => ({
-  useClusterSummaryWithProject: (clusterId?: string) => ({
-    data: clusterId ? mockSummaryData : null,
-    isLoading: false,
-  }),
+  useClusterSummaryWithProject: (clusterId?: string) => {
+    summaryCalledWith = clusterId;
+    return {
+      data: clusterId ? mockSummaryData : null,
+      isLoading: false,
+    };
+  },
+}));
+
+vi.mock('@/hooks/useActiveClusterId', () => ({
+  useActiveClusterId: () => mockActiveClusterId ?? mockCurrentClusterId,
 }));
 
 vi.mock('@/hooks/useKubernetes', () => ({
@@ -56,8 +65,10 @@ beforeEach(() => {
   mockIsConnected = false;
   mockIsBackendConfigured = false;
   mockCurrentClusterId = null;
+  mockActiveClusterId = null;
   mockSummaryData = null;
   mockK8sData = {};
+  summaryCalledWith = undefined;
 });
 
 // ============================================================================
@@ -165,6 +176,25 @@ describe('useResourceCounts — backend summary', () => {
     expect(counts.customresourcedefinitions).toBe(8);
     expect(counts.mutatingwebhookconfigurations).toBe(4);
     expect(counts.validatingwebhookconfigurations).toBe(2);
+  });
+
+  it('uses activeCluster.id (via useActiveClusterId) when it differs from stale currentClusterId', () => {
+    // Regression: localStorage has a stale cluster ID left over from a deleted
+    // cluster, but useRestoreClusterFromBackend has since set activeCluster to a
+    // different, valid cluster. Sidebar counts MUST query the valid one — not
+    // the stale ID — otherwise the summary endpoint returns nothing and every
+    // count renders as 0.
+    mockIsConnected = true;
+    mockIsBackendConfigured = true;
+    mockCurrentClusterId = 'stale-deleted-cluster-id';
+    mockActiveClusterId = 'current-valid-cluster-id';
+    mockSummaryData = { pod_count: 42, deployment_count: 11 };
+
+    const { result } = renderHook(() => useResourceCounts());
+
+    expect(summaryCalledWith).toBe('current-valid-cluster-id');
+    expect(result.current.counts.pods).toBe(42);
+    expect(result.current.counts.deployments).toBe(11);
   });
 
   it('returns 0 for types not in summary and without direct K8s data', () => {

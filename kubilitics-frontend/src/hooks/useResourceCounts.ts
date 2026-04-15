@@ -13,6 +13,7 @@ import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/back
 import { useK8sResourceList, type KubernetesResource, type ResourceList, type ResourceType } from './useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useClusterSummaryWithProject } from '@/hooks/useClusterSummary';
+import { useActiveClusterId } from '@/hooks/useActiveClusterId';
 import { useMemo, useRef } from 'react';
 
 // Zero counts returned when disconnected (no fake data)
@@ -134,11 +135,11 @@ const DIRECT_K8S_QUERY_OPTIONS = {
 export function useResourceCounts(): { counts: ResourceCounts; isLoading: boolean; isInitialLoad: boolean; isConnected: boolean } {
   const { isConnected } = useConnectionStatus();
   const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
-  // Use currentClusterId for faster initial load — the summary endpoint doesn't need
-  // the full cluster restore to complete, just the cluster ID.
-  // Previously used activeCluster.id which waited for restore, causing 1-2 min delay.
-  const currentClusterId = useBackendConfigStore((s) => s.currentClusterId);
-  const activeClusterId = currentClusterId;
+  // Source of truth: useActiveClusterId prefers the live restored activeCluster.id
+  // and only falls back to the persisted currentClusterId during the very first
+  // render. This prevents the sidebar from querying a stale/deleted cluster ID
+  // after a kubeconfig swap or external cluster deletion.
+  const activeClusterId = useActiveClusterId();
 
   // Backend path: single summary request (project-scoped when activeProject is set)
   const summaryQuery = useClusterSummaryWithProject(

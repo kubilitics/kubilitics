@@ -196,7 +196,22 @@ export const useClusterStore = create<ClusterState>()(
       kubeconfigContent: undefined,
       detectedClusters: undefined,
       setClusters: (clusters) => set({ clusters }),
-      setActiveCluster: (cluster) => set({ activeCluster: cluster }),
+      setActiveCluster: (cluster) => {
+        set({ activeCluster: cluster });
+        // Keep backendConfigStore.currentClusterId in sync so every cluster-scoped
+        // API call (sidebar counts, topology, events, ...) reads the same ID from
+        // either store. Stale localStorage IDs after a cluster was deleted, renamed,
+        // or swapped used to break the sidebar counters — syncing here eliminates
+        // the drift at its source. Dynamic import avoids a circular module cycle.
+        if (cluster && !cluster.id.startsWith('__demo__')) {
+          import('@/stores/backendConfigStore').then(({ useBackendConfigStore }) => {
+            const backend = useBackendConfigStore.getState();
+            if (backend.currentClusterId !== cluster.id) {
+              backend.setCurrentClusterId(cluster.id);
+            }
+          });
+        }
+      },
       setActiveNamespace: (namespace) => set({ activeNamespace: namespace }),
       setNamespaces: (namespaces) => set({ namespaces }),
       setAppMode: (appMode) => set({ appMode }),
