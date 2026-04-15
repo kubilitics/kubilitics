@@ -191,7 +191,7 @@ function OverviewTab({ resource: cronJob, age }: ResourceContext<CronJobResource
   const { childJobsSorted } = useChildJobs(cronJob.metadata?.namespace, cronJob.metadata?.name);
 
   const diagnosis = useMemo(
-    () => diagnoseWorkload(cronJob as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedJobs: childJobsSorted }),
+    () => diagnoseWorkload({ ...cronJob, kind: 'CronJob' } as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedJobs: childJobsSorted }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [cronJob?.metadata?.uid, cronJob?.metadata?.resourceVersion, childJobsSorted],
   );

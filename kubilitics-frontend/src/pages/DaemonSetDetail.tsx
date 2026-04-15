@@ -108,7 +108,7 @@ function OverviewTab({ resource: daemonSet }: ResourceContext<DaemonSetResource>
   });
 
   const diagnosis = useMemo(
-    () => diagnoseWorkload(daemonSet as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: childPods }),
+    () => diagnoseWorkload({ ...daemonSet, kind: 'DaemonSet' } as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: childPods }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [daemonSet?.metadata?.uid, daemonSet?.metadata?.resourceVersion, childPods],
   );

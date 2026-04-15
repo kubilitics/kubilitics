@@ -115,7 +115,7 @@ function OverviewTab({ resource: statefulSet }: ResourceContext<StatefulSetResou
   });
 
   const diagnosis = useMemo(
-    () => diagnoseWorkload(statefulSet as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: childPods }),
+    () => diagnoseWorkload({ ...statefulSet, kind: 'StatefulSet' } as unknown as Parameters<typeof diagnoseWorkload>[0], { relatedPods: childPods }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [statefulSet?.metadata?.uid, statefulSet?.metadata?.resourceVersion, childPods],
   );
