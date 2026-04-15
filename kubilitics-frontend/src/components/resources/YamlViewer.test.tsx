@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import React from 'react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { YamlViewer } from './YamlViewer';
 import type { YamlCopyMenuProps } from './YamlCopyMenu';
@@ -31,12 +32,64 @@ vi.mock('./YamlCopyMenu', async (importOriginal) => {
   };
 });
 
+// ── Fake Monaco editor ─────────────────────────────────────────────────────────
+// Records fold API calls so tests can verify the fold menu is wired correctly.
+
+interface FakeEditorCalls {
+  foldAllCalled: number;
+  unfoldAllCalled: number;
+  foldSelectedCalled: number;
+  lastSelection?: { startLine: number; endLine: number };
+  cursorListeners: Array<(e: { position: { lineNumber: number } }) => void>;
+}
+
+let fakeEditorCalls: FakeEditorCalls;
+
+function createFakeEditor(calls: FakeEditorCalls) {
+  return {
+    getAction: (id: string) => ({
+      run: () => {
+        if (id === 'editor.foldAll') calls.foldAllCalled++;
+        else if (id === 'editor.unfoldAll') calls.unfoldAllCalled++;
+        else if (id === 'editor.foldSelected') calls.foldSelectedCalled++;
+        return Promise.resolve();
+      },
+    }),
+    setSelection: (range: { startLineNumber?: number; endLineNumber?: number } | unknown) => {
+      const r = range as { startLineNumber?: number; endLineNumber?: number };
+      if (r.startLineNumber !== undefined && r.endLineNumber !== undefined) {
+        calls.lastSelection = { startLine: r.startLineNumber, endLine: r.endLineNumber };
+      }
+    },
+    onDidChangeCursorPosition: (listener: (e: { position: { lineNumber: number } }) => void) => {
+      calls.cursorListeners.push(listener);
+      return { dispose: () => {} };
+    },
+    revealLineInCenter: () => {},
+    getModel: () => null,
+  } as unknown as import('monaco-editor').editor.IStandaloneCodeEditor;
+}
+
 // Mock CodeEditor so tests don't need Monaco — it just renders its `value` prop
-// into a textarea. That's enough to assert what the user sees.
+// into a textarea. The onEditorReady callback fires once on mount with a fake
+// Monaco editor so fold-menu tests can verify the fold API is called correctly.
 vi.mock('@/components/editor/CodeEditor', () => ({
-  CodeEditor: ({ value }: { value: string }) => (
-    <textarea data-testid="code-editor" value={value} readOnly />
-  ),
+  CodeEditor: ({
+    value,
+    onEditorReady,
+  }: {
+    value: string;
+    onEditorReady?: (e: unknown) => void;
+  }) => {
+    const didFire = React.useRef(false);
+    React.useEffect(() => {
+      if (!didFire.current && onEditorReady) {
+        didFire.current = true;
+        onEditorReady(createFakeEditor(fakeEditorCalls));
+      }
+    }, [onEditorReady]);
+    return <textarea data-testid="code-editor" value={value} readOnly />;
+  },
 }));
 
 vi.mock('@/components/ui/sonner', () => ({
@@ -91,6 +144,12 @@ describe('YamlViewer — Clean/Raw filter', () => {
   beforeEach(() => {
     capturedMenuProps = null;
     copyMenuOnCopySpy.mockClear();
+    fakeEditorCalls = {
+      foldAllCalled: 0,
+      unfoldAllCalled: 0,
+      foldSelectedCalled: 0,
+      cursorListeners: [],
+    };
   });
 
   it('default render hides managedFields', () => {
@@ -215,6 +274,12 @@ describe('YamlViewer — YamlCopyMenu integration', () => {
   beforeEach(() => {
     capturedMenuProps = null;
     copyMenuOnCopySpy.mockClear();
+    fakeEditorCalls = {
+      foldAllCalled: 0,
+      unfoldAllCalled: 0,
+      foldSelectedCalled: 0,
+      cursorListeners: [],
+    };
   });
 
   it('copy menu Clean item copies filtered YAML without managedFields', async () => {
@@ -279,5 +344,53 @@ describe('YamlViewer — YamlCopyMenu integration', () => {
     expect(written).toContain("cat <<'EOF' | kubectl apply -f -");
     expect(written).toContain('EOF');
     expect(written).toContain('name: nginx');
+  });
+});
+
+describe('YamlViewer — fold menu', () => {
+  beforeEach(() => {
+    capturedMenuProps = null;
+    copyMenuOnCopySpy.mockClear();
+    fakeEditorCalls = {
+      foldAllCalled: 0,
+      unfoldAllCalled: 0,
+      foldSelectedCalled: 0,
+      cursorListeners: [],
+    };
+  });
+
+  it('Fold All menu item calls editor.foldAll', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+    await user.click(screen.getByRole('button', { name: /fold menu/i }));
+    await user.click(screen.getByRole('menuitem', { name: /^fold all$/i }));
+    expect(fakeEditorCalls.foldAllCalled).toBe(1);
+  });
+
+  it('Unfold All menu item calls editor.unfoldAll', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+    await user.click(screen.getByRole('button', { name: /fold menu/i }));
+    await user.click(screen.getByRole('menuitem', { name: /^unfold all$/i }));
+    expect(fakeEditorCalls.unfoldAllCalled).toBe(1);
+  });
+
+  it('Fold status menu item selects a line range then folds (in Raw preset)', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+    // Switch to Raw so `status:` is visible in the text.
+    await user.click(screen.getByRole('button', { name: /^raw$/i }));
+    await user.click(screen.getByRole('button', { name: /fold menu/i }));
+    await user.click(screen.getByRole('menuitem', { name: /fold status/i }));
+    expect(fakeEditorCalls.lastSelection?.startLine).toBeGreaterThan(0);
+    expect(fakeEditorCalls.foldSelectedCalled).toBe(1);
+  });
+
+  it('Fold managedFields item is disabled in Clean preset', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+    await user.click(screen.getByRole('button', { name: /fold menu/i }));
+    const item = screen.getByRole('menuitem', { name: /fold managedfields/i });
+    expect(item).toHaveAttribute('aria-disabled', 'true');
   });
 });

@@ -1,17 +1,26 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Download, Edit3, CheckCircle2, AlertCircle, AlertTriangle, RotateCcw, RefreshCw, ShieldAlert, Save, X, FileCode, Search, Loader2 } from 'lucide-react';
+import { Download, Edit3, CheckCircle2, AlertCircle, AlertTriangle, RotateCcw, RefreshCw, ShieldAlert, Save, X, FileCode, Search, Loader2, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { CodeEditor } from '@/components/editor/CodeEditor';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/sonner';
 import yamlParser from 'js-yaml';
-import { filterYaml, toJson, type YamlPreset } from '@/lib/yaml/filterYaml';
+import { filterYaml, toJson, wellKnownFoldPaths, type YamlPreset } from '@/lib/yaml/filterYaml';
 import { isConflictError } from '@/lib/conflictDetection';
 import { YamlCopyMenu } from './YamlCopyMenu';
+import { findFoldRange } from './yamlFoldRanges';
+import type { editor as monacoEditor } from 'monaco-editor';
 
 export interface YamlValidationError {
   line: number;
@@ -75,6 +84,7 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
   const previousPresetRef = useRef<YamlPreset>('clean');
   const [mode, setMode] = useState<'yaml' | 'json'>('yaml');
   const previousModeRef = useRef<'yaml' | 'json'>('yaml');
+  const editorInstanceRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
 
   const displayYaml = useMemo(() => {
     if (!resource) return yaml;
@@ -95,6 +105,28 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
       return yaml;
     }
   }, [preset, mode, resource, yaml]);
+
+  const foldLineRange = useCallback(
+    (range: { startLine: number; endLine: number } | null) => {
+      const editor = editorInstanceRef.current;
+      if (!editor || !range) return;
+      editor.setSelection({
+        startLineNumber: range.startLine,
+        startColumn: 1,
+        endLineNumber: range.endLine,
+        endColumn: 1,
+      } as unknown as monacoEditor.IRange);
+      editor.getAction('editor.foldSelected')?.run();
+    },
+    [],
+  );
+
+  const stripsByPreset: Record<YamlPreset, string[]> = {
+    raw: [],
+    clean: ['metadata.managedFields'],
+    'apply-ready': ['metadata.managedFields', 'status'],
+  };
+  const alreadyStripped = stripsByPreset[preset];
 
   const cleanYaml = useMemo(() => {
     if (!resource) return yaml;
@@ -405,6 +437,42 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
             </>
           ) : (
             <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs font-medium gap-1 px-2"
+                    disabled={isEditing}
+                    aria-label="Fold menu"
+                  >
+                    Fold <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem onSelect={() => editorInstanceRef.current?.getAction('editor.foldAll')?.run()}>
+                    Fold All
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => editorInstanceRef.current?.getAction('editor.unfoldAll')?.run()}>
+                    Unfold All
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {wellKnownFoldPaths().map((p) => {
+                    const disabled = alreadyStripped.includes(p.path);
+                    return (
+                      <DropdownMenuItem
+                        key={p.path}
+                        disabled={disabled}
+                        onSelect={() => foldLineRange(findFoldRange(displayYaml, p.path))}
+                      >
+                        {p.label}
+                        {disabled && <span className="ml-auto text-[10px] text-muted-foreground">hidden</span>}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Separator orientation="vertical" className="h-4 mx-1" />
               <YamlCopyMenu
                 cleanYaml={cleanYaml}
                 applyReadyYaml={applyReadyYaml}
@@ -552,6 +620,7 @@ export function YamlViewer({ yaml, resource, resourceName, editable = false, onS
           minHeight="600px"
           className="rounded-none border-0"
           fontSize="small"
+          onEditorReady={(e) => { editorInstanceRef.current = e; }}
         />
       )}
     </div>
