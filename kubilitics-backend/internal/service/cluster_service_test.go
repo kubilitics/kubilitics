@@ -276,3 +276,78 @@ func TestClusterService_AddCluster_ConnectionFailure(t *testing.T) {
 
 // Ensure mockClusterRepo satisfies repository.ClusterRepository
 var _ repository.ClusterRepository = (*mockClusterRepo)(nil)
+
+// ─── ReconnectCluster strict kubeconfig validation (P0 data-identity fix) ───
+
+func TestReconnectCluster_ErrorsWhenKubeconfigPathIsEmpty(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &mockClusterRepo{clusters: map[string]*models.Cluster{
+		"c-empty-path": {
+			ID: "c-empty-path", Name: "was-aws", Context: "aws-prod",
+			KubeconfigPath: "", Status: "connected",
+			CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		},
+	}}
+	svc := NewClusterService(repo, nil)
+
+	_, err := svc.ReconnectCluster(ctx, "c-empty-path")
+	if err == nil {
+		t.Fatal("expected error for empty kubeconfig path, got nil")
+	}
+	if !strings.Contains(err.Error(), "no stored kubeconfig path") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	updated, _ := repo.Get(ctx, "c-empty-path")
+	if updated.Status != "disconnected" {
+		t.Errorf("expected status=disconnected, got %q", updated.Status)
+	}
+}
+
+func TestReconnectCluster_ErrorsWhenKubeconfigFileMissing(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tmp := filepath.Join(t.TempDir(), "does-not-exist.yaml")
+	repo := &mockClusterRepo{clusters: map[string]*models.Cluster{
+		"c-missing-file": {
+			ID: "c-missing-file", Name: "was-aws", Context: "aws-prod",
+			KubeconfigPath: tmp, Status: "connected",
+			CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		},
+	}}
+	svc := NewClusterService(repo, nil)
+
+	_, err := svc.ReconnectCluster(ctx, "c-missing-file")
+	if err == nil {
+		t.Fatal("expected error for missing kubeconfig file, got nil")
+	}
+	if !strings.Contains(err.Error(), "no longer exists") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	updated, _ := repo.Get(ctx, "c-missing-file")
+	if updated.Status != "disconnected" {
+		t.Errorf("expected status=disconnected, got %q", updated.Status)
+	}
+}
+
+func TestReconnectCluster_ErrorsWhenKubeconfigPathIsDirectory(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	repo := &mockClusterRepo{clusters: map[string]*models.Cluster{
+		"c-is-dir": {
+			ID: "c-is-dir", Name: "weird", Context: "ctx",
+			KubeconfigPath: dir, Status: "connected",
+			CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		},
+	}}
+	svc := NewClusterService(repo, nil)
+
+	_, err := svc.ReconnectCluster(ctx, "c-is-dir")
+	if err == nil {
+		t.Fatal("expected error for directory path, got nil")
+	}
+	if !strings.Contains(err.Error(), "is a directory") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
