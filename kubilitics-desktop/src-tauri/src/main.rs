@@ -1,6 +1,12 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// Compile-time safety: release builds must never enable the devtools Cargo
+// feature. If someone ever flips it on in Cargo.toml, the release build will
+// fail loudly instead of silently shipping the WebView inspector to users.
+#[cfg(all(not(debug_assertions), feature = "devtools"))]
+compile_error!("the 'devtools' Cargo feature must not be enabled in release builds");
+
 use tauri::{Emitter, Manager, RunEvent};
 
 mod backend_ports;

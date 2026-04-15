@@ -1,6 +1,6 @@
 [package]
 name = "kubilitics-desktop"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 
 [build-dependencies]
@@ -27,10 +27,15 @@ base64 = "0.22"
 rand = "0.8"
 sha2 = "0.10"
 
-# devtools only in debug builds (cargo build vs cargo build --release)
-[target.'cfg(debug_assertions)'.dependencies]
-tauri = { version = "2.0", features = ["tray-icon", "devtools"] }
+# Note: Tauri 2 gates the WKWebView inspector on Rust's built-in debug_assertions
+# flag inside the Tauri crate. Do not add the 'devtools' Cargo feature to the base
+# dependency above — the release build must never ship the inspector. A
+# compile-time guard in src/main.rs makes this impossible to break by accident.
 
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+# Opt-in devtools feature. Enables the WebView inspector. Must NEVER be used
+# in release builds — main.rs has a compile_error! guard that fails the build
+# if this feature is enabled together with !debug_assertions.
+devtools = ["tauri/devtools"]
