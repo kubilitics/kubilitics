@@ -59,7 +59,7 @@ import { DEFAULT_BACKEND_BASE_URL } from '@/lib/backendConstants';
 import { useClustersFromBackend } from '@/hooks/useClustersFromBackend';
 import { useDiscoverClusters } from '@/hooks/useDiscoverClusters';
 import { useBackendHealth } from '@/hooks/useBackendHealth';
-import { addCluster, addClusterWithUpload, resetBackendCircuit, getClusterOverview, type BackendCluster } from '@/services/backendApiClient';
+import { addCluster, addClusterWithUpload, reconnectCluster, resetBackendCircuit, getClusterOverview, type BackendCluster } from '@/services/backendApiClient';
 import { backendClusterToCluster } from '@/lib/backendClusterAdapter';
 import { extractContextFromKubeconfig, parseKubeconfigContexts, bytesToBase64 } from '@/lib/kubeconfigUtils';
 import { toast } from '@/components/ui/sonner';
@@ -433,7 +433,7 @@ export default function ClusterConnect() {
     }
   };
 
-  const handleConnect = (cluster: DetectedCluster, isNew: boolean = false) => {
+  const handleConnect = async (cluster: DetectedCluster, isNew: boolean = false) => {
     if (!isBackendConfigured) {
       toast.error('Backend not configured. Please wait for backend to start.');
       return;
@@ -449,6 +449,29 @@ export default function ClusterConnect() {
 
     setIsConnecting(true);
     setSelectedClusterId(cluster.id);
+
+    // P0 identity guard: ask the backend to reconnect and only continue if it
+    // succeeds. Backend was hardened (cluster_service.go ReconnectCluster) so a
+    // missing stored kubeconfig returns an error instead of silently falling
+    // back to ~/.kube/config. If we navigate optimistically we risk landing
+    // the user on a Dashboard whose data is from a completely different
+    // cluster than what the card said. Skip the check for brand-new clusters
+    // which were just registered — addCluster already verified connectivity.
+    if (!isNew) {
+      try {
+        await reconnectCluster(backendBaseUrl, cluster.id);
+      } catch (err) {
+        setIsConnecting(false);
+        const msg = err instanceof Error ? err.message : String(err);
+        toast.error(`Cluster "${cluster.name}" is unreachable`, {
+          description: msg.length > 200 ? msg.slice(0, 200) + '…' : msg,
+        });
+        // Refresh the list so the card shows its new status (disconnected).
+        queryClient.invalidateQueries({ queryKey: ['backend', 'clusters'] });
+        clustersFromBackend.refetch();
+        return;
+      }
+    }
 
     // Build cluster list for store
     const connectedClusters = clustersFromBackend.data
