@@ -3,6 +3,7 @@ import { diagnosePod } from './podDiagnosis';
 import {
   crashLoopPod,
   healthyPod,
+  healthyPodWithInit,
   oomKilledPod,
   imagePullPod,
   schedulingFailedPod,
@@ -29,6 +30,13 @@ describe('diagnosePod', () => {
     expect(d.severity).toBe('healthy');
     expect(d.reasons).toHaveLength(0);
     expect(d.headline.toLowerCase()).toContain('running');
+  });
+
+  it('healthy pod with init container reports regular container count only', () => {
+    const d = diagnosePod(healthyPodWithInit());
+    expect(d.severity).toBe('healthy');
+    expect(d.oneLine).toContain('2 container');
+    expect(d.oneLine).not.toContain('3 container');
   });
 
   it('OOMKilled surfaces as broken with OOMKilled reason', () => {

@@ -4,6 +4,53 @@
  * reads — no more. Keeps tests small and focused.
  */
 
+/**
+ * Healthy pod with one completed init container and two running regular
+ * containers — mirrors the real aws-node-hpd64 pod shape (EKS CNI
+ * DaemonSet): init container finishes setup with exit 0, main containers
+ * are running and ready. Used to verify diagnosePod's healthy oneLine
+ * matches kubectl's READY 2/2 semantics (init containers NOT counted).
+ */
+export function healthyPodWithInit(name = 'aws-node') {
+  return {
+    kind: 'Pod',
+    metadata: { name, namespace: 'kube-system', uid: `uid-${name}`, resourceVersion: '1' },
+    status: {
+      phase: 'Running',
+      initContainerStatuses: [
+        {
+          name: 'aws-vpc-cni-init',
+          ready: false,
+          restartCount: 0,
+          state: {
+            terminated: { reason: 'Completed', exitCode: 0, finishedAt: '2026-04-14T10:00:00Z' },
+          },
+        },
+      ],
+      containerStatuses: [
+        {
+          name: 'aws-node',
+          ready: true,
+          restartCount: 0,
+          state: { running: { startedAt: '2026-04-14T10:00:05Z' } },
+        },
+        {
+          name: 'aws-eks-nodeagent',
+          ready: true,
+          restartCount: 0,
+          state: { running: { startedAt: '2026-04-14T10:00:05Z' } },
+        },
+      ],
+      conditions: [
+        { type: 'Initialized', status: 'True' },
+        { type: 'Ready', status: 'True' },
+        { type: 'ContainersReady', status: 'True' },
+        { type: 'PodScheduled', status: 'True' },
+      ],
+    },
+  };
+}
+
 export function crashLoopPod(name = 'busybox-pod') {
   return {
     kind: 'Pod',

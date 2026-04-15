@@ -154,8 +154,12 @@ export function diagnosePod(pod: PodLike, events: WarningEvent[] = []): Diagnosi
 
   if (severity === 'healthy') {
     headline = phase === 'Succeeded' ? 'Completed' : 'Running, all containers ready';
-    const restarts = containers.reduce((s, c) => s + c.restartCount, 0);
-    oneLine = `${containers.length} container${containers.length === 1 ? '' : 's'}, ${restarts} restart${restarts === 1 ? '' : 's'}.`;
+    // Match kubectl's READY N/M semantics: only regular (non-init) containers
+    // count. Init containers are setup scaffolding that have already finished
+    // by the time a pod reaches the healthy state.
+    const regular = containers.filter(c => !c.isInit);
+    const restarts = regular.reduce((s, c) => s + c.restartCount, 0);
+    oneLine = `${regular.length} container${regular.length === 1 ? '' : 's'}, ${restarts} restart${restarts === 1 ? '' : 's'}.`;
   } else if (uniqueReasons[0]) {
     headline = uniqueReasons[0].title;
     oneLine = buildOneLine(uniqueReasons[0], containers, pod);
