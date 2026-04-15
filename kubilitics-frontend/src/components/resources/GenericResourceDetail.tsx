@@ -633,7 +633,7 @@ export function GenericResourceDetail<T extends KubernetesResource>({
       id: 'yaml',
       label: 'YAML',
       icon: FileCode,
-      content: <YamlViewer yaml={yaml} resourceName={ctx.name} editable onSave={handleSaveYaml} onFetchLatest={handleFetchLatestYaml} />,
+      content: <YamlViewer yaml={yaml} resource={resource} resourceName={ctx.name} editable onSave={handleSaveYaml} onFetchLatest={handleFetchLatestYaml} />,
     },
     {
       id: 'compare',
