@@ -59,6 +59,7 @@ import { useDeleteK8sResource, useUpdateK8sResource, type KubernetesResource, ty
 import { normalizeKindForTopology } from '@/utils/resourceKindMapper';
 import { ResourceEventsTab } from '@/components/events/ResourceEventsTab';
 import { ResourceTracesTab } from '@/components/traces/ResourceTracesTab';
+import { BlastRadiusTab } from '@/components/resources/BlastRadiusTab';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useClusterStore } from '@/stores/clusterStore';
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
@@ -663,6 +664,18 @@ export function GenericResourceDetail<T extends KubernetesResource>({
           name={name ?? ''}
           sourceResourceType={kind}
           sourceResourceName={resource?.metadata?.name ?? name ?? ''}
+        />
+      ),
+    },
+    {
+      id: 'blast-radius',
+      label: 'Blast Radius',
+      icon: Zap,
+      content: (
+        <BlastRadiusTab
+          kind={kind}
+          namespace={namespace}
+          name={name}
         />
       ),
     },
