@@ -306,11 +306,28 @@ function useRestoreClusterFromBackend() {
     return () => { cancelled = true; };
   }, [isBackendConfigured, restoreAttempted, syncClusters]);
 
-  // Poll every 30s to pick up external changes (cluster add/delete via API/CLI)
+  // Poll every 15s to pick up external changes (cluster add/delete via API/CLI),
+  // AND re-sync immediately whenever the window regains focus or becomes visible.
+  // The focus/visibility hooks are the main robustness win: a user who deletes a
+  // context in their terminal and switches back to Kubilitics sees the change
+  // within a frame instead of waiting up to 30s for the next poll. When the
+  // persisted activeCluster.id no longer exists in the returned list, syncClusters
+  // falls through to picking list[0], so split-brain UI (header on a pruned
+  // cluster, widgets on a valid one) is impossible past the next sync.
   useEffect(() => {
     if (!isBackendConfigured) return;
-    const interval = setInterval(() => syncClusters(false), 30_000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => syncClusters(false), 15_000);
+    const onFocus = () => syncClusters(false);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') syncClusters(false);
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [isBackendConfigured, syncClusters]);
 
   return { restoreAttempted, restoreFailed };
