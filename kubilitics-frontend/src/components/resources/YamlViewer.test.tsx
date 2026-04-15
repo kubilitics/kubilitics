@@ -394,3 +394,33 @@ describe('YamlViewer — fold menu', () => {
     expect(item).toHaveAttribute('aria-disabled', 'true');
   });
 });
+
+describe('YamlViewer — breadcrumb', () => {
+  beforeEach(() => {
+    capturedMenuProps = null;
+    copyMenuOnCopySpy.mockClear();
+    fakeEditorCalls = {
+      foldAllCalled: 0,
+      unfoldAllCalled: 0,
+      foldSelectedCalled: 0,
+      cursorListeners: [],
+    };
+  });
+
+  it('breadcrumb updates when cursor moves', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+    // Switch to Raw so the full YAML (with top-level keys at known lines) is rendered.
+    await user.click(screen.getByRole('button', { name: /^raw$/i }));
+    // After re-render, the effect re-subscribes with fresh displayYaml and pushes a new listener.
+    // Fire the most recent listener at line 4 (inside metadata: of the rawYaml fixture).
+    const listener =
+      fakeEditorCalls.cursorListeners[fakeEditorCalls.cursorListeners.length - 1];
+    expect(listener).toBeDefined();
+    listener({ position: { lineNumber: 4 } });
+    // Assert a breadcrumb row is rendered. It's a div with font-mono class.
+    // Use a role-agnostic query on the expected text content from the walker.
+    const breadcrumb = await screen.findByText(/metadata/i);
+    expect(breadcrumb).toBeInTheDocument();
+  });
+});
