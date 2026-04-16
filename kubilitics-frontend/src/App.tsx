@@ -708,6 +708,24 @@ function AppZoom({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+// ─── Centralized cache invalidation on cluster switch ──────────────────────
+// Every setActiveCluster call (Header picker, ClusterConnect.handleConnect,
+// useRestoreClusterFromBackend, FirstRunWizard, ShellSession) changes the
+// cluster identity. If we don't clear React Query's cache, widgets briefly
+// render stale pods/deployments/services from the PREVIOUS cluster under the
+// NEW cluster's identity — same class of bug as the P0 cluster-identity fix.
+// Subscribing at the store level (outside React) guarantees no caller can
+// forget to invalidate.
+let _prevActiveClusterId: string | undefined;
+useClusterStore.subscribe((state) => {
+  const nextId = state.activeCluster?.id;
+  if (nextId && nextId !== _prevActiveClusterId) {
+    _prevActiveClusterId = nextId;
+    queryClient.removeQueries({ queryKey: ['k8s'] });
+    queryClient.removeQueries({ queryKey: ['backend'] });
+  }
+});
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
