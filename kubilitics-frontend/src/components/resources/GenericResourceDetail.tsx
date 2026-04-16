@@ -608,27 +608,27 @@ export function GenericResourceDetail<T extends KubernetesResource>({
       // Badge intentionally omitted — the tab content shows its own count from the
       // wide-events store query, which differs from the legacy passthrough count.
       // Showing a misleading "99+" badge from a different data source confuses users.
-      content: (
+      content: ctx.name ? (
         <ResourceEventsTab
           resourceKind={kind}
           resourceName={ctx.name}
           namespace={ctx.namespace}
           clusterId={clusterId ?? null}
         />
-      ),
+      ) : null,
     },
     {
       id: 'traces',
       label: 'Traces',
       icon: GitBranch,
-      content: (
+      content: ctx.name ? (
         <ResourceTracesTab
           resourceKind={kind}
           resourceName={ctx.name}
           namespace={ctx.namespace}
           clusterId={clusterId ?? null}
         />
-      ),
+      ) : null,
     },
     {
       id: 'yaml',
