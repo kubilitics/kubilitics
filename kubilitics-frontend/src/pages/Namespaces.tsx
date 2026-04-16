@@ -160,9 +160,9 @@ export default function Namespaces() {
 
  const { data: podsData } = useK8sResourceList('pods', undefined, { limit: 5000, enabled: !backendNsCounts && isConnected });
  const { data: svcsData } = useK8sResourceList('services', undefined, { limit: 5000, enabled: !backendNsCounts && isConnected });
- const { data: deploymentsData } = useK8sResourceList('deployments', undefined, { limit: 5000 });
- const { data: configmapsData } = useK8sResourceList('configmaps', undefined, { limit: 5000 });
- const { data: secretsData } = useK8sResourceList('secrets', undefined, { limit: 5000 });
+ const { data: deploymentsData } = useK8sResourceList('deployments', undefined, { limit: 5000, enabled: !backendNsCounts && isConnected });
+ const { data: configmapsData } = useK8sResourceList('configmaps', undefined, { limit: 5000, enabled: !backendNsCounts && isConnected });
+ const { data: secretsData } = useK8sResourceList('secrets', undefined, { limit: 5000, enabled: !backendNsCounts && isConnected });
 
  const nsCountMap = useMemo(() => {
  const countBy = (items: Array<{ metadata: { namespace?: string } }>) => {
