@@ -1,7 +1,8 @@
 import { type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
-import { Plus } from 'lucide-react';
+import { Plus, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 
 export interface TableEmptyStateProps {
   /** Resource-specific icon (e.g. from KubernetesIcons or lucide-react) */
@@ -35,6 +36,26 @@ export function TableEmptyState({
   onCreate,
   className,
 }: TableEmptyStateProps) {
+  const { isConnected } = useConnectionStatus();
+
+  if (!isConnected) {
+    return (
+      <div
+        className={cn('empty-state animate-slide-up', className)}
+        role="status"
+        aria-label="No cluster connected"
+      >
+        <div className="empty-state-icon [&>svg]:h-8 [&>svg]:w-8 [&>svg]:opacity-70 text-muted-foreground">
+          <WifiOff className="h-8 w-8" />
+        </div>
+        <div className="space-y-2">
+          <h3 className="empty-state-title">No cluster connected</h3>
+          <p className="empty-state-description">Connect a Kubernetes cluster to view resources.</p>
+        </div>
+      </div>
+    );
+  }
+
   const ariaLabel = hasActiveFilters
     ? `${title}. Clear filters to see resources`
     : title;
