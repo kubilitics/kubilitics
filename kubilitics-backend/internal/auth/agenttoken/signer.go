@@ -20,7 +20,9 @@ func NewSigner(secret []byte) *Signer {
 	if len(secret) < 32 {
 		panic("agenttoken: signing secret must be >= 32 bytes")
 	}
-	return &Signer{secret: secret}
+	cp := make([]byte, len(secret))
+	copy(cp, secret)
+	return &Signer{secret: cp}
 }
 
 type BootstrapClaims struct {
@@ -88,15 +90,15 @@ func (s *Signer) VerifyAccess(tok string) (*AccessClaims, error) {
 }
 
 func (s *Signer) parse(tok, expectedTyp string) (jwt.MapClaims, error) {
-	parsed, err := jwt.Parse(tok, func(t *jwt.Token) (any, error) {
+	claims := jwt.MapClaims{}
+	parsed, err := jwt.ParseWithClaims(tok, claims, func(t *jwt.Token) (any, error) {
 		if t.Method.Alg() != "HS256" {
 			return nil, fmt.Errorf("unexpected alg %s", t.Method.Alg())
 		}
 		return s.secret, nil
-	})
+	}, jwt.WithExpirationRequired())
 	if err != nil { return nil, err }
-	claims, ok := parsed.Claims.(jwt.MapClaims)
-	if !ok || !parsed.Valid { return nil, errors.New("invalid token") }
+	if !parsed.Valid { return nil, errors.New("invalid token") }
 	if getString(claims, "iss") != issuer { return nil, errors.New("bad issuer") }
 	if getString(claims, "typ") != expectedTyp { return nil, errors.New("wrong token type") }
 	return claims, nil
