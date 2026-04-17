@@ -19,8 +19,6 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { toast } from '@/components/ui/sonner';
 import {
@@ -38,7 +36,7 @@ import {
   type ResourceContext,
   type ContainerInfo,
 } from '@/components/resources';
-import { PodTerminal } from '@/components/resources/PodTerminal';
+import { WorkloadTerminalTab } from '@/components/resources/WorkloadTerminalTab';
 import { useK8sResourceList, usePatchK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useMutationPolling } from '@/hooks/useMutationPolling';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
@@ -185,9 +183,6 @@ export default function ReplicaSetDetail() {
 
   const [showScaleDialog, setShowScaleDialog] = useState(false);
 
-  const [selectedTerminalPod, setSelectedTerminalPod] = useState<string>('');
-  const [selectedTerminalContainer, setSelectedTerminalContainer] = useState<string>('');
-
   const { refetchInterval: fastPollInterval, isFastPolling, triggerFastPolling } = useMutationPolling({
     fastInterval: 2000,
     fastDuration: 30000,
@@ -298,62 +293,13 @@ export default function ReplicaSetDetail() {
       id: 'terminal',
       label: 'Terminal',
       icon: Terminal,
-      render: (ctx) => {
-        const rs = ctx.resource;
-        const rsMatchLabels = rs.spec?.selector?.matchLabels ?? {};
-        const rsPods = (podsList?.items ?? []).filter((pod) => {
-          const labels = pod.metadata?.labels ?? {};
-          return Object.entries(rsMatchLabels).every(([k, v]) => labels[k] === v);
-        });
-        const containers: ContainerInfo[] = (rs.spec?.template?.spec?.containers || []).map(c => ({
-          name: c.name, image: c.image, ready: true, restartCount: 0, state: 'running', ports: c.ports || [], resources: c.resources || {},
-        }));
-        const firstPodName = rsPods[0]?.metadata?.name ?? '';
-        const terminalPod = selectedTerminalPod || firstPodName;
-        const terminalPodContainers = (rsPods.find((p) => p.metadata?.name === terminalPod) as { spec?: { containers?: Array<{ name: string }> } } | undefined)?.spec?.containers?.map((c) => c.name) ?? containers.map((c) => c.name);
-
-        return (
-          <SectionCard icon={Terminal} title="Terminal" tooltip={<p className="text-xs text-muted-foreground">Exec into ReplicaSet pods</p>}>
-            {rsPods.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No pods available to open a terminal.</p>
-            ) : (
-              <div className="space-y-4">
-                <div className="flex flex-wrap gap-4 items-end">
-                  <div className="space-y-2">
-                    <Label>Pod</Label>
-                    <Select value={terminalPod} onValueChange={setSelectedTerminalPod}>
-                      <SelectTrigger className="w-[280px]">
-                        <SelectValue placeholder="Select pod" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {rsPods.map((p) => (
-                          <SelectItem key={p.metadata?.name} value={p.metadata?.name ?? ''}>
-                            {p.metadata?.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Container</Label>
-                    <Select value={selectedTerminalContainer || terminalPodContainers[0]} onValueChange={setSelectedTerminalContainer}>
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Select container" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {terminalPodContainers.map((c) => (
-                          <SelectItem key={c} value={c}>{c}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <PodTerminal key={`${terminalPod}-${selectedTerminalContainer || terminalPodContainers[0]}`} podName={terminalPod} namespace={namespace ?? undefined} containerName={selectedTerminalContainer || terminalPodContainers[0]} containers={terminalPodContainers} onContainerChange={setSelectedTerminalContainer} />
-              </div>
-            )}
-          </SectionCard>
-        );
-      },
+      render: (ctx) => (
+        <WorkloadTerminalTab
+          matchLabels={ctx.resource.spec?.selector?.matchLabels ?? {}}
+          namespace={namespace ?? undefined}
+          tooltip="Exec into ReplicaSet pods"
+        />
+      ),
     },
     {
       id: 'metrics',

@@ -28,7 +28,6 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { toast } from '@/components/ui/sonner';
@@ -48,7 +47,7 @@ import {
   type ResourceContext,
   type ContainerInfo,
 } from '@/components/resources';
-import { PodTerminal } from '@/components/resources/PodTerminal';
+import { WorkloadTerminalTab } from '@/components/resources/WorkloadTerminalTab';
 import { useK8sResourceList, usePatchK8sResource, calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useMutationPolling } from '@/hooks/useMutationPolling';
@@ -244,8 +243,6 @@ export default function StatefulSetDetail() {
   const [showScaleDialog, setShowScaleDialog] = useState(false);
   const [showRolloutDialog, setShowRolloutDialog] = useState(false);
 
-  const [selectedTerminalPod, setSelectedTerminalPod] = useState<string>('');
-  const [selectedTerminalContainer, setSelectedTerminalContainer] = useState<string>('');
   const [partitionInput, setPartitionInput] = useState<string>('');
 
   const { refetchInterval: fastPollInterval, isFastPolling, triggerFastPolling } = useMutationPolling({
@@ -607,54 +604,13 @@ export default function StatefulSetDetail() {
       id: 'terminal',
       label: 'Terminal',
       icon: Terminal,
-      render: (ctx) => {
-        const sts = ctx.resource;
-        const stsMatchLabels = sts.spec?.selector?.matchLabels ?? {};
-        const stsPods = (podsList?.items ?? []).filter((pod) => {
-          const labels = pod.metadata?.labels ?? {};
-          return Object.entries(stsMatchLabels).every(([k, v]) => labels[k] === v);
-        });
-        const containers: ContainerInfo[] = (sts.spec?.template?.spec?.containers || []).map(c => ({
-          name: c.name, image: c.image, ready: true, restartCount: 0, state: 'running',
-          ports: c.ports?.map(p => ({ containerPort: p.containerPort, protocol: p.protocol || 'TCP' })) || [],
-          resources: c.resources || {},
-        }));
-        const firstPodName = stsPods[0]?.metadata?.name ?? '';
-        const terminalPod = selectedTerminalPod || firstPodName;
-        const terminalPodContainers = (stsPods.find((p) => p.metadata?.name === terminalPod) as { spec?: { containers?: Array<{ name: string }> } } | undefined)?.spec?.containers?.map((c) => c.name) ?? containers.map((c) => c.name);
-
-        return (
-          <SectionCard icon={Terminal} title="Terminal" tooltip={<p className="text-xs text-muted-foreground">Exec into StatefulSet pods</p>}>
-            {stsPods.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No pods available for terminal.</p>
-            ) : (
-              <div className="space-y-4">
-                <div className="flex flex-wrap gap-4 items-end">
-                  <div className="space-y-2">
-                    <Label>Pod</Label>
-                    <Select value={terminalPod} onValueChange={setSelectedTerminalPod}>
-                      <SelectTrigger className="w-[280px]"><SelectValue placeholder="Select pod" /></SelectTrigger>
-                      <SelectContent>
-                        {stsPods.map((p) => (<SelectItem key={p.metadata?.name} value={p.metadata?.name ?? ''}>{p.metadata?.name}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Container</Label>
-                    <Select value={selectedTerminalContainer || terminalPodContainers[0]} onValueChange={setSelectedTerminalContainer}>
-                      <SelectTrigger className="w-[180px]"><SelectValue placeholder="Select container" /></SelectTrigger>
-                      <SelectContent>
-                        {terminalPodContainers.map((c) => (<SelectItem key={c} value={c}>{c}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <PodTerminal key={`${terminalPod}-${selectedTerminalContainer || terminalPodContainers[0]}`} podName={terminalPod} namespace={namespace ?? undefined} containerName={selectedTerminalContainer || terminalPodContainers[0]} containers={terminalPodContainers} onContainerChange={setSelectedTerminalContainer} />
-              </div>
-            )}
-          </SectionCard>
-        );
-      },
+      render: (ctx) => (
+        <WorkloadTerminalTab
+          matchLabels={ctx.resource.spec?.selector?.matchLabels ?? {}}
+          namespace={namespace ?? undefined}
+          tooltip="Exec into StatefulSet pods"
+        />
+      ),
     },
     {
       id: 'metrics',

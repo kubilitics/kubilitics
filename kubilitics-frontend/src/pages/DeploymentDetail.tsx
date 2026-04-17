@@ -28,8 +28,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { toast } from '@/components/ui/sonner';
 import {
@@ -50,7 +48,7 @@ import {
   type ContainerInfo,
   type PodTarget,
 } from '@/components/resources';
-import { PodTerminal } from '@/components/resources/PodTerminal';
+import { WorkloadTerminalTab } from '@/components/resources/WorkloadTerminalTab';
 import { useK8sResource, useK8sResourceList, usePatchK8sResource, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useMutationPolling } from '@/hooks/useMutationPolling';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
@@ -242,89 +240,6 @@ function OverviewTab({ resource: deployment }: ResourceContext<DeploymentResourc
 // Main component
 // ---------------------------------------------------------------------------
 
-/**
- * Self-contained Terminal tab for Deployments. Owns its own pod query
- * with labelSelector derived from the deployment's spec.selector.matchLabels.
- * This component exists because the parent-level podsList query was unreliable
- * in release builds (timing, project scoping, cache ordering issues). Moving
- * the query into a dedicated component that receives the deployment via props
- * eliminates all those issues: the query fires when the component mounts with
- * valid props, re-fires when the deployment updates, and doesn't depend on
- * any parent-level query state.
- */
-function DeploymentTerminalTab({
-  deployment,
-  namespace,
-  name,
-}: {
-  deployment: DeploymentResource;
-  namespace?: string;
-  name?: string;
-}) {
-  const [selectedPod, setSelectedPod] = useState('');
-  const [selectedContainer, setSelectedContainer] = useState('');
-
-  const matchLabels = deployment?.spec?.selector?.matchLabels ?? {};
-  const labelSelector = Object.entries(matchLabels).map(([k, v]) => `${k}=${v}`).join(',');
-
-  const { data: podsList } = useK8sResourceList<KubernetesResource & { metadata?: { name?: string; labels?: Record<string, string> }; spec?: { containers?: Array<{ name: string }> } }>(
-    'pods',
-    namespace,
-    { enabled: !!namespace && !!labelSelector, labelSelector, staleTime: 30000 },
-  );
-
-  const pods = podsList?.items ?? [];
-  const containers = (deployment?.spec?.template?.spec?.containers || []).map((c: { name: string; image?: string }) => c.name);
-  const firstPodName = pods[0]?.metadata?.name ?? '';
-  const activePod = selectedPod || firstPodName;
-  const activePodContainers = pods.find((p) => p.metadata?.name === activePod)?.spec?.containers?.map((c) => c.name) ?? containers;
-
-  if (pods.length === 0) {
-    return (
-      <SectionCard icon={Terminal} title="Terminal" tooltip={<p className="text-xs text-muted-foreground">Exec into deployment pods</p>}>
-        <p className="text-sm text-muted-foreground">
-          {!labelSelector ? 'Loading deployment selector...' : 'No pods available. Select a deployment with running pods to open a terminal.'}
-        </p>
-      </SectionCard>
-    );
-  }
-
-  return (
-    <SectionCard icon={Terminal} title="Terminal" tooltip={<p className="text-xs text-muted-foreground">Exec into deployment pods</p>}>
-      <div className="space-y-4">
-        <div className="flex flex-wrap gap-4 items-end">
-          <div className="space-y-2">
-            <Label>Pod</Label>
-            <Select value={activePod} onValueChange={setSelectedPod}>
-              <SelectTrigger className="w-[280px]"><SelectValue placeholder="Select pod" /></SelectTrigger>
-              <SelectContent>
-                {pods.map((p) => (<SelectItem key={p.metadata?.name} value={p.metadata?.name ?? ''}>{p.metadata?.name}</SelectItem>))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Container</Label>
-            <Select value={selectedContainer || activePodContainers[0]} onValueChange={setSelectedContainer}>
-              <SelectTrigger className="w-[180px]"><SelectValue placeholder="Select container" /></SelectTrigger>
-              <SelectContent>
-                {activePodContainers.map((c) => (<SelectItem key={c} value={c}>{c}</SelectItem>))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <PodTerminal
-          key={`${activePod}-${selectedContainer || activePodContainers[0]}`}
-          podName={activePod}
-          namespace={namespace}
-          containerName={selectedContainer || activePodContainers[0]}
-          containers={activePodContainers}
-          onContainerChange={setSelectedContainer}
-        />
-      </div>
-    </SectionCard>
-  );
-}
-
 export default function DeploymentDetail() {
   const { namespace, name } = useParams();
   const clusterId = useActiveClusterId();
@@ -334,8 +249,6 @@ export default function DeploymentDetail() {
 
   const [showScaleDialog, setShowScaleDialog] = useState(false);
   const [showRolloutDialog, setShowRolloutDialog] = useState(false);
-  const [selectedTerminalPod, setSelectedTerminalPod] = useState<string>('');
-  const [selectedTerminalContainer, setSelectedTerminalContainer] = useState<string>('');
 
   const { refetchInterval: fastPollInterval, isFastPolling, triggerFastPolling } = useMutationPolling({
     fastInterval: 2000,
@@ -889,10 +802,10 @@ export default function DeploymentDetail() {
       label: 'Terminal',
       icon: Terminal,
       render: (ctx) => (
-        <DeploymentTerminalTab
-          deployment={ctx.resource}
+        <WorkloadTerminalTab
+          matchLabels={ctx.resource.spec?.selector?.matchLabels ?? {}}
           namespace={namespace ?? undefined}
-          name={name}
+          tooltip="Exec into deployment pods"
         />
       ),
     },
