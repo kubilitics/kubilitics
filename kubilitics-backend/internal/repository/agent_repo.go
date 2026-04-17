@@ -122,7 +122,10 @@ WHERE jti = ? AND used_at IS NULL AND revoked_at IS NULL`, clusterID, jti)
 	if err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
 	if n == 0 {
 		return ErrAgentNotFound
 	}
@@ -183,6 +186,7 @@ func (r *AgentRepo) TouchAgentCredential(ctx context.Context, id string, ts time
 func scanAgentCluster(row *sql.Row) (*models.AgentCluster, error) {
 	var c models.AgentCluster
 	var lastHB sql.NullTime
+	// registered_at is NOT NULL DEFAULT CURRENT_TIMESTAMP per migration 051; safe to scan into time.Time.
 	if err := row.Scan(&c.ID, &c.OrganizationID, &c.ClusterUID, &c.Name, &c.K8sVersion,
 		&c.AgentVersion, &c.NodeCount, &c.Status, &c.CredentialEpoch, &c.RegisteredAt, &lastHB); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
