@@ -53,6 +53,7 @@ import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useMutationPolling } from '@/hooks/useMutationPolling';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
+import { escapeRegExp } from '@/lib/escapeRegExp';
 
 interface StatefulSetResource extends KubernetesResource {
   spec?: {
@@ -321,8 +322,8 @@ export default function StatefulSetDetail() {
         });
         const stsName = sts.metadata?.name ?? '';
         const stsPods = [...stsPodsRaw].sort((a, b) => {
-          const ordA = parseInt(a.metadata?.name?.replace(new RegExp(`^${stsName}-`), '') ?? '-1', 10);
-          const ordB = parseInt(b.metadata?.name?.replace(new RegExp(`^${stsName}-`), '') ?? '-1', 10);
+          const ordA = parseInt(a.metadata?.name?.replace(new RegExp(`^${escapeRegExp(stsName)}-`), '') ?? '-1', 10);
+          const ordB = parseInt(b.metadata?.name?.replace(new RegExp(`^${escapeRegExp(stsName)}-`), '') ?? '-1', 10);
           return ordA - ordB;
         });
         return (
@@ -360,7 +361,7 @@ export default function StatefulSetDetail() {
         });
         const volumeClaimTemplates = sts.spec?.volumeClaimTemplates || [];
 
-        const templatePattern = new RegExp(`^[a-z0-9-]+-${stsName}-\\d+$`);
+        const templatePattern = new RegExp(`^[a-z0-9-]+-${escapeRegExp(stsName)}-\\d+$`);
         const podPvcNames = new Set<string>();
         for (const pod of stsPodsRaw) {
           const volumes = (pod as { spec?: { volumes?: Array<{ persistentVolumeClaim?: { claimName?: string } }> } }).spec?.volumes ?? [];
@@ -647,7 +648,7 @@ export default function StatefulSetDetail() {
             return Object.entries(stsMatchLabels).every(([k, v]) => labels[k] === v);
           });
           const stsName = sts.metadata?.name ?? '';
-          const templatePattern = new RegExp(`^[a-z0-9-]+-${stsName}-\\d+$`);
+          const templatePattern = new RegExp(`^[a-z0-9-]+-${escapeRegExp(stsName)}-\\d+$`);
           const podPvcNames = new Set<string>();
           for (const pod of stsPodsRaw) {
             const volumes = (pod as { spec?: { volumes?: Array<{ persistentVolumeClaim?: { claimName?: string } }> } }).spec?.volumes ?? [];

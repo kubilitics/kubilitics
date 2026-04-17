@@ -24,6 +24,16 @@ const KubeDiagramsBinaryName = "kube-diagrams"
 //
 // Returns ErrKubeDiagramsNotInstalled if kube-diagrams is not on PATH.
 func GraphToArchitecturePNG(ctx context.Context, kubeconfigPath, namespace, kubectlPath string) ([]byte, error) {
+	// Validate namespace to prevent shell injection via the sh -c pipeline below.
+	// Kubernetes namespace names must match DNS label rules: lowercase alphanumeric and hyphens.
+	if namespace != "" && namespace != "all" {
+		for _, c := range namespace {
+			if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+				return nil, fmt.Errorf("invalid namespace name: must contain only lowercase alphanumeric characters and hyphens")
+			}
+		}
+	}
+
 	// Resolve kube-diagrams binary
 	kubeDiagramsPath, err := resolveKubeDiagrams()
 	if err != nil {
@@ -89,6 +99,10 @@ func GraphToArchitecturePNG(ctx context.Context, kubeconfigPath, namespace, kube
 	kubeDiagramsCmd := fmt.Sprintf("%s -o %s -", kubeDiagramsPath, outputPath)
 	pipeline := fmt.Sprintf("%s | %s", kubectlCmd, kubeDiagramsCmd)
 
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	// Safe: kubectlPath and kubeDiagramsPath are resolved from PATH (exec.LookPath). The namespace
+	// argument is validated above to contain only [a-z0-9-]. The kubeconfigPath is from stored cluster
+	// config, not from request user input. Shell pipeline is required for kubectl | kube-diagrams piping.
 	cmd := exec.CommandContext(ctx, "sh", "-c", pipeline)
 	cmd.Env = buildEnv(kubeconfigPath)
 	var stderr bytes.Buffer

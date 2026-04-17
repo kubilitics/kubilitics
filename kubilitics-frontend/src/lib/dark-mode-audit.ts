@@ -17,6 +17,8 @@
  * from .tsx source text. It does NOT execute components or access the DOM.
  */
 
+import { escapeRegExp } from './escapeRegExp';
+
 /* ─── Types ─── */
 
 export type IssueSeverity = 'error' | 'warning' | 'info';
@@ -230,7 +232,7 @@ function extractClassStrings(line: string): string[] {
 function hasDarkVariant(allClasses: string, basePrefix: string): boolean {
   // Check for dark:bg-*, dark:text-*, dark:border-* matching the prefix type
   const prefix = basePrefix.split('-')[0]; // 'bg', 'text', 'border'
-  return new RegExp(`\\bdark:${prefix}-`).test(allClasses);
+  return new RegExp(`\\bdark:${escapeRegExp(prefix)}-`).test(allClasses);
 }
 
 /**

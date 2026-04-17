@@ -23,10 +23,12 @@ func writeJSONError(w http.ResponseWriter, statusCode int, msg string) {
 	b, err := json.Marshal(map[string]string{"error": msg})
 	if err != nil {
 		// Fallback: this should never happen with a simple string map
-		w.Write([]byte(`{"error":"internal error"}`))
+		// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+		w.Write([]byte(`{"error":"internal error"}`)) // Content-Type: application/json — not HTML
 		return
 	}
-	w.Write(b)
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	w.Write(b) // Content-Type: application/json — not HTML
 }
 
 // Auth returns middleware that enforces auth mode (disabled | optional | required) and sets claims in context.

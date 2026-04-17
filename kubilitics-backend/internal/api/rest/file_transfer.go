@@ -230,7 +230,8 @@ func (h *Handler) DownloadContainerFile(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(stdout))
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	_, _ = w.Write([]byte(stdout)) // Content-Type: application/octet-stream — not HTML
 }
 
 // UploadContainerFile handles POST /clusters/{clusterId}/resources/{namespace}/{pod}/upload

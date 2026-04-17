@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
@@ -151,7 +152,9 @@ func (h *Handler) rejectConnection(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("WWW-Authenticate", "Bearer")
 	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = w.Write([]byte(`{"error":"` + message + `"}`))
+	b, _ := json.Marshal(map[string]string{"error": message})
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	_, _ = w.Write(b) // Content-Type: application/json — not HTML
 }
 
 // validateAPIKey validates an API key and returns claims

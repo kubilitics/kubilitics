@@ -106,6 +106,9 @@ func (h *Handler) PostKCLIExec(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), kcliExecTimeout)
 	defer cancel()
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	// Safe: kcliBin is our own kubilitics-backend kcli binary resolved from PATH or a known location.
+	// args are validated and sanitised above (blockedShellVerbs check + splitCommand parsing).
 	cmd := exec.CommandContext(ctx, kcliBin, args...)
 	env := append(os.Environ(), "KUBECONFIG="+cluster.KubeconfigPath)
 	env = append(env, h.buildKCLIAIEnvVars()...)

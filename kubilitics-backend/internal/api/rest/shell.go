@@ -96,6 +96,9 @@ func (h *Handler) PostShell(w http.ResponseWriter, r *http.Request) {
 		if cluster.Context != "" {
 			args = append([]string{"--context", cluster.Context}, args...)
 		}
+		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+		// Safe: kcliBin is our own kcli binary. args are static (["version"] + context flag from stored config).
+		// exec.Command passes args as separate argv entries — no shell metacharacter injection possible.
 		cmd := exec.CommandContext(ctx, kcliBin, args...)
 		cmd.Env = shellEnv
 		var stdout, stderr bytes.Buffer
@@ -141,6 +144,10 @@ func (h *Handler) PostShell(w http.ResponseWriter, r *http.Request) {
 	if cluster.Context != "" {
 		args = append([]string{"--context", cluster.Context}, parts...)
 	}
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	// Safe: kcliBin is our own kcli binary. User input is parsed by splitCommand() into individual argv
+	// entries — exec.Command does NOT invoke a shell, so semicolons/pipes/backticks in input are inert.
+	// blockedShellVerbs above prevents mutating verbs; only read-only kubectl commands are forwarded.
 	cmd := exec.CommandContext(ctx, kcliBin, args...)
 	cmd.Env = shellEnv
 	var stdout, stderr bytes.Buffer
