@@ -18,6 +18,9 @@ func TestMigration051Applied(t *testing.T) {
 		_ = rows.Scan(&n)
 		names = append(names, n)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if len(names) != 4 {
 		t.Fatalf("expected 4 agent-trust tables, got %v", names)
 	}
