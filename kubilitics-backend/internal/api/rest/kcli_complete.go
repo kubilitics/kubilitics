@@ -108,6 +108,9 @@ func (h *Handler) GetKCLIComplete(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "--context", cluster.Context)
 	}
 	args = append(args, words...)
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	// Safe: kcliBin is our own kubilitics-backend kcli binary resolved from PATH or a known location.
+	// args contains only "--context", cluster.Context (from stored config), and validated kubectl sub-commands.
 	cmd := exec.CommandContext(ctx, kcliBin, args...)
 	cmd.Env = append(os.Environ(), "KUBECONFIG="+cluster.KubeconfigPath)
 

@@ -50,6 +50,9 @@ export type LegacyPackage = (typeof LEGACY_PACKAGES)[number];
 const IMPORT_PATTERNS = LEGACY_PACKAGES.map((pkg) => ({
   package: pkg,
   // Match: import ... from 'pkg' / import ... from "pkg" / require('pkg') / require("pkg")
+  // nosemgrep: javascript.lang.security.audit.non-literal-regexp.non-literal-regexp
+  // Build-time utility — pkg values come from the LEGACY_PACKAGES const array above, not user input.
+  // Each value is escaped via escapeRegex() before interpolation.
   regex: new RegExp(
     `(?:import\\s+.*?from\\s+['"]${escapeRegex(pkg)}(?:/[^'"]*)?['"]|require\\s*\\(\\s*['"]${escapeRegex(pkg)}(?:/[^'"]*)?['"]\\s*\\))`,
     'gm',
@@ -119,6 +122,8 @@ export function scanForLegacyImports(rootDir: string): ScanResult {
 
   // Scan package.json
   try {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+    // Build-time utility — rootDir is from process.argv/process.cwd(), not user-controlled web input.
     const pkgPath = join(rootDir, 'package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
     const sections = ['dependencies', 'devDependencies', 'peerDependencies'] as const;
@@ -157,6 +162,8 @@ function walkDir(dir: string, callback: (filePath: string) => void): void {
   for (const entry of entries) {
     if (SKIP_DIRS.has(entry)) continue;
 
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+    // Build-time utility — dir/entry come from readdirSync traversal, not user-controlled web input.
     const fullPath = join(dir, entry);
     let stat;
     try {

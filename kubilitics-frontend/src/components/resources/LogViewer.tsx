@@ -38,6 +38,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { escapeRegExp } from '@/lib/escapeRegExp';
 import { parseRawLogs, type LogEntry } from '@/lib/logParser';
 import { useK8sPodLogs } from '@/hooks/useKubernetes';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
@@ -138,10 +139,11 @@ function formatTimestamp(ts: string): string {
 function buildRegex(query: string, useRegex: boolean): RegExp | null {
   if (!query.trim()) return null;
   if (!useRegex) {
-    return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    return new RegExp(escapeRegExp(query), 'gi');
   }
   try {
-    return new RegExp(query, 'gi');
+    // useRegex is true: user has explicitly opted into raw regex mode
+    return new RegExp(query, 'gi'); // nosemgrep: javascript.lang.security.audit.non-literal-regexp.non-literal-regexp
   } catch {
     return null;
   }

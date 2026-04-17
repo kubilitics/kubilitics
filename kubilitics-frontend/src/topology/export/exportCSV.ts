@@ -27,6 +27,8 @@ function getNestedValue(obj: Record<string, unknown>, path: string): string {
   let current: unknown = obj;
   for (const part of parts) {
     if (current == null || typeof current !== 'object') return '';
+    // nosemgrep: javascript.lang.security.audit.prototype-pollution-loop.prototype-pollution-loop
+    // for...of loop (not for...in), and part comes from a static path string constant — not user input.
     current = (current as Record<string, unknown>)[part];
   }
   if (current == null) return '';

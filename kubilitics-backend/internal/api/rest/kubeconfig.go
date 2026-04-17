@@ -81,5 +81,6 @@ func (h *Handler) GetKubeconfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-yaml")
 	w.Header().Set("Content-Disposition", `attachment; filename="kubeconfig-`+name+`.yaml"`)
 	w.WriteHeader(http.StatusOK)
-	w.Write(yaml)
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	w.Write(yaml) // Content-Type: application/x-yaml — not HTML
 }

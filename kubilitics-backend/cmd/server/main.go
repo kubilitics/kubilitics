@@ -153,6 +153,9 @@ func readShellPATH() string {
 		// Use -l (login) to source profile files, -i avoided (interactive mode
 		// may hang), -c to execute and exit immediately. Timeout prevents hangs.
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+		// Safe: shell is resolved from a hardcoded list (/bin/zsh, /bin/bash) or $SHELL env var.
+		// The only argument is the static string "echo $PATH" — no user input.
 		cmd := exec.CommandContext(ctx, shell, "-l", "-c", "echo $PATH")
 		cmd.Env = append(os.Environ(), "PS1=") // suppress prompt in case shell sources .bashrc
 		out, err := cmd.Output()

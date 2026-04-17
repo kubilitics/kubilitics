@@ -154,7 +154,8 @@ func (h *Handler) GetCatalogValues(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(values)) //nolint:errcheck
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	w.Write([]byte(values)) //nolint:errcheck // Content-Type: text/yaml — not HTML
 }
 
 func (h *Handler) PlanInstall(w http.ResponseWriter, r *http.Request) {
@@ -630,7 +631,8 @@ func (h *Handler) GetRBACManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/yaml")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(yaml))
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	w.Write([]byte(yaml)) // Content-Type: application/yaml — not HTML
 }
 
 // ── Cluster Bootstrap Profile handlers (T8.04) ────────────────────────────────

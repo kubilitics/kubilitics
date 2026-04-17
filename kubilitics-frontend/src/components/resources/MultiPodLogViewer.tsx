@@ -44,6 +44,7 @@ import { useActiveClusterId } from '@/hooks/useActiveClusterId';
 import { getPodLogsUrl } from '@/services/backendApiClient';
 import { useTheme } from '@/hooks/useTheme';
 import { toast } from '@/components/ui/sonner';
+import { escapeRegExp } from '@/lib/escapeRegExp';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -144,10 +145,11 @@ function formatTimestamp(ts: string): string {
 function buildRegex(query: string, useRegex: boolean): RegExp | null {
   if (!query.trim()) return null;
   if (!useRegex) {
-    return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    return new RegExp(escapeRegExp(query), 'gi');
   }
   try {
-    return new RegExp(query, 'gi');
+    // useRegex is true: user has explicitly opted into raw regex mode
+    return new RegExp(query, 'gi'); // nosemgrep: javascript.lang.security.audit.non-literal-regexp.non-literal-regexp
   } catch {
     return null;
   }

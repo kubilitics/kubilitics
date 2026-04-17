@@ -237,7 +237,8 @@ func (h *ScannerHandler) GetReport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", "attachment; filename=\"scan-report-"+runID+"."+ext+"\"")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data) //nolint:errcheck // response writer; server-generated content only
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	_, _ = w.Write(data) //nolint:errcheck // Content-Type: application/json|text/plain — not HTML; server-generated content only
 }
 
 // ListTools handles GET /scanner/tools — lists available scanner tools.

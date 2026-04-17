@@ -1,4 +1,5 @@
 import React from 'react';
+import { escapeRegExp } from '@/lib/escapeRegExp';
 
 interface SearchHighlightProps {
   text: string;
@@ -18,8 +19,7 @@ export function SearchHighlight({
 }: SearchHighlightProps) {
   if (!query.trim()) return <>{text}</>;
 
-  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`(${escapedQuery})`, 'gi');
+  const regex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
   const parts = text.split(regex);
 
   return (
