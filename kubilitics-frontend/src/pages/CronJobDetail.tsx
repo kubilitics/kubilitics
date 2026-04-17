@@ -572,6 +572,15 @@ function LogsTab({ resource: cronJob }: ResourceContext<CronJobResource>) {
   );
 }
 
+/**
+ * Cannot use WorkloadTerminalTab here: CronJob pods are discovered via an
+ * ownerReferences chain (CronJob → child Jobs → Pods) rather than a simple
+ * matchLabels selector. The `useChildJobs` + `useCjPods` hooks implement
+ * this chain. WorkloadTerminalTab only supports a flat label-selector query
+ * (spec.selector.matchLabels or job-name), which would miss pods created by
+ * older or renamed child jobs. Keeping inline logic until WorkloadTerminalTab
+ * gains ownerReferences-chain support.
+ */
 function TerminalTab({ resource: cronJob }: ResourceContext<CronJobResource>) {
   const namespace = cronJob.metadata?.namespace;
   const name = cronJob.metadata?.name;
