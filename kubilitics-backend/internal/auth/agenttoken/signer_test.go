@@ -54,3 +54,21 @@ func TestSignAndVerifyAccess(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestVerifyAccess_RejectsBootstrapToken(t *testing.T) {
+	s := NewSigner([]byte("test-secret-min-32-bytes-aaaaaaaa"))
+	tok, _ := s.IssueBootstrap(BootstrapClaims{
+		JTI: uuid.NewString(), OrgID: "o", CreatedBy: "u", TTL: time.Hour,
+	})
+	if _, err := s.VerifyAccess(tok); err == nil {
+		t.Fatal("expected wrong token type error")
+	}
+}
+
+func TestVerifyBootstrap_RejectsAccessToken(t *testing.T) {
+	s := NewSigner([]byte("test-secret-min-32-bytes-aaaaaaaa"))
+	tok, _ := s.IssueAccess(AccessClaims{ClusterID: "c", OrgID: "o", Epoch: 1, TTL: time.Hour})
+	if _, err := s.VerifyBootstrap(tok); err == nil {
+		t.Fatal("expected wrong token type error")
+	}
+}
