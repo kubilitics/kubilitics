@@ -242,6 +242,89 @@ function OverviewTab({ resource: deployment }: ResourceContext<DeploymentResourc
 // Main component
 // ---------------------------------------------------------------------------
 
+/**
+ * Self-contained Terminal tab for Deployments. Owns its own pod query
+ * with labelSelector derived from the deployment's spec.selector.matchLabels.
+ * This component exists because the parent-level podsList query was unreliable
+ * in release builds (timing, project scoping, cache ordering issues). Moving
+ * the query into a dedicated component that receives the deployment via props
+ * eliminates all those issues: the query fires when the component mounts with
+ * valid props, re-fires when the deployment updates, and doesn't depend on
+ * any parent-level query state.
+ */
+function DeploymentTerminalTab({
+  deployment,
+  namespace,
+  name,
+}: {
+  deployment: DeploymentResource;
+  namespace?: string;
+  name?: string;
+}) {
+  const [selectedPod, setSelectedPod] = useState('');
+  const [selectedContainer, setSelectedContainer] = useState('');
+
+  const matchLabels = deployment?.spec?.selector?.matchLabels ?? {};
+  const labelSelector = Object.entries(matchLabels).map(([k, v]) => `${k}=${v}`).join(',');
+
+  const { data: podsList } = useK8sResourceList<KubernetesResource & { metadata?: { name?: string; labels?: Record<string, string> }; spec?: { containers?: Array<{ name: string }> } }>(
+    'pods',
+    namespace,
+    { enabled: !!namespace && !!labelSelector, labelSelector, staleTime: 30000 },
+  );
+
+  const pods = podsList?.items ?? [];
+  const containers = (deployment?.spec?.template?.spec?.containers || []).map((c: { name: string; image?: string }) => c.name);
+  const firstPodName = pods[0]?.metadata?.name ?? '';
+  const activePod = selectedPod || firstPodName;
+  const activePodContainers = pods.find((p) => p.metadata?.name === activePod)?.spec?.containers?.map((c) => c.name) ?? containers;
+
+  if (pods.length === 0) {
+    return (
+      <SectionCard icon={Terminal} title="Terminal" tooltip={<p className="text-xs text-muted-foreground">Exec into deployment pods</p>}>
+        <p className="text-sm text-muted-foreground">
+          {!labelSelector ? 'Loading deployment selector...' : 'No pods available. Select a deployment with running pods to open a terminal.'}
+        </p>
+      </SectionCard>
+    );
+  }
+
+  return (
+    <SectionCard icon={Terminal} title="Terminal" tooltip={<p className="text-xs text-muted-foreground">Exec into deployment pods</p>}>
+      <div className="space-y-4">
+        <div className="flex flex-wrap gap-4 items-end">
+          <div className="space-y-2">
+            <Label>Pod</Label>
+            <Select value={activePod} onValueChange={setSelectedPod}>
+              <SelectTrigger className="w-[280px]"><SelectValue placeholder="Select pod" /></SelectTrigger>
+              <SelectContent>
+                {pods.map((p) => (<SelectItem key={p.metadata?.name} value={p.metadata?.name ?? ''}>{p.metadata?.name}</SelectItem>))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Container</Label>
+            <Select value={selectedContainer || activePodContainers[0]} onValueChange={setSelectedContainer}>
+              <SelectTrigger className="w-[180px]"><SelectValue placeholder="Select container" /></SelectTrigger>
+              <SelectContent>
+                {activePodContainers.map((c) => (<SelectItem key={c} value={c}>{c}</SelectItem>))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <PodTerminal
+          key={`${activePod}-${selectedContainer || activePodContainers[0]}`}
+          podName={activePod}
+          namespace={namespace}
+          containerName={selectedContainer || activePodContainers[0]}
+          containers={activePodContainers}
+          onContainerChange={setSelectedContainer}
+        />
+      </div>
+    </SectionCard>
+  );
+}
+
 export default function DeploymentDetail() {
   const { namespace, name } = useParams();
   const clusterId = useActiveClusterId();
@@ -805,61 +888,13 @@ export default function DeploymentDetail() {
       id: 'terminal',
       label: 'Terminal',
       icon: Terminal,
-      render: (ctx) => {
-        const deployment = ctx.resource;
-        const deploymentName = deployment?.metadata?.name ?? name;
-        const matchLabels = deployment.spec?.selector?.matchLabels ?? {};
-        const deploymentPods = (podsList?.items ?? []).filter((pod) => {
-          const labels = pod.metadata?.labels ?? {};
-          return Object.keys(matchLabels).length > 0 &&
-            Object.entries(matchLabels).every(([k, v]) => labels[k] === v);
-        });
-        const containers: ContainerInfo[] = (deployment.spec?.template?.spec?.containers || []).map(c => ({
-          name: c.name, image: c.image, ready: true, restartCount: 0, state: 'running', ports: c.ports || [], resources: c.resources || {},
-        }));
-        const firstPodName = deploymentPods[0]?.metadata?.name ?? '';
-        const terminalPod = selectedTerminalPod || firstPodName;
-        const terminalPodContainers = (deploymentPods.find((p) => p.metadata?.name === terminalPod) as { spec?: { containers?: Array<{ name: string }> } } | undefined)?.spec?.containers?.map((c) => c.name) ?? containers.map((c) => c.name);
-
-        return (
-          <SectionCard icon={Terminal} title="Terminal" tooltip={<p className="text-xs text-muted-foreground">Exec into deployment pods</p>}>
-            {deploymentPods.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No pods available. Select a deployment with running pods to open a terminal.</p>
-            ) : (
-              <div className="space-y-4">
-                <div className="flex flex-wrap gap-4 items-end">
-                  <div className="space-y-2">
-                    <Label>Pod</Label>
-                    <Select value={terminalPod} onValueChange={setSelectedTerminalPod}>
-                      <SelectTrigger className="w-[280px]"><SelectValue placeholder="Select pod" /></SelectTrigger>
-                      <SelectContent>
-                        {deploymentPods.map((p) => (<SelectItem key={p.metadata?.name} value={p.metadata?.name ?? ''}>{p.metadata?.name}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Container</Label>
-                    <Select value={selectedTerminalContainer || terminalPodContainers[0]} onValueChange={setSelectedTerminalContainer}>
-                      <SelectTrigger className="w-[180px]"><SelectValue placeholder="Select container" /></SelectTrigger>
-                      <SelectContent>
-                        {terminalPodContainers.map((c) => (<SelectItem key={c} value={c}>{c}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <PodTerminal
-                  key={`${terminalPod}-${selectedTerminalContainer || terminalPodContainers[0]}`}
-                  podName={terminalPod}
-                  namespace={namespace ?? undefined}
-                  containerName={selectedTerminalContainer || terminalPodContainers[0]}
-                  containers={terminalPodContainers}
-                  onContainerChange={setSelectedTerminalContainer}
-                />
-              </div>
-            )}
-          </SectionCard>
-        );
-      },
+      render: (ctx) => (
+        <DeploymentTerminalTab
+          deployment={ctx.resource}
+          namespace={namespace ?? undefined}
+          name={name}
+        />
+      ),
     },
     {
       id: 'metrics',
