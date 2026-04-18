@@ -387,7 +387,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           [ -d "../dist" ] && [ -n "$(ls -A ../dist)" ] || { echo "❌ dist missing"; exit 1; }
-          cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
+          # MSI requires numeric-only prerelease identifiers (each <=65535). For tags
+          # like v1.0.0-rc.1 the bundler aborts. NSIS accepts any version, so skip MSI
+          # for prereleases — they're for testing the updater path, not for distribution
+          # via MSI managed-install channels.
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis
+          else
+            cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
+          fi
 
       - name: Build Tauri app (Linux AppImage + DEB + RPM)
         if: matrix.os == 'ubuntu-latest'
