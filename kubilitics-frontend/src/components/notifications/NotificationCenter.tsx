@@ -464,7 +464,11 @@ export function NotificationCenter({ className, clusterId }: NotificationCenterP
 
   return (
     <div className="relative">
-      {/* Bell trigger button */}
+      {/* Bell trigger button — fixed-square icon button to match the other
+          header tools (theme, port-forwards, profile). The unread count is
+          conveyed by the badge dot/number on the bell itself; an inline
+          "Updates" / "N New" text label was overflowing the w-9 box on wide
+          screens and visually crashing into the adjacent ThemeToggle. */}
       <button
         ref={triggerRef}
         onClick={togglePanel}
@@ -486,23 +490,18 @@ export function NotificationCenter({ className, clusterId }: NotificationCenterP
         aria-expanded={isPanelOpen}
         aria-haspopup="true"
       >
-        <div className="relative shrink-0 flex items-center justify-center">
+        <span className="relative shrink-0 inline-flex items-center justify-center">
           <Bell className="h-[18px] w-[18px]" />
-          {currentUnreadCount > 0 ? (
+          {currentUnreadCount > 0 && (
             <motion.span
               key={currentUnreadCount}
               initial={{ scale: 0.5, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="absolute -top-2 -right-2 min-w-[18px] h-[18px] rounded-full bg-red-500 border-2 border-[hsl(221,83%,53%)] dark:border-[hsl(221,70%,35%)] shadow-sm flex items-center justify-center text-[10px] font-black text-white px-0.5"
+              className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] rounded-full bg-red-500 border-2 border-[hsl(221,83%,53%)] dark:border-[hsl(221,70%,35%)] shadow-sm flex items-center justify-center text-[10px] font-black text-white px-1 leading-none"
             >
               {currentUnreadCount > 99 ? '99+' : currentUnreadCount}
             </motion.span>
-          ) : (
-            <span className="absolute -top-1.5 -right-1.5 w-2.5 h-2.5 rounded-full bg-sky-300 border-2 border-[hsl(221,83%,53%)] dark:border-[hsl(221,70%,35%)] shadow-sm" />
           )}
-        </div>
-        <span className="hidden 2xl:inline text-sm font-bold tracking-tight">
-          {currentUnreadCount > 0 ? `${currentUnreadCount} New` : 'Updates'}
         </span>
       </button>
 
