@@ -130,7 +130,8 @@ echo ""
 info "5/6  Production build smoke test"
 
 if [ -d "kubilitics-frontend/dist" ]; then
-  (cd kubilitics-frontend && npx serve dist -l 4173 &)
+  # `&` outside the subshell so $! captures the background job's PID in this scope.
+  (cd kubilitics-frontend && npx serve dist -l 4173) &
   SERVE_PID=$!
   sleep 3
 

@@ -29,7 +29,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/kubilitics/kubilitics-backend
-  tag: "0.3.0"
+  tag: "1.0.0-rc.1"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
