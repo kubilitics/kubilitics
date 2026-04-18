@@ -266,6 +266,15 @@ function useRestoreClusterFromBackend() {
       const connectedClusters = list.map(backendClusterToCluster);
       setClusters(connectedClusters);
 
+      // Seamless in-cluster install: when the helm-deployed hub auto-registers
+      // its own cluster (see backend cmd/server/main.go self-registration), the
+      // browser-served UI should NOT show the desktop-style FirstRunWizard.
+      // The first-run is "complete" the moment the user has a cluster to view.
+      // Only applies in browser mode — desktop keeps its original wizard flow.
+      if (!isTauri() && list.length > 0 && !useOnboardingStore.getState().hasCompletedFirstRun) {
+        useOnboardingStore.getState().completeFirstRun();
+      }
+
       // Determine which cluster to activate
       const currentActive = useClusterStore.getState().activeCluster;
       const storedId = useBackendConfigStore.getState().currentClusterId;
