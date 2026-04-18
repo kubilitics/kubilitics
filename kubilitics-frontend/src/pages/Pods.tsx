@@ -270,8 +270,18 @@ export default function Pods() {
 
  const { isConnected } = useConnectionStatus();
 
+ // Sort that gets pushed to the server. Defaults to "newest first" (creationTimestamp desc)
+ // because that's what users expect when they open a Pods page in any K8s tool.
+ // Updated below by a useEffect when the user clicks a column header that maps to a
+ // server-sortable field (age, name, namespace). Other columns fall back to client-side
+ // sort over the visible page (deterministic but cross-page-incorrect; the column types
+ // that hit this — CPU, Memory, Ready, Restarts — need backend support to fix properly).
+ const [serverSort, setServerSort] = useState<{ sortBy: 'name' | 'namespace' | 'creationTimestamp'; sortOrder: 'asc' | 'desc' }>({
+   sortBy: 'creationTimestamp',
+   sortOrder: 'desc',
+ });
+
  // Server-side pagination path (backend + informer cache)
- // Server sorts by name (default); client-side useTableFiltersAndSort re-sorts the visible page.
  const {
    data: serverItems,
    isLoading: serverIsLoading,
@@ -285,8 +295,8 @@ export default function Pods() {
  } = useServerPaginatedResourceList<PodResource>('pods', selectedNamespaces.size === 1 ? Array.from(selectedNamespaces)[0] : undefined, {
    pageSize,
    search: debouncedSearch || undefined,
-   sortBy: 'name',
-   sortOrder: 'asc',
+   sortBy: serverSort.sortBy,
+   sortOrder: serverSort.sortOrder,
    fieldSelector: statusPhaseFilter ? `status.phase=${statusPhaseFilter}` : undefined,
    namespaces: selectedNamespaces.size > 1 ? Array.from(selectedNamespaces) : undefined,
  });
@@ -453,7 +463,8 @@ export default function Pods() {
 
  const podKey = (p: Pod) => `${p.namespace}/${p.name}`;
  const podsTableConfig = useMemo((): { columns: ColumnConfig<Pod>[]; defaultSortKey: string; defaultSortOrder: 'asc' } => ({
- defaultSortKey: 'name',
+ // Default to "newest first" — opening Pods surfaces freshly-created workloads at top.
+ defaultSortKey: 'age',
  defaultSortOrder: 'asc',
  columns: [
  { columnId: 'name', getValue: (p) => p.name, sortable: true, filterable: true },
@@ -510,6 +521,31 @@ export default function Pods() {
  clearAllFilters,
  hasActiveFilters,
  } = useTableFiltersAndSort(filteredUnsorted, podsTableConfig);
+
+ // Push the user's column-header sort down to the server so pagination stays
+ // correct across pages. Without this, the server returned alphabetical pages
+ // and the client only re-sorted the visible 10 — so a freshly-created pod
+ // could land on page 2 even though "Age ↑" should put it first.
+ useEffect(() => {
+   if (!sortKey) return;
+   if (sortKey === 'name' || sortKey === 'namespace') {
+     setServerSort({ sortBy: sortKey, sortOrder });
+     setPageIndex(0);
+     return;
+   }
+   if (sortKey === 'age') {
+     // Age column uses sortValue=-creationTimestamp client-side, so client 'asc'
+     // means "newest first". Map that to server creationTimestamp 'desc'.
+     setServerSort({ sortBy: 'creationTimestamp', sortOrder: sortOrder === 'asc' ? 'desc' : 'asc' });
+     setPageIndex(0);
+     return;
+   }
+   // Other columns (status/ready/restarts/cpu/memory/node) aren't server-sortable.
+   // Keep server on creationTimestamp desc so pagination at least returns a stable
+   // newest-first slice; the visible page is then re-sorted client-side. Cross-page
+   // correctness for these requires backend support.
+   setServerSort({ sortBy: 'creationTimestamp', sortOrder: 'desc' });
+ }, [sortKey, sortOrder]);
 
  const columnVisibility = useColumnVisibility({
  tableId: 'pods',
