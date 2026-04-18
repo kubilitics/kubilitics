@@ -792,7 +792,8 @@ func main() {
 	// the existing user-auth middleware for now; RBAC guard is a later spec item.
 	router.Handle("/api/v1/agent/register", regH).Methods("POST")
 	router.Handle("/api/v1/agent/token/refresh", tokH).Methods("POST")
-	router.Handle("/api/v1/agent/heartbeat", hbH).Methods("POST")
+	hbLimited := rest.NewClusterRateLimitMiddleware(agentSigner, 10, 50)(hbH)
+	router.Handle("/api/v1/agent/heartbeat", hbLimited).Methods("POST")
 	router.HandleFunc("/api/v1/admin/clusters/bootstrap-token", admH.MintBootstrap).Methods("POST")
 	log.Info("Agent trust endpoints registered",
 		"register", "POST /api/v1/agent/register",
