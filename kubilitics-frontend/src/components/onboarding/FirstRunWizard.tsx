@@ -352,8 +352,18 @@ function ConnectClusterStep({ onNext, onSkip }: { onNext: () => void; onSkip: ()
           Connect Your Cluster
         </h2>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          We'll scan <code className="font-mono text-xs bg-muted/80 px-1.5 py-0.5 rounded">~/.kube/config</code> to
-          find your Kubernetes contexts.
+          {isTauri() ? (
+            <>
+              We'll scan <code className="font-mono text-xs bg-muted/80 px-1.5 py-0.5 rounded">~/.kube/config</code> to
+              find your Kubernetes contexts.
+            </>
+          ) : (
+            <>
+              Clusters appear here once their agents register with this hub
+              (<code className="font-mono text-xs bg-muted/80 px-1.5 py-0.5 rounded">helm install kubilitics-agent</code>),
+              or skip this step to add a kubeconfig manually.
+            </>
+          )}
         </p>
       </div>
 
