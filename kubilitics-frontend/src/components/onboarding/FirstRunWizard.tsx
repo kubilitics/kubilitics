@@ -250,7 +250,60 @@ interface DiscoveredContext {
   context: string;
 }
 
+/**
+ * Browser-mode "no clusters yet" view: the only sensible action when no
+ * cluster is registered against the in-cluster hub is to install the agent
+ * Helm chart on a cluster you want to track. Desktop kubeconfig flows do
+ * not apply here. The hub auto-registers ITS OWN cluster on startup, so
+ * this view should rarely render at all (only if the auto-register failed).
+ */
+function BrowserAddClusterStep({ onSkip }: { onSkip: () => void }) {
+  const cmd =
+    'helm install kubilitics-agent kubilitics/kubilitics-agent \\\n' +
+    '  -n kubilitics-system --create-namespace \\\n' +
+    `  --set hub.url=${typeof window !== 'undefined' ? window.location.origin : '<your-hub-url>'}`;
+  return (
+    <motion.div {...stepTransition}>
+      <div className="text-center mb-8">
+        <div className="inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-primary/10 mb-5">
+          <Server className="h-7 w-7 text-primary" />
+        </div>
+        <h2 className="text-xl font-bold tracking-tight text-foreground mb-2">
+          Add a cluster
+        </h2>
+        <p className="text-sm text-muted-foreground max-w-md mx-auto">
+          Run this on any cluster you want Kubilitics to monitor. It registers
+          itself with this hub automatically — no further setup.
+        </p>
+      </div>
+      <pre className="text-xs bg-muted/60 rounded-lg p-4 overflow-x-auto whitespace-pre font-mono leading-relaxed">
+        {cmd}
+      </pre>
+      <div className="mt-6 flex justify-center">
+        <button
+          type="button"
+          onClick={onSkip}
+          className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          I'll do this later — open the dashboard
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
 function ConnectClusterStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
+  // In a browser-served (in-cluster Helm) deployment, the desktop-style
+  // kubeconfig auto-detect / upload-config flows do not apply. Render an
+  // entirely separate step component so React's hook order stays consistent
+  // (each branch has its own hook lineup; we never conditionally call hooks).
+  if (!isTauri()) {
+    return <BrowserAddClusterStep onSkip={onSkip} />;
+  }
+  return <DesktopConnectClusterStep onNext={onNext} onSkip={onSkip} />;
+}
+
+function DesktopConnectClusterStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
   const [status, setStatus] = useState<ConnectionStatus>('idle');
   const [discovered, setDiscovered] = useState<DiscoveredContext[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);

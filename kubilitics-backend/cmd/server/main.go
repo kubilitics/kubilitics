@@ -777,6 +777,37 @@ func main() {
 			if ns, nsErr := cs.CoreV1().Namespaces().Get(ctx, "kube-system", metav1.GetOptions{}); nsErr == nil {
 				hubClusterUID = string(ns.UID)
 			}
+
+			// Seamless install: when the hub starts in-cluster and the legacy
+			// clusters table has no rows, auto-register THIS cluster so the UI
+			// shows insights immediately — no onboarding clicks. Adding remote
+			// clusters is the explicit `helm install kubilitics-agent` flow.
+			if existing, listErr := repo.List(ctx); listErr == nil && len(existing) == 0 {
+				name := os.Getenv("KUBILITICS_HUB_CLUSTER_NAME")
+				if name == "" { name = "in-cluster" }
+				k8sVersion := ""
+				if discoveryClient := cs.Discovery(); discoveryClient != nil {
+					if vinfo, vErr := discoveryClient.ServerVersion(); vErr == nil {
+						k8sVersion = vinfo.GitVersion
+					}
+				}
+				selfCluster := &models.Cluster{
+					Name:           name,
+					Context:        "",                  // empty → k8s.NewClient uses InClusterConfig
+					KubeconfigPath: "",                  // ditto
+					ServerURL:      inClusterCfg.Host,
+					Version:        k8sVersion,
+					Status:         "connected",
+					Provider:       "in-cluster",
+					Source:         "in-cluster",
+				}
+				if err := repo.Create(ctx, selfCluster); err != nil {
+					log.Warn("hub self-registration failed; UI will start with empty cluster list", "error", err.Error())
+				} else {
+					log.Info("hub auto-registered its own cluster — UI will show insights on first load",
+						"cluster_id", selfCluster.ID, "name", selfCluster.Name, "k8s_version", k8sVersion)
+				}
+			}
 		}
 	}
 
