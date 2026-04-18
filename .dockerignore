@@ -24,6 +24,33 @@ deploy
 tests
 scripts
 *.db
-coverage.out
+**/*.db
+**/*.log
+**/data/
+**/coverage.out
+**/*.test
+**/*.prof
+# Stale local binaries (NOT directories — be path-specific to avoid excluding source dirs)
+kubilitics-backend/kubilitics-backend
+kubilitics-backend/server
+kubilitics-backend/kubilitics-server
+kubilitics-backend/server_bin
+kubilitics-backend/cmd/server/server
+kubilitics-backend/cmd/server/server_bin
+kubilitics-backend/cmd/server/kubilitics-server
 **/bin/
 **/tmp/
+
+# Heavy unrelated assets
+*.zip
+*.pptx
+*.docx
+*.png
+designs
+competitor-research
+content-calendar
+prd-unicorn
+production-ready
+project-docs
+specs
+docs

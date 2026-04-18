@@ -792,11 +792,14 @@ func main() {
 	// they carry their own HS256 tokens validated by agenttoken.Signer.
 	// The admin bootstrap-token endpoint enforces its own user-JWT guard inline
 	// (see AgentAdminHandler.MintBootstrap). Full RBAC is a later spec item.
-	router.Handle("/api/v1/agent/register", regH).Methods("POST")
-	router.Handle("/api/v1/agent/token/refresh", tokH).Methods("POST")
+	// Register on apiRouter (the /api/v1 subrouter) — the subrouter intercepts
+	// every /api/v1/* request and 404s anything not registered on IT, even if
+	// registered on the parent router with the full prefix.
+	apiRouter.Handle("/agent/register", regH).Methods("POST")
+	apiRouter.Handle("/agent/token/refresh", tokH).Methods("POST")
 	hbLimited := rest.NewClusterRateLimitMiddleware(agentSigner, 10, 50)(hbH)
-	router.Handle("/api/v1/agent/heartbeat", hbLimited).Methods("POST")
-	router.HandleFunc("/api/v1/admin/clusters/bootstrap-token", admH.MintBootstrap).Methods("POST")
+	apiRouter.Handle("/agent/heartbeat", hbLimited).Methods("POST")
+	apiRouter.HandleFunc("/admin/clusters/bootstrap-token", admH.MintBootstrap).Methods("POST")
 	log.Info("Agent trust endpoints registered",
 		"register", "POST /api/v1/agent/register",
 		"token_refresh", "POST /api/v1/agent/token/refresh",
