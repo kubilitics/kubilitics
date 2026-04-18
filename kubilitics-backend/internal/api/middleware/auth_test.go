@@ -206,6 +206,56 @@ func TestAuthMiddleware_OptionalMode_NoToken(t *testing.T) {
 	}
 }
 
+func TestAuthMiddleware_AgentPath_Bypass(t *testing.T) {
+	cfg := &config.Config{
+		AuthMode:      "required",
+		AuthJWTSecret: "test-secret-key-minimum-32-characters-long",
+	}
+	repo := setupTestRepo(t)
+	defer repo.Close()
+
+	handler := Auth(cfg, repo)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+
+	// Agent heartbeat path must not be blocked even with no Authorization header
+	// when auth_mode=required, because agent endpoints use their own HS256 token
+	// validated by agenttoken.Signer (not the user-JWT Auth middleware).
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/heartbeat", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200 for agent path bypass, got %d", rec.Code)
+	}
+}
+
+func TestAuthMiddleware_AdminBootstrapPath_Bypass(t *testing.T) {
+	cfg := &config.Config{
+		AuthMode:      "required",
+		AuthJWTSecret: "test-secret-key-minimum-32-characters-long",
+	}
+	repo := setupTestRepo(t)
+	defer repo.Close()
+
+	reached := false
+	handler := Auth(cfg, repo)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// The admin bootstrap-token path bypasses this middleware so the handler
+	// itself can enforce auth; confirm the request reaches the next handler.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/bootstrap-token", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !reached {
+		t.Error("admin bootstrap-token handler was not reached; middleware blocked it")
+	}
+}
+
 func TestAuthMiddleware_HealthEndpoint_Bypass(t *testing.T) {
 	cfg := &config.Config{
 		AuthMode:     "required",

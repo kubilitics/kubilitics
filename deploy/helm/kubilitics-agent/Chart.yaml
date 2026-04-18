@@ -1,0 +1,6 @@
+apiVersion: v2
+name: kubilitics-agent
+description: Kubilitics agent — pushes cluster topology/events to a Kubilitics hub.
+type: application
+version: 0.1.0
+appVersion: "0.4.0"
