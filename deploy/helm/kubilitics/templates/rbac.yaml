@@ -127,6 +127,11 @@ rules:
   - apiGroups: ["*"]
     resources: ["*"]
     verbs: ["get", "list", "watch"]
+  # TokenReview — required for the agent registration same-cluster path
+  # (hub validates an agent's ServiceAccount JWT via TokenReview).
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
   {{- if .Values.rbac.additionalRules }}
   {{- toYaml .Values.rbac.additionalRules | nindent 2 }}
   {{- end }}

@@ -9,7 +9,9 @@ kind delete cluster --name "$CLUSTER" 2>/dev/null || true
 kind create cluster --name "$CLUSTER"
 
 echo "==> [2/6] Building images"
-docker build -t kubilitics-hub:e2e   -f "$REPO_ROOT/kubilitics-backend/Dockerfile" "$REPO_ROOT"
+# Hub Dockerfile expects context = kubilitics-backend (per its header comment).
+# Agent Dockerfile expects context = repo root (it COPYs both modules for go.work).
+docker build -t kubilitics-hub:e2e   -f "$REPO_ROOT/kubilitics-backend/Dockerfile" "$REPO_ROOT/kubilitics-backend"
 docker build -t kubilitics-agent:e2e -f "$REPO_ROOT/kubilitics-agent/Dockerfile"   "$REPO_ROOT"
 
 echo "==> [3/6] Loading images into kind"
@@ -41,6 +43,7 @@ helm upgrade --install kubilitics-agent "$REPO_ROOT/deploy/helm/kubilitics-agent
   --set image.tag=e2e \
   --set image.pullPolicy=Never \
   --set "hub.url=http://${HUB_SVC}.kubilitics-system.svc:8190" \
+  --set hub.insecureSkipTLSVerify=true \
   --wait --timeout 2m
 
 echo "==> [6/6] Waiting for heartbeat (60s)"
