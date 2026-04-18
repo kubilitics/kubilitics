@@ -51,10 +51,10 @@ export function getDefaultBackendBaseUrl(): string {
   if (typeof import.meta !== 'undefined' && import.meta.env?.DEV && typeof window !== 'undefined' && isLocalHostname(window.location?.hostname ?? '')) {
     return '';
   }
-  // Browser on local host (production build): use explicit backend URL
-  if (typeof window !== 'undefined' && isLocalHostname(window.location?.hostname ?? '')) {
-    return DEFAULT_BACKEND_BASE_URL;
-  }
+  // Production browser (no Tauri, no Dev, no explicit VITE_API_URL): use SAME-ORIGIN.
+  // This is the in-cluster web deployment — nginx serves the dist and proxies /api/* to
+  // the backend Service. Hardcoding http://localhost:8190 here used to break the browser
+  // path because the user's browser cannot reach the in-cluster backend pod directly.
   return '';
 }
 
