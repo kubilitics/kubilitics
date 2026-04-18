@@ -783,13 +783,15 @@ func main() {
 	regH := rest.NewAgentRegisterHandler(agentRepo, agentSigner, agentReviewer, hubClusterUID)
 	tokH := rest.NewAgentTokenHandler(agentRepo, agentSigner)
 	hbH := rest.NewAgentHeartbeatHandler(agentRepo, agentSigner)
-	admH := rest.NewAgentAdminHandler(agentRepo, agentSigner)
+	admH := rest.NewAgentAdminHandlerWithAuth(agentRepo, agentSigner, cfg.AuthMode, cfg.AuthJWTSecret)
 
 	// Register directly on the main router with full paths so they are not
 	// subject to apiRouter subrouter path-encoding quirks or the NotFoundHandler
 	// that will be set on apiRouter below.
-	// NOTE: The admin bootstrap-token endpoint is intentionally exposed without
-	// the existing user-auth middleware for now; RBAC guard is a later spec item.
+	// Agent endpoints bypass the user-JWT Auth middleware (see middleware/auth.go);
+	// they carry their own HS256 tokens validated by agenttoken.Signer.
+	// The admin bootstrap-token endpoint enforces its own user-JWT guard inline
+	// (see AgentAdminHandler.MintBootstrap). Full RBAC is a later spec item.
 	router.Handle("/api/v1/agent/register", regH).Methods("POST")
 	router.Handle("/api/v1/agent/token/refresh", tokH).Methods("POST")
 	hbLimited := rest.NewClusterRateLimitMiddleware(agentSigner, 10, 50)(hbH)

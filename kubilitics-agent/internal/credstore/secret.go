@@ -46,6 +46,17 @@ func (s *Store) Save(ctx context.Context, c Creds) error {
 	return err
 }
 
+// Delete removes the credential Secret from Kubernetes. If the Secret does not
+// exist the call is a no-op (idempotent). Used by the re-registration recovery
+// loop in main so stale creds are cleared before the next bootstrap attempt.
+func (s *Store) Delete(ctx context.Context) error {
+	err := s.cs.CoreV1().Secrets(s.namespace).Delete(ctx, s.name, metav1.DeleteOptions{})
+	if apierr.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 func (s *Store) Load(ctx context.Context) (Creds, error) {
 	sec, err := s.cs.CoreV1().Secrets(s.namespace).Get(ctx, s.name, metav1.GetOptions{})
 	if err != nil {

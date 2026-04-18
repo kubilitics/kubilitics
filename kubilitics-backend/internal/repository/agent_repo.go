@@ -19,20 +19,23 @@ func NewAgentRepo(db *sql.DB) *AgentRepo { return &AgentRepo{db: db} }
 // ErrAgentNotFound is returned when a requested row does not exist.
 var ErrAgentNotFound = errors.New("agent: not found")
 
-// UpsertCluster inserts a new cluster or updates name/version/status
-// while preserving credential_epoch and registered_at.
+// UpsertCluster inserts a new cluster or updates name/version/status on conflict.
+// On conflict (re-registration), credential_epoch is incremented atomically by
+// the database rather than by Go, which prevents lost-increment races when two
+// registrations for the same cluster_uid run concurrently.
+// On first insert the passed CredentialEpoch value (typically 1) is used as-is.
 func (r *AgentRepo) UpsertCluster(ctx context.Context, c *models.AgentCluster) error {
 	_, err := r.db.ExecContext(ctx, `
 INSERT INTO agent_clusters (id, organization_id, cluster_uid, name, k8s_version, agent_version,
                             node_count, status, credential_epoch)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(organization_id, cluster_uid) DO UPDATE SET
-  name = excluded.name,
-  k8s_version = excluded.k8s_version,
-  agent_version = excluded.agent_version,
-  node_count = excluded.node_count,
-  status = excluded.status,
-  credential_epoch = excluded.credential_epoch
+  name           = excluded.name,
+  k8s_version    = excluded.k8s_version,
+  agent_version  = excluded.agent_version,
+  node_count     = excluded.node_count,
+  status         = excluded.status,
+  credential_epoch = agent_clusters.credential_epoch + 1
 `, c.ID, c.OrganizationID, c.ClusterUID, c.Name, c.K8sVersion, c.AgentVersion,
 		c.NodeCount, c.Status, c.CredentialEpoch)
 	return err
