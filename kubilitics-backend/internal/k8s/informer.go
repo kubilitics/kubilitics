@@ -287,37 +287,103 @@ func (im *InformerManager) ListFromCacheWithPagination(resourceType, namespace s
 	}
 	descending := strings.ToLower(sortOrder) == "desc"
 
+	// Cross-cutting tie-break: equal primary keys fall through to (namespace, name)
+	// so the user-visible ordering is deterministic across reloads.
+	tieBreak := func(i, j int) bool {
+		ni, nj := filtered[i].GetNamespace(), filtered[j].GetNamespace()
+		if ni != nj {
+			return ni < nj
+		}
+		return filtered[i].GetName() < filtered[j].GetName()
+	}
+	getNStr := func(idx int, path ...string) string {
+		v, _, _ := unstructured.NestedString(filtered[idx].Object, path...)
+		return v
+	}
+	getNInt := func(idx int, path ...string) int64 {
+		if v, found, _ := unstructured.NestedInt64(filtered[idx].Object, path...); found {
+			return v
+		}
+		if v, found, _ := unstructured.NestedFloat64(filtered[idx].Object, path...); found {
+			return int64(v)
+		}
+		return 0
+	}
+	getRestarts := func(idx int) int64 {
+		stats, found, err := unstructured.NestedSlice(filtered[idx].Object, "status", "containerStatuses")
+		if err != nil || !found {
+			return 0
+		}
+		var total int64
+		for _, s := range stats {
+			m, ok := s.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if rc, found, _ := unstructured.NestedInt64(m, "restartCount"); found {
+				total += rc
+			} else if rcF, found, _ := unstructured.NestedFloat64(m, "restartCount"); found {
+				total += int64(rcF)
+			}
+		}
+		return total
+	}
+
 	sort.Slice(filtered, func(i, j int) bool {
-		var vi, vj string
+		// String comparator with tie-break.
+		strLess := func(a, b string) bool {
+			if a == b {
+				return tieBreak(i, j)
+			}
+			return a < b
+		}
+		// Int comparator with tie-break.
+		intLess := func(a, b int64) bool {
+			if a == b {
+				return tieBreak(i, j)
+			}
+			return a < b
+		}
+		var less bool
 		switch strings.ToLower(sortBy) {
 		case "namespace":
-			vi = filtered[i].GetNamespace()
-			vj = filtered[j].GetNamespace()
+			less = strLess(filtered[i].GetNamespace(), filtered[j].GetNamespace())
 		case "creationtimestamp":
 			ti := filtered[i].GetCreationTimestamp().Time
 			tj := filtered[j].GetCreationTimestamp().Time
-			if descending {
-				return ti.After(tj)
+			if ti.Equal(tj) {
+				less = tieBreak(i, j)
+			} else {
+				less = ti.Before(tj)
 			}
-			return ti.Before(tj)
-		case "status":
-			// For pods use .status.phase; for others fall back to name
-			vi, _, _ = unstructured.NestedString(filtered[i].Object, "status", "phase")
-			vj, _, _ = unstructured.NestedString(filtered[j].Object, "status", "phase")
-			if vi == "" {
-				vi = filtered[i].GetName()
+		case "status", "status.phase":
+			a, b := getNStr(i, "status", "phase"), getNStr(j, "status", "phase")
+			if a == "" {
+				a = filtered[i].GetName()
 			}
-			if vj == "" {
-				vj = filtered[j].GetName()
+			if b == "" {
+				b = filtered[j].GetName()
 			}
+			less = strLess(a, b)
+		case "status.podip":
+			less = strLess(getNStr(i, "status", "podIP"), getNStr(j, "status", "podIP"))
+		case "spec.nodename":
+			less = strLess(getNStr(i, "spec", "nodeName"), getNStr(j, "spec", "nodeName"))
+		case "restarts":
+			less = intLess(getRestarts(i), getRestarts(j))
+		case "spec.replicas":
+			less = intLess(getNInt(i, "spec", "replicas"), getNInt(j, "spec", "replicas"))
+		case "status.replicas":
+			less = intLess(getNInt(i, "status", "replicas"), getNInt(j, "status", "replicas"))
+		case "status.readyreplicas":
+			less = intLess(getNInt(i, "status", "readyReplicas"), getNInt(j, "status", "readyReplicas"))
 		default: // "name"
-			vi = filtered[i].GetName()
-			vj = filtered[j].GetName()
+			less = strLess(filtered[i].GetName(), filtered[j].GetName())
 		}
 		if descending {
-			return vi > vj
+			return !less
 		}
-		return vi < vj
+		return less
 	})
 
 	// Record total after filtering and sorting, before pagination

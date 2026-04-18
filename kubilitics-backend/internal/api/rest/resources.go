@@ -57,20 +57,83 @@ const DestructiveConfirmHeader = "X-Confirm-Destructive"
 // canSortUnstructured reports whether sortUnstructuredList knows how to handle
 // the given sort key. Unknown keys must not be re-sorted in the merge step —
 // doing so would scramble whatever order the per-namespace cache already applied.
+//
+// Supported keys (kept in lockstep with sortUnstructuredList):
+//   - identity:        name, namespace, creationTimestamp
+//   - pod:             status.phase, status.podIP, spec.nodeName, restarts
+//   - workload counts: spec.replicas, status.replicas, status.readyReplicas
+//
+// The frontend's mapClientSortToServerSort lowers user clicks (e.g. "Status",
+// "Restarts", "Node", "Ready") to these paths so cross-page ordering is
+// correct in any list backed by useServerPaginatedResourceList.
 func canSortUnstructured(sortBy string) bool {
 	switch sortBy {
-	case "", "name", "namespace", "creationTimestamp":
+	case "", "name", "namespace", "creationTimestamp",
+		"status.phase", "status.podIP", "spec.nodeName", "restarts",
+		"spec.replicas", "status.replicas", "status.readyReplicas":
 		return true
 	default:
 		return false
 	}
 }
 
+// sumPodRestarts returns the sum of containerStatuses[].restartCount for a Pod.
+// Returns 0 if the path is missing (e.g. for non-Pod resources, which simply
+// won't be sortable by 'restarts' but won't crash).
+func sumPodRestarts(u *unstructured.Unstructured) int64 {
+	stats, found, err := unstructured.NestedSlice(u.Object, "status", "containerStatuses")
+	if err != nil || !found {
+		return 0
+	}
+	var total int64
+	for _, s := range stats {
+		m, ok := s.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if rc, found, _ := unstructured.NestedInt64(m, "restartCount"); found {
+			total += rc
+		} else if rcF, found, _ := unstructured.NestedFloat64(m, "restartCount"); found {
+			total += int64(rcF)
+		}
+	}
+	return total
+}
+
+// nestedString extracts a string at the dotted path, returning "" if missing.
+// Used by sortUnstructuredList for status.phase / status.podIP / spec.nodeName.
+func nestedString(u *unstructured.Unstructured, path ...string) string {
+	v, _, _ := unstructured.NestedString(u.Object, path...)
+	return v
+}
+
+// nestedInt extracts an int64 at the dotted path, returning 0 if missing.
+// JSON unmarshalling can produce float64 for integer values, so try both.
+func nestedInt(u *unstructured.Unstructured, path ...string) int64 {
+	if v, found, _ := unstructured.NestedInt64(u.Object, path...); found {
+		return v
+	}
+	if v, found, _ := unstructured.NestedFloat64(u.Object, path...); found {
+		return int64(v)
+	}
+	return 0
+}
+
 // sortUnstructuredList sorts a slice of unstructured items in-place by the given
 // field and order. Used to re-sort merged multi-namespace results before pagination.
 // Uses a stable sort so equal primary keys preserve relative input order.
+//
+// Cross-cutting tie-break: equal primary keys fall through to (namespace, name)
+// so the user-visible ordering is deterministic across reloads.
 func sortUnstructuredList(items []unstructured.Unstructured, sortBy, sortOrder string) {
 	desc := sortOrder == "desc"
+	tieBreak := func(i, j int) bool {
+		ni, nj := items[i].GetNamespace(), items[j].GetNamespace()
+		if ni != nj {
+			return ni < nj
+		}
+		return items[i].GetName() < items[j].GetName()
+	}
 	sort.SliceStable(items, func(i, j int) bool {
 		var less bool
 		switch sortBy {
@@ -85,9 +148,58 @@ func sortUnstructuredList(items []unstructured.Unstructured, sortBy, sortOrder s
 			ti := items[i].GetCreationTimestamp()
 			tj := items[j].GetCreationTimestamp()
 			if ti.Equal(&tj) {
-				less = items[i].GetName() < items[j].GetName()
+				less = tieBreak(i, j)
 			} else {
 				less = ti.Before(&tj)
+			}
+		case "status.phase":
+			a, b := nestedString(&items[i], "status", "phase"), nestedString(&items[j], "status", "phase")
+			if a == b {
+				less = tieBreak(i, j)
+			} else {
+				less = a < b
+			}
+		case "status.podIP":
+			a, b := nestedString(&items[i], "status", "podIP"), nestedString(&items[j], "status", "podIP")
+			if a == b {
+				less = tieBreak(i, j)
+			} else {
+				less = a < b
+			}
+		case "spec.nodeName":
+			a, b := nestedString(&items[i], "spec", "nodeName"), nestedString(&items[j], "spec", "nodeName")
+			if a == b {
+				less = tieBreak(i, j)
+			} else {
+				less = a < b
+			}
+		case "restarts":
+			a, b := sumPodRestarts(&items[i]), sumPodRestarts(&items[j])
+			if a == b {
+				less = tieBreak(i, j)
+			} else {
+				less = a < b
+			}
+		case "spec.replicas":
+			a, b := nestedInt(&items[i], "spec", "replicas"), nestedInt(&items[j], "spec", "replicas")
+			if a == b {
+				less = tieBreak(i, j)
+			} else {
+				less = a < b
+			}
+		case "status.replicas":
+			a, b := nestedInt(&items[i], "status", "replicas"), nestedInt(&items[j], "status", "replicas")
+			if a == b {
+				less = tieBreak(i, j)
+			} else {
+				less = a < b
+			}
+		case "status.readyReplicas":
+			a, b := nestedInt(&items[i], "status", "readyReplicas"), nestedInt(&items[j], "status", "readyReplicas")
+			if a == b {
+				less = tieBreak(i, j)
+			} else {
+				less = a < b
 			}
 		default: // "" or "name"
 			ni, nj := items[i].GetName(), items[j].GetName()

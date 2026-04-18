@@ -92,37 +92,104 @@ export interface UseTableFiltersAndSortResult<T> {
 
 /**
  * The set of sort fields the backend's resource cache understands. See
- * `kubilitics-backend/internal/api/rest/resources.go canSortUnstructured`.
+ * `kubilitics-backend/internal/api/rest/resources.go canSortUnstructured`
+ * and `kubilitics-backend/internal/k8s/informer.go ListFromCacheWithPagination`.
+ *
+ * Cross-page ordering is only correct for these fields. Anything else
+ * gets sorted client-side over the visible page only.
  */
-export type ServerSortField = 'name' | 'namespace' | 'creationTimestamp';
+export type ServerSortField =
+  | 'name'
+  | 'namespace'
+  | 'creationTimestamp'
+  | 'status.phase'
+  | 'status.podIP'
+  | 'spec.nodeName'
+  | 'restarts'
+  | 'spec.replicas'
+  | 'status.replicas'
+  | 'status.readyReplicas';
 
 /**
  * Map a client-side column sort (sortKey + 'asc'/'desc') to the server's
- * paginator parameters. Use in pages that hit useServerPaginatedResourceList
- * so user clicks on column headers produce correct CROSS-PAGE ordering, not
- * just per-page re-sorting of an alphabetically-paginated slice.
+ * paginator parameters. Use in pages backed by useServerPaginatedResourceList
+ * so user clicks on column headers produce correct CROSS-PAGE ordering.
  *
- * Mapping:
- *   - 'name' / 'namespace' → passthrough.
- *   - 'age' → server sortBy='creationTimestamp'. Client uses negated-timestamp
- *     so client 'asc' means newest-first; map that to server 'desc' (and vice
- *     versa) so the user-visible ordering matches.
- *   - everything else → server falls back to creationTimestamp desc so the
- *     visible page is at least a stable newest-first cohort. Client-side
- *     re-sort then orders the visible 10 by the unsupported column.
+ * Mapping (every column the user can click in Pods + ReplicaSets has an entry):
+ *   - 'name' / 'namespace'  → passthrough.
+ *   - 'age'                 → creationTimestamp (inverted: client 'asc' means
+ *                              newest-first under negated-timestamp scheme,
+ *                              which maps to server 'desc').
+ *   - 'status'              → status.phase (Pod) or derived (ReplicaSet — falls
+ *                              back to name in the server when status.phase
+ *                              is empty for non-Pod kinds, see informer.go).
+ *   - 'restarts'            → restarts (sum of containerStatuses[].restartCount).
+ *   - 'node'                → spec.nodeName.
+ *   - 'ip'                  → status.podIP.
+ *   - 'desired' / 'replicas'→ spec.replicas (ReplicaSet/Deployment-shaped).
+ *   - 'current'             → status.replicas.
+ *   - 'ready' (workloads)   → status.readyReplicas.
+ *   - 'cpu' / 'memory' / 'ready' (Pod's "1/1") → cannot be sorted by the
+ *     resource cache (CPU/memory live in metrics-server; Pod 'ready' is a
+ *     computed string). Falls back to creationTimestamp desc so the page
+ *     is at least a stable newest-first slice; client re-sorts the visible
+ *     page by the requested column.
+ *   - default               → creationTimestamp desc (newest-first slice).
  */
 export function mapClientSortToServerSort(
   sortKey: string | null,
   sortOrder: 'asc' | 'desc',
+  /**
+   * Per-page overrides for ambiguous column ids. Example:
+   * { ready: 'status.readyReplicas' } — tells ReplicaSets that its 'ready'
+   * column means readyReplicas, while Pods leaves it unset (Pod 'ready' is
+   * the "1/1" string and not server-sortable).
+   */
+  overrides?: Record<string, ServerSortField>,
 ): { sortBy: ServerSortField; sortOrder: 'asc' | 'desc' } {
-  if (sortKey === 'name' || sortKey === 'namespace') {
-    return { sortBy: sortKey, sortOrder };
+  if (sortKey && overrides && overrides[sortKey]) {
+    return { sortBy: overrides[sortKey], sortOrder };
   }
-  if (sortKey === 'age') {
-    return { sortBy: 'creationTimestamp', sortOrder: sortOrder === 'asc' ? 'desc' : 'asc' };
+  switch (sortKey) {
+    case 'name':
+    case 'namespace':
+      return { sortBy: sortKey, sortOrder };
+    case 'age':
+      // Client sortValue is negated, so client 'asc' = newest-first. Invert.
+      return { sortBy: 'creationTimestamp', sortOrder: sortOrder === 'asc' ? 'desc' : 'asc' };
+    case 'status':
+      return { sortBy: 'status.phase', sortOrder };
+    case 'restarts':
+      return { sortBy: 'restarts', sortOrder };
+    case 'node':
+      return { sortBy: 'spec.nodeName', sortOrder };
+    case 'ip':
+      return { sortBy: 'status.podIP', sortOrder };
+    case 'desired':
+    case 'replicas':
+      return { sortBy: 'spec.replicas', sortOrder };
+    case 'current':
+      return { sortBy: 'status.replicas', sortOrder };
+    case 'readyReplicas':
+      return { sortBy: 'status.readyReplicas', sortOrder };
+    default:
+      // 'cpu', 'memory', 'ready', or any column the server can't sort.
+      return { sortBy: 'creationTimestamp', sortOrder: 'desc' };
   }
-  return { sortBy: 'creationTimestamp', sortOrder: 'desc' };
 }
+
+/**
+ * Set of column ids that the server CAN sort. Pages backed by server
+ * pagination should disable click-to-sort on columns NOT in this set so
+ * users don't get the misleading "looks sorted but only on this page"
+ * behavior. Pages that fetch the full list (no server pagination) can
+ * ignore this — every column sort is correct over the full data.
+ */
+export const SERVER_SORTABLE_COLUMN_IDS = new Set<string>([
+  'name', 'namespace', 'age',
+  'status', 'restarts', 'node', 'ip',
+  'desired', 'current', 'readyReplicas', 'replicas',
+]);
 
 export function useTableFiltersAndSort<T>(
   items: T[],
