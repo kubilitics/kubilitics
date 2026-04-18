@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubilitics-agent.fullname" . }}
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "kubilitics-agent.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "kubilitics-agent.fullname" . }}
+    spec:
+      serviceAccountName: {{ include "kubilitics-agent.fullname" . }}
+      containers:
+      - name: agent
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: KUBILITICS_HUB_URL
+          value: {{ .Values.hub.url | quote }}
+        - name: KUBILITICS_AGENT_VERSION
+          value: {{ .Chart.AppVersion | quote }}
+        {{- if .Values.hub.insecureSkipTLSVerify }}
+        - name: KUBILITICS_HUB_INSECURE
+          value: "true"
+        {{- end }}
+        {{- if .Values.hub.token }}
+        - name: KUBILITICS_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "kubilitics-agent.fullname" . }}-hub
+              key: token
+        {{- end }}
+        {{- if .Values.hub.caBundle }}
+        - name: KUBILITICS_HUB_CA_BUNDLE
+          value: /etc/kubilitics/ca.crt
+        volumeMounts:
+        - name: hub-ca
+          mountPath: /etc/kubilitics
+          readOnly: true
+        {{- end }}
+        resources:
+{{ toYaml .Values.resources | indent 10 }}
+      {{- if .Values.hub.caBundle }}
+      volumes:
+      - name: hub-ca
+        secret:
+          secretName: {{ include "kubilitics-agent.fullname" . }}-hub
+          items:
+          - key: ca.crt
+            path: ca.crt
+      {{- end }}

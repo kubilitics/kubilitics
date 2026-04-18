@@ -1,0 +1,23 @@
+image:
+  repository: ghcr.io/kubilitics/kubilitics-agent
+  tag: ""               # defaults to .Chart.AppVersion when empty
+  pullPolicy: IfNotPresent
+
+# REQUIRED for remote clusters: the URL the agent posts to.
+# In same-cluster installs (hub + agent on the same K8s cluster), use:
+#   http://kubilitics.kubilitics-system.svc.cluster.local:8190
+hub:
+  url: ""
+  token: ""             # bootstrap token for remote installs; leave empty for same-cluster.
+  caBundle: ""          # optional PEM contents for private CA
+  insecureSkipTLSVerify: false
+
+namespace: kubilitics-system
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
