@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -20,6 +22,9 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/cors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	k8srest "k8s.io/client-go/rest"
 
 	grpcapi "github.com/kubilitics/kubilitics-backend/internal/api/grpc"
 	"github.com/kubilitics/kubilitics-backend/internal/api/middleware"
@@ -33,6 +38,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/addon/resolver"
 	"github.com/kubilitics/kubilitics-backend/internal/addon/scanner"
 	"github.com/kubilitics/kubilitics-backend/internal/auth"
+	"github.com/kubilitics/kubilitics-backend/internal/auth/agenttoken"
 	"github.com/kubilitics/kubilitics-backend/internal/config"
 	"github.com/kubilitics/kubilitics-backend/internal/events"
 	"github.com/kubilitics/kubilitics-backend/internal/otel"
@@ -740,6 +746,64 @@ func main() {
 	handler.SetTracingHandler(tracingHandler)
 
 	rest.SetupRoutes(apiRouter, handler)
+
+	// ── Agent trust model endpoints ───────────────────────────────────────────
+	// These endpoints use their own token-based access control and must NOT be
+	// placed behind the existing user-auth middleware.
+	//
+	// Secret: loaded from KUBILITICS_AGENT_SIGNING_SECRET.  In dev mode (unset),
+	// a random ephemeral 48-byte secret is generated with a loud warning so that
+	// "go run ./cmd/server" still works.  The Helm chart always provides the env
+	// var, so production is never ephemeral.
+	agentSecret := []byte(os.Getenv("KUBILITICS_AGENT_SIGNING_SECRET"))
+	if len(agentSecret) < 32 {
+		raw := make([]byte, 48)
+		if _, randErr := rand.Read(raw); randErr != nil {
+			log.Error("Failed to generate ephemeral agent signing secret", "error", randErr)
+			os.Exit(1)
+		}
+		agentSecret = []byte(hex.EncodeToString(raw)) // 96 ASCII chars — well above 32
+		log.Warn("DEV MODE: agent signing secret is ephemeral; agents will be locked out across restarts. Set KUBILITICS_AGENT_SIGNING_SECRET to a stable 32+ byte value.")
+	}
+	agentSigner := agenttoken.NewSigner(agentSecret)
+	agentRepo := repository.NewAgentRepo(repo.DB())
+
+	// Optional same-cluster reviewer + hub cluster UID (only available in-cluster).
+	var agentReviewer rest.Reviewer
+	var hubClusterUID string
+	if inClusterCfg, inClusterErr := k8srest.InClusterConfig(); inClusterErr == nil {
+		if cs, csErr := kubernetes.NewForConfig(inClusterCfg); csErr == nil {
+			agentReviewer = k8s.NewTokenReviewer(cs)
+			if ns, nsErr := cs.CoreV1().Namespaces().Get(ctx, "kube-system", metav1.GetOptions{}); nsErr == nil {
+				hubClusterUID = string(ns.UID)
+			}
+		}
+	}
+
+	regH := rest.NewAgentRegisterHandler(agentRepo, agentSigner, agentReviewer, hubClusterUID)
+	tokH := rest.NewAgentTokenHandler(agentRepo, agentSigner)
+	hbH := rest.NewAgentHeartbeatHandler(agentRepo, agentSigner)
+	admH := rest.NewAgentAdminHandlerWithAuth(agentRepo, agentSigner, cfg.AuthMode, cfg.AuthJWTSecret)
+
+	// Register directly on the main router with full paths so they are not
+	// subject to apiRouter subrouter path-encoding quirks or the NotFoundHandler
+	// that will be set on apiRouter below.
+	// Agent endpoints bypass the user-JWT Auth middleware (see middleware/auth.go);
+	// they carry their own HS256 tokens validated by agenttoken.Signer.
+	// The admin bootstrap-token endpoint enforces its own user-JWT guard inline
+	// (see AgentAdminHandler.MintBootstrap). Full RBAC is a later spec item.
+	router.Handle("/api/v1/agent/register", regH).Methods("POST")
+	router.Handle("/api/v1/agent/token/refresh", tokH).Methods("POST")
+	hbLimited := rest.NewClusterRateLimitMiddleware(agentSigner, 10, 50)(hbH)
+	router.Handle("/api/v1/agent/heartbeat", hbLimited).Methods("POST")
+	router.HandleFunc("/api/v1/admin/clusters/bootstrap-token", admH.MintBootstrap).Methods("POST")
+	log.Info("Agent trust endpoints registered",
+		"register", "POST /api/v1/agent/register",
+		"token_refresh", "POST /api/v1/agent/token/refresh",
+		"heartbeat", "POST /api/v1/agent/heartbeat",
+		"bootstrap_mint", "POST /api/v1/admin/clusters/bootstrap-token",
+	)
+	// ── End agent trust model endpoints ──────────────────────────────────────
 
 	// API 404 — set AFTER all routes (events-intelligence, otel, rest) are registered
 	// so the NotFoundHandler doesn't shadow any routes.
