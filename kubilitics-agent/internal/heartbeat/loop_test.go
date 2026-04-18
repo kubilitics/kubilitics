@@ -2,6 +2,7 @@ package heartbeat
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ func TestLoop_SendsHeartbeats(t *testing.T) {
 	l := New(Inputs{Hub: hub, Interval: 20 * time.Millisecond, ClusterID: "c", ClusterUID: "u"})
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	l.RunWithCreds(ctx, "rk", "eyJ")
+	_ = l.RunWithCreds(ctx, "rk", "eyJ") // returns nil on ctx cancellation
 	if hub.hbCalls.Load() < 3 {
 		t.Fatalf("only %d hb", hub.hbCalls.Load())
 	}
@@ -45,8 +46,18 @@ func TestLoop_RefreshesOnAccessExpired(t *testing.T) {
 	l := New(Inputs{Hub: hub, Interval: 10 * time.Millisecond, ClusterID: "c", ClusterUID: "u"})
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancel()
-	l.RunWithCreds(ctx, "rk", "eyJ")
+	_ = l.RunWithCreds(ctx, "rk", "eyJ")
 	if hub.refCalls.Load() == 0 {
 		t.Fatal("did not refresh")
+	}
+}
+
+func TestLoop_410ReturnsReRegister(t *testing.T) {
+	hub := &fakeHub{hbErr: &hubclient.APIError{Status: 410, Code: "uid_mismatch"}}
+	l := New(Inputs{Hub: hub, Interval: 10 * time.Millisecond, ClusterID: "c", ClusterUID: "u"})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := l.RunWithCreds(ctx, "rk", "eyJ"); !errors.Is(err, ErrNeedsReRegister) {
+		t.Fatalf("expected ErrNeedsReRegister, got %v", err)
 	}
 }

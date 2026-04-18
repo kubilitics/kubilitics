@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	corev1clients "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -47,19 +49,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	saToken := readSAToken()
-	creds, err := bootstrap.Run(ctx, bootstrap.Inputs{
-		Store:          store,
-		Hub:            hub,
-		BootstrapToken: cfg.BootstrapToken,
-		SAToken:        saToken,
-		ClusterUID:     uid,
-		AgentVersion:   cfg.AgentVersion,
-	})
-	if err != nil {
-		log.Fatalf("registration failed: %v", err)
-	}
-
 	go func() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
@@ -67,14 +56,55 @@ func main() {
 		cancel()
 	}()
 
-	l := heartbeat.New(heartbeat.Inputs{
-		Hub:          hub,
-		Interval:     cfg.HeartbeatInterval,
-		ClusterID:    creds.ClusterID,
-		ClusterUID:   uid,
-		AgentVersion: cfg.AgentVersion,
-	})
-	l.RunWithCreds(ctx, creds.RefreshToken, creds.AccessToken)
+	saToken := readSAToken()
+
+	// Recovery loop: on ErrNeedsReRegister the agent clears stale credentials
+	// and re-registers rather than crashing. Without this loop, a 410 from the
+	// hub causes a CrashLoop because the same stale Secret is loaded on restart.
+	for {
+		creds, err := bootstrap.Run(ctx, bootstrap.Inputs{
+			Store:          store,
+			Hub:            hub,
+			BootstrapToken: cfg.BootstrapToken,
+			SAToken:        saToken,
+			ClusterUID:     uid,
+			AgentVersion:   cfg.AgentVersion,
+		})
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("registration failed: %v (retrying in 10s)", err)
+			select {
+			case <-time.After(10 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+			continue
+		}
+
+		l := heartbeat.New(heartbeat.Inputs{
+			Hub:          hub,
+			Interval:     cfg.HeartbeatInterval,
+			ClusterID:    creds.ClusterID,
+			ClusterUID:   uid,
+			AgentVersion: cfg.AgentVersion,
+		})
+		herr := l.RunWithCreds(ctx, creds.RefreshToken, creds.AccessToken)
+		if herr == nil {
+			// ctx cancelled — clean shutdown.
+			return
+		}
+		if errors.Is(herr, heartbeat.ErrNeedsReRegister) {
+			log.Printf("hub signalled re-registration; clearing creds")
+			if derr := store.Delete(ctx); derr != nil {
+				log.Printf("warn: clearing creds failed: %v", derr)
+			}
+			continue
+		}
+		log.Printf("heartbeat exited with unexpected error: %v", herr)
+		return
+	}
 }
 
 func readSAToken() string {

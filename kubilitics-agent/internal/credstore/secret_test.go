@@ -28,6 +28,22 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 }
 
+func TestDelete(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	s := New(cs, "ns", "name")
+	_ = s.Save(context.Background(), Creds{ClusterID: "c", RefreshToken: "rk_live_x"})
+	if err := s.Delete(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(context.Background()); err == nil {
+		t.Fatal("expected load to fail after delete")
+	}
+	// Idempotent: deleting again is fine.
+	if err := s.Delete(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoadMissing(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	s := New(cs, "ns", "name")

@@ -42,6 +42,19 @@ func Auth(cfg *config.Config, repo *repository.SQLiteRepository) func(http.Handl
 				next.ServeHTTP(w, r)
 				return
 			}
+			// Agent endpoints carry their own HS256 access tokens validated by
+			// agenttoken.Signer. They must bypass the user-JWT Auth middleware.
+			if strings.HasPrefix(path, "/api/v1/agent/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Admin bootstrap-token endpoint requires user auth (enforced inline in
+			// AgentAdminHandler.MintBootstrap). Bypass this middleware so the handler
+			// can do its own auth check.
+			if path == "/api/v1/admin/clusters/bootstrap-token" {
+				next.ServeHTTP(w, r)
+				return
+			}
 			mode := strings.ToLower(strings.TrimSpace(cfg.AuthMode))
 			if mode == "" {
 				mode = "disabled"

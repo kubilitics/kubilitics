@@ -153,9 +153,17 @@ func (h *AgentRegisterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		cluster.AgentVersion = req.AgentVersion
 		cluster.NodeCount = req.NodeCount
 		cluster.Status = "active"
-		cluster.CredentialEpoch++
+		// Do NOT pre-increment CredentialEpoch here — the SQL ON CONFLICT clause
+		// atomically increments it to prevent lost-increment races under concurrent
+		// re-registrations of the same cluster_uid. We re-read the row below.
 	}
 	if err := h.repo.UpsertCluster(r.Context(), cluster); err != nil {
+		writeAgentErr(w, http.StatusInternalServerError, "db_error", err.Error())
+		return
+	}
+	// Re-read to get the SQL-bumped epoch (race-safe against concurrent re-registrations).
+	cluster, err = h.repo.GetClusterByUID(r.Context(), orgID, req.ClusterUID)
+	if err != nil {
 		writeAgentErr(w, http.StatusInternalServerError, "db_error", err.Error())
 		return
 	}
