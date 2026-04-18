@@ -225,8 +225,12 @@ export default function ReplicaSets() {
  const { filteredAndSortedItems: filteredItems, distinctValuesByColumn, valueCountsByColumn, columnFilters, setColumnFilter, sortKey, sortOrder, setSort, clearAllFilters, hasActiveFilters } = useTableFiltersAndSort(itemsAfterSearchAndNs, { columns: replicaSetsTableConfig, defaultSortKey: 'age', defaultSortOrder: 'asc' });
 
  // Push user's column-header sort to server so cross-page ordering is correct.
+ // ReplicaSets-specific overrides: 'ready' here means readyReplicas (an int)
+ // not the Pod-style "1/1" string.
  useEffect(() => {
-   setServerSort(mapClientSortToServerSort(sortKey, sortOrder));
+   setServerSort(mapClientSortToServerSort(sortKey, sortOrder, {
+     ready: 'status.readyReplicas',
+   }));
    setPageIndex(0);
  }, [sortKey, sortOrder]);
 
