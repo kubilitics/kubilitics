@@ -8,43 +8,40 @@ Kubilitics has been installed.
 
    kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "kubilitics.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
 
-{{- if and .Values.persistence.enabled (not .Values.persistence.storageClass) (or .Release.IsInstall .Release.IsUpgrade) }}
-{{- $defaultSCFound := false }}
-{{- $storageClasses := (lookup "storage.k8s.io/v1" "StorageClass" "" "").items }}
-{{- range $storageClasses }}
-  {{- if or (eq (index .metadata.annotations "storageclass.kubernetes.io/is-default-class") "true") (index .metadata.annotations "storageclass.beta.kubernetes.io/is-default-class" | eq "true") }}
-    {{- $defaultSCFound = true }}
-  {{- end }}
-{{- end }}
-{{- if not $defaultSCFound }}
+{{- if eq (include "kubilitics.persistence.useEmptyDir" .) "true" }}
 
-⚠️  WARNING: No default StorageClass was found on this cluster, and
-    persistence.storageClass was left unset. The data PersistentVolumeClaim
-    ({{ include "kubilitics.fullname" . }}-pvc) will stay "Pending" and its
-    pod will never schedule — you'll see a FailedScheduling event like:
+⚠️  NO PERSISTENT STORAGE — RUNNING ON EMPTYDIR
 
-      0/N nodes are available: pod has unbound immediate PersistentVolumeClaims.
+    No default StorageClass was found on this cluster, and
+    persistence.storageClass was left unset. To let the install succeed
+    immediately, Kubilitics automatically used a non-persistent emptyDir
+    volume instead of a PersistentVolumeClaim.
 
-    To fix this, do ONE of the following:
+    This means: the SQLite database at /data will be WIPED every time the
+    pod restarts (upgrade, node drain, crash, eviction, etc.) — nothing is
+    durable. This is fine for a quick evaluation, but do not run production
+    workloads this way.
 
-      a) List your cluster's available storage classes and set one explicitly:
+    This pod also carries the annotation kubilitics.io/storage-fallback=true
+    so you can detect this state later: kubectl get deploy {{ include "kubilitics.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.spec.template.metadata.annotations}'
 
-           kubectl get storageclass
-           helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} \
-             --set persistence.storageClass=<name-from-above>
+    To switch to real persistent storage:
 
-      b) For a quick, non-persistent evaluation install (data is lost on pod
-         restart — do not use this for production):
+      kubectl get storageclass
+      helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} \
+        --set persistence.storageClass=<name-from-above>
 
-           helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} \
-             --set persistence.enabled=false
-{{- end }}
+    (This will recreate the data pod with a PersistentVolumeClaim — any data
+    written while running on emptyDir is already gone by this point.)
 {{- end }}
 
 3. Troubleshooting a pod stuck in "Pending":
 
    kubectl describe pod -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
 
-   If the events mention "unbound immediate PersistentVolumeClaims", see the
-   storage class guidance above (or re-run `helm upgrade` after fixing it —
-   the warning above only prints once at install/upgrade time).
+   If you manage this chart via a GitOps tool that renders with Helm
+   lookups disabled (e.g. default ArgoCD Helm rendering), the automatic
+   emptyDir fallback above cannot see your cluster's real StorageClass
+   state and will always report no default found. Set
+   persistence.storageClass explicitly in that case for a deterministic,
+   lookup-independent render.
