@@ -135,6 +135,35 @@ Deploy Kubilitics to your Kubernetes cluster for team-wide browser access.
 | Kubernetes | ≥ 1.24 |
 | Helm | ≥ 3.8 (OCI support) |
 | kubectl | configured |
+| A default StorageClass | required for the default (persistent) install — see below |
+
+> **No default StorageClass on your cluster?** By default Kubilitics requests
+> persistent storage for its SQLite database using whatever StorageClass your
+> cluster marks as default. Many bare-metal/dev clusters (kubeadm, some kind/k3s
+> setups) don't have one, which leaves the pod stuck `Pending` with a
+> `FailedScheduling: unbound immediate PersistentVolumeClaims` event. Check first:
+>
+> ```bash
+> kubectl get storageclass   # look for "(default)" next to one of them
+> ```
+>
+> If none is marked default, pick one of:
+>
+> ```bash
+> # Option A: tell Kubilitics which StorageClass to use
+> helm install kubilitics ./deploy/helm/kubilitics \
+>   --namespace kubilitics --create-namespace \
+>   --set persistence.storageClass=<name-from-the-list-above>
+>
+> # Option B: quick, non-persistent evaluation install (data is lost on pod
+> # restart — do not use this for production)
+> helm install kubilitics ./deploy/helm/kubilitics \
+>   --namespace kubilitics --create-namespace \
+>   --set persistence.enabled=false
+> ```
+>
+> The chart also prints this guidance automatically in the post-install NOTES
+> when it detects a missing default StorageClass.
 
 ### Install
 
