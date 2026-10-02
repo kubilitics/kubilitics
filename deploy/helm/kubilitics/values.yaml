@@ -84,11 +84,14 @@ database:
 # Persistence for SQLite database (only used when database.type: "sqlite")
 persistence:
   enabled: true
-  # Empty string = use the cluster's default StorageClass. If your cluster has
-  # no default StorageClass, either set this explicitly (`kubectl get storageclass`
-  # to list options) or set persistence.enabled=false for a non-persistent eval
-  # install. Leaving this unset on a cluster with no default StorageClass will
-  # leave the data pod stuck "Pending" — see README.md Helm Deployment section.
+  # Empty string = use the cluster's default StorageClass. If the cluster has
+  # no default StorageClass, the chart automatically falls back to a
+  # non-persistent emptyDir volume (install still succeeds, but /data — the
+  # SQLite database — is wiped on every pod restart) and prints a loud
+  # warning in the post-install NOTES plus a kubilitics.io/storage-fallback
+  # pod annotation. To get real persistent storage on such a cluster, set
+  # this explicitly after checking `kubectl get storageclass`. See
+  # README.md's Helm Deployment section for details.
   storageClass: ""
   size: 1Gi
   # mountPath is /data in the container

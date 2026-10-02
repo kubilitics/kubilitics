@@ -13,6 +13,11 @@ spec:
     metadata:
       labels:
         {{- include "kubilitics.selectorLabels" . | nindent 8 }}
+      {{- if eq (include "kubilitics.persistence.useEmptyDir" .) "true" }}
+      annotations:
+        kubilitics.io/storage-fallback: "true"
+        kubilitics.io/storage-fallback-reason: "no default StorageClass found on this cluster and persistence.storageClass was unset — using non-persistent emptyDir instead of a PersistentVolumeClaim; data in /data (including the SQLite database) will NOT survive a pod restart. Set persistence.storageClass to get persistent storage; see README.md Helm Deployment section."
+      {{- end }}
     spec:
       {{- include "kubilitics.imagePullSecrets" . | nindent 6 }}
       {{- with .Values.serviceAccount }}
@@ -226,7 +231,7 @@ spec:
             {{- end }}
       volumes:
         - name: data
-          {{- if .Values.persistence.enabled }}
+          {{- if and .Values.persistence.enabled (ne (include "kubilitics.persistence.useEmptyDir" .) "true") }}
           persistentVolumeClaim:
             claimName: {{ include "kubilitics.fullname" . }}-pvc
           {{- else }}
