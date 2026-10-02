@@ -1,0 +1,50 @@
+Kubilitics has been installed.
+
+1. Check that the pods are running:
+
+   kubectl get pods -n {{ .Release.Namespace }}
+
+2. Access the UI (port-forward for local testing):
+
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "kubilitics.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+
+{{- if and .Values.persistence.enabled (not .Values.persistence.storageClass) (or .Release.IsInstall .Release.IsUpgrade) }}
+{{- $defaultSCFound := false }}
+{{- $storageClasses := (lookup "storage.k8s.io/v1" "StorageClass" "" "").items }}
+{{- range $storageClasses }}
+  {{- if or (eq (index .metadata.annotations "storageclass.kubernetes.io/is-default-class") "true") (index .metadata.annotations "storageclass.beta.kubernetes.io/is-default-class" | eq "true") }}
+    {{- $defaultSCFound = true }}
+  {{- end }}
+{{- end }}
+{{- if not $defaultSCFound }}
+
+⚠️  WARNING: No default StorageClass was found on this cluster, and
+    persistence.storageClass was left unset. The data PersistentVolumeClaim
+    ({{ include "kubilitics.fullname" . }}-pvc) will stay "Pending" and its
+    pod will never schedule — you'll see a FailedScheduling event like:
+
+      0/N nodes are available: pod has unbound immediate PersistentVolumeClaims.
+
+    To fix this, do ONE of the following:
+
+      a) List your cluster's available storage classes and set one explicitly:
+
+           kubectl get storageclass
+           helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} \
+             --set persistence.storageClass=<name-from-above>
+
+      b) For a quick, non-persistent evaluation install (data is lost on pod
+         restart — do not use this for production):
+
+           helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} \
+             --set persistence.enabled=false
+{{- end }}
+{{- end }}
+
+3. Troubleshooting a pod stuck in "Pending":
+
+   kubectl describe pod -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+   If the events mention "unbound immediate PersistentVolumeClaims", see the
+   storage class guidance above (or re-run `helm upgrade` after fixing it —
+   the warning above only prints once at install/upgrade time).

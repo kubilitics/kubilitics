@@ -84,6 +84,11 @@ database:
 # Persistence for SQLite database (only used when database.type: "sqlite")
 persistence:
   enabled: true
+  # Empty string = use the cluster's default StorageClass. If your cluster has
+  # no default StorageClass, either set this explicitly (`kubectl get storageclass`
+  # to list options) or set persistence.enabled=false for a non-persistent eval
+  # install. Leaving this unset on a cluster with no default StorageClass will
+  # leave the data pod stuck "Pending" — see README.md Helm Deployment section.
   storageClass: ""
   size: 1Gi
   # mountPath is /data in the container
