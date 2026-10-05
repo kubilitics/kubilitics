@@ -22,33 +22,24 @@ import { useConnectionStatus } from "@/hooks/useConnectionStatus";
 import { Loader2, Server, Cpu, MemoryStick, Hexagon, Info, Layers } from "lucide-react";
 import { EmptyNoClusters } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
+import { parseK8sCpuToMillicores, parseK8sQuantityToBytes } from "@/lib/k8sQuantity";
 
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
 /* ═══════════════════════════════════════════════════════════════════════════
    Helpers
    ═══════════════════════════════════════════════════════════════════════════ */
 
+// METRICS-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): previously reimplemented
+// unit parsing locally, including a bug where lowercase decimal unit letters
+// (k/m/g/t/p/e) were treated as valid memory suffixes with the same scale as
+// their uppercase decimal counterparts — not a real Kubernetes quantity
+// suffix for memory — and invalid input silently became 0 via `|| 0`.
 function parseCpuMillis(v: string | number | undefined): number {
-  if (v == null) return 0;
-  const s = String(v);
-  if (s.endsWith("m")) return parseInt(s, 10) || 0;
-  if (s.endsWith("n")) return Math.round((parseInt(s, 10) || 0) / 1e6);
-  return (parseFloat(s) || 0) * 1000;
+  return parseK8sCpuToMillicores(v ?? null) ?? 0;
 }
 
 function parseMemoryBytes(v: string | number | undefined): number {
-  if (v == null) return 0;
-  const s = String(v);
-  const match = s.match(/^(\d+(?:\.\d+)?)\s*([EPTGMK]i?|[eptgmk])?$/);
-  if (!match) return parseInt(s, 10) || 0;
-  const num = parseFloat(match[1]!);
-  const unit = match[2] ?? "";
-  const m: Record<string, number> = {
-    "": 1, K: 1e3, M: 1e6, G: 1e9, T: 1e12, P: 1e15, E: 1e18,
-    Ki: 1024, Mi: 1024 ** 2, Gi: 1024 ** 3, Ti: 1024 ** 4, Pi: 1024 ** 5, Ei: 1024 ** 6,
-    k: 1e3, m: 1e6, g: 1e9, t: 1e12, p: 1e15, e: 1e18,
-  };
-  return Math.round(num * (m[unit] ?? 1));
+  return parseK8sQuantityToBytes(v ?? null) ?? 0;
 }
 
 function formatCpu(millis: number): string {

@@ -22,6 +22,7 @@ import {
   Bar,
 } from 'recharts';
 import { cn } from '@/lib/utils';
+import { parseK8sCpuToMillicores, parseK8sQuantityToBytes } from '@/lib/k8sQuantity';
 
 const TOOLTIP_CPU_UNIT = 'Processing power over time. 1000m = 1 CPU core. Spikes may indicate heavy computation or request surges.';
 const TOOLTIP_MEMORY_UNIT = 'RAM allocation over time. Steady growth may indicate a memory leak. Sudden drops typically mean a pod restart.';
@@ -95,16 +96,17 @@ interface MetricsDashboardProps {
   clusterId?: string | null;
 }
 
+// METRICS-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): previously only
+// recognized the "m"/"Mi"-suffixed shape and silently returned 0 for any
+// other valid Kubernetes quantity (e.g. a whole-core "1" CPU value) or
+// invalid input. Delegates to the canonical parser.
 function parsePodCpuValue(s: string): number {
-  if (!s || s === '-') return 0;
-  const v = parseFloat(s.replace(/m$/, '').trim());
-  return Number.isNaN(v) ? 0 : v;
+  return parseK8sCpuToMillicores(s) ?? 0;
 }
 
 function parsePodMemoryMi(s: string): number {
-  if (!s || s === '-') return 0;
-  const v = parseFloat(s.replace(/Mi$/, '').trim());
-  return Number.isNaN(v) ? 0 : v;
+  const bytes = parseK8sQuantityToBytes(s);
+  return bytes == null ? 0 : bytes / (1024 * 1024);
 }
 
 /** Format CPU millicores with clean display: 0→"0m", <0.001→"< 1m", <1→2dp, <100→1dp, >=100→0dp */
@@ -143,29 +145,17 @@ function formatMemoryDelta(v: number): string {
   return `${Math.round(abs)}Mi`;
 }
 
+// METRICS-2: the old bare-number CPU heuristic (`v < 10 ? v*1000 : v`) guessed
+// "cores vs. already-millicores" from magnitude alone — ambiguous and wrong
+// for e.g. a legitimate 15-core node (would have been left as 15m instead of
+// 15000m). The canonical parser treats a bare number as whole cores,
+// matching real Kubernetes quantity semantics unambiguously.
 function parseCPUToMillicores(s: string): number {
-  if (!s || s === '-') return 0;
-  const v = parseFloat(s.replace(/[nmuµ]$/i, '').trim());
-  if (Number.isNaN(v)) return 0;
-  if (s.endsWith('n')) return v / 1000000;
-  if (s.endsWith('u') || s.endsWith('µ')) return v / 1000;
-  if (s.endsWith('m')) return v;
-  return v < 10 ? v * 1000 : v;
+  return parseK8sCpuToMillicores(s) ?? 0;
 }
 
 function parseMemoryToBytes(s: string): number {
-  if (!s || s === '-') return 0;
-  const num = parseFloat(s.replace(/[KMGT]i?$/i, '').trim());
-  if (Number.isNaN(num)) return 0;
-  if (s.endsWith('Ki')) return num * 1024;
-  if (s.endsWith('Mi')) return num * 1024 * 1024;
-  if (s.endsWith('Gi')) return num * 1024 * 1024 * 1024;
-  if (s.endsWith('Ti')) return num * 1024 * 1024 * 1024 * 1024;
-  if (s.endsWith('K')) return num * 1000;
-  if (s.endsWith('M')) return num * 1000 * 1000;
-  if (s.endsWith('G')) return num * 1000 * 1000 * 1000;
-  if (s.endsWith('T')) return num * 1000 * 1000 * 1000 * 1000;
-  return num;
+  return parseK8sQuantityToBytes(s) ?? 0;
 }
 
 /**
