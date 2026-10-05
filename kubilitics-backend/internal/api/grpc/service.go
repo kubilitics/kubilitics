@@ -536,7 +536,11 @@ func (s *clusterDataService) GetTopologyGraph(ctx context.Context, req *pb.Topol
 	s.log.Debug("GetTopologyGraph", "cluster_id", req.ClusterId, "namespace", req.Namespace)
 
 	filters := models.TopologyFilters{Namespace: strings.TrimSpace(req.Namespace)}
-	graph, err := s.topologyService.GetTopology(ctx, req.ClusterId, filters, 0, false)
+	// Bounded by default (Phase 2, docs/TOPOLOGY-SCALE-INVESTIGATION.md) —
+	// this call had the identical unbounded-maxNodes gap as the REST V1
+	// handler before this fix. No proto field exists yet for an explicit
+	// override; add one if a real caller needs the unbounded form.
+	graph, err := s.topologyService.GetTopology(ctx, req.ClusterId, filters, models.DefaultMaxTopologyNodes, false)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to build topology: %v", err)
 	}

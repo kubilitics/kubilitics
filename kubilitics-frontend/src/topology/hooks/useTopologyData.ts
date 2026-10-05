@@ -16,7 +16,10 @@
  * so the namespace picker always has the complete set.
  */
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useClusterTopology } from "@/hooks/useClusterTopology";
+import { listResources } from "@/services/backendApiClient";
+import { useBackendConfigStore, getEffectiveBackendBaseUrl } from "@/stores/backendConfigStore";
 import { transformGraph } from "../utils/transformGraph";
 import type { TopologyResponse, TopologyNode, TopologyEdge, ViewMode } from "../types/topology";
 
@@ -32,8 +35,28 @@ export const DEPTH_LABELS: Record<DepthLevel, { label: string; description: stri
 
 /**
  * Maximum nodes rendered on the canvas before truncation kicks in.
- * Backend pod aggregation (>3 pods collapse to 1 node) keeps real node counts
- * well below this limit. ELK hybrid layout handles ~1000 nodes smoothly.
+ *
+ * TOPOLOGY-3 (docs/PRODUCTION-RELIABILITY-AUDIT.md): this comment previously
+ * claimed "backend pod aggregation (>3 pods collapse to 1 node) keeps real
+ * node counts well below this limit." That aggregation exists only in the
+ * separate V2 topology engine (internal/topology/v2/builder/pod_aggregation.go,
+ * used by the Blast Radius tab) — the V1 engine this page actually calls
+ * (internal/topology/engine.go, via useClusterTopology/getTopology) has no
+ * pod aggregation at all. Porting it would require extending V1's
+ * TopologyNode schema (it has no Category/Group/Layer/Extra fields V2's
+ * aggregation needs) — a larger, riskier change than this fix calls for, and
+ * explicitly left optional by the roadmap ("port... OR migrate... and
+ * correct the misleading comment either way").
+ *
+ * The real backstops for a high-pod-count namespace/cluster are: (1)
+ * TOPOLOGY-1's namespace-scoping fix, which now bounds backend discovery to
+ * the selected namespace instead of the whole cluster for the common
+ * single-namespace case, and (2) this MAX_VISIBLE_NODES truncation itself —
+ * ELK's hybrid layout switches to a fast category-grid layout above 300
+ * nodes and this cap hard-truncates the rendered set above 1000, so a
+ * namespace with many replicas still won't freeze the UI, it will just show
+ * a truncated/capped view (see the wasTruncated/totalBeforeCap metadata this
+ * hook already returns).
  */
 export const MAX_VISIBLE_NODES = 1000;
 
@@ -165,25 +188,78 @@ export function useTopologyData({
   resource = "",
   enabled = true,
 }: UseTopologyDataParams) {
+  // View modes where namespace filtering makes sense.
+  // Cluster and RBAC show cluster-scoped resources (no namespace) so filtering would exclude everything.
+  const NS_FILTERABLE_VIEWS = new Set<ViewMode>(["namespace", "traffic"]);
+
+  // TOPOLOGY-1 (docs/PRODUCTION-RELIABILITY-AUDIT.md): the namespace selector
+  // was cosmetic — selectedNamespaces was only ever applied as a client-side
+  // filter AFTER an unscoped, full-cluster backend fetch, so every topology
+  // load cost the same regardless of what the user picked (a code comment
+  // elsewhere in this file literally warns "Empty set = All Namespaces = 735
+  // resources = system freeze" — that's what happened on every load).
+  // useClusterTopology/getTopology already support a single `namespace`
+  // backend filter (wired in Phase 1 for TOPOLOGY-2's timeout fix); the
+  // backend's TopologyFilters.Namespace is a single string (internal/models/
+  // topology.go), not a multi-value filter, so real backend scoping is only
+  // possible when exactly one namespace is selected. For 0 (all) or 2+
+  // (multi-select) namespaces, the backend fetch remains unscoped and
+  // filterByNamespaces (below) continues to do the filtering client-side,
+  // exactly as before — not a regression for those cases, and matching the
+  // roadmap's scope ("thread the selected namespace," not "add multi-
+  // namespace backend support").
+  const backendNamespace =
+    NS_FILTERABLE_VIEWS.has(viewMode) && selectedNamespaces.size === 1
+      ? Array.from(selectedNamespaces)[0]
+      : undefined;
+
   const { graph, isLoading, isFetching, error, refetch } = useClusterTopology({
     clusterId,
+    namespace: backendNamespace,
     depth,
     enabled: enabled && !!clusterId,
   });
 
-  // Extract ALL namespaces from unfiltered graph (for the namespace picker)
+  // VALID-06 (docs/VALID-06-INVESTIGATION.md): allNamespaces previously
+  // derived from `graph.nodes` — the CURRENTLY LOADED, already
+  // namespace-scoped topology data. That makes the namespace picker a
+  // function of what's already selected, not of what actually exists in
+  // the cluster: a namespace the user hasn't picked yet (and that isn't
+  // incidentally cross-referenced from whatever IS loaded) could never
+  // appear in its own picker, with no error or indication why. Fixed by
+  // fetching the real namespace list independently, reusing the exact same
+  // `listResources` call the dedicated Namespaces page already uses (not a
+  // new discovery mechanism) — scoped only by the explicit `clusterId`
+  // param this hook already takes (mirroring useClusterTopology's own
+  // pattern exactly, below), NOT the implicit global active-cluster store
+  // that useK8sResourceList/usePaginatedResourceList read internally. That
+  // distinction matters here specifically: unlike every other caller of
+  // those hooks (which always render for "the" active cluster), this hook's
+  // whole contract is "operate on the clusterId you were explicitly given,"
+  // so staying consistent with useClusterTopology's explicit-param pattern
+  // is what actually guarantees no cross-cluster namespace-list leakage.
+  // Namespace objects are small and bounded in count even on huge clusters
+  // (unlike Pods), so this stays cheap — not the "load the whole cluster
+  // graph" shortcut this fix must avoid.
+  const backendBaseUrlRaw = useBackendConfigStore((s) => s.backendBaseUrl);
+  const effectiveBackendBaseUrl = getEffectiveBackendBaseUrl(backendBaseUrlRaw);
+  const isBackendConfigured = useBackendConfigStore((s) => s.isBackendConfigured());
+  const namespaceListQuery = useQuery({
+    queryKey: ["topology-namespaces", clusterId],
+    queryFn: async ({ signal }) => {
+      if (!clusterId) return { items: [] };
+      return listResources(effectiveBackendBaseUrl, clusterId, "namespaces", { signal });
+    },
+    enabled: enabled && !!clusterId && isBackendConfigured,
+    staleTime: 60_000,
+  });
   const allNamespaces = useMemo<string[]>(() => {
-    if (!graph?.nodes) return [];
-    const nsSet = new Set<string>();
-    for (const n of graph.nodes) {
-      if (n.namespace) nsSet.add(n.namespace);
-    }
-    return Array.from(nsSet).sort();
-  }, [graph]);
-
-  // View modes where namespace filtering makes sense.
-  // Cluster and RBAC show cluster-scoped resources (no namespace) so filtering would exclude everything.
-  const NS_FILTERABLE_VIEWS = new Set<ViewMode>(["namespace", "traffic"]);
+    const items = namespaceListQuery.data?.items ?? [];
+    const names = items
+      .map((item) => (item as { metadata?: { name?: string } }).metadata?.name)
+      .filter((n): n is string => !!n);
+    return Array.from(new Set(names)).sort();
+  }, [namespaceListQuery.data]);
 
   // Stable keys for Set dependencies so React's useMemo comparison
   // always detects changes. Set objects are compared by reference.
@@ -297,6 +373,10 @@ export function useTopologyData({
   return {
     topology,
     allNamespaces,
+    /** VALID-06: surfaced so the namespace filter can show a useful error
+     * instead of silently appearing empty when enumeration itself fails. */
+    allNamespacesError: namespaceListQuery.isError,
+    allNamespacesLoading: namespaceListQuery.isLoading,
     allKinds,
     allEdgeCategories,
     isLoading,
