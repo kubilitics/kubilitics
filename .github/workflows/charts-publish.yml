@@ -70,7 +70,7 @@ jobs:
           version: '3.16.0'
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v3
 
       - name: Add upstream Helm repos (for dependencies)
         run: |
