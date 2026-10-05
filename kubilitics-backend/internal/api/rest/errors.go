@@ -2,7 +2,11 @@ package rest
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
+
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
 )
 
 // APIError represents a structured API error response
@@ -46,4 +50,30 @@ func respondStructuredError(w http.ResponseWriter, status int, code, message str
 // respondErrorWithCode is a convenience wrapper for structured errors
 func respondErrorWithCode(w http.ResponseWriter, status int, code, message string, requestID string) {
 	respondStructuredError(w, status, code, message, requestID, nil)
+}
+
+// respondTimeout is the single choke point for every context.DeadlineExceeded
+// response in this package (OBS-1, docs/PRODUCTION-HARDENING-ROADMAP.md,
+// Phase 8). It logs a structured, operator-greppable warning line — distinct
+// from the generic per-request log line StructuredLog middleware already
+// writes, which only records the generic http.StatusText for the status code
+// and cannot distinguish a timeout from any other 503/504 — and increments
+// metrics.RequestTimeoutsTotal, before writing the same error response the
+// caller would have written anyway. Does not change response status/body/
+// behavior in any way; purely additive observability on an existing,
+// unmodified timeout boundary (Phase 1).
+func respondTimeout(w http.ResponseWriter, r *http.Request, status int, code, operation, clusterID, message string) {
+	requestID := logger.FromContext(r.Context())
+	slog.Default().Warn("request timed out",
+		"request_id", requestID,
+		"cluster_id", clusterID,
+		"operation", operation,
+		"path", r.URL.Path,
+	)
+	metrics.RequestTimeoutsTotal.WithLabelValues(operation, clusterID).Inc()
+	if code != "" {
+		respondErrorWithCode(w, status, code, message, requestID)
+		return
+	}
+	respondError(w, status, message)
 }

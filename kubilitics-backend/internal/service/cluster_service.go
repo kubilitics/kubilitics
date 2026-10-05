@@ -17,6 +17,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 	"github.com/kubilitics/kubilitics-backend/internal/repository"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 	appsv1 "k8s.io/api/apps/v1"
@@ -87,6 +88,12 @@ type clusterService struct {
 	repo               repository.ClusterRepository
 	clients            map[string]*k8s.Client // id -> live K8s client
 	overviewCache      *OverviewCache
+	// lifecycle implements the hybrid informer lifecycle
+	// (docs/INFORMER-LIFECYCLE-IMPLEMENTATION.md): decides WHEN
+	// overviewCache's Start/StopClusterCache run. Registration/reconnect/
+	// startup no longer call overviewCache directly — see EnsureActive's
+	// doc comment for why this is the only path that starts informers.
+	lifecycle          *ClusterLifecycleManager
 	maxClusters        int
 	k8sTimeout         time.Duration // timeout for outbound K8s API calls; 0 = use request context only
 	k8sRateLimitPerSec float64
@@ -191,6 +198,7 @@ func newClusterService(repo repository.ClusterRepository, cfg *config.Config, fa
 	var k8sTimeout time.Duration
 	var k8sRatePerSec float64
 	var k8sRateBurst int
+	var idleTTL time.Duration
 	if cfg != nil {
 		if cfg.MaxClusters > 0 {
 			maxClusters = cfg.MaxClusters
@@ -202,11 +210,16 @@ func newClusterService(repo repository.ClusterRepository, cfg *config.Config, fa
 			k8sRatePerSec = cfg.K8sRateLimitPerSec
 			k8sRateBurst = cfg.K8sRateLimitBurst
 		}
+		if cfg.ClusterIdleTTLSec > 0 {
+			idleTTL = time.Duration(cfg.ClusterIdleTTLSec) * time.Second
+		}
 	}
+	overviewCache := NewOverviewCache()
 	return &clusterService{
 		repo:               repo,
 		clients:            make(map[string]*k8s.Client),
-		overviewCache:      NewOverviewCache(),
+		overviewCache:      overviewCache,
+		lifecycle:          NewClusterLifecycleManager(overviewCache, idleTTL),
 		maxClusters:        maxClusters,
 		k8sTimeout:         k8sTimeout,
 		k8sRateLimitPerSec: k8sRatePerSec,
@@ -214,6 +227,14 @@ func newClusterService(repo repository.ClusterRepository, cfg *config.Config, fa
 		clientFactory:      factory,
 	}
 }
+
+// VALID-01 (docs/VALID-01-INVESTIGATION.md): backgroundReconnectBudget bounds
+// the non-blocking reconnect ListClusters kicks off for a cluster with no
+// live client — generous enough to let GetOrReconnectClient's own 3s
+// reconnectTimeout plus a real GetClusterInfo call complete, but this budget
+// is never on the critical path of any HTTP response (see
+// kickBackgroundReconnect).
+const backgroundReconnectBudget = 8 * time.Second
 
 func (s *clusterService) ListClusters(ctx context.Context) ([]*models.Cluster, error) {
 	clusters, err := s.repo.List(ctx)
@@ -228,10 +249,52 @@ func (s *clusterService) ListClusters(ctx context.Context) ([]*models.Cluster, e
 		_, currentContext, _ = k8s.GetKubeconfigContexts(filepath.Join(home, ".kube", "config"))
 	}
 
-	// Enrich with live client status where available; try reconnect when client missing
-	// P0-B: Parallelize enrichment to avoid sequential delays from hanging EKS clusters.
+	// VALID-01 (docs/VALID-01-INVESTIGATION.md, Phase: post-Release-Gate
+	// validation): previously every cluster — including ones with no live
+	// client at all — was enriched inside this function's wg.Wait() group,
+	// with a reconnect attempt (tryReconnectCluster) bounded only by a 10s
+	// per-call timeout and NO caching between calls. One unreachable cluster
+	// therefore delayed this entire response — including already-known-good
+	// data for every OTHER, healthy cluster — by up to 10 seconds, on EVERY
+	// single call (live-reproduced: GET /api/v1/clusters took 10.015s with
+	// 1 healthy + 1 unreachable cluster).
+	//
+	// Fix: only clusters that already have a live client are refreshed
+	// synchronously inside the wg.Wait() group below — this is the
+	// already-fast case (live-measured ~70-300ms) and is unchanged from
+	// before. Clusters with NO live client are never added to the wait
+	// group at all: this call returns their persisted, truthfully-labeled
+	// last-known Status/NodeCount/NamespaceCount/LastConnected immediately
+	// (never fabricated as "connected"), while a reconnect attempt is fired
+	// through the existing, purpose-built GetOrReconnectClient — which
+	// already provides singleflight coalescing (no duplicate reconnect
+	// storms across concurrent/repeated ListClusters calls) and a 10s
+	// negative-failure cache (a known-broken cluster is not re-dialed on
+	// every call) — on a background context, so it is not cancelled when
+	// this HTTP response is written, and updates the persisted row for the
+	// *next* ListClusters call. No new reconnection/cache/timeout mechanism
+	// is introduced; this reuses GetOrReconnectClient exactly as the
+	// investigation recommended (Option E) instead of ListClusters'
+	// previous, separate, uncached tryReconnectCluster call.
 	var wg sync.WaitGroup
 	for _, c := range clusters {
+		c.IsCurrent = (c.Context == currentContext)
+
+		s.mu.RLock()
+		client, hasClient := s.clients[c.ID]
+		s.mu.RUnlock()
+
+		if !hasClient {
+			// Return this cluster's persisted last-known state as-is (already
+			// truthfully labeled connected/disconnected/error by whatever
+			// previously wrote it — AddCluster, a prior successful enrichment,
+			// or a prior background reconnect's correction below) and kick off
+			// a non-blocking refresh for next time. Does not join wg — must
+			// never be waited on by this response.
+			s.kickBackgroundReconnect(c.ID)
+			continue
+		}
+
 		wg.Add(1)
 		go func(c *models.Cluster) {
 			defer func() {
@@ -245,64 +308,115 @@ func (s *clusterService) ListClusters(ctx context.Context) ([]*models.Cluster, e
 			clusterCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 
-			c.IsCurrent = (c.Context == currentContext)
-
-			s.mu.RLock()
-			client, hasClient := s.clients[c.ID]
-			s.mu.RUnlock()
-
-			if hasClient {
-				info, err := client.GetClusterInfo(clusterCtx)
-				if err != nil {
-					c.Status = clusterStatusFromError(err)
-					_ = s.repo.Update(ctx, c)
-					return
-				}
-				c.ServerURL = clusterInfoString(info, "server_url")
-				c.Version = clusterInfoString(info, "version")
-				c.NodeCount = clusterInfoInt(info, "node_count")
-				c.NamespaceCount = clusterInfoInt(info, "namespace_count")
-				c.Status = "connected"
-				c.LastConnected = time.Now()
-				if p, err := client.DetectProvider(clusterCtx); err == nil && p != "" {
-					c.Provider = p
-				}
+			info, err := client.GetClusterInfo(clusterCtx)
+			if err != nil {
+				c.Status = clusterStatusFromError(err)
 				_ = s.repo.Update(ctx, c)
-
-				// Start/Ensure cache (internal lockers handle concurrency)
-				_ = s.overviewCache.StartClusterCache(clusterCtx, c.ID, client)
-			} else {
-				// No client in map, try to reconnect
-				if s.tryReconnectCluster(clusterCtx, c) {
-					// tryReconnect successfully updated s.clients (with internal lock)
-					s.mu.RLock()
-					client = s.clients[c.ID]
-					s.mu.RUnlock()
-
-					if client != nil {
-						info, _ := client.GetClusterInfo(clusterCtx)
-						if info != nil {
-							c.ServerURL = clusterInfoString(info, "server_url")
-							c.Version = clusterInfoString(info, "version")
-							c.NodeCount = clusterInfoInt(info, "node_count")
-							c.NamespaceCount = clusterInfoInt(info, "namespace_count")
-						}
-						c.Status = "connected"
-						c.LastConnected = time.Now()
-						if p, err := client.DetectProvider(clusterCtx); err == nil && p != "" {
-							c.Provider = p
-						}
-						_ = s.repo.Update(ctx, c)
-						_ = s.overviewCache.StartClusterCache(clusterCtx, c.ID, client)
-					}
-				} else {
-					c.Status = "disconnected"
-				}
+				return
 			}
+			c.ServerURL = clusterInfoString(info, "server_url")
+			c.Version = clusterInfoString(info, "version")
+			c.NodeCount = clusterInfoInt(info, "node_count")
+			c.NamespaceCount = clusterInfoInt(info, "namespace_count")
+			c.Status = "connected"
+			c.LastConnected = time.Now()
+			if p, err := client.DetectProvider(clusterCtx); err == nil && p != "" {
+				c.Provider = p
+			}
+			_ = s.repo.Update(ctx, c)
+
+			// Informer lifecycle (docs/INFORMER-LIFECYCLE-IMPLEMENTATION.md):
+			// a live client is established here, but informers are NOT
+			// started eagerly — EnsureActive (called from GetInformerManager/
+			// GetOverview, the choke points every consumer already goes
+			// through) starts them lazily on first actual use. Registered ≠
+			// Active.
 		}(c)
 	}
 	wg.Wait()
 	return clusters, nil
+}
+
+// kickBackgroundReconnect fires a non-blocking reconnect attempt for a
+// cluster with no live client, reusing GetOrReconnectClient's existing
+// singleflight coalescing and negative-failure cache (see its doc comment)
+// rather than introducing a second, parallel reconnect implementation.
+// Intentionally fire-and-forget: runs on context.Background() (not the
+// triggering HTTP request's context), matching the same pattern
+// cmd/server/main.go's existing 60s presence-refresh ticker already uses,
+// so the attempt is not cancelled the moment the HTTP response that
+// triggered it is written. Reads a FRESH copy of the cluster row via
+// s.repo.Get rather than mutating the *models.Cluster instance already
+// returned to (and potentially already serialized by) the caller of
+// ListClusters — this avoids ANY possibility of mutating response data
+// after it may have already been written to the wire.
+//
+// Known, pre-existing, NOT newly introduced race: if RemoveCluster runs
+// concurrently with this goroutine, s.repo.Get/Update may race the
+// row's deletion (a harmless no-op UPDATE on a since-deleted id — SQLite
+// does not error on a zero-row UPDATE), and GetOrReconnectClient could in
+// principle populate s.clients[clusterID] for an id that RemoveCluster
+// already deleted. This exact race already exists for every other
+// concurrent caller of GetOrReconnectClient (e.g. an in-flight resource
+// request during a removal) — this fix does not widen it beyond invoking
+// an already-present, already-accepted code path from one additional call
+// site; closing it fully is a broader concurrency change out of VALID-01's
+// scope.
+func (s *clusterService) kickBackgroundReconnect(clusterID string) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("[ListClusters] Panic in background reconnect for cluster %s: %v\n", clusterID, r)
+			}
+		}()
+
+		bgCtx, cancel := context.WithTimeout(context.Background(), backgroundReconnectBudget)
+		defer cancel()
+
+		client, err := s.GetOrReconnectClient(bgCtx, clusterID)
+		if err != nil {
+			// GetOrReconnectClient has already recorded this failure in its own
+			// negative-failure cache (bounding future reconnect attempts, not
+			// just future DB writes). Correct the persisted row only if it
+			// doesn't already reflect a non-connected state, so a cluster that
+			// was last known "connected" (e.g. before a backend restart) does
+			// not keep showing a stale, now-proven-false "connected" status
+			// indefinitely.
+			c, gerr := s.repo.Get(context.Background(), clusterID)
+			if gerr != nil || c == nil {
+				return // removed or lookup failed — nothing to correct
+			}
+			newStatus := clusterStatusFromError(err)
+			if c.Status != newStatus {
+				c.Status = newStatus
+				_ = s.repo.Update(context.Background(), c)
+			}
+			return
+		}
+
+		c, gerr := s.repo.Get(context.Background(), clusterID)
+		if gerr != nil || c == nil {
+			return // cluster was removed while reconnecting; nothing to update
+		}
+
+		infoCtx, infoCancel := context.WithTimeout(context.Background(), reconnectTimeout)
+		defer infoCancel()
+		if info, ierr := client.GetClusterInfo(infoCtx); ierr == nil {
+			c.ServerURL = clusterInfoString(info, "server_url")
+			c.Version = clusterInfoString(info, "version")
+			c.NodeCount = clusterInfoInt(info, "node_count")
+			c.NamespaceCount = clusterInfoInt(info, "namespace_count")
+		}
+		c.Status = "connected"
+		c.LastConnected = time.Now()
+		if p, perr := client.DetectProvider(infoCtx); perr == nil && p != "" {
+			c.Provider = p
+		}
+		_ = s.repo.Update(context.Background(), c)
+		// Informer lifecycle: client re-established, informers start lazily
+		// on first use via EnsureActive — see the registration-path comment
+		// above for the same rationale.
+	}()
 }
 
 func (s *clusterService) GetCluster(ctx context.Context, id string) (*models.Cluster, error) {
@@ -476,7 +590,8 @@ func (s *clusterService) addClusterWithSource(ctx context.Context, kubeconfigPat
 				s.mu.Lock()
 				s.clients[c.ID] = client
 				s.mu.Unlock()
-				_ = s.overviewCache.StartClusterCache(ctx, c.ID, client)
+				// Informer lifecycle: client stored; informers start lazily
+				// on first use (EnsureActive), not here.
 			}
 			return c, nil
 		}
@@ -506,7 +621,8 @@ func (s *clusterService) addClusterWithSource(ctx context.Context, kubeconfigPat
 		s.mu.Lock()
 		s.clients[cluster.ID] = client
 		s.mu.Unlock()
-		_ = s.overviewCache.StartClusterCache(ctx, cluster.ID, client)
+		// Informer lifecycle: client stored; informers start lazily on
+		// first use (EnsureActive), not here.
 	}
 
 	fmt.Printf("[AddCluster] Successfully registered %s\n", cluster.ID)
@@ -593,7 +709,7 @@ func (s *clusterService) RemoveCluster(ctx context.Context, id string) error {
 	s.mu.Lock()
 	delete(s.clients, id)
 	s.mu.Unlock()
-	s.overviewCache.StopClusterCache(id)
+	s.lifecycle.Remove(id)
 	return nil
 }
 
@@ -620,14 +736,37 @@ func (s *clusterService) GetClusterSummary(ctx context.Context, id string) (*mod
 		return nil, err
 	}
 
-	nodes, _ := client.Clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	pods, _ := client.Clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-	deployments, _ := client.Clientset.AppsV1().Deployments("").List(ctx, metav1.ListOptions{})
-	services, _ := client.Clientset.CoreV1().Services("").List(ctx, metav1.ListOptions{})
+	// FLEET-1 UNVERIFIED caveat, resolved (docs/PRODUCTION-RELIABILITY-AUDIT.md,
+	// Phase 4): client.Timeout IS always set in production (NewClusterService is
+	// always constructed with a real, viper-loaded cfg — K8sTimeoutSec defaults
+	// to 30s — confirmed by reading cmd/server/main.go and config.go), but
+	// these four raw Clientset calls never applied it: they ran on ctx alone,
+	// like LOADING-3's Overview-handler bug. GetFleetOverview calls this method
+	// per cluster concurrently (fleet.go); a single registered-but-newly-slow
+	// cluster (e.g. VPN flapping) had no effective deadline here and could
+	// still slow the whole Fleet aggregate response. Bound with the same
+	// client.WithTimeout() wrapper LOADING-3 already established.
+	listCtx, listCancel := client.WithTimeout(ctx)
+	defer listCancel()
+
+	nodes, _ := client.Clientset.CoreV1().Nodes().List(listCtx, metav1.ListOptions{})
+	pods, _ := client.Clientset.CoreV1().Pods("").List(listCtx, metav1.ListOptions{})
+	deployments, _ := client.Clientset.AppsV1().Deployments("").List(listCtx, metav1.ListOptions{})
+	services, _ := client.Clientset.CoreV1().Services("").List(listCtx, metav1.ListOptions{})
 
 	// Compute health from actual resource state
 	healthStatus := computeClusterHealthStatus(nodes, pods, deployments)
 
+	// FLEET-N1 (docs/FLEET-N1-IMPLEMENTATION.md): Reachable was never set here
+	// — it silently stayed at Go's zero-value (false) on every call, success
+	// or not. That went unnoticed while this method's only caller
+	// (GetFleetOverview) was discarding Reachable anyway; caught live when
+	// GetFleetOverview was fixed to actually surface it to the frontend —
+	// every cluster would have shown as "unreachable" in Fleet regardless of
+	// true state, a regression versus the per-cluster /summary endpoint
+	// (buildClusterSummary, a separate implementation) which does set it
+	// correctly. Reaching this line means every K8s call above succeeded
+	// enough to compute real counts, so Reachable=true is correct here.
 	return &models.ClusterSummary{
 		ID:              id,
 		Name:            id,
@@ -637,6 +776,7 @@ func (s *clusterService) GetClusterSummary(ctx context.Context, id string) (*mod
 		DeploymentCount: len(deployments.Items),
 		ServiceCount:    len(services.Items),
 		HealthStatus:    healthStatus,
+		Reachable:       true,
 	}, nil
 }
 
@@ -699,77 +839,120 @@ func (s *clusterService) buildClientForCluster(c *models.Cluster) (*k8s.Client, 
 // slow exec-based auth (aws eks get-token, gke-gcloud-auth-plugin, etc.).
 const loadStartupTimeout = 8 * time.Second
 
+// loadClustersConcurrency bounds how many clusters LoadClustersFromRepo connects
+// to at once. STARTUP-1 (docs/PRODUCTION-RELIABILITY-AUDIT.md): the previous
+// sequential loop cost N x loadStartupTimeout in the worst case (measured in
+// docs/PRODUCTION-BASELINE.md: 3 unreachable clusters = 24s). Fanning out fully
+// unbounded isn't safe either — each connection attempt can spawn an exec-based
+// auth plugin subprocess (aws eks get-token, gke-gcloud-auth-plugin), and at the
+// "100+ cluster enterprise architect" scale this product targets, launching all
+// of them simultaneously would spike CPU/process count and cloud-provider auth
+// API load for no benefit once far more than CPU-core-count are in flight. 10
+// mirrors common bounded-worker-pool defaults and keeps the worst case at
+// roughly (N/10) x loadStartupTimeout instead of N x loadStartupTimeout.
+const loadClustersConcurrency = 10
+
 // LoadClustersFromRepo restores K8s clients from persisted clusters (call on startup).
 // Per-cluster failures do not abort the process; each cluster gets status disconnected/error.
 // Connection tests run with a hard per-cluster timeout so unreachable or exec-auth clusters
-// (EKS, GKE, AKS) never block the server from starting.
+// (EKS, GKE, AKS) never block the server from starting. Clusters are connected concurrently
+// (bounded by loadClustersConcurrency), reusing the same bounded-fan-out pattern already
+// proven correct in GetFleetOverview (internal/api/rest/fleet.go) — one slow/unreachable
+// cluster no longer multiplies startup latency for every other cluster.
 func (s *clusterService) LoadClustersFromRepo(ctx context.Context) error {
 	clusters, err := s.repo.List(ctx)
 	if err != nil {
 		return err
 	}
+
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(loadClustersConcurrency)
+
 	for _, c := range clusters {
-		// in-cluster rows have empty KubeconfigPath but build a client via
-		// rest.InClusterConfig — handled inside buildClientForCluster.
-		if c.KubeconfigPath == "" && c.Source != "in-cluster" {
-			c.Status = "disconnected"
-			_ = s.repo.Update(ctx, c)
-			continue
-		}
-		client, clientErr := s.buildClientForCluster(c)
-
-		if clientErr != nil {
-			fmt.Printf("[LoadClustersFromRepo] Skipping cluster %s (%s): failed to create client: %v\n", c.ID, c.Context, clientErr)
-			c.Status = "error"
-			_ = s.repo.Update(ctx, c)
-			continue
-		}
-
-		if s.k8sTimeout > 0 {
-			client.SetTimeout(s.k8sTimeout)
-		}
-		if s.k8sRateLimitPerSec > 0 && s.k8sRateLimitBurst > 0 {
-			client.SetLimiter(rate.NewLimiter(rate.Limit(s.k8sRateLimitPerSec), s.k8sRateLimitBurst))
-		}
-
-		// Test connection with a hard per-cluster deadline so exec-based auth plugins
-		// (aws eks get-token, gke-gcloud-auth-plugin) and offline clusters don't block startup.
-		testCtx, testCancel := context.WithTimeout(ctx, loadStartupTimeout)
-		connErr := client.TestConnection(testCtx)
-		testCancel()
-		if connErr != nil {
-			fmt.Printf("[LoadClustersFromRepo] Cluster %s (%s): connection test failed (%v) — marking %s\n",
-				c.ID, c.Context, connErr, clusterStatusFromError(connErr))
-			c.Status = clusterStatusFromError(connErr)
-		} else {
-			c.Status = "connected"
-		}
-
-		if connErr == nil {
-			// Only register the live client and start the informer cache when the cluster
-			// is reachable. Starting informers for offline/disconnected clusters causes
-			// continuous reflector log spam as they hammer unreachable API servers.
-			s.mu.Lock()
-			s.clients[c.ID] = client
-			s.mu.Unlock()
-
-			c.LastConnected = time.Now()
-			_ = s.overviewCache.StartClusterCache(ctx, c.ID, client)
-
-			// Detect provider with the same short timeout so it never blocks startup.
-			provCtx, provCancel := context.WithTimeout(ctx, loadStartupTimeout)
-			if p, err := client.DetectProvider(provCtx); err == nil && p != "" {
-				c.Provider = p
-			}
-			provCancel()
-		} else {
-			fmt.Printf("[LoadClustersFromRepo] Cluster %s (%s): skipping informer cache (cluster is %s)\n",
-				c.ID, c.Context, c.Status)
-		}
-
-		_ = s.repo.Update(ctx, c)
+		c := c // capture loop variable
+		g.Go(func() error {
+			s.loadOneClusterFromRepo(gCtx, c)
+			return nil // per-cluster failures never abort the group — see loadOneClusterFromRepo
+		})
 	}
-	return nil
+
+	// g.Wait() only returns an error if a Go func returned one; ours never do,
+	// so this is defensive, matching GetFleetOverview's own comment.
+	return g.Wait()
+}
+
+// loadOneClusterFromRepo performs the full connect sequence for a single
+// persisted cluster row: build client, apply timeout/rate-limit, test
+// connection, and — only if reachable — register the client and start its
+// informer cache. Errors are recorded on the cluster's persisted status, never
+// returned, so one cluster's failure can never affect another's (LoadClustersFromRepo
+// runs this concurrently, bounded by loadClustersConcurrency).
+func (s *clusterService) loadOneClusterFromRepo(ctx context.Context, c *models.Cluster) {
+	// in-cluster rows have empty KubeconfigPath but build a client via
+	// rest.InClusterConfig — handled inside buildClientForCluster.
+	if c.KubeconfigPath == "" && c.Source != "in-cluster" {
+		c.Status = "disconnected"
+		_ = s.repo.Update(ctx, c)
+		return
+	}
+	client, clientErr := s.buildClientForCluster(c)
+
+	if clientErr != nil {
+		fmt.Printf("[LoadClustersFromRepo] Skipping cluster %s (%s): failed to create client: %v\n", c.ID, c.Context, clientErr)
+		c.Status = "error"
+		_ = s.repo.Update(ctx, c)
+		return
+	}
+
+	if s.k8sTimeout > 0 {
+		client.SetTimeout(s.k8sTimeout)
+	}
+	if s.k8sRateLimitPerSec > 0 && s.k8sRateLimitBurst > 0 {
+		client.SetLimiter(rate.NewLimiter(rate.Limit(s.k8sRateLimitPerSec), s.k8sRateLimitBurst))
+	}
+
+	// Test connection with a hard per-cluster deadline so exec-based auth plugins
+	// (aws eks get-token, gke-gcloud-auth-plugin) and offline clusters don't block startup.
+	testCtx, testCancel := context.WithTimeout(ctx, loadStartupTimeout)
+	connErr := client.TestConnection(testCtx)
+	testCancel()
+	if connErr != nil {
+		fmt.Printf("[LoadClustersFromRepo] Cluster %s (%s): connection test failed (%v) — marking %s\n",
+			c.ID, c.Context, connErr, clusterStatusFromError(connErr))
+		c.Status = clusterStatusFromError(connErr)
+	} else {
+		c.Status = "connected"
+	}
+
+	if connErr == nil {
+		// Only register the live client when the cluster is reachable.
+		// Informer lifecycle (docs/INFORMER-LIFECYCLE-IMPLEMENTATION.md):
+		// this is the single highest-impact fix identified by the
+		// investigation — backend startup previously started the full
+		// 27-informer set for EVERY persisted, reachable cluster from any
+		// past session, before any UI connected. Now it only establishes
+		// the client; EnsureActive starts informers lazily on first real
+		// use. A user with 50 previously-registered clusters no longer
+		// pays ~297 goroutines × 50 on every backend restart regardless of
+		// which (if any) they intend to use this session.
+		s.mu.Lock()
+		s.clients[c.ID] = client
+		s.mu.Unlock()
+
+		c.LastConnected = time.Now()
+
+		// Detect provider with the same short timeout so it never blocks startup.
+		provCtx, provCancel := context.WithTimeout(ctx, loadStartupTimeout)
+		if p, err := client.DetectProvider(provCtx); err == nil && p != "" {
+			c.Provider = p
+		}
+		provCancel()
+	} else {
+		fmt.Printf("[LoadClustersFromRepo] Cluster %s (%s): skipping informer cache (cluster is %s)\n",
+			c.ID, c.Context, c.Status)
+	}
+
+	_ = s.repo.Update(ctx, c)
 }
 
 // tryReconnectCluster builds a K8s client for a cluster when none is in memory (e.g. after restart).
@@ -822,8 +1005,42 @@ func (s *clusterService) applyAndStoreClient(ctx context.Context, c *models.Clus
 	s.mu.Lock()
 	s.clients[c.ID] = client
 	s.mu.Unlock()
-	_ = s.overviewCache.StartClusterCache(ctx, c.ID, client)
+	// VALID-04 (docs/VALID-04-INVESTIGATION.md), now mediated through
+	// ClusterLifecycleManager.Reconnected (docs/INFORMER-LIFECYCLE-
+	// IMPLEMENTATION.md): stop-before-start still applies (old client's
+	// informers must never keep running against a new client), but the
+	// manager's own entry.mu now owns this transition so its bookkeeping
+	// (state/generation) never drifts out of sync with what OverviewCache
+	// actually has running — only reached after TestConnection has already
+	// succeeded, so a failed reconnect attempt never tears down a
+	// still-working cache.
+	if err := s.lifecycle.Reconnected(ctx, c.ID, client); err != nil {
+		return false
+	}
 	return true
+}
+
+// finishReconnect persists the post-reconnect cluster row, but only if the row still exists.
+// ReconnectCluster's success paths run a slow network call (TestConnection/GetClusterInfo) between
+// reading c and writing it back; if RemoveCluster deletes the row during that window, an unconditional
+// Update would resurrect it (see docs/VALID-01-INVESTIGATION.md). If the row is gone, this also rolls
+// back the client/cache entries ReconnectCluster already installed for it, so a removed cluster is
+// never left with a live client.
+func (s *clusterService) finishReconnect(ctx context.Context, c *models.Cluster) {
+	if _, err := s.repo.Get(ctx, c.ID); err != nil {
+		// Route through lifecycle.Remove (not overviewCache.StopClusterCache
+		// directly) so the lifecycle entry's own bookkeeping is marked
+		// removed/deleted too — otherwise Reconnected() having just set
+		// state=Active moments ago would leave the manager believing this
+		// cluster is still active after this rollback actually stopped it,
+		// a real state-vs-reality drift this fix closes.
+		s.lifecycle.Remove(c.ID)
+		s.mu.Lock()
+		delete(s.clients, c.ID)
+		s.mu.Unlock()
+		return
+	}
+	_ = s.repo.Update(ctx, c)
 }
 
 // ReconnectCluster resets the circuit breaker for an existing client (if any) and builds a fresh
@@ -858,7 +1075,7 @@ func (s *clusterService) ReconnectCluster(ctx context.Context, id string) (*mode
 		}
 		c.Status = "connected"
 		c.LastConnected = time.Now()
-		_ = s.repo.Update(ctx, c)
+		s.finishReconnect(ctx, c)
 		return c, nil
 	}
 
@@ -913,14 +1130,15 @@ func (s *clusterService) ReconnectCluster(ctx context.Context, id string) (*mode
 		return c, fmt.Errorf("connection test failed: %w", err)
 	}
 
-	// Success: replace client and restart overview cache.
+	// Success: replace client, then replace the informer generation through
+	// the lifecycle manager (keeps its state/generation bookkeeping
+	// authoritative — see Reconnected's doc comment).
 	// Map write must hold the lock — GetClient reads it under RLock from other
 	// goroutines; unlocked writes race the runtime map rehash and can segfault.
-	s.overviewCache.StopClusterCache(id)
 	s.mu.Lock()
 	s.clients[id] = client
 	s.mu.Unlock()
-	_ = s.overviewCache.StartClusterCache(ctx, id, client)
+	_ = s.lifecycle.Reconnected(ctx, id, client)
 	// Clear any negative-cache entry now that we have a live client again.
 	s.reconnectFailCache.Delete(id)
 
@@ -935,20 +1153,73 @@ func (s *clusterService) ReconnectCluster(ctx context.Context, id string) (*mode
 	}
 	c.Status = "connected"
 	c.LastConnected = time.Now()
-	_ = s.repo.Update(ctx, c)
+	s.finishReconnect(ctx, c)
 	return c, nil
 }
 
+// GetOverview is one of the two choke points (with GetInformerManager) every
+// informer-backed-data consumer goes through — see EnsureActive's doc
+// comment. Triggers lazy activation as a side effect (ignoring the returned
+// *InformerManager; callers here want the cached overview, not the raw
+// manager) so a cluster that has never been viewed warms up on its first
+// Dashboard request. The first call after a cold activation still returns
+// (ov, false) — informer events haven't populated the overview yet — and
+// GetClusterOverview's existing direct-API fallback (internal/api/rest/
+// overview.go) serves that one request; subsequent calls return real
+// cached data once the informers have synced.
 func (s *clusterService) GetOverview(clusterID string) (*models.ClusterOverview, bool) {
+	s.ensureActiveBestEffort(clusterID)
 	return s.overviewCache.GetOverview(clusterID)
 }
 
+// Subscribe is the WebSocket real-time-overview entry point. Also triggers
+// activation — a subscriber opening a live feed for a never-viewed cluster
+// must not sit on a channel that never receives anything because nothing
+// ever started generating events for it.
 func (s *clusterService) Subscribe(clusterID string) (chan *models.ClusterOverview, func(), error) {
+	s.ensureActiveBestEffort(clusterID)
 	return s.overviewCache.Subscribe(clusterID)
 }
 
+// ensureActiveBestEffort triggers lazy informer activation for clusterID if
+// a live client exists, swallowing any error — these call sites (GetOverview,
+// Subscribe) already have their own established "cache miss -> fall back"
+// behavior (GetClusterOverview's direct-API path; an empty WS feed that
+// fills in once synced) and must not fail the caller's request just because
+// activation itself failed (e.g. a transient issue) — EnsureActive's own
+// error return exists for callers that DO need to know synchronously
+// (GetInformerManager's callers already tolerate a nil manager the same way).
+func (s *clusterService) ensureActiveBestEffort(clusterID string) {
+	s.mu.RLock()
+	client, ok := s.clients[clusterID]
+	s.mu.RUnlock()
+	if !ok {
+		return
+	}
+	_, _ = s.lifecycle.EnsureActive(context.Background(), clusterID, client)
+}
+
+// GetInformerManager is the other of the two choke points (with GetOverview)
+// every informer-backed-data consumer goes through (resources.go,
+// workloads.go, events.go — all already written to tolerate a nil return by
+// falling back to a direct API call, confirmed by reading those call sites
+// before this change). Triggers lazy activation; on a cold cluster this
+// call itself returns the manager EnsureActive just started (informers
+// running, not yet synced) rather than nil, so HasSynced() gating downstream
+// behaves exactly as it already does today in the brief window right after
+// an eager start — no new caller-visible state was introduced.
 func (s *clusterService) GetInformerManager(clusterID string) *k8s.InformerManager {
-	return s.overviewCache.GetInformerManager(clusterID)
+	s.mu.RLock()
+	client, ok := s.clients[clusterID]
+	s.mu.RUnlock()
+	if !ok {
+		return s.overviewCache.GetInformerManager(clusterID) // no client — nothing to activate; preserves today's nil-on-unregistered behavior
+	}
+	im, err := s.lifecycle.EnsureActive(context.Background(), clusterID, client)
+	if err != nil {
+		return nil
+	}
+	return im
 }
 
 // DiscoverClusters scans the configured kubeconfig (or default ~/.kube/config) for contexts not yet in the repository.

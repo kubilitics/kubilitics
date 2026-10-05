@@ -50,18 +50,26 @@ func (h *Handler) GetClusterOverview(w http.ResponseWriter, r *http.Request) {
 	// Track partial failures to set HealthStatus accurately.
 	degraded := false
 
-	pods, podErr := client.Clientset.CoreV1().Pods("").List(r.Context(), metav1.ListOptions{})
+	// LOADING-3 (docs/PRODUCTION-RELIABILITY-AUDIT.md): these three raw Clientset
+	// calls previously ran on r.Context() alone, with no deadline of their own —
+	// unlike every other resource handler, which goes through the client's
+	// configured K8s call timeout. A hung apiserver here had no bound. Apply the
+	// same timeout the rest of the client already uses for this cluster.
+	listCtx, listCancel := client.WithTimeout(r.Context())
+	defer listCancel()
+
+	pods, podErr := client.Clientset.CoreV1().Pods("").List(listCtx, metav1.ListOptions{})
 	if podErr != nil {
 		log.Printf("overview: failed to list pods cluster=%s error=%v", clusterID, podErr)
 		pods = &corev1.PodList{}
 		degraded = true
 	}
-	deployments, deployErr := client.Clientset.AppsV1().Deployments("").List(r.Context(), metav1.ListOptions{})
+	deployments, deployErr := client.Clientset.AppsV1().Deployments("").List(listCtx, metav1.ListOptions{})
 	if deployErr != nil {
 		log.Printf("overview: failed to list deployments cluster=%s error=%v", clusterID, deployErr)
 		degraded = true
 	}
-	services, svcErr := client.Clientset.CoreV1().Services("").List(r.Context(), metav1.ListOptions{})
+	services, svcErr := client.Clientset.CoreV1().Services("").List(listCtx, metav1.ListOptions{})
 	if svcErr != nil {
 		log.Printf("overview: failed to list services cluster=%s error=%v", clusterID, svcErr)
 		degraded = true
