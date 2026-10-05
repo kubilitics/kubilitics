@@ -17,6 +17,7 @@ import {
 import type {
   BackendCluster,
   BackendClusterSummary,
+  BackendFleetOverview,
   ClusterOverview,
   WorkloadsOverview,
   BackendCapabilities,
@@ -34,6 +35,17 @@ export async function getCapabilities(baseUrl: string): Promise<BackendCapabilit
  */
 export async function getClusters(baseUrl: string): Promise<BackendCluster[]> {
   return backendRequest<BackendCluster[]>(baseUrl, 'clusters');
+}
+
+/**
+ * GET /api/v1/fleet/overview — FLEET-N1 (docs/FLEET-N1-IMPLEMENTATION.md):
+ * one request for the whole fleet's cluster list + per-cluster health
+ * summaries + aggregate totals, server-side. Replaces useFleetOverview.ts's
+ * previous pattern of GET /clusters followed by N parallel
+ * GET /clusters/{id}/summary calls, one per cluster.
+ */
+export async function getFleetOverview(baseUrl: string): Promise<BackendFleetOverview> {
+  return backendRequest<BackendFleetOverview>(baseUrl, 'fleet/overview');
 }
 
 /**

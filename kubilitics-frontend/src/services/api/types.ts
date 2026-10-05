@@ -27,6 +27,46 @@ export interface BackendCluster {
   is_current?: boolean;
 }
 
+/**
+ * FLEET-N1: shape returned by GET /api/v1/fleet/overview (matches backend
+ * FleetClusterInfo/FleetOverviewResponse, internal/api/rest/fleet.go).
+ * One request for the whole fleet instead of 1 + N (useFleetOverview.ts).
+ */
+export interface BackendFleetClusterInfo {
+  id: string;
+  name: string;
+  context?: string;
+  status?: string;
+  provider?: string;
+  version?: string;
+  last_connected?: string;
+  nodes: number;
+  pods: number;
+  deployments: number;
+  services: number;
+  namespaces: number;
+  healthStatus: string;
+  healthReason?: string;
+  reachable: boolean;
+  stale?: boolean;
+  stale_as_of?: string;
+  error_message?: string;
+  summary_unavailable?: boolean;
+}
+
+export interface BackendFleetOverview {
+  clusters: BackendFleetClusterInfo[];
+  totals: {
+    nodes: number;
+    pods: number;
+    deployments: number;
+    namespaces: number;
+    healthy: number;
+    degraded: number;
+    unhealthy: number;
+  };
+}
+
 /** Cluster summary shape from GET /api/v1/clusters/{clusterId}/summary (matches backend ClusterSummary). */
 export interface BackendClusterSummary {
   id: string;

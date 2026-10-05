@@ -1,21 +1,44 @@
 /**
  * Unit tests for src/hooks/useFleetOverview.ts
  *
- * Covers: aggregation logic, empty clusters, status mapping,
- * mergeCluster helper behavior via the hook output.
+ * FLEET-N1 (docs/FLEET-N1-IMPLEMENTATION.md): this hook previously issued
+ * GET /clusters followed by N parallel GET /clusters/{id}/summary calls.
+ * These tests now mock the single GET /fleet/overview call it replaced
+ * that pattern with — covers: aggregation logic, empty clusters, status
+ * mapping, mergeCluster helper behavior via the hook output, and the
+ * single-request/isolation guarantees FLEET-N1 specifically added.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement } from 'react';
-import type { BackendCluster, BackendClusterSummary } from '@/services/backendApiClient';
+import type { BackendFleetOverview, BackendFleetClusterInfo } from '@/services/backendApiClient';
 
 // ── Mock controls ────────────────────────────────────────────────────────────
 
 let mockIsBackendConfigured = true;
 let mockBackendBaseUrl = 'http://localhost:8190';
-let mockClusters: BackendCluster[] = [];
-let mockSummaries: Record<string, BackendClusterSummary> = {};
+let mockOverview: BackendFleetOverview = { clusters: [], totals: emptyTotals() };
+let getFleetOverviewCallCount = 0;
+
+function emptyTotals() {
+  return { nodes: 0, pods: 0, deployments: 0, namespaces: 0, healthy: 0, degraded: 0, unhealthy: 0 };
+}
+
+function cluster(overrides: Partial<BackendFleetClusterInfo> & { id: string; name: string }): BackendFleetClusterInfo {
+  return {
+    context: 'ctx',
+    status: 'connected',
+    nodes: 0,
+    pods: 0,
+    deployments: 0,
+    services: 0,
+    namespaces: 0,
+    healthStatus: '',
+    reachable: true,
+    ...overrides,
+  };
+}
 
 vi.mock('@/stores/backendConfigStore', () => ({
   useBackendConfigStore: (selector: (s: Record<string, unknown>) => unknown) => {
@@ -29,14 +52,14 @@ vi.mock('@/stores/backendConfigStore', () => ({
 }));
 
 vi.mock('@/services/backendApiClient', () => ({
-  getClusters: vi.fn(async () => mockClusters),
-  getClusterSummary: vi.fn(async (_baseUrl: string, clusterId: string) => {
-    if (mockSummaries[clusterId]) return mockSummaries[clusterId];
-    throw new Error(`Cluster ${clusterId} not found`);
+  getFleetOverview: vi.fn(async () => {
+    getFleetOverviewCallCount++;
+    return mockOverview;
   }),
 }));
 
 import { useFleetOverview } from './useFleetOverview';
+import { getFleetOverview } from '@/services/backendApiClient';
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -55,12 +78,13 @@ describe('useFleetOverview', () => {
   beforeEach(() => {
     mockIsBackendConfigured = true;
     mockBackendBaseUrl = 'http://localhost:8190';
-    mockClusters = [];
-    mockSummaries = {};
+    mockOverview = { clusters: [], totals: emptyTotals() };
+    getFleetOverviewCallCount = 0;
+    vi.clearAllMocks();
   });
 
   it('returns empty aggregates when no clusters exist', async () => {
-    mockClusters = [];
+    mockOverview = { clusters: [], totals: emptyTotals() };
 
     const { result } = renderHook(() => useFleetOverview(), {
       wrapper: createWrapper(),
@@ -79,32 +103,17 @@ describe('useFleetOverview', () => {
       healthyClusters: 0,
       degradedClusters: 0,
       failedClusters: 0,
+      unknownClusters: 0,
     });
   });
 
-  it('aggregates cluster data correctly with summaries', async () => {
-    mockClusters = [
-      {
-        id: 'c1', name: 'prod', context: 'prod-ctx',
-        status: 'connected', node_count: 3,
-      } as BackendCluster,
-      {
-        id: 'c2', name: 'staging', context: 'staging-ctx',
-        status: 'connected', node_count: 2,
-      } as BackendCluster,
-    ];
-
-    mockSummaries = {
-      c1: {
-        id: 'c1', name: 'prod', node_count: 3, namespace_count: 5,
-        pod_count: 50, deployment_count: 10, service_count: 8,
-        health_status: 'healthy',
-      },
-      c2: {
-        id: 'c2', name: 'staging', node_count: 2, namespace_count: 3,
-        pod_count: 20, deployment_count: 5, service_count: 3,
-        health_status: 'warning',
-      },
+  it('aggregates cluster data correctly from the fleet overview response', async () => {
+    mockOverview = {
+      clusters: [
+        cluster({ id: 'c1', name: 'prod', nodes: 3, pods: 50, deployments: 10, services: 8, namespaces: 5, healthStatus: 'healthy' }),
+        cluster({ id: 'c2', name: 'staging', nodes: 2, pods: 20, deployments: 5, services: 3, namespaces: 3, healthStatus: 'warning' }),
+      ],
+      totals: { nodes: 5, pods: 70, deployments: 15, namespaces: 8, healthy: 1, degraded: 1, unhealthy: 0 },
     };
 
     const { result } = renderHook(() => useFleetOverview(), {
@@ -115,7 +124,6 @@ describe('useFleetOverview', () => {
       expect(result.current.clusters.length).toBe(2);
     });
 
-    // Check individual cluster mapping
     const prod = result.current.clusters.find((c) => c.id === 'c1');
     expect(prod).toBeDefined();
     expect(prod!.name).toBe('prod');
@@ -129,7 +137,6 @@ describe('useFleetOverview', () => {
     expect(staging!.status).toBe('warning');
     expect(staging!.healthGrade).toBe('C');
 
-    // Check aggregates
     expect(result.current.aggregates.totalClusters).toBe(2);
     expect(result.current.aggregates.totalNodes).toBe(5);
     expect(result.current.aggregates.totalPods).toBe(70);
@@ -139,14 +146,15 @@ describe('useFleetOverview', () => {
     expect(result.current.aggregates.failedClusters).toBe(0);
   });
 
-  it('maps error/failed/disconnected cluster statuses correctly', async () => {
-    mockClusters = [
-      { id: 'c1', name: 'dead', context: 'ctx', status: 'disconnected' } as BackendCluster,
-      { id: 'c2', name: 'ok', context: 'ctx', status: 'connected' } as BackendCluster,
-      { id: 'c3', name: 'warn', context: 'ctx', status: 'degraded' } as BackendCluster,
-    ];
-    // No summaries — status derived from cluster.status
-    mockSummaries = {};
+  it('maps error/failed/disconnected cluster statuses correctly when the summary itself is unavailable', async () => {
+    mockOverview = {
+      clusters: [
+        cluster({ id: 'c1', name: 'dead', status: 'disconnected', summary_unavailable: true, reachable: false }),
+        cluster({ id: 'c2', name: 'ok', status: 'connected', summary_unavailable: true, reachable: false }),
+        cluster({ id: 'c3', name: 'warn', status: 'degraded', summary_unavailable: true, reachable: false }),
+      ],
+      totals: emptyTotals(),
+    };
 
     const { result } = renderHook(() => useFleetOverview(), {
       wrapper: createWrapper(),
@@ -167,16 +175,10 @@ describe('useFleetOverview', () => {
     expect(warn!.status).toBe('warning');
   });
 
-  it('uses summary health_status over cluster status when available', async () => {
-    mockClusters = [
-      { id: 'c1', name: 'cluster', context: 'ctx', status: 'connected' } as BackendCluster,
-    ];
-    mockSummaries = {
-      c1: {
-        id: 'c1', name: 'cluster', node_count: 1, namespace_count: 1,
-        pod_count: 5, deployment_count: 2, service_count: 1,
-        health_status: 'critical',
-      },
+  it('uses the backend healthStatus over cluster.status when the summary is available', async () => {
+    mockOverview = {
+      clusters: [cluster({ id: 'c1', name: 'cluster', status: 'connected', healthStatus: 'critical' })],
+      totals: emptyTotals(),
     };
 
     const { result } = renderHook(() => useFleetOverview(), {
@@ -187,16 +189,20 @@ describe('useFleetOverview', () => {
       expect(result.current.clusters.length).toBe(1);
     });
 
-    // summary says "critical" -> should map to "error" even though cluster.status is "connected"
+    // backend reports "critical" -> should map to "error" even though cluster.status is "connected"
     expect(result.current.clusters[0].status).toBe('error');
     expect(result.current.aggregates.failedClusters).toBe(1);
   });
 
-  it('falls back to cluster node_count when summary is unavailable', async () => {
-    mockClusters = [
-      { id: 'c1', name: 'cluster', context: 'ctx', status: 'connected', node_count: 7 } as BackendCluster,
-    ];
-    mockSummaries = {};
+  // UX-2 (docs/PRODUCTION-HARDENING-ROADMAP.md, Phase 7): a missing or
+  // unrecognized cluster.status must never render as 'healthy' — Fleet has
+  // no basis to claim the cluster is fine. Regression test for the
+  // `if (!status) return 'healthy'` bug.
+  it('maps a missing cluster.status to unknown, not healthy, when the summary is unavailable', async () => {
+    mockOverview = {
+      clusters: [cluster({ id: 'c1', name: 'fresh', status: '', summary_unavailable: true, reachable: false })],
+      totals: emptyTotals(),
+    };
 
     const { result } = renderHook(() => useFleetOverview(), {
       wrapper: createWrapper(),
@@ -206,25 +212,121 @@ describe('useFleetOverview', () => {
       expect(result.current.clusters.length).toBe(1);
     });
 
-    expect(result.current.clusters[0].nodeCount).toBe(7);
-    expect(result.current.clusters[0].podCount).toBe(0);
+    expect(result.current.clusters[0].status).toBe('unknown');
+    expect(result.current.clusters[0].status).not.toBe('healthy');
+    expect(result.current.aggregates.unknownClusters).toBe(1);
+    expect(result.current.aggregates.healthyClusters).toBe(0);
   });
 
-  it('does not fetch when backend is not configured', async () => {
-    mockIsBackendConfigured = false;
-    mockClusters = [
-      { id: 'c1', name: 'cluster', context: 'ctx' } as BackendCluster,
-    ];
+  // Companion: a missing/unrecognized healthStatus must also map to
+  // 'unknown', not 'healthy', even though cluster.status is fine.
+  it('maps a missing healthStatus to unknown, not healthy', async () => {
+    mockOverview = {
+      clusters: [cluster({ id: 'c1', name: 'cluster', status: 'connected', healthStatus: '' })],
+      totals: emptyTotals(),
+    };
 
     const { result } = renderHook(() => useFleetOverview(), {
       wrapper: createWrapper(),
     });
 
-    // Should not attempt to load
+    await waitFor(() => {
+      expect(result.current.clusters.length).toBe(1);
+    });
+
+    expect(result.current.clusters[0].status).toBe('unknown');
+  });
+
+  it('does not fetch when backend is not configured', async () => {
+    mockIsBackendConfigured = false;
+    mockOverview = { clusters: [cluster({ id: 'c1', name: 'cluster' })], totals: emptyTotals() };
+
+    const { result } = renderHook(() => useFleetOverview(), {
+      wrapper: createWrapper(),
+    });
+
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
     });
 
     expect(result.current.clusters).toEqual([]);
+    expect(getFleetOverviewCallCount).toBe(0);
+  });
+
+  // ── FLEET-N1 regression tests ──────────────────────────────────────────────
+
+  it('FLEET-N1: issues exactly ONE backend request regardless of cluster count (was 1 + N)', async () => {
+    const clusters = Array.from({ length: 30 }, (_, i) =>
+      cluster({ id: `c${i}`, name: `cluster-${i}`, nodes: 1, pods: 10, healthStatus: 'healthy' })
+    );
+    mockOverview = { clusters, totals: { ...emptyTotals(), nodes: 30, pods: 300, healthy: 30 } };
+
+    const { result } = renderHook(() => useFleetOverview(), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(result.current.clusters.length).toBe(30);
+    });
+
+    expect(getFleetOverview).toHaveBeenCalledTimes(1);
+    expect(getFleetOverviewCallCount).toBe(1);
+  });
+
+  it('FLEET-N1: an unreachable cluster does not corrupt or hide healthy clusters in the same response', async () => {
+    mockOverview = {
+      clusters: [
+        cluster({ id: 'healthy-1', name: 'a', nodes: 3, pods: 50, healthStatus: 'healthy', reachable: true }),
+        cluster({
+          id: 'broken-1', name: 'b', status: 'disconnected', summary_unavailable: true,
+          reachable: false, error_message: 'dial tcp: connection refused',
+        }),
+        cluster({ id: 'healthy-2', name: 'c', nodes: 2, pods: 20, healthStatus: 'healthy', reachable: true }),
+      ],
+      totals: { ...emptyTotals(), nodes: 5, pods: 70, healthy: 2, unhealthy: 1 },
+    };
+
+    const { result } = renderHook(() => useFleetOverview(), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(result.current.clusters.length).toBe(3);
+    });
+
+    const h1 = result.current.clusters.find((c) => c.id === 'healthy-1')!;
+    expect(h1.status).toBe('healthy');
+    expect(h1.podCount).toBe(50);
+
+    const h2 = result.current.clusters.find((c) => c.id === 'healthy-2')!;
+    expect(h2.status).toBe('healthy');
+    expect(h2.podCount).toBe(20);
+
+    const broken = result.current.clusters.find((c) => c.id === 'broken-1')!;
+    expect(broken.status).not.toBe('healthy');
+    expect(broken.reachable).toBe(false);
+    expect(broken.summaryUnavailable).toBe(true);
+    expect(broken.errorMessage).toBe('dial tcp: connection refused');
+
+    expect(result.current.aggregates.healthyClusters).toBe(2);
+  });
+
+  it('FLEET-N1: propagates reachable/stale/staleAsOf for HEALTH-1/HEALTH-2 correctness (never fabricate healthy)', async () => {
+    mockOverview = {
+      clusters: [
+        cluster({
+          id: 'c1', name: 'cached', healthStatus: 'healthy',
+          reachable: false, stale: true, stale_as_of: '2026-01-01T00:00:00Z',
+        }),
+      ],
+      totals: emptyTotals(),
+    };
+
+    const { result } = renderHook(() => useFleetOverview(), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(result.current.clusters.length).toBe(1);
+    });
+
+    const c = result.current.clusters[0];
+    expect(c.reachable).toBe(false);
+    expect(c.stale).toBe(true);
+    expect(c.staleAsOf).toBe('2026-01-01T00:00:00Z');
   });
 });
