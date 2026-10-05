@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -57,11 +59,54 @@ type Client struct {
 	// Health status: last successful call time, last error, etc.
 	lastSuccessTime time.Time
 	lastError       error
+	// lastCheckedTime records when TestConnection/GetClusterInfo was last
+	// attempted, success or failure — distinct from lastSuccessTime, which
+	// only moves forward on success. HEALTH-2 (docs/PRODUCTION-RELIABILITY-
+	// AUDIT.md): without this, nothing could distinguish "confirmed reachable
+	// 2 seconds ago" from "confirmed reachable 10 minutes ago" from "never
+	// actually checked."
+	lastCheckedTime time.Time
 	healthMu        sync.RWMutex
 	// BA-8: Discovery cache for CRD/unknown resource types; TTL 5 min.
 	discoveryCache     []DiscoveredResource
 	discoveryCacheTime time.Time
 	discoveryCacheMu   sync.Mutex
+}
+
+// defaultClientQPS/defaultClientBurst override client-go's own built-in
+// default (rest.DefaultQPS=5, rest.DefaultBurst=10) on every constructed
+// K8s client. Set once at startup via SetDefaultClientRateLimit (cmd/server/
+// main.go, right after config loads, before any client is constructed) —
+// zero value (unset) means "use client-go's default," so a backend that
+// never calls SetDefaultClientRateLimit (e.g. in unit tests) is unaffected.
+//
+// Phase 2D (docs/TOPOLOGY-CONCURRENCY-INVESTIGATION.md): this limiter lives
+// on the shared rest.Config/clientset for a cluster, applied to EVERY
+// concurrent caller of that cluster's client — client-go's conservative
+// default (tuned for low-frequency controller reconcile loops) throttles
+// severely under Kubilitics' own concurrent-request load (10 concurrent
+// topology builds: 18.2s -> 3.2s after raising this; verified the real API
+// server's own CPU stayed under 20% throughout both, i.e. this was not
+// simply shifting an overload onto the API server).
+var defaultClientQPS float32
+var defaultClientBurst int
+
+// SetDefaultClientRateLimit configures the QPS/Burst every subsequently
+// constructed K8s client uses, in place of client-go's own default.
+// qps<=0 or burst<=0 leaves client-go's default (5/10) in effect for that
+// value. Call once at startup, before any client is constructed.
+func SetDefaultClientRateLimit(qps float32, burst int) {
+	defaultClientQPS = qps
+	defaultClientBurst = burst
+}
+
+func applyDefaultClientRateLimit(config *rest.Config) {
+	if defaultClientQPS > 0 {
+		config.QPS = defaultClientQPS
+	}
+	if defaultClientBurst > 0 {
+		config.Burst = defaultClientBurst
+	}
 }
 
 // NewClient creates a new Kubernetes client
@@ -87,6 +132,7 @@ func NewClient(kubeconfigPath, context string) (*Client, error) {
 			return nil, fmt.Errorf("failed to build config: %w", err)
 		}
 	}
+	applyDefaultClientRateLimit(config)
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
@@ -154,6 +200,16 @@ func (c *Client) withTimeout(ctx context.Context) (context.Context, context.Canc
 	return ctx, func() {}
 }
 
+// WithTimeout is the exported form of withTimeout, for callers outside this
+// package that make raw Clientset calls directly (bypassing the wrapped
+// TestConnection/GetClusterInfo/ListResources helpers, which already apply
+// this internally). LOADING-3/LOADING-4 (docs/PRODUCTION-RELIABILITY-AUDIT.md):
+// every K8s API call must be bounded by the client's configured timeout, not
+// left to rely on the caller's own context alone.
+func (c *Client) WithTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return c.withTimeout(ctx)
+}
+
 func buildConfigFromFlags(context, kubeconfigPath string) (*rest.Config, error) {
 	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
@@ -195,6 +251,7 @@ func NewClientFromBytes(kubeconfigBytes []byte, context string) (*Client, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build config for context %s: %w", contextToUse, err)
 	}
+	applyDefaultClientRateLimit(config)
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
@@ -229,6 +286,7 @@ func (c *Client) GetServerVersion(ctx context.Context) (string, error) {
 // TestConnection verifies connectivity to the cluster (with timeout, retry, and circuit breaker).
 // BE-SCALE-001: Uses circuit breaker to prevent cascading failures.
 func (c *Client) TestConnection(ctx context.Context) error {
+	start := time.Now()
 	if err := c.waitRateLimit(ctx); err != nil {
 		return err
 	}
@@ -243,13 +301,14 @@ func (c *Client) TestConnection(ctx context.Context) error {
 		})
 	})
 
-	c.updateHealth(err)
+	c.updateHealth(err, time.Since(start))
 	return err
 }
 
 // GetClusterInfo returns basic cluster information (with timeout, retry, and circuit breaker).
 // BE-SCALE-001: Uses circuit breaker to prevent cascading failures.
 func (c *Client) GetClusterInfo(ctx context.Context) (map[string]interface{}, error) {
+	start := time.Now()
 	if err := c.waitRateLimit(ctx); err != nil {
 		return nil, err
 	}
@@ -286,22 +345,38 @@ func (c *Client) GetClusterInfo(ctx context.Context) (map[string]interface{}, er
 		return fnErr
 	})
 
-	c.updateHealth(err)
+	c.updateHealth(err, time.Since(start))
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-// updateHealth updates the health status of the client.
-func (c *Client) updateHealth(err error) {
+// updateHealth updates the health status of the client. lastCheckedTime moves
+// forward on every call (success or failure); lastSuccessTime only on success.
+// duration is the time the check itself took — OBS-2
+// (docs/PRODUCTION-HARDENING-ROADMAP.md, Phase 8): this is the single choke
+// point every TestConnection/GetClusterInfo call passes through on its way to
+// updating LastCheckedAt/LastSuccessAt/LastError (HEALTH-2's freshness
+// fields), so it is also the correct place to feed the per-cluster
+// health-check latency/failure metrics from the same data, not a second,
+// independently-tracked signal.
+func (c *Client) updateHealth(err error, duration time.Duration) {
+	clusterID := ""
+	if c.circuitBreaker != nil {
+		clusterID = c.circuitBreaker.clusterID
+	}
+	metrics.ClusterHealthCheckDurationSeconds.WithLabelValues(clusterID).Observe(duration.Seconds())
+
 	c.healthMu.Lock()
 	defer c.healthMu.Unlock()
+	c.lastCheckedTime = time.Now()
 	if err == nil {
 		c.lastSuccessTime = time.Now()
 		c.lastError = nil
 	} else {
 		c.lastError = err
+		metrics.ClusterHealthCheckFailuresTotal.WithLabelValues(clusterID).Inc()
 	}
 }
 
@@ -314,6 +389,15 @@ func (c *Client) HealthStatus() (isHealthy bool, lastSuccess time.Time, lastErr 
 	state := c.circuitBreaker.State()
 	isHealthy = state == StateClosed && c.lastError == nil
 	return isHealthy, c.lastSuccessTime, c.lastError, state
+}
+
+// LastCheckedAt returns when TestConnection/GetClusterInfo was last attempted
+// (success or failure), or the zero time if never checked. Added for
+// HEALTH-2 without changing HealthStatus()'s existing signature/callers.
+func (c *Client) LastCheckedAt() time.Time {
+	c.healthMu.RLock()
+	defer c.healthMu.RUnlock()
+	return c.lastCheckedTime
 }
 
 // NewClientForTest creates a Client that uses the given Clientset. Used by tests (e.g. topology)

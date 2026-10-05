@@ -31,6 +31,23 @@ var (
 		[]string{"method", "path"},
 	)
 
+	// RequestTimeoutsTotal counts requests that hit a timeout boundary
+	// (context.DeadlineExceeded) by operation and cluster_id. OBS-1
+	// (docs/PRODUCTION-HARDENING-ROADMAP.md, Phase 8): the generic
+	// http_requests_total/duration metrics and the structured request log
+	// both collapse every non-2xx response (timeout, not-ready, 4xx, 5xx)
+	// into the same status code with no indication of *why* — this makes
+	// "did a request time out, where, how often" (Phase 1's timeout
+	// boundaries) answerable from metrics alone, without reading source code.
+	RequestTimeoutsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "request_timeouts_total",
+			Help:      "Total number of requests that hit a timeout boundary (context.DeadlineExceeded), by operation and cluster_id.",
+		},
+		[]string{"operation", "cluster_id"},
+	)
+
 	// TopologyBuildDurationSeconds is topology build latency (SLO target).
 	TopologyBuildDurationSeconds = promauto.NewHistogram(
 		prometheus.HistogramOpts{
@@ -177,6 +194,34 @@ var (
 			Help:      "Total number of circuit breaker state transitions.",
 		},
 		[]string{"cluster_id", "from_state", "to_state"},
+	)
+
+	// ClusterHealthCheckDurationSeconds measures how long each per-cluster
+	// health check (TestConnection/GetClusterInfo — the same calls that
+	// update Client.LastCheckedAt/LastSuccessAt/LastError, the Phase 2
+	// HEALTH-2 freshness fields) took. OBS-2
+	// (docs/PRODUCTION-HARDENING-ROADMAP.md, Phase 8): lets an operator see
+	// per-cluster health-check latency from metrics alone.
+	ClusterHealthCheckDurationSeconds = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Name:      "cluster_health_check_duration_seconds",
+			Help:      "Per-cluster health check (TestConnection/GetClusterInfo) duration in seconds.",
+			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 10), // 10ms to ~10s
+		},
+		[]string{"cluster_id"},
+	)
+
+	// ClusterHealthCheckFailuresTotal counts failed per-cluster health
+	// checks, fed by the same HEALTH-2 freshness update path as
+	// ClusterHealthCheckDurationSeconds. OBS-2.
+	ClusterHealthCheckFailuresTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "cluster_health_check_failures_total",
+			Help:      "Total number of failed per-cluster health checks (TestConnection/GetClusterInfo).",
+		},
+		[]string{"cluster_id"},
 	)
 
 	// CircuitBreakerFailuresTotal counts circuit breaker failures.

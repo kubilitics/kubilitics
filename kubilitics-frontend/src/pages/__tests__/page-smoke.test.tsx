@@ -5,7 +5,7 @@
  * All external hooks/stores are mocked to avoid network calls.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
@@ -102,7 +102,12 @@ vi.mock('@/stores/themeStore', () => ({
 vi.mock('@/stores/clusterOrganizationStore', () => ({
   useClusterOrganizationStore: (selector?: (s: Record<string, unknown>) => unknown) => {
     const state: Record<string, unknown> = {
-      favorites: new Set<string>(),
+      // Real store (src/stores/clusterOrganizationStore.ts) types this as
+      // string[] — ClusterCard calls favorites.includes(id), an Array
+      // method. A Set here was never exercised because no prior test
+      // rendered a populated cluster list (ClusterCard only mounts per
+      // cluster), so the mismatch was latent until Phase 7's UX-2 test did.
+      favorites: [] as string[],
       envTags: {} as Record<string, string>,
       groups: {} as Record<string, unknown>,
       toggleFavorite: vi.fn(),
@@ -183,18 +188,20 @@ vi.mock('@/hooks/useBackendCircuitOpen', () => ({
   useBackendCircuitOpen: () => false,
 }));
 
-// Clusters from backend (Settings)
+// Clusters from backend (Settings) — mockUseClustersFromBackend is a vi.fn()
+// so individual tests (e.g. the LIFECYCLE-2 regression test below) can
+// override its return value, while every other test keeps the empty-list
+// default via resetClustersFromBackendMock() in beforeEach.
+export const mockUseClustersFromBackend = vi.fn(() => ({ data: [] as unknown[], isLoading: false }));
 vi.mock('@/hooks/useClustersFromBackend', () => ({
-  useClustersFromBackend: () => ({
-    data: [],
-    isLoading: false,
-  }),
+  useClustersFromBackend: () => mockUseClustersFromBackend(),
 }));
 
 // Backend API client
+export const mockDeleteCluster = vi.fn().mockResolvedValue(undefined);
 vi.mock('@/services/backendApiClient', () => ({
   getHealth: vi.fn().mockResolvedValue({ status: 'ok' }),
-  deleteCluster: vi.fn().mockResolvedValue(undefined),
+  deleteCluster: (...args: unknown[]) => mockDeleteCluster(...args),
   getProjects: vi.fn().mockResolvedValue([]),
   deleteProject: vi.fn().mockResolvedValue(undefined),
   searchResources: vi.fn().mockResolvedValue([]),
@@ -277,9 +284,15 @@ vi.mock('@/components/settings/ClusterAppearance', () => ({
   ClusterAppearanceSettings: () => <div data-testid="cluster-appearance">ClusterAppearance</div>,
 }));
 
-// StatusBadge (FleetDashboard)
+// StatusBadge (FleetDashboard) — FleetDashboard actually uses the
+// variant/label "legacy API" (see status-badge.tsx), not status/children;
+// the mock previously ignored both, so the badge always rendered empty
+// regardless of what status was passed — silently swallowing any label text
+// a test might assert on.
 vi.mock('@/components/ui/status-badge', () => ({
-  StatusBadge: ({ status, children }: { status?: string; children?: React.ReactNode }) => <span data-testid="status-badge">{children || status}</span>,
+  StatusBadge: ({ status, children, label }: { status?: string; children?: React.ReactNode; label?: string }) => (
+    <span data-testid="status-badge" role="status" aria-label={label ?? status}>{children || label || status}</span>
+  ),
 }));
 
 // ---------------------------------------------------------------------------
@@ -370,6 +383,42 @@ describe('Page smoke tests', () => {
       // With 0 clusters, should show the connect prompt
       expect(screen.getByText(/Connect your first cluster/)).toBeInTheDocument();
     });
+
+    // UX-2 (docs/PRODUCTION-HARDENING-ROADMAP.md, Phase 7): a cluster with
+    // status 'unknown' previously had no entry in FleetDashboard's
+    // statusConfig map, so `cfg.ringClass` on the resulting `undefined`
+    // would throw during render — the whole Fleet page would crash the
+    // moment one cluster's health couldn't be determined. Regression test:
+    // render must succeed and show the distinct "Unknown" label.
+    it('renders an unknown-status cluster without crashing, labeled distinctly from Healthy', async () => {
+      const fleetHook = (await import('@/hooks/useFleetOverview')) as unknown as Record<string, unknown>;
+      const origHook = fleetHook.useFleetOverview;
+      fleetHook.useFleetOverview = () => ({
+        clusters: [{
+          id: 'c1', name: 'mystery-cluster', context: 'ctx',
+          status: 'unknown', nodeCount: 0, podCount: 0, healthScore: 0,
+          healthGrade: '?', deploymentCount: 0, serviceCount: 0,
+        }],
+        aggregates: {
+          totalClusters: 1, totalNodes: 0, totalPods: 0, totalDeployments: 0,
+          healthyClusters: 0, degradedClusters: 0, failedClusters: 0, unknownClusters: 1,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+      });
+
+      const FleetDashboard = (await import('@/pages/FleetDashboard')).default;
+      expect(() => renderPage(<FleetDashboard />, { route: '/fleet' })).not.toThrow();
+      expect(screen.getByText('mystery-cluster')).toBeInTheDocument();
+      // "Healthy" also appears as a static stat-card label (0 Healthy) even
+      // when no cluster is healthy, so assert on the cluster's own status
+      // badge specifically rather than absence of the word anywhere on the page.
+      expect(screen.getByTestId('status-badge')).toHaveTextContent('Unknown');
+      expect(screen.getByTestId('status-badge')).not.toHaveTextContent('Healthy');
+
+      fleetHook.useFleetOverview = origHook;
+    });
   });
 
   describe('ResourceTemplates', () => {
@@ -409,6 +458,45 @@ describe('Page smoke tests', () => {
       const { container } = renderPage(<Settings />);
       expect(container).toBeTruthy();
       expect(screen.getByText('Settings')).toBeInTheDocument();
+    });
+
+    // LIFECYCLE-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): the delete-cluster
+    // confirmation dialog's onError previously never cleared clusterToRemove,
+    // so a failed delete left the dialog visibly open ("stuck") instead of
+    // surfacing the error and letting the user retry.
+    describe('delete cluster — error path (LIFECYCLE-2)', () => {
+      afterEach(() => {
+        mockUseClustersFromBackend.mockReturnValue({ data: [], isLoading: false });
+        mockDeleteCluster.mockReset().mockResolvedValue(undefined);
+      });
+
+      it('closes the confirmation dialog when deleteCluster rejects', async () => {
+        mockUseClustersFromBackend.mockReturnValue({
+          data: [{ id: 'other-cluster', name: 'other-cluster', context: 'ctx', status: 'connected' }],
+          isLoading: false,
+        });
+        mockDeleteCluster.mockRejectedValue(new Error('backend unreachable'));
+
+        const Settings = (await import('@/pages/Settings')).default;
+        const { container } = renderPage(<Settings />);
+
+        // The delete trigger is an icon-only button (lucide Trash2, no
+        // accessible text) — locate it by the icon's lucide class.
+        const trashButton = container
+          .querySelector('svg.lucide-trash2')
+          ?.closest('button');
+        expect(trashButton).toBeTruthy();
+        fireEvent.click(trashButton!);
+
+        const confirmButton = await screen.findByRole('button', { name: /remove cluster/i });
+        fireEvent.click(confirmButton);
+
+        // Dialog should close (confirm button unmounts) once the rejected
+        // mutation's onError clears clusterToRemove — not stay stuck open.
+        await waitFor(() => {
+          expect(screen.queryByRole('button', { name: /remove cluster/i })).not.toBeInTheDocument();
+        });
+      });
     });
   });
 });

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,11 +18,21 @@ import (
 )
 
 // mockClusterRepo implements repository.ClusterRepository for tests.
+//
+// STARTUP-1 (docs/PRODUCTION-RELIABILITY-AUDIT.md): LoadClustersFromRepo now
+// calls Update concurrently (bounded fan-out), unlike before. The real
+// SQLite/Postgres repos are safe for this (SQLite: a single pooled connection
+// serializes access; Postgres: connection-pool + driver-level safety), but this
+// plain-map fake is not — guard it with a mutex so tests exercise the
+// concurrency this change introduces without a false-positive data race.
 type mockClusterRepo struct {
+	mu       sync.Mutex
 	clusters map[string]*models.Cluster
 }
 
 func (m *mockClusterRepo) Create(ctx context.Context, cluster *models.Cluster) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.clusters == nil {
 		m.clusters = make(map[string]*models.Cluster)
 	}
@@ -31,6 +42,8 @@ func (m *mockClusterRepo) Create(ctx context.Context, cluster *models.Cluster) e
 }
 
 func (m *mockClusterRepo) Get(ctx context.Context, id string) (*models.Cluster, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if c, ok := m.clusters[id]; ok {
 		cp := *c
 		return &cp, nil
@@ -39,6 +52,8 @@ func (m *mockClusterRepo) Get(ctx context.Context, id string) (*models.Cluster, 
 }
 
 func (m *mockClusterRepo) List(ctx context.Context) ([]*models.Cluster, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var out []*models.Cluster
 	for _, c := range m.clusters {
 		cp := *c
@@ -47,9 +62,22 @@ func (m *mockClusterRepo) List(ctx context.Context) ([]*models.Cluster, error) {
 	return out, nil
 }
 
+// Update matches real SQLite/Postgres UPDATE semantics: a no-op (zero rows
+// affected, no error) when the row no longer exists — NOT an upsert. This
+// is exactly the behavior kickBackgroundReconnect's own doc comment already
+// relies on ("a harmless no-op UPDATE on a since-deleted id — SQLite does
+// not error on a zero-row UPDATE"). Informer-lifecycle work surfaced that
+// this mock previously always wrote (effectively upserting, resurrecting a
+// row RemoveCluster had just deleted) — a test-fixture fidelity gap, not a
+// production behavior change; fixed here, not in production code.
 func (m *mockClusterRepo) Update(ctx context.Context, cluster *models.Cluster) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.clusters == nil {
-		m.clusters = make(map[string]*models.Cluster)
+		return nil
+	}
+	if _, exists := m.clusters[cluster.ID]; !exists {
+		return nil // real UPDATE on a deleted row: zero rows affected, not an error
 	}
 	c := *cluster
 	m.clusters[cluster.ID] = &c
@@ -57,8 +85,22 @@ func (m *mockClusterRepo) Update(ctx context.Context, cluster *models.Cluster) e
 }
 
 func (m *mockClusterRepo) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.clusters, id)
 	return nil
+}
+
+// Get is also used by tests directly to snapshot state without racing writers.
+func (m *mockClusterRepo) snapshot() map[string]*models.Cluster {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]*models.Cluster, len(m.clusters))
+	for k, v := range m.clusters {
+		cp := *v
+		out[k] = &cp
+	}
+	return out
 }
 
 func TestClusterService_ListClusters_EmptyRepo(t *testing.T) {

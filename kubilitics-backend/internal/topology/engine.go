@@ -588,7 +588,23 @@ func (e *Engine) discoverPersistentVolumes(ctx context.Context, graph *Graph) er
 		return fmt.Errorf("failed to list persistent volumes: %w", err)
 	}
 	for _, pv := range pvs.Items {
-		graph.AddNode(buildNode("PersistentVolume", "", pv.Name, string(pv.Status.Phase), pv.ObjectMeta))
+		node := buildNode("PersistentVolume", "", pv.Name, string(pv.Status.Phase), pv.ObjectMeta)
+		graph.AddNode(node)
+		// Store spec.storageClassName now, from data already fetched by this
+		// bulk List, so inferStorageRelationships never needs its live-Get
+		// fallback (Phase 2, docs/TOPOLOGY-SCALE-INVESTIGATION.md — that
+		// fallback, one Get per PV/PVC lacking this, was the actual 16-19s
+		// bottleneck at ~2K-pod/75-PVC scale, throttled by client-go's
+		// default QPS=5/Burst=10 limiter; this fetches nothing new, it just
+		// stops discarding what the List call already returned).
+		// Always set extra (even empty) so GetNodeExtra returns non-nil —
+		// that's what tells inferStorageRelationships discovery already
+		// ran, distinct from "never discovered" (extra == nil).
+		extra := map[string]interface{}{}
+		if pv.Spec.StorageClassName != "" {
+			extra["storageClassName"] = pv.Spec.StorageClassName
+		}
+		graph.SetNodeExtra(node.ID, extra)
 	}
 	return nil
 }
@@ -599,7 +615,20 @@ func (e *Engine) discoverPersistentVolumeClaims(ctx context.Context, graph *Grap
 		return fmt.Errorf("failed to list persistent volume claims: %w", err)
 	}
 	for _, pvc := range pvcs.Items {
-		graph.AddNode(buildNode("PersistentVolumeClaim", pvc.Namespace, pvc.Name, string(pvc.Status.Phase), pvc.ObjectMeta))
+		node := buildNode("PersistentVolumeClaim", pvc.Namespace, pvc.Name, string(pvc.Status.Phase), pvc.ObjectMeta)
+		graph.AddNode(node)
+		// Same fix as discoverPersistentVolumes above — volumeName/
+		// storageClassName are already on this List response; storing them
+		// now avoids inferStorageRelationships's live-Get-per-PVC fallback.
+		extra := map[string]interface{}{}
+		if pvc.Spec.VolumeName != "" {
+			extra["volumeName"] = pvc.Spec.VolumeName
+		}
+		if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
+			extra["storageClassName"] = *pvc.Spec.StorageClassName
+		}
+		// Always set (even empty) — see discoverPersistentVolumes' comment.
+		graph.SetNodeExtra(node.ID, extra)
 	}
 	return nil
 }

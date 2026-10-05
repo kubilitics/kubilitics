@@ -228,10 +228,12 @@ func (a *clusterRepoAdapter) ListAll() ([]discovery.StoredCluster, error) {
 			continue
 		}
 		out = append(out, discovery.StoredCluster{
-			Name:      r.Name,
-			ServerURL: r.ServerURL,
-			SessionID: r.ID,
-			Provider:  r.Provider,
+			Name:           r.Name,
+			ServerURL:      r.ServerURL,
+			SessionID:      r.ID,
+			Provider:       r.Provider,
+			KubeconfigPath: r.KubeconfigPath,
+			ContextName:    r.Context,
 		})
 	}
 	return out, nil
@@ -246,6 +248,29 @@ func maskDSN(dsn string) string {
 		}
 	}
 	return dsn
+}
+
+// discoveryRefreshTimeout bounds every discoveryMgr.Refresh call (LOADING-4
+// Phase B, docs/LOADING4-BOUNDED-IO-SWEEP.md). Refresh enumerates every
+// registered DiscoverySource, including KubernetesSecretSource when running
+// in-cluster (Helm hub/agent deployment mode) — a live
+// Secrets().List(ctx,...) call against that in-cluster API server. Without
+// this, a hung in-cluster API server could block backend startup
+// indefinitely (the initial call, on main()'s synchronous startup path,
+// before the HTTP server starts accepting connections), one AddCluster/
+// RemoveCluster/reconnect HTTP response (the OnClusterMutation callback), or
+// the 60s periodic ticker goroutine — consistent with the sibling
+// ListClusters(refreshCtx) call immediately preceding the ticker's own
+// Refresh call, which was already bounded. Manager.Refresh's own Enumerate
+// loop already isolates one broken SOURCE from the others ("do NOT abort —
+// one broken source should not blank out others" — internal/cluster/
+// discovery/manager.go); this adds the missing bound for one HUNG source.
+const discoveryRefreshTimeout = 15 * time.Second
+
+func refreshDiscoveryBounded(discoveryMgr *discovery.Manager) error {
+	ctx, cancel := context.WithTimeout(context.Background(), discoveryRefreshTimeout)
+	defer cancel()
+	return discoveryMgr.Refresh(ctx)
 }
 
 func main() {
@@ -296,6 +321,9 @@ func main() {
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"
 	}
+	// Phase 2D (docs/TOPOLOGY-CONCURRENCY-INVESTIGATION.md): apply the
+	// configured client-go QPS/Burst before any K8s client is constructed.
+	k8s.SetDefaultClientRateLimit(cfg.K8sClientQPS, cfg.K8sClientBurst)
 
 	// BE-OBS-002: Initialize structured logger
 	log := logger.StdLogger(cfg.LogFormat, cfg.LogLevel)
@@ -410,34 +438,66 @@ func main() {
 	// Initialize services (cluster repo for persistence)
 	log.Info("Initializing services")
 	clusterService := service.NewClusterService(repo, cfg)
-	if err := clusterService.LoadClustersFromRepo(ctx); err != nil {
-		log.Warn("Failed to load clusters from repo", "error", err)
+
+	// STARTUP-1 completion (Phase 4, docs/PRODUCTION-HARDENING-EXECUTION.md):
+	// Phase 2 bounded LoadClustersFromRepo's per-cluster connection fan-out
+	// (concurrency=10), but the call here still blocked main() — and hence the
+	// HTTP listener bind further below — until EVERY cluster's connection
+	// attempt resolved. Measured at the target "100+ cluster" persona (15
+	// hanging, 85 healthy): ~18s before the listener could bind, even with the
+	// Phase 2 fix. The listener binding does not semantically depend on any
+	// cluster's connection test completing — only on the persisted cluster
+	// rows existing (read synchronously below, before branching), so the
+	// connection-testing phase now runs in the background: the app becomes
+	// reachable immediately, and clusters populate progressively as their
+	// bounded-concurrent connection attempts resolve. ListClusters/GetCluster
+	// already live-refresh on every read (pre-existing), so a cluster that's
+	// still connecting simply shows as not-yet-connected until it resolves —
+	// not a new state, not a data correctness change.
+	existingClusters, listErr := repo.List(ctx)
+	if listErr != nil {
+		log.Warn("Failed to list persisted clusters; assuming clusters may exist and attempting background load rather than silently skipping", "error", listErr)
 	}
-	// Auto-load clusters from default kubeconfig when DB is empty (Docker Desktop, kind, etc.)
-	if cfg.KubeconfigAutoLoad {
-		list, _ := clusterService.ListClusters(ctx)
-		if len(list) == 0 {
-			kubeconfigPath := cfg.KubeconfigPath
-			if kubeconfigPath == "" {
-				kubeconfigPath = os.Getenv("KUBECONFIG")
+	if len(existingClusters) > 0 || listErr != nil {
+		// listErr != nil: fail safe toward attempting to load (LoadClustersFromRepo
+		// re-queries and surfaces its own clear error if the DB is genuinely
+		// unavailable) rather than silently registering zero clusters on a
+		// transient read error — this is a real edge case caught during Phase 4's
+		// own startup measurement (docs/PRODUCTION-HARDENING-EXECUTION.md).
+		go func() {
+			if err := clusterService.LoadClustersFromRepo(ctx); err != nil {
+				log.Warn("Failed to load clusters from repo", "error", err)
 			}
-			if kubeconfigPath == "" {
-				if home, _ := os.UserHomeDir(); home != "" {
-					kubeconfigPath = filepath.Join(home, ".kube", "config")
-				}
+		}()
+	} else if cfg.KubeconfigAutoLoad {
+		// DB is empty (first run) — auto-load from the default kubeconfig.
+		// Runs synchronously: this is a one-time, first-run-only path (not the
+		// recurring-restart path STARTUP-1/the measurement above addresses),
+		// deliberately left out of this phase's scope — see docs/PRODUCTION-
+		// HARDENING-EXECUTION.md Phase 4 record. Checking existingClusters
+		// (read once, above) instead of re-querying also avoids racing the
+		// background LoadClustersFromRepo goroutine: the two branches are
+		// mutually exclusive on the same upfront snapshot.
+		kubeconfigPath := cfg.KubeconfigPath
+		if kubeconfigPath == "" {
+			kubeconfigPath = os.Getenv("KUBECONFIG")
+		}
+		if kubeconfigPath == "" {
+			if home, _ := os.UserHomeDir(); home != "" {
+				kubeconfigPath = filepath.Join(home, ".kube", "config")
 			}
-			if kubeconfigPath != "" {
-				contexts, _, err := k8s.GetKubeconfigContexts(kubeconfigPath)
-				if err != nil {
-					log.Warn("Could not list kubeconfig contexts", "kubeconfig", kubeconfigPath, "error", err)
-				} else {
-					for _, contextName := range contexts {
-						_, err := clusterService.AddCluster(ctx, kubeconfigPath, contextName)
-						if err != nil {
-							log.Warn("Could not add cluster", "context", contextName, "error", err)
-						} else {
-							log.Info("Auto-added cluster context", "context", contextName)
-						}
+		}
+		if kubeconfigPath != "" {
+			contexts, _, err := k8s.GetKubeconfigContexts(kubeconfigPath)
+			if err != nil {
+				log.Warn("Could not list kubeconfig contexts", "kubeconfig", kubeconfigPath, "error", err)
+			} else {
+				for _, contextName := range contexts {
+					_, err := clusterService.AddCluster(ctx, kubeconfigPath, contextName)
+					if err != nil {
+						log.Warn("Could not add cluster", "context", contextName, "error", err)
+					} else {
+						log.Info("Auto-added cluster context", "context", contextName)
 					}
 				}
 			}
@@ -500,61 +560,25 @@ func main() {
 	}
 	topologyService := service.NewTopologyService(clusterService, topologyCache)
 
-	// Initialize blast radius graph engines (non-blocking — runs in background after server starts).
-	// Engines are started lazily: we verify API server connectivity before spinning up informers
-	// to avoid flooding the process with retry loops for unreachable clusters.
-	graphEngines := make(map[string]*graph.ClusterGraphEngine)
-	go func() {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(5 * time.Second):
-		}
-		clusters, listErr := clusterService.ListClusters(ctx)
-		if listErr != nil {
-			log.Warn("Failed to list clusters for graph engines", "error", listErr)
-			return
-		}
-		for _, cluster := range clusters {
-			client, clientErr := clusterService.GetClient(cluster.ID)
-			if clientErr != nil {
-				log.Warn("Skipping graph engine — cannot get client", "cluster", cluster.ID, "error", clientErr)
-				continue
-			}
-			// Quick connectivity check — skip clusters with unreachable API servers
-			// Quick connectivity check: try to reach the API server
-			type result struct {
-				err error
-			}
-			ch := make(chan result, 1)
-			go func() {
-				_, e := client.Clientset.Discovery().ServerVersion()
-				ch <- result{err: e}
-			}()
-			var err error
-			select {
-			case r := <-ch:
-				err = r.err
-			case <-time.After(5 * time.Second):
-				err = fmt.Errorf("timeout connecting to API server")
-			}
-			if err != nil {
-				log.Warn("Skipping graph engine — API server unreachable", "cluster", cluster.ID, "error", err)
-				continue
-			}
-			engine := graph.NewClusterGraphEngine(cluster.ID, client.Clientset, log)
-			// Gap 2 fix: actively invalidate BOTH V1 and V2 topology caches
-			// when informers detect K8s resource changes. Without this, the
-			// topology shows stale data for up to 30s (the TTL).
-			engine.SetOnRebuild(func(cid string) {
-				rest.TopologyCacheInvalidateForCluster(cid) // V2 handler cache (sync.Map)
-				topologyCache.InvalidateForCluster(cid)     // V1 service cache (topologycache.Cache)
-			})
-			engine.Start(ctx)
-			graphEngines[cluster.ID] = engine
-			log.Info("Started blast radius graph engine", "cluster", cluster.ID)
-		}
-	}()
+	// Blast radius graph engines (internal/graph/lifecycle.go): lazy
+	// activation, same REGISTERED != ACTIVE principle as the Hybrid Informer
+	// Lifecycle (docs/INFORMER-LIFECYCLE-IMPLEMENTATION.md). Found during the
+	// 2026-10 verification pass — this used to unconditionally construct and
+	// Start() a full ~15-informer-type engine for EVERY reachable persisted
+	// cluster, ~5s after boot, regardless of whether anyone ever opened
+	// Blast Radius for it (live-measured: ~169 extra goroutines/cluster),
+	// AND wrote into this same map with no lock while rest.Handler served
+	// requests from it under its own mutex — an unsynchronized concurrent
+	// map read/write (Go runtime fatal error, not a recoverable panic).
+	// Engines now start only on first real Blast Radius request, via
+	// EngineLifecycleManager.EnsureActive (rest/blast_radius.go), and are
+	// released after an idle TTL, exactly mirroring OverviewCache/
+	// ClusterLifecycleManager's already-proven activation model.
+	graphEngineMgr := graph.NewEngineLifecycleManager(0, func(cid string) {
+		rest.TopologyCacheInvalidateForCluster(cid) // V2 handler cache (sync.Map)
+		topologyCache.InvalidateForCluster(cid)     // V1 service cache (topologycache.Cache)
+	})
+	defer graphEngineMgr.Shutdown()
 
 	logsService := service.NewLogsService(clusterService)
 	eventsService := service.NewEventsServiceWithRepo(clusterService, repo)
@@ -688,13 +712,13 @@ func main() {
 	} else {
 		snapshotStore = sqliteStore
 	}
-	handler := rest.NewHandler(clusterService, topologyService, cfg, logsService, eventsService, metricsService, unifiedMetricsService, projectService, addonSvc, repo, graphEngines, snapshotStore)
+	handler := rest.NewHandler(clusterService, topologyService, cfg, logsService, eventsService, metricsService, unifiedMetricsService, projectService, addonSvc, repo, graphEngineMgr, snapshotStore)
 	authHandler := rest.NewAuthHandler(repo, cfg)
 
 	// Auto-Pilot initialization
 	apRegistry := autopilot.NewRuleRegistry()
 	apRepo := autopilot.NewMemRepository()
-	apScheduler := autopilot.NewScheduler(apRegistry, nil, nil, nil, apRepo, graphEngines, 0)
+	apScheduler := autopilot.NewScheduler(apRegistry, nil, nil, nil, apRepo, graphEngineMgr, 0)
 	rest.InitAutoPilot(apScheduler, apRepo, apRegistry)
 	
 	// OIDC handler (Phase 2: Enterprise Authentication)
@@ -748,7 +772,34 @@ func main() {
 	presenceSources = append(presenceSources, discovery.NewManualSource(&clusterRepoAdapter{repo: repo}))
 
 	discoveryMgr := discovery.NewManager(presenceSources)
-	if refreshErr := discoveryMgr.Refresh(context.Background()); refreshErr != nil {
+
+	// HEALTH-1/HEALTH-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): wire presence's
+	// Reachable flag to ClusterService's live client registry instead of the
+	// previous hardcoded `true`. A cluster only has a live client when its most
+	// recent connection attempt (LoadClustersFromRepo, AddCluster, reconnect)
+	// succeeded; GetClient returning an error (not found/not connected) means
+	// not reachable. Client.HealthStatus()/LastCheckedAt() are the same
+	// per-client health tracking TestConnection/GetClusterInfo already update
+	// on every call — reused, not reimplemented.
+	discoveryMgr.SetReachabilityChecker(func(sessionID string) discovery.ReachabilityStatus {
+		client, err := clusterService.GetClient(sessionID)
+		if err != nil {
+			return discovery.ReachabilityStatus{Reachable: false}
+		}
+		isHealthy, lastSuccess, lastErr, _ := client.HealthStatus()
+		lastErrStr := ""
+		if lastErr != nil {
+			lastErrStr = lastErr.Error()
+		}
+		return discovery.ReachabilityStatus{
+			Reachable:     isHealthy,
+			LastCheckedAt: client.LastCheckedAt(),
+			LastSuccessAt: lastSuccess,
+			LastError:     lastErrStr,
+		}
+	})
+
+	if refreshErr := refreshDiscoveryBounded(discoveryMgr); refreshErr != nil {
 		log.Warn("initial discovery refresh failed; /api/v1/presence will start empty", "error", refreshErr.Error())
 	}
 
@@ -763,7 +814,7 @@ func main() {
 	// dashboard that reports "no cluster connected" despite the backend
 	// having just registered the cluster.
 	handler.OnClusterMutation = func() {
-		if err := discoveryMgr.Refresh(context.Background()); err != nil {
+		if err := refreshDiscoveryBounded(discoveryMgr); err != nil {
 			log.Warn("discovery refresh after cluster mutation failed", "error", err.Error())
 		}
 	}
@@ -771,11 +822,23 @@ func main() {
 	// Periodic refresh (defensive — watch streams should keep state up to
 	// date, but a dropped channel or misbehaving source shouldn't silently
 	// stall the snapshot).
+	//
+	// HEALTH-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): also re-verify each
+	// registered cluster's connectivity on every tick by calling ListClusters
+	// (already does a live per-cluster GetClusterInfo refresh for the
+	// dashboard's cluster list — reused here, not reimplemented), so presence's
+	// Reachable/LastCheckedAt reflect a check from within the last tick
+	// interval rather than whatever the last page view happened to leave
+	// cached. A cluster that goes offline between page views now still gets
+	// re-checked and shows stale/unreachable within this interval.
 	go func() {
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
 		for range t.C {
-			_ = discoveryMgr.Refresh(context.Background())
+			refreshCtx, refreshCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			_, _ = clusterService.ListClusters(refreshCtx)
+			refreshCancel()
+			_ = refreshDiscoveryBounded(discoveryMgr)
 		}
 	}()
 
@@ -926,6 +989,11 @@ func main() {
 
 	// Wire events pipeline lifecycle into cluster add/remove/reconnect handlers.
 	handler.SetLifecycleHook(pipelineManager)
+	// Wire graph-engine lifecycle into the same hook: on reconnect, stop any
+	// engine still bound to the old client (forces a fresh lazy engine on
+	// next Blast Radius use); on removal, stop and tombstone. Never starts
+	// one eagerly — see graphEngineMgr's construction comment above.
+	handler.SetLifecycleHook(graphEngineMgr)
 
 	// Distributed tracing: Helm-based install model — no in-cluster puller needed.
 	tracingHandler := rest.NewTracingHandler(clusterService, otelReceiver)

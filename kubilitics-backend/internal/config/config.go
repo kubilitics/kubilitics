@@ -54,10 +54,24 @@ type Config struct {
 	ShutdownTimeoutSec  int      `mapstructure:"shutdown_timeout_sec"`    // Graceful shutdown wait
 	MaxClusters         int      `mapstructure:"max_clusters"`            // Max registered clusters (e.g. 100); 0 = default
 	K8sTimeoutSec       int      `mapstructure:"k8s_timeout_sec"`         // Timeout for outbound K8s API calls; 0 = default
+	ClusterIdleTTLSec   int      `mapstructure:"cluster_idle_ttl_sec"`    // Informer lifecycle (docs/INFORMER-LIFECYCLE-IMPLEMENTATION.md): seconds a cluster's informers may run unused before stopping; 0 = default (600s/10min)
 	TopologyCacheTTLSec int      `mapstructure:"topology_cache_ttl_sec"`  // Topology cache TTL; 0 = cache disabled
 	TopologyMaxNodes    int      `mapstructure:"topology_max_nodes"`      // Max nodes per topology response; 0 = no limit (C1.4)
 	K8sRateLimitPerSec  float64  `mapstructure:"k8s_rate_limit_per_sec"`  // Token bucket rate per cluster (req/s); 0 = no limit (C1.5)
 	K8sRateLimitBurst   int      `mapstructure:"k8s_rate_limit_burst"`    // Token bucket burst per cluster; 0 = no limit (C1.5)
+	// K8sClientQPS/Burst set rest.Config.QPS/Burst on every constructed K8s
+	// client (internal/k8s/client.go) — client-go's OWN internal limiter,
+	// distinct from K8sRateLimitPerSec/Burst above (Kubilitics' separate,
+	// optional app-level rate.Limiter wrapper, used only by the stateless
+	// request-kubeconfig path and only when explicitly configured).
+	// Phase 2D (docs/TOPOLOGY-CONCURRENCY-INVESTIGATION.md): client-go
+	// defaults QPS/Burst to 5/10 (tuned for low-frequency reconcile loops),
+	// shared across every concurrent caller of one cluster's client — under
+	// concurrent topology/dashboard/resource-list load this throttles badly
+	// (live-measured: 10 concurrent topology requests, 18.2s -> 3.2s after
+	// raising this). 0 = use client-go's own default (5/10).
+	K8sClientQPS   float32 `mapstructure:"k8s_client_qps"`
+	K8sClientBurst int     `mapstructure:"k8s_client_burst"`
 	ApplyMaxYAMLBytes   int      `mapstructure:"apply_max_yaml_bytes"`    // Max YAML body size for POST /apply (D1.2); 0 = default 512KB
 	KCLIRateLimitPerSec float64  `mapstructure:"kcli_rate_limit_per_sec"` // Token bucket rate per cluster for /kcli APIs; 0 = disabled
 	KCLIRateLimitBurst  int      `mapstructure:"kcli_rate_limit_burst"`   // Burst for /kcli APIs; 0 uses sane default
@@ -191,6 +205,14 @@ func Load() (*Config, error) {
 	viper.SetDefault("topology_cache_ttl_sec", 30)
 	viper.SetDefault("topology_max_nodes", 5000)  // recommended cap for large clusters (C1.4)
 	viper.SetDefault("k8s_rate_limit_per_sec", 0) // 0 = disabled
+	// Phase 2D (docs/TOPOLOGY-CONCURRENCY-INVESTIGATION.md): raised from
+	// client-go's own default (5/10) — live-evidenced as the dominant cause
+	// of severe concurrent-request contention (10 concurrent topology
+	// builds: 18.2s at 5/10 -> 3.2s at 50/100), with the real API server's
+	// own CPU staying low (<20%) throughout, i.e. not simply transferring
+	// load the API server can't handle.
+	viper.SetDefault("k8s_client_qps", 50)
+	viper.SetDefault("k8s_client_burst", 100)
 	viper.SetDefault("k8s_rate_limit_burst", 0)
 	viper.SetDefault("apply_max_yaml_bytes", 5*1024*1024) // 5MB for YAML apply (BE-DATA-001); standard API body limit 512KB via middleware
 	viper.SetDefault("kcli_rate_limit_per_sec", 12.0)

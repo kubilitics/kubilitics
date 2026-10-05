@@ -84,10 +84,18 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
+// UX-2 (docs/PRODUCTION-HARDENING-ROADMAP.md, Phase 7): no 'unknown' entry
+// existed, and the one call site defaulted a missing status to 'healthy'
+// (`statusColors[cluster.status ?? 'healthy']`) — a cluster Header had no
+// status for rendered as a green "healthy" dot.
 const statusColors: Record<string, string> = {
+  connected: 'bg-emerald-500',
   healthy: 'bg-emerald-500',
   warning: 'bg-amber-500',
+  degraded: 'bg-amber-500',
   error: 'bg-red-500',
+  disconnected: 'bg-red-500',
+  unknown: 'bg-slate-400',
 };
 
 /** Header height — keep in sync with Sidebar's top offset */
@@ -690,7 +698,7 @@ export function Header() {
                         onClick={() => handleDownloadKubeconfig(cluster.id, cluster.name)}
                         className="flex items-center gap-4 py-4 px-4 cursor-pointer rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
                       >
-                        <div className={cn('w-2 h-2 rounded-full shrink-0 shadow-sm', statusColors[cluster.status ?? 'healthy'])} />
+                        <div className={cn('w-2 h-2 rounded-full shrink-0 shadow-sm', statusColors[cluster.status ?? 'unknown'] ?? statusColors.unknown)} />
                         <span className="flex-1 text-sm font-bold text-foreground/80 truncate">{cluster.name}</span>
                         <div className="h-9 w-9 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
                           <FileDown className="h-4 w-4 text-muted-foreground" />

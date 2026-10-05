@@ -160,7 +160,7 @@ func (h *Handler) PostShell(w http.ResponseWriter, r *http.Request) {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else if errors.Is(err, context.DeadlineExceeded) {
-			respondError(w, http.StatusGatewayTimeout, "Command timed out (60s). Try a more specific query or use -n namespace.")
+			respondTimeout(w, r, http.StatusGatewayTimeout, "", "PostShell", clusterID, "Command timed out (60s). Try a more specific query or use -n namespace.")
 			return
 		} else {
 			respondError(w, http.StatusInternalServerError, "Failed to run command: "+err.Error())

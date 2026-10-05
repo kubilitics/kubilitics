@@ -74,6 +74,38 @@ func TestManualSource_EnumerateCarriesSessionIDAndProvider(t *testing.T) {
 	}
 }
 
+// VALID-05 regression (docs/VALID-05-INVESTIGATION.md): a cluster registered
+// via a non-default kubeconfig path must carry that path (and its context
+// name) through Enumerate, so the presence snapshot — and ultimately the
+// frontend's click-to-connect flow — never has to fall back to a hardcoded
+// "~/.kube/config" guess that 400s whenever the real path differs.
+func TestManualSource_EnumerateCarriesKubeconfigPathAndContext(t *testing.T) {
+	db := &fakeClusterDB{clusters: []StoredCluster{
+		{
+			Name: "lab", ServerURL: "https://lab", SessionID: "uuid-456",
+			KubeconfigPath: "/custom/path/kubeconfig.yaml", ContextName: "lab-ctx",
+		},
+		{Name: "default-cluster", ServerURL: "https://default"}, // no custom path — must stay empty, not panic
+	}}
+	s := NewManualSource(db)
+	got, err := s.Enumerate(context.Background())
+	if err != nil {
+		t.Fatalf("enum: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 entries: %+v", got)
+	}
+	if got[0].KubeconfigPath != "/custom/path/kubeconfig.yaml" {
+		t.Fatalf("KubeconfigPath not propagated: %q", got[0].KubeconfigPath)
+	}
+	if got[0].ContextName != "lab-ctx" {
+		t.Fatalf("ContextName not propagated: %q", got[0].ContextName)
+	}
+	if got[1].KubeconfigPath != "" || got[1].ContextName != "" {
+		t.Fatalf("expected empty path/context for a cluster with none, got: %+v", got[1])
+	}
+}
+
 // Task A regression: NotifyAdd must also emit SessionID + Provider so
 // SSE consumers (the frontend presence store) see the full shape, not
 // just the logical identity.

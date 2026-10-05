@@ -1,4 +1,4 @@
-{{- if .Values.persistence.enabled }}
+{{- if and .Values.persistence.enabled (ne (include "kubilitics.persistence.useEmptyDir" .) "true") }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

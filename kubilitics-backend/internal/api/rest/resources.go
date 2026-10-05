@@ -25,15 +25,17 @@ import (
 const maxNamespacesParam = 20
 
 // respondK8sError maps Kubernetes API errors to structured HTTP error responses
-// with proper status codes, error codes, and request IDs.
-func respondK8sError(w http.ResponseWriter, err error, requestID string) {
+// with proper status codes, error codes, and request IDs. r and clusterID are
+// used only for the OBS-1 timeout-observability path (respondTimeout) — see
+// docs/PRODUCTION-HARDENING-ROADMAP.md, Phase 8.
+func respondK8sError(w http.ResponseWriter, r *http.Request, clusterID, operation string, err error, requestID string) {
 	if errors.Is(err, k8s.ErrCircuitOpen) {
 		w.Header().Set("Retry-After", "30")
 		respondErrorWithCode(w, http.StatusServiceUnavailable, ErrCodeCircuitBreaker, "Cluster API is temporarily unavailable due to repeated failures. Circuit breaker is open. Please retry after 30 seconds.", requestID)
 		return
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		respondErrorWithCode(w, http.StatusGatewayTimeout, ErrCodeTimeout, "Request to Kubernetes API timed out. The cluster may be slow or overloaded.", requestID)
+		respondTimeout(w, r, http.StatusGatewayTimeout, ErrCodeTimeout, operation, clusterID, "Request to Kubernetes API timed out. The cluster may be slow or overloaded.")
 		return
 	}
 	if apierrors.IsNotFound(err) {
@@ -416,7 +418,7 @@ func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 					if errors.Is(err, context.DeadlineExceeded) {
-						respondErrorWithCode(w, http.StatusGatewayTimeout, ErrCodeTimeout, "Request to Kubernetes API timed out. The cluster may be slow or overloaded. Try again or use a more specific query with namespace or label selectors.", requestID)
+						respondTimeout(w, r, http.StatusGatewayTimeout, ErrCodeTimeout, "ListResources", clusterID, "Request to Kubernetes API timed out. The cluster may be slow or overloaded. Try again or use a more specific query with namespace or label selectors.")
 						return
 					}
 					if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
@@ -469,7 +471,7 @@ func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
 				list = &unstructured.UnstructuredList{Items: nil}
 			} else {
 				requestID := logger.FromContext(r.Context())
-				respondK8sError(w, err, requestID)
+				respondK8sError(w, r, clusterID, "ListResources", err, requestID)
 				return
 			}
 		}
@@ -575,7 +577,7 @@ func (h *Handler) GetResource(w http.ResponseWriter, r *http.Request) {
 	obj, err := client.GetResource(r.Context(), kind, namespace, name)
 	if err != nil {
 		requestID := logger.FromContext(r.Context())
-		respondK8sError(w, err, requestID)
+		respondK8sError(w, r, clusterID, "GetResource", err, requestID)
 		return
 	}
 
@@ -641,7 +643,7 @@ func (h *Handler) PatchResource(w http.ResponseWriter, r *http.Request) {
 	obj, err := client.PatchResource(r.Context(), kind, namespace, name, patchBytes)
 	if err != nil {
 		audit.LogMutation(requestID, clusterID, "patch", kind, namespace, name, "failure", err.Error())
-		respondK8sError(w, err, requestID)
+		respondK8sError(w, r, clusterID, "PatchResource", err, requestID)
 		return
 	}
 	audit.LogMutation(requestID, clusterID, "patch", kind, namespace, name, "success", "")
@@ -689,7 +691,7 @@ func (h *Handler) DeleteResource(w http.ResponseWriter, r *http.Request) {
 	opts := metav1.DeleteOptions{}
 	if err := client.DeleteResource(r.Context(), kind, namespace, name, opts); err != nil {
 		audit.LogDelete(requestID, clusterID, kind, namespace, name, "failure", err.Error())
-		respondK8sError(w, err, requestID)
+		respondK8sError(w, r, clusterID, "DeleteResource", err, requestID)
 		return
 	}
 
@@ -757,7 +759,7 @@ func (h *Handler) ApplyManifest(w http.ResponseWriter, r *http.Request) {
 	applied, err := client.ApplyYAML(r.Context(), req.YAML)
 	if err != nil {
 		audit.LogApply(requestID, clusterID, "failure", err.Error(), nil)
-		respondK8sError(w, err, requestID)
+		respondK8sError(w, r, clusterID, "ApplyManifest", err, requestID)
 		return
 	}
 	resources := make([]audit.AppliedResource, len(applied))
@@ -807,7 +809,7 @@ func (h *Handler) GetServiceEndpoints(w http.ResponseWriter, r *http.Request) {
 	obj, err := client.GetResource(r.Context(), "endpoints", namespace, name)
 	if err != nil {
 		requestID := logger.FromContext(r.Context())
-		respondK8sError(w, err, requestID)
+		respondK8sError(w, r, clusterID, "GetServiceEndpoints", err, requestID)
 		return
 	}
 
