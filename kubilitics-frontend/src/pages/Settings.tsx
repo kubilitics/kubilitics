@@ -91,7 +91,14 @@ export default function Settings() {
       setClusterToRemove(null);
       toast.success('Cluster removed');
     },
-    onError: (err: Error) => toast.error(`Failed to remove cluster: ${err.message}`),
+    // LIFECYCLE-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): onError previously
+    // never cleared clusterToRemove, so a failed delete left the confirmation
+    // dialog visibly open — reading as "stuck" — and inviting repeated
+    // re-clicks. Mirror onSuccess's cleanup here too.
+    onError: (err: Error) => {
+      setClusterToRemove(null);
+      toast.error(`Failed to remove cluster: ${err.message}`);
+    },
   });
 
   // Projects query — when disabled (circuit open / not configured), force isLoading to false

@@ -9,39 +9,22 @@
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { getNodeMetrics, listResources } from '@/services/backendApiClient';
+import { parseK8sCpuToMillicores, parseK8sQuantityToBytes } from '@/lib/k8sQuantity';
 
-/* ─── Parsing helpers ─── */
-
-/** Parse CPU string like "787.26m" or "4" (cores) into millicores. */
+/* ─── Parsing helpers ───
+ * METRICS-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): these previously
+ * reimplemented unit parsing locally with `parseFloat(x) || 0` fallbacks,
+ * silently turning a malformed quantity into 0 instead of null. Delegates to
+ * the canonical parser; 0-on-failure is preserved here only for this
+ * function's own `number` contract — the cluster-wide `metricsAvailable`
+ * flag below (not a per-node fallback) is this hook's actual "unknown"
+ * signal, and is unaffected by this change. */
 function parseCpuMillicores(cpu: string): number {
-  if (!cpu) return 0;
-  const s = cpu.trim();
-  if (s.endsWith('m')) return parseFloat(s.slice(0, -1)) || 0;
-  if (s.endsWith('n')) return (parseFloat(s.slice(0, -1)) || 0) / 1_000_000;
-  if (s.endsWith('u')) return (parseFloat(s.slice(0, -1)) || 0) / 1_000;
-  return (parseFloat(s) || 0) * 1000; // bare number = cores
+  return parseK8sCpuToMillicores(cpu) ?? 0;
 }
 
-/** Parse memory string like "864.57Mi", "8025296Ki", "8Gi" into bytes. */
 function parseMemoryBytes(mem: string): number {
-  if (!mem) return 0;
-  const s = mem.trim();
-  const units: Record<string, number> = {
-    Ki: 1024,
-    Mi: 1024 ** 2,
-    Gi: 1024 ** 3,
-    Ti: 1024 ** 4,
-    K: 1000,
-    M: 1000 ** 2,
-    G: 1000 ** 3,
-    T: 1000 ** 4,
-  };
-  for (const [suffix, multiplier] of Object.entries(units)) {
-    if (s.endsWith(suffix)) {
-      return (parseFloat(s.slice(0, -suffix.length)) || 0) * multiplier;
-    }
-  }
-  return parseFloat(s) || 0; // bare number = bytes
+  return parseK8sQuantityToBytes(mem) ?? 0;
 }
 
 interface NodeInfo {

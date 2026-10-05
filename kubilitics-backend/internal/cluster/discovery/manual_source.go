@@ -15,10 +15,15 @@ import (
 // calls without keeping a second store, and (b) render cloud-provider
 // chips without a second lookup.
 type StoredCluster struct {
-	Name      string
-	ServerURL string
-	SessionID string
-	Provider  string
+	Name           string
+	ServerURL      string
+	SessionID      string
+	Provider       string
+	// KubeconfigPath and ContextName round out VALID-05's fix: the DB row
+	// already stores these (models.Cluster), they just weren't threaded
+	// through this adapter shape before.
+	KubeconfigPath string
+	ContextName    string
 }
 
 // ClusterRepository is the read port onto the cluster DB.
@@ -49,10 +54,12 @@ func (s *ManualSource) Enumerate(ctx context.Context) ([]DiscoveredCluster, erro
 	out := make([]DiscoveredCluster, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, DiscoveredCluster{
-			Identity:  identity.LogicalIdentity{Name: r.Name, ServerURL: r.ServerURL},
-			Source:    s.Name(),
-			SessionID: r.SessionID,
-			Provider:  r.Provider,
+			Identity:       identity.LogicalIdentity{Name: r.Name, ServerURL: r.ServerURL},
+			Source:         s.Name(),
+			SessionID:      r.SessionID,
+			Provider:       r.Provider,
+			KubeconfigPath: r.KubeconfigPath,
+			ContextName:    r.ContextName,
 		})
 	}
 	return out, nil

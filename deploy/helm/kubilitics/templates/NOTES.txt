@@ -1,0 +1,47 @@
+Kubilitics has been installed.
+
+1. Check that the pods are running:
+
+   kubectl get pods -n {{ .Release.Namespace }}
+
+2. Access the UI (port-forward for local testing):
+
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "kubilitics.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+
+{{- if eq (include "kubilitics.persistence.useEmptyDir" .) "true" }}
+
+⚠️  NO PERSISTENT STORAGE — RUNNING ON EMPTYDIR
+
+    No default StorageClass was found on this cluster, and
+    persistence.storageClass was left unset. To let the install succeed
+    immediately, Kubilitics automatically used a non-persistent emptyDir
+    volume instead of a PersistentVolumeClaim.
+
+    This means: the SQLite database at /data will be WIPED every time the
+    pod restarts (upgrade, node drain, crash, eviction, etc.) — nothing is
+    durable. This is fine for a quick evaluation, but do not run production
+    workloads this way.
+
+    This pod also carries the annotation kubilitics.io/storage-fallback=true
+    so you can detect this state later: kubectl get deploy {{ include "kubilitics.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.spec.template.metadata.annotations}'
+
+    To switch to real persistent storage:
+
+      kubectl get storageclass
+      helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} \
+        --set persistence.storageClass=<name-from-above>
+
+    (This will recreate the data pod with a PersistentVolumeClaim — any data
+    written while running on emptyDir is already gone by this point.)
+{{- end }}
+
+3. Troubleshooting a pod stuck in "Pending":
+
+   kubectl describe pod -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+   If you manage this chart via a GitOps tool that renders with Helm
+   lookups disabled (e.g. default ArgoCD Helm rendering), the automatic
+   emptyDir fallback above cannot see your cluster's real StorageClass
+   state and will always report no default found. Set
+   persistence.storageClass explicitly in that case for a deterministic,
+   lookup-independent render.

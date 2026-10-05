@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -102,16 +103,103 @@ func (im *InformerManager) Start(ctx context.Context) error {
 	// Start all informers
 	im.factory.Start(im.stopCh)
 
-	// Wait for cache sync
-	syncMap := im.factory.WaitForCacheSync(im.stopCh)
-	for resource, ok := range syncMap {
-		if !ok {
-			return fmt.Errorf("failed to sync cache for resource: %v", resource)
-		}
+	// LOADING-5 (docs/PRODUCTION-RELIABILITY-AUDIT.md): WaitForCacheSync(im.stopCh)
+	// previously blocked forever if any single resource type never completed its
+	// initial sync (e.g. an RBAC watch denial on one resource) — im.stopCh only
+	// closes on an explicit Stop(), so nothing ever woke this up. This only ever
+	// blocked a background goroutine (StartClusterCache launches Start via `go
+	// func(){}`), never an HTTP request, but left the cluster's cache permanently
+	// "still warming up" with no actionable signal and no further retry. Bound the
+	// initial wait, then keep retrying in the background instead of giving up.
+	if im.waitForSync(initialSyncTimeout) {
+		im.synced.Store(true)
+		return nil
 	}
 
-	im.synced.Store(true)
-	return nil
+	select {
+	case <-im.stopCh:
+		// A real Stop() was requested while waiting — not a timeout. Don't retry.
+		return fmt.Errorf("informer manager stopped before initial cache sync completed")
+	default:
+	}
+
+	log.Printf("informer cache did not finish initial sync within %s; resource reads for this cluster will use the slower direct API fallback until it succeeds. Retrying in the background every %s.",
+		initialSyncTimeout, syncRetryInterval)
+	go im.retrySyncInBackground()
+	return fmt.Errorf("informer cache sync did not complete within %s; continuing to retry in background", initialSyncTimeout)
+}
+
+// initialSyncTimeout bounds how long Start() waits for the first full cache
+// sync before giving up and handing off to the background retry loop.
+// syncRetryInterval paces the retry loop afterward — generous enough not to
+// hammer the API server the way the resync-period comment above warns against.
+const (
+	initialSyncTimeout = 2 * time.Minute
+	syncRetryInterval  = 30 * time.Second
+)
+
+// waitForSync blocks until every registered informer cache reports synced,
+// the manager is stopped, or timeout elapses — whichever happens first.
+// Returns true only if every cache reported synced before giving up.
+func (im *InformerManager) waitForSync(timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	giveUp := make(chan struct{})
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-im.stopCh:
+		case <-timer.C:
+		case <-done:
+			return
+		}
+		close(giveUp)
+	}()
+
+	syncMap := im.factory.WaitForCacheSync(giveUp)
+	for _, ok := range syncMap {
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// retrySyncInBackground polls (non-blocking) for sync completion every
+// syncRetryInterval until it succeeds or the manager is stopped. Runs only
+// after the initial bounded wait in Start() gave up without every cache
+// having synced.
+func (im *InformerManager) retrySyncInBackground() {
+	ticker := time.NewTicker(syncRetryInterval)
+	defer ticker.Stop()
+
+	alreadyClosed := make(chan struct{})
+	close(alreadyClosed)
+
+	for {
+		select {
+		case <-im.stopCh:
+			return
+		case <-ticker.C:
+			// Non-blocking poll: an already-closed stop channel makes
+			// WaitForCacheSync return immediately with current state.
+			syncMap := im.factory.WaitForCacheSync(alreadyClosed)
+			allSynced := true
+			for _, ok := range syncMap {
+				if !ok {
+					allSynced = false
+					break
+				}
+			}
+			if allSynced {
+				im.synced.Store(true)
+				log.Printf("informer cache finished initial sync after retrying in the background")
+				return
+			}
+		}
+	}
 }
 
 // HasSynced returns true after all informer caches have completed their
@@ -255,6 +343,27 @@ func (im *InformerManager) ListFromCacheWithPagination(resourceType, namespace s
 
 	// Read all items from the informer store (lock-free, O(n))
 	rawItems := store.List()
+
+	normalizedSortBy := strings.ToLower(sortBy)
+	if normalizedSortBy == "" {
+		normalizedSortBy = "name"
+	}
+	descending := strings.ToLower(sortOrder) == "desc"
+
+	// PERF (10K campaign P1): name/namespace/creationTimestamp — the default
+	// sort and the two most common explicit ones — are available directly on
+	// every runtime.Object via metav1.Object, with no reflection-based
+	// ToUnstructured conversion required. Filter+sort+paginate on the typed
+	// objects first, and convert only the page actually being returned, so a
+	// request's cost scales with `limit`, not with total cluster object
+	// count. Exotic computed sort keys (status.phase, restarts, etc.) still
+	// need resource-specific nested-field access and fall back to the
+	// original full-conversion path unchanged below.
+	switch normalizedSortBy {
+	case "name", "namespace", "creationtimestamp":
+		return listFromCacheTypedFastPath(rawItems, namespace, search, normalizedSortBy, descending, offset, limit)
+	}
+
 	filtered := make([]unstructured.Unstructured, 0, len(rawItems))
 
 	searchLower := strings.ToLower(search)
@@ -283,15 +392,6 @@ func (im *InformerManager) ListFromCacheWithPagination(resourceType, namespace s
 
 		filtered = append(filtered, u)
 	}
-
-	// Sort
-	if sortBy == "" {
-		sortBy = "name"
-	}
-	if sortOrder == "" {
-		sortOrder = "asc"
-	}
-	descending := strings.ToLower(sortOrder) == "desc"
 
 	// Cross-cutting tie-break: equal primary keys fall through to (namespace, name)
 	// so the user-visible ordering is deterministic across reloads.
@@ -351,17 +451,7 @@ func (im *InformerManager) ListFromCacheWithPagination(resourceType, namespace s
 			return a < b
 		}
 		var less bool
-		switch strings.ToLower(sortBy) {
-		case "namespace":
-			less = strLess(filtered[i].GetNamespace(), filtered[j].GetNamespace())
-		case "creationtimestamp":
-			ti := filtered[i].GetCreationTimestamp().Time
-			tj := filtered[j].GetCreationTimestamp().Time
-			if ti.Equal(tj) {
-				less = tieBreak(i, j)
-			} else {
-				less = ti.Before(tj)
-			}
+		switch normalizedSortBy {
 		case "status", "status.phase":
 			a, b := getNStr(i, "status", "phase"), getNStr(j, "status", "phase")
 			if a == "" {
@@ -409,6 +499,116 @@ func (im *InformerManager) ListFromCacheWithPagination(resourceType, namespace s
 	}
 
 	return &CacheListResult{Items: filtered, Total: total}, true
+}
+
+// typedEntry carries the metadata needed to filter and sort a cached object
+// without first paying for a full ToUnstructured conversion.
+type typedEntry struct {
+	obj       interface{}
+	name      string
+	namespace string
+	created   time.Time
+}
+
+// listFromCacheTypedFastPath implements the name/namespace/creationTimestamp
+// sort paths (see PERF comment above the call site) by filtering and sorting
+// on typed-object metadata, then converting only the final requested page to
+// unstructured.Unstructured. Output ordering and tie-break semantics are
+// identical to the generic unstructured path for these three sort keys.
+func listFromCacheTypedFastPath(rawItems []interface{}, namespace, search, sortBy string, descending bool, offset, limit int) (*CacheListResult, bool) {
+	entries := make([]typedEntry, 0, len(rawItems))
+	searchLower := strings.ToLower(search)
+
+	for _, item := range rawItems {
+		accessor, err := meta.Accessor(item)
+		if err != nil {
+			continue
+		}
+
+		ns := accessor.GetNamespace()
+		if namespace != "" && ns != namespace {
+			continue
+		}
+
+		name := accessor.GetName()
+		if searchLower != "" {
+			if !strings.Contains(strings.ToLower(name), searchLower) && !strings.Contains(strings.ToLower(ns), searchLower) {
+				continue
+			}
+		}
+
+		entries = append(entries, typedEntry{
+			obj:       item,
+			name:      name,
+			namespace: ns,
+			created:   accessor.GetCreationTimestamp().Time,
+		})
+	}
+
+	tieBreak := func(i, j int) bool {
+		if entries[i].namespace != entries[j].namespace {
+			return entries[i].namespace < entries[j].namespace
+		}
+		return entries[i].name < entries[j].name
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		var less bool
+		switch sortBy {
+		case "namespace":
+			if entries[i].namespace == entries[j].namespace {
+				less = tieBreak(i, j)
+			} else {
+				less = entries[i].namespace < entries[j].namespace
+			}
+		case "creationtimestamp":
+			if entries[i].created.Equal(entries[j].created) {
+				less = tieBreak(i, j)
+			} else {
+				less = entries[i].created.Before(entries[j].created)
+			}
+		default: // "name"
+			if entries[i].name == entries[j].name {
+				less = tieBreak(i, j)
+			} else {
+				less = entries[i].name < entries[j].name
+			}
+		}
+		if descending {
+			return !less
+		}
+		return less
+	})
+
+	total := int64(len(entries))
+
+	if offset > 0 {
+		if offset >= len(entries) {
+			return &CacheListResult{Items: []unstructured.Unstructured{}, Total: total}, true
+		}
+		entries = entries[offset:]
+	}
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+
+	// Convert only the page actually being returned. A ToUnstructured failure
+	// here (vanishingly rare for objects already deserialized by the
+	// informer) silently shrinks this page below `limit` rather than
+	// adjusting `total` to exclude it, unlike the slow path below which
+	// filters unconvertible items out before counting. Accepted trade-off:
+	// re-converting every item up front to pre-validate would reintroduce
+	// the O(N) cost this fast path exists to remove.
+	items := make([]unstructured.Unstructured, 0, len(entries))
+	for _, e := range entries {
+		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(e.obj)
+		if err != nil {
+			continue
+		}
+		items = append(items, unstructured.Unstructured{Object: obj})
+	}
+
+	return &CacheListResult{Items: items, Total: total}, true
 }
 
 // Stop stops all informers

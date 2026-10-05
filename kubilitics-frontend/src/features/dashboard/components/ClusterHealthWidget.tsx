@@ -44,6 +44,16 @@ export const ClusterHealthWidget = () => {
   const overview = useClusterOverview(clusterId);
   const healthScore = useHealthScore();
 
+  // UX-1 (docs/PRODUCTION-HARDENING-ROADMAP.md, Phase 7): this widget
+  // previously never checked overview/healthScore loading or error state at
+  // all — on first load (before any data arrives) it rendered healthScore's
+  // default "score 0, grade F, critical" exactly as if the cluster were
+  // actually unhealthy, and a fetch failure looked identical to "0 issues."
+  // healthScore.isLoading/isError already aggregate across this widget's own
+  // overview query and the direct-K8s fallback (see useHealthScore.ts).
+  const isLoading = healthScore.isLoading;
+  const isError = healthScore.isError;
+
   const hasOverview = isBackendConfigured && clusterId && overview.data?.health;
   const score = hasOverview ? overview.data!.health.score : healthScore.score;
   const grade = hasOverview ? overview.data!.health.grade : healthScore.grade;
@@ -75,10 +85,15 @@ export const ClusterHealthWidget = () => {
             Cluster Health
           </h2>
           <div className="flex items-center gap-2">
-            <div className={cn("inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-xs font-semibold shadow-sm backdrop-blur-sm", config.badge)}>
-              <StatusIcon className="w-3 h-3" />
-              <span>{statusLabel}</span>
-            </div>
+            {/* UX-1: the status badge must not claim a health verdict ("At
+                Risk" etc.) while that verdict is still loading or could not
+                be determined — same reasoning as the CardContent gating below. */}
+            {!isLoading && !isError && hasData && (
+              <div className={cn("inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-xs font-semibold shadow-sm backdrop-blur-sm", config.badge)}>
+                <StatusIcon className="w-3 h-3" />
+                <span>{statusLabel}</span>
+              </div>
+            )}
             <Tooltip>
               <TooltipTrigger>
                 <Info className="w-3.5 h-3.5 text-muted-foreground hover:text-primary transition-colors shrink-0" />
@@ -96,6 +111,19 @@ export const ClusterHealthWidget = () => {
               size="sm"
               primaryAction={{ label: "Connect Cluster", href: "/clusters?addCluster=true" }}
             />
+          </div>
+        ) : isLoading ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3" role="status" aria-label="Loading cluster health">
+            <div className="h-40 w-40 rounded-full border-4 border-muted animate-pulse" />
+            <p className="text-xs text-muted-foreground">Loading cluster health…</p>
+          </div>
+        ) : isError ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center" role="alert">
+            <AlertCircle className="w-8 h-8 text-destructive" />
+            <p className="text-sm font-medium text-foreground">Unable to load cluster health</p>
+            <p className="text-xs text-muted-foreground max-w-[22rem]">
+              The health check request failed or timed out. This does not mean the cluster is unhealthy — it means health data could not be retrieved right now.
+            </p>
           </div>
         ) : (
           <>

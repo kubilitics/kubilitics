@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -18,15 +19,43 @@ import (
 // ---------------------------------------------------------------------------
 
 // FleetClusterInfo describes a single cluster within the fleet overview.
+//
+// FLEET-N1 (docs/FLEET-N1-IMPLEMENTATION.md, docs/ENTERPRISE-SCALE-RELIABILITY-REPORT.md §10): originally a trimmed subset of
+// what ClusterService.GetClusterSummary already returns per cluster — this
+// handler had the full models.Cluster + models.ClusterSummary in scope the
+// whole time, it just wasn't copying several fields the frontend actually
+// needs (reachable/stale/errorMessage especially — HEALTH-1/HEALTH-2's
+// "never fabricate a healthy state" guarantee depends on these reaching the
+// UI). That gap is why the frontend built its own N-request client-side
+// aggregation instead of using this endpoint. Extended here, additively,
+// rather than inventing a second response shape.
 type FleetClusterInfo struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Status       string `json:"status"`
-	Nodes        int    `json:"nodes"`
-	Pods         int    `json:"pods"`
-	Deployments  int    `json:"deployments"`
-	Namespaces   int    `json:"namespaces"`
-	HealthStatus string `json:"healthStatus"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Context       string `json:"context"`
+	Status        string `json:"status"`
+	Provider      string `json:"provider,omitempty"`
+	Version       string `json:"version,omitempty"`
+	LastConnected string `json:"last_connected,omitempty"`
+	Nodes         int    `json:"nodes"`
+	Pods          int    `json:"pods"`
+	Deployments   int    `json:"deployments"`
+	Services      int    `json:"services"`
+	Namespaces    int    `json:"namespaces"`
+	HealthStatus  string `json:"healthStatus"`
+	HealthReason  string `json:"healthReason,omitempty"`
+	// Reachable/Stale/StaleAsOf/ErrorMessage mirror models.ClusterSummary's
+	// own fields exactly (HEALTH-1/HEALTH-2) — the frontend must be able to
+	// tell "confirmed healthy" apart from "unknown/last-known-good cache"
+	// apart from "confirmed unreachable," never collapsing any of the three.
+	Reachable    bool   `json:"reachable"`
+	Stale        bool   `json:"stale,omitempty"`
+	StaleAsOf    string `json:"stale_as_of,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	// SummaryUnavailable mirrors the frontend's own existing distinction
+	// (useFleetOverview.ts) between "the /summary call itself failed" and
+	// "it succeeded but reported bad health" — true only in the former case.
+	SummaryUnavailable bool `json:"summary_unavailable,omitempty"`
 }
 
 // FleetTotals contains aggregate counts across all clusters.
@@ -68,6 +97,12 @@ type FleetSearchResponse struct {
 
 const fleetSearchMaxResults = 100
 
+// maxConcurrentFleetClusterSummaries bounds GetFleetOverview's per-cluster
+// fan-out (Phase I-B). An evidence-informed starting bound, not empirically
+// load-tested at 50-100 cluster scale in this pass — see the implementation
+// doc for what remains UNVERIFIED and why.
+const maxConcurrentFleetClusterSummaries = 10
+
 // GetFleetOverview handles GET /fleet/overview.
 // It iterates all registered clusters, fetches summary data for each using
 // the existing ClusterService.GetClusterSummary logic, and returns aggregated
@@ -83,24 +118,43 @@ func (h *Handler) GetFleetOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		mu       sync.Mutex
-		infos    []FleetClusterInfo
-		totals   FleetTotals
+		mu     sync.Mutex
+		infos  []FleetClusterInfo
+		totals FleetTotals
 	)
 
+	// Phase I-B (docs/FLEET-PERFORMANCE-IMPLEMENTATION.md): this fan-out was
+	// previously fully unbounded — one goroutine per cluster, each of which
+	// itself fans out to up to 30 concurrent K8s calls (buildClusterSummary).
+	// At N clusters that was N×30 simultaneous outbound K8s API calls with no
+	// ceiling in either dimension. Bounded here to maxConcurrentFleetClusterSummaries
+	// at a time; combined with maxConcurrentSummaryListCalls's own per-cluster
+	// bound, worst-case concurrent K8s calls is now a fixed product of the two
+	// constants rather than growing unboundedly with fleet size.
 	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(maxConcurrentFleetClusterSummaries)
 	for _, c := range clusters {
 		c := c // capture loop variable
 		g.Go(func() error {
 			summary, summaryErr := h.clusterService.GetClusterSummary(gCtx, c.ID)
 			if summaryErr != nil {
 				// Cluster unreachable — record as unhealthy but do not fail the whole request.
+				// FLEET-N1: SummaryUnavailable=true + ErrorMessage set, so the frontend
+				// can distinguish "the /summary call itself failed" from "it succeeded
+				// but reported bad health" — the same distinction useFleetOverview.ts
+				// already made for its own per-cluster requests.
 				mu.Lock()
 				infos = append(infos, FleetClusterInfo{
-					ID:           c.ID,
-					Name:         c.Name,
-					Status:       c.Status,
-					HealthStatus: "unhealthy",
+					ID:                 c.ID,
+					Name:               c.Name,
+					Context:            c.Context,
+					Status:             c.Status,
+					Provider:           c.Provider,
+					Version:            c.Version,
+					HealthStatus:       "unhealthy",
+					Reachable:          false,
+					ErrorMessage:       summaryErr.Error(),
+					SummaryUnavailable: true,
 				})
 				totals.Unhealthy++
 				mu.Unlock()
@@ -110,12 +164,26 @@ func (h *Handler) GetFleetOverview(w http.ResponseWriter, r *http.Request) {
 			info := FleetClusterInfo{
 				ID:           c.ID,
 				Name:         c.Name,
+				Context:      c.Context,
 				Status:       c.Status,
+				Provider:     c.Provider,
+				Version:      c.Version,
 				Nodes:        summary.NodeCount,
 				Pods:         summary.PodCount,
 				Deployments:  summary.DeploymentCount,
+				Services:     summary.ServiceCount,
 				Namespaces:   summary.NamespaceCount,
 				HealthStatus: summary.HealthStatus,
+				HealthReason: summary.HealthReason,
+				Reachable:    summary.Reachable,
+				Stale:        summary.Stale,
+				ErrorMessage: summary.ErrorMessage,
+			}
+			if !c.LastConnected.IsZero() {
+				info.LastConnected = c.LastConnected.Format(time.RFC3339)
+			}
+			if summary.StaleAsOf != nil {
+				info.StaleAsOf = summary.StaleAsOf.Format(time.RFC3339)
 			}
 
 			mu.Lock()

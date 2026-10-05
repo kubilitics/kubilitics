@@ -25,6 +25,8 @@ export {
 export type {
   BackendCluster,
   BackendClusterSummary,
+  BackendFleetOverview,
+  BackendFleetClusterInfo,
   ClusterOverview,
   WorkloadsOverview,
   BackendCapabilities,
@@ -62,6 +64,7 @@ export type {
 export {
   getCapabilities,
   getClusters,
+  getFleetOverview,
   discoverClusters,
   getClusterFeatureMetallb,
   getClusterSummary,

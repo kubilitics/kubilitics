@@ -227,10 +227,22 @@ const statusConfig = {
     ringClass: 'ring-red-500/20 dark:ring-red-400/20',
     indicatorClass: 'bg-red-500 dark:bg-red-400',
   },
+  // UX-2 (docs/PRODUCTION-HARDENING-ROADMAP.md, Phase 7): a cluster Fleet has
+  // no health information for (status 'unknown', from useFleetOverview) must
+  // render distinctly from 'healthy' — never green, never silently absent.
+  // Previously `statusConfig[cluster.status]` had no 'unknown' key at all,
+  // which would have thrown (cfg.ringClass on undefined) the first time a
+  // cluster without a resolvable status reached this component.
+  unknown: {
+    variant: 'neutral' as const,
+    label: 'Unknown',
+    ringClass: 'ring-slate-400/20 dark:ring-slate-500/20',
+    indicatorClass: 'bg-slate-400 dark:bg-slate-500',
+  },
 };
 
 function ClusterCard({ cluster, onClick, onDelete }: { cluster: FleetCluster; onClick: () => void; onDelete: () => void }) {
-  const cfg = statusConfig[cluster.status];
+  const cfg = statusConfig[cluster.status] ?? statusConfig.unknown;
   const favorites = useClusterOrganizationStore((s) => s.favorites);
   const envTags = useClusterOrganizationStore((s) => s.envTags);
   const groups = useClusterOrganizationStore((s) => s.groups);
@@ -400,20 +412,44 @@ function ClusterCard({ cluster, onClick, onDelete }: { cluster: FleetCluster; on
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {cluster.healthReason ? (
-              <TooltipProvider delayDuration={200}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span><StatusBadge variant={cfg.variant} label={cfg.label} size="sm" dot /></span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="max-w-xs text-xs">
-                    {cluster.healthReason}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            ) : (
-              <StatusBadge variant={cfg.variant} label={cfg.label} size="sm" dot />
-            )}
+            <div className="flex items-center gap-1.5">
+              {/* UX-2: stale-data indicator — same amber "clock" treatment used
+                  wherever cached-not-live data is shown; visible by default,
+                  not hover-only, so Fleet matches the roadmap's "consistent
+                  wherever cluster health is shown" requirement. */}
+              {cluster.stale && (
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                        <Clock className="h-3 w-3" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs text-xs">
+                      {cluster.staleAsOf
+                        ? `Showing cached data from ${formatDistanceToNow(new Date(cluster.staleAsOf), { addSuffix: true })} — live fetch failed.`
+                        : 'Showing cached data — live fetch failed.'}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              {(cluster.healthReason || cluster.summaryUnavailable) ? (
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span><StatusBadge variant={cfg.variant} label={cfg.label} size="sm" dot /></span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs text-xs">
+                      {cluster.summaryUnavailable
+                        ? `Health details unavailable${cluster.errorMessage ? `: ${cluster.errorMessage}` : ' — request failed.'}`
+                        : cluster.healthReason}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : (
+                <StatusBadge variant={cfg.variant} label={cfg.label} size="sm" dot />
+              )}
+            </div>
           </div>
         </div>
 

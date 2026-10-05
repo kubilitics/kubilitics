@@ -135,6 +135,34 @@ Deploy Kubilitics to your Kubernetes cluster for team-wide browser access.
 | Kubernetes | ≥ 1.24 |
 | Helm | ≥ 3.8 (OCI support) |
 | kubectl | configured |
+| A default StorageClass | recommended for persistent installs — see below (install succeeds without one too) |
+
+> **No default StorageClass on your cluster?** By default Kubilitics requests
+> persistent storage for its SQLite database using whatever StorageClass your
+> cluster marks as default. Many bare-metal/dev clusters (kubeadm, some kind/k3s
+> setups) don't have one. **The chart detects this automatically and falls
+> back to a non-persistent `emptyDir` volume so the install still succeeds on
+> the first try** — it prints a loud warning in the post-install NOTES and
+> tags the pod with a `kubilitics.io/storage-fallback=true` annotation so
+> the fallback is never silent. The tradeoff: with no default StorageClass,
+> `/data` (the SQLite database) is wiped on every pod restart — fine for a
+> quick evaluation, not for production.
+>
+> To get real persistent storage instead:
+>
+> ```bash
+> kubectl get storageclass   # look for "(default)" next to one of them,
+>                            # or list the ones available if none is default
+>
+> helm install kubilitics ./deploy/helm/kubilitics \
+>   --namespace kubilitics --create-namespace \
+>   --set persistence.storageClass=<name-from-the-list-above>
+> ```
+>
+> Note: the automatic fallback relies on a live cluster lookup at install
+> time, which most GitOps tools (e.g. ArgoCD's default Helm rendering)
+> disable. If you install via GitOps, set `persistence.storageClass`
+> explicitly rather than relying on auto-detection.
 
 ### Install
 

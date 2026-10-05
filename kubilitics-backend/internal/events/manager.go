@@ -90,31 +90,79 @@ func (m *PipelineManager) GetSharedChainCache() *ChainCache {
 	return m.sharedChainCache
 }
 
+// clusterSizingTimeout bounds DetectClusterSize's live Pod-count List
+// calls. P1 fix (docs/PIPELINEMANAGER-LOCK-IO-INVESTIGATION.md): StartCluster
+// used to run this against an unbounded context.Background() WHILE HOLDING
+// m.mu, the single mutex shared by the entire PipelineManager — a cluster
+// with a slow/unreachable API server at connect/reconnect time could freeze
+// StartCluster/StopCluster/pipeline lookups for every OTHER registered
+// cluster indefinitely, the same "one bad cluster poisons unrelated
+// clusters" class of bug already fixed for ListClusters (VALID-01) and
+// ClusterGraphEngine (BLASTRADIUS-3). A bounded context's expiry is already
+// handled by DetectClusterSize's existing error path (any List error ->
+// "defaulting to small" — see cluster_sizing.go), so no new fallback
+// behavior was invented here.
+// var, not const, so tests can shrink it temporarily (e.g. to prove the
+// timeout bound itself without a real 15s wait).
+var clusterSizingTimeout = 15 * time.Second
+
 // StartCluster starts a pipeline for a specific cluster. Idempotent — calling
 // it again for an already-running cluster is a no-op.
+//
+// Concurrency model (P1 fix, see clusterSizingTimeout doc comment above):
+// the clientset reachability check and DetectClusterSize both run OUTSIDE
+// m.mu entirely — no Kubernetes I/O of any kind happens while the lock is
+// held. m.mu is acquired only to install the new pipeline into m.pipelines,
+// a fast, local, in-memory operation (Pipeline.Start itself only spawns
+// background goroutines and sets up informers asynchronously — confirmed
+// non-blocking, same pattern as every other Start() in this codebase).
+// Because sizing now happens before the lock, two concurrent StartCluster
+// calls for the SAME clusterID can both reach the lock with a fully-built
+// pipeline; the second one re-checks m.pipelines under the lock and, if it
+// lost the race, stops and discards its own (otherwise-unused) pipeline
+// instead of leaking its goroutines or silently overwriting the winner's.
 func (m *PipelineManager) StartCluster(clientset kubernetes.Interface, clusterID string) error {
 	if clientset == nil {
 		return fmt.Errorf("cannot start pipeline: clientset is nil for cluster %s", clusterID)
 	}
 
-	// Validate the clientset can actually connect before starting informers
-	_, err := clientset.Discovery().ServerVersion()
-	if err != nil {
+	// Validate the clientset can actually connect before starting informers.
+	// Already outside any lock (unchanged from before this fix) — only this
+	// cluster's own StartCluster call is exposed if this hangs, not every
+	// other cluster's, so it's a different (lower-severity, out of this
+	// fix's scope) failure mode than the one being fixed here.
+	if _, err := clientset.Discovery().ServerVersion(); err != nil {
 		return fmt.Errorf("cannot start pipeline: cluster %s unreachable: %w", clusterID, err)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, exists := m.pipelines[clusterID]; exists {
-		return nil // already running
+	// Fast path: avoid the (bounded but still real) sizing cost entirely if
+	// another caller already started this cluster's pipeline.
+	m.mu.RLock()
+	_, exists := m.pipelines[clusterID]
+	m.mu.RUnlock()
+	if exists {
+		return nil
 	}
 
-	// Detect cluster size and auto-tune pipeline settings.
-	tuning := DetectClusterSize(context.Background(), clientset)
+	// Detect cluster size and auto-tune pipeline settings — bounded, and
+	// deliberately performed before acquiring m.mu so a slow/unreachable
+	// cluster can never block any other cluster's pipeline operations.
+	sizeCtx, sizeCancel := context.WithTimeout(context.Background(), clusterSizingTimeout)
+	tuning := DetectClusterSize(sizeCtx, clientset)
+	sizeCancel()
 
 	pipeline := NewPipeline(m.db)
 	pipeline.ApplyTuning(tuning)
+
+	m.mu.Lock()
+	if _, exists := m.pipelines[clusterID]; exists {
+		// Lost a race against a concurrent StartCluster(clusterID) call that
+		// started (and installed) its pipeline while we were sizing. Discard
+		// ours rather than leaking it or clobbering the installed one.
+		m.mu.Unlock()
+		pipeline.Stop()
+		return nil
+	}
 	if m.metrics != nil {
 		pipeline.SetMetricsProvider(m.metrics)
 	}
@@ -129,10 +177,12 @@ func (m *PipelineManager) StartCluster(clientset kubernetes.Interface, clusterID
 	pipeline.SetChainCache(m.sharedChainCache)
 
 	if err := pipeline.Start(clientset, clusterID); err != nil {
+		m.mu.Unlock()
 		return fmt.Errorf("start pipeline for cluster %s: %w", clusterID, err)
 	}
-
 	m.pipelines[clusterID] = pipeline
+	m.mu.Unlock()
+
 	log.Printf("[events/manager] started pipeline for cluster %s (%s, %d pods)", clusterID, tuning.Size, tuning.PodCount)
 	return nil
 }

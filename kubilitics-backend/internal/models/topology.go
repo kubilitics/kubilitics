@@ -72,6 +72,13 @@ type GraphWarning struct {
 	AffectedNodes []string `json:"affectedNodes,omitempty"`
 }
 
+// DefaultMaxTopologyNodes is the shared safety-net cap for topology
+// responses when no explicit maxNodes override is given (Phase 2,
+// docs/TOPOLOGY-SCALE-INVESTIGATION.md). Single source of truth for both
+// internal/api/rest (MaxTopologyNodes = this value) and internal/api/grpc's
+// GetTopologyGraph, which had the identical unbounded-by-default gap.
+const DefaultMaxTopologyNodes = 500
+
 // TopologyGraphMetadata is the contract graph-level metadata.
 type TopologyGraphMetadata struct {
 	ClusterId   string         `json:"clusterId"`

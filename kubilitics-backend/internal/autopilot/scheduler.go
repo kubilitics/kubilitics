@@ -20,7 +20,7 @@ type Scheduler struct {
 	safetyGate *SafetyGate
 	executor   *Executor
 	repo       AutoPilotRepository
-	engines    map[string]*graph.ClusterGraphEngine
+	engineMgr  *graph.EngineLifecycleManager
 	interval   time.Duration
 	stopCh     chan struct{}
 	mu         sync.RWMutex
@@ -34,7 +34,7 @@ func NewScheduler(
 	safetyGate *SafetyGate,
 	executor *Executor,
 	repo AutoPilotRepository,
-	engines map[string]*graph.ClusterGraphEngine,
+	engineMgr *graph.EngineLifecycleManager,
 	interval time.Duration,
 ) *Scheduler {
 	if interval <= 0 {
@@ -46,7 +46,7 @@ func NewScheduler(
 		safetyGate: safetyGate,
 		executor:   executor,
 		repo:       repo,
-		engines:    engines,
+		engineMgr:  engineMgr,
 		interval:   interval,
 		stopCh:     make(chan struct{}),
 	}
@@ -103,8 +103,11 @@ func (s *Scheduler) Stop() {
 // RunOnce performs a single detection pass for a specific cluster.
 // This is used for manual trigger (scan endpoint).
 func (s *Scheduler) RunOnce(clusterID string) ([]Finding, error) {
-	engine, ok := s.engines[clusterID]
-	if !ok {
+	if s.engineMgr == nil {
+		return nil, nil
+	}
+	engine := s.engineMgr.Get(clusterID)
+	if engine == nil {
 		return nil, nil
 	}
 
@@ -118,9 +121,17 @@ func (s *Scheduler) RunOnce(clusterID string) ([]Finding, error) {
 	return findings, nil
 }
 
-// runAll iterates over all registered cluster engines and runs detection.
+// runAll iterates over every cluster with a currently-active graph engine
+// and runs detection. Note (2026-10 verification pass): engines now start
+// lazily on first Blast Radius use rather than eagerly for every reachable
+// registered cluster, so this only scans clusters someone has actually
+// viewed Blast Radius for — a deliberate behavior change, not a bug. See
+// docs/INFORMER-LIFECYCLE-IMPLEMENTATION.md "Verification Pass" section.
 func (s *Scheduler) runAll() {
-	for clusterID := range s.engines {
+	if s.engineMgr == nil {
+		return
+	}
+	for _, clusterID := range s.engineMgr.ActiveClusterIDs() {
 		findings, err := s.RunOnce(clusterID)
 		if err != nil {
 			slog.Error("autopilot scan failed", "cluster", clusterID, "error", err)

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -20,22 +21,24 @@ import (
 
 	"github.com/kubilitics/kubilitics-backend/internal/api/middleware"
 	"github.com/kubilitics/kubilitics-backend/internal/api/resilient"
-	"github.com/kubilitics/kubilitics-backend/internal/healthscore"
 	"github.com/kubilitics/kubilitics-backend/internal/auth"
 	"github.com/kubilitics/kubilitics-backend/internal/config"
 	"github.com/kubilitics/kubilitics-backend/internal/graph"
+	"github.com/kubilitics/kubilitics-backend/internal/healthscore"
 	"github.com/kubilitics/kubilitics-backend/internal/intelligence/diff"
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/topologyexport"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 	"github.com/kubilitics/kubilitics-backend/internal/repository"
-	"github.com/kubilitics/kubilitics-backend/internal/pkg/topologyexport"
 	"github.com/kubilitics/kubilitics-backend/internal/service"
 	"github.com/kubilitics/kubilitics-backend/internal/topology"
 	topologyv2 "github.com/kubilitics/kubilitics-backend/internal/topology/v2"
 	topologyv2builder "github.com/kubilitics/kubilitics-backend/internal/topology/v2/builder"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -66,7 +69,40 @@ const topologyCacheTTL = 30 * time.Second
 
 // MaxTopologyNodes is the maximum number of nodes allowed in a topology response.
 // If exceeded, depth=0 filtering is applied automatically and the response is marked as truncated.
-const MaxTopologyNodes = 500
+const MaxTopologyNodes = models.DefaultMaxTopologyNodes
+
+// maxConcurrentSummaryListCalls bounds buildClusterSummary's own fan-out
+// (Phase I-B, docs/FLEET-PERFORMANCE-IMPLEMENTATION.md): 30 independent List
+// calls previously ran as 30 unconditional goroutines with no concurrency
+// cap at all. At fleet scale (GetFleetOverview's own per-cluster fan-out
+// calling this once per cluster) that compounds to 30×N simultaneous K8s API
+// calls with N clusters queried at once — unbounded in both dimensions.
+// 10 is a conservative, evidence-informed starting bound (roughly a third of
+// the 30 calls can run at once, still capturing most of the parallelism
+// benefit over fully sequential) — NOT empirically load-tested at 50-100
+// cluster scale in this pass; see the implementation doc for what remains
+// UNVERIFIED and why.
+const maxConcurrentSummaryListCalls = 10
+
+// clusterSummaryTimeout bounds buildClusterSummary's ~26-way List fan-out
+// (Phase A, docs/BUILDCLUSTERSUMMARY-FANOUT-INVESTIGATION.md). Before this,
+// every call shared ctx = r.Context() with no internal deadline of its own
+// — if even one of the 26 calls hung (not merely errored) against a
+// genuinely unresponsive API server, g.Wait() blocked forever, since
+// nothing in this call chain (resilient.WrapClusterHandler included) ever
+// adds a deadline; only an actual client disconnect cancels r.Context().
+// Each hung summary request (and every poll/retry for the same cluster)
+// would leak one goroutine + one held Clientset connection indefinitely —
+// contained to that one cluster's own requests, not the shared-lock class
+// of bug already fixed for PipelineManager/ClusterGraphEngine, but still a
+// real, unbounded resource-accumulation path. A bounded internal timeout
+// still lets a real client cancellation propagate immediately (this ctx is
+// derived FROM the caller's), while guaranteeing an upper bound regardless.
+// A timeout here is classified by resilient.IsTransientClusterError as
+// transient (context.DeadlineExceeded), so it flows into the EXISTING
+// stale-cache-fallback path — no new fallback behavior was invented.
+// var, not const, so tests can shrink it without a real 20s wait.
+var clusterSummaryTimeout = 20 * time.Second
 
 // topologyCacheKey builds a cache key from the request parameters.
 func topologyCacheKey(clusterID, mode, namespace string, depth int) string {
@@ -142,19 +178,37 @@ type Handler struct {
 	k8sClientCache        *expirable.LRU[string, *k8s.Client] // Cache for stateless requests
 	wsConnMu              sync.Mutex
 	wsConns               map[string]int // "clusterId:userIdentity" -> active WS connection count
-	graphEnginesMu        sync.RWMutex
-	graphEngines          map[string]*graph.ClusterGraphEngine // clusterId -> engine
-	snapshotStore         diff.SnapshotStore                   // topology diff snapshot persistence
-	scheduleHandler       *ScheduleHandler                     // optional: report schedule CRUD (nil = disabled)
-	tracingHandler        *TracingHandler                      // optional: tracing enable/disable/instrument (nil = disabled)
-	lifecycleHooks        []ClusterLifecycleHook               // optional: lifecycle hooks (events pipeline, etc.)
+	// graphEngineMgr owns the lazy-activation/idle-TTL lifecycle for
+	// ClusterGraphEngine (Blast Radius's separate informer system). Replaces
+	// the former raw map + graphEnginesMu trio — see
+	// internal/graph/lifecycle.go for why a dedicated manager (found during
+	// the 2026-10 verification pass, see
+	// docs/INFORMER-LIFECYCLE-IMPLEMENTATION.md) rather than reusing
+	// service.ClusterLifecycleManager directly.
+	graphEngineMgr *graph.EngineLifecycleManager
+	// graphEngineGroup coalesces concurrent cold-start calls (client
+	// resolution + EnsureActive) for the SAME clusterID (BLASTRADIUS-3):
+	// EnsureActive's own per-entry mutex already guarantees only one engine
+	// is ever constructed, but without this, N concurrent first-requests for
+	// a not-yet-active cluster would each independently call
+	// getClientFromRequest before racing into EnsureActive — redundant work
+	// against a slow/unreachable cluster, and (found via the race detector
+	// while re-verifying this refactor) unsafe against the test suite's
+	// mockClusterService, which isn't itself safe for concurrent calls.
+	// Different clusterIDs never block each other — singleflight.Group only
+	// serializes calls sharing a key.
+	graphEngineGroup singleflight.Group
+	snapshotStore    diff.SnapshotStore     // topology diff snapshot persistence
+	scheduleHandler  *ScheduleHandler       // optional: report schedule CRUD (nil = disabled)
+	tracingHandler   *TracingHandler        // optional: tracing enable/disable/instrument (nil = disabled)
+	lifecycleHooks   []ClusterLifecycleHook // optional: lifecycle hooks (events pipeline, etc.)
 
 	// summaryLRU and eventsLRU back the resilient envelope for the
 	// cluster-scoped list endpoints migrated in Phase 4 onboarding-v2.
 	// Keys: see buildSummaryCacheKey / buildEventsCacheKey.
-	summaryLRU    *resilient.LRUCache[string, *models.ClusterSummary]
-	eventsLRU     *resilient.LRUCache[string, eventsResponse]
-	workloadsLRU  *resilient.LRUCache[string, models.WorkloadsOverview]
+	summaryLRU   *resilient.LRUCache[string, *models.ClusterSummary]
+	eventsLRU    *resilient.LRUCache[string, eventsResponse]
+	workloadsLRU *resilient.LRUCache[string, models.WorkloadsOverview]
 
 	// OnClusterMutation is invoked after AddCluster / RemoveCluster / reconnect
 	// operations so the caller (main.go) can refresh the DiscoveryManager
@@ -165,7 +219,7 @@ type Handler struct {
 }
 
 // NewHandler creates a new HTTP handler. unifiedMetricsService can be nil; then metrics summary uses legacy per-resource endpoints. projSvc can be nil; then project routes return 501. addonService can be nil; then addon routes return 404 or 501. repo can be nil if auth is disabled. snapshotStore can be nil; then topology snapshot endpoints return 503.
-func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *config.Config, logsService service.LogsService, eventsService service.EventsService, metricsService service.MetricsService, unifiedMetricsService *service.UnifiedMetricsService, projSvc service.ProjectService, addonService service.AddOnService, repo *repository.SQLiteRepository, graphEngines map[string]*graph.ClusterGraphEngine, snapshotStore diff.SnapshotStore) *Handler {
+func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *config.Config, logsService service.LogsService, eventsService service.EventsService, metricsService service.MetricsService, unifiedMetricsService *service.UnifiedMetricsService, projSvc service.ProjectService, addonService service.AddOnService, repo *repository.SQLiteRepository, graphEngineMgr *graph.EngineLifecycleManager, snapshotStore diff.SnapshotStore) *Handler {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
@@ -184,7 +238,7 @@ func NewHandler(cs service.ClusterService, ts service.TopologyService, cfg *conf
 		kcliStreamActive:      map[string]int{},
 		k8sClientCache:        expirable.NewLRU[string, *k8s.Client](100, nil, time.Minute*10),
 		wsConns:               map[string]int{},
-		graphEngines:          graphEngines,
+		graphEngineMgr:        graphEngineMgr,
 		snapshotStore:         snapshotStore,
 		summaryLRU:            resilient.NewLRUCache[string, *models.ClusterSummary](256),
 		eventsLRU:             resilient.NewLRUCache[string, eventsResponse](256),
@@ -306,18 +360,33 @@ func (h *Handler) resolveClusterID(ctx context.Context, clusterID string) (strin
 		return clusterID, nil
 	}
 
-	// 2. Try direct lookup from repo (includes disconnected clusters)
-	if c, err := h.clusterService.GetCluster(ctx, clusterID); err == nil && c != nil {
-		return clusterID, nil
-	}
-
-	// 3. Fall back to search by Context or Name
+	// 2. Pure existence/identity lookup by ID, Context, or Name — no reconnect.
+	//
+	// VALID-02 (docs/VALID-02-INVESTIGATION.md): this used to call
+	// clusterService.GetCluster, which — for a cluster with no live client —
+	// synchronously runs tryReconnectCluster (bounded only by the 30s client
+	// timeout, no singleflight, no negative cache). getClientFromRequest's
+	// own fallback (a few lines below this handler's call site) immediately
+	// performs a SECOND, independent reconnect attempt via the properly
+	// bounded GetOrReconnectClient. Chained back-to-back against the same
+	// unreachable cluster, these two attempts measured ~63s total
+	// (live-reproduced) instead of GetOrReconnectClient's own ~3s bound.
+	//
+	// Fix: resolveClusterID only needs to know whether/what the cluster is,
+	// not whether it is currently reachable. ListClusters (already fixed by
+	// VALID-01) returns every persisted cluster's last-known state
+	// immediately, without blocking on any cluster's reconnect — exactly the
+	// non-blocking existence check this function needs. All reconnection
+	// stays solely owned by getClientFromRequest -> GetOrReconnectClient, as
+	// the investigation's Candidate B recommended. GetCluster itself is
+	// unchanged and still used, unmodified, by every other caller that
+	// genuinely wants its enrichment + reconnect side effect.
 	clusters, listErr := h.clusterService.ListClusters(ctx)
 	if listErr != nil {
 		return "", listErr
 	}
 	for _, c := range clusters {
-		if c.Context == clusterID || c.Name == clusterID {
+		if c.ID == clusterID || c.Context == clusterID || c.Name == clusterID {
 			return c.ID, nil
 		}
 	}
@@ -945,6 +1014,12 @@ func (h *Handler) buildClusterSummary(ctx context.Context, r *http.Request) (*mo
 	vars := mux.Vars(r)
 	clusterID := vars["clusterId"]
 
+	// Bounded independently of the caller's own ctx (see clusterSummaryTimeout
+	// doc comment) — still cancels immediately if the caller's ctx is
+	// cancelled first, since this ctx is derived from it.
+	ctx, cancel := context.WithTimeout(ctx, clusterSummaryTimeout)
+	defer cancel()
+
 	// Headlamp/Lens model: try kubeconfig from request first, fall back to stored cluster.
 	client, err := h.getClientFromRequest(ctx, r, clusterID, h.cfg)
 	if err != nil {
@@ -992,9 +1067,26 @@ func (h *Handler) buildClusterSummary(ctx context.Context, r *http.Request) (*mo
 		}
 	}
 
-	// Fetch all resource counts in parallel — 27 API calls via goroutines
+	// Fetch all resource counts in parallel — bounded to
+	// maxConcurrentSummaryListCalls at a time (Phase I-B). Each call's error
+	// is tracked (not silently discarded, as it previously was) via
+	// failedListCalls; a non-zero count is surfaced in HealthReason below so
+	// a partial-data summary is never indistinguishable from a cluster that
+	// genuinely has zero of some resource type.
 	listOpts := metav1.ListOptions{}
-	var wg sync.WaitGroup
+	// Deliberately NOT errgroup.WithContext: each List call's failure must
+	// stay independent (today's behavior — one resource type being slow or
+	// erroring must not cancel the other 29 in-flight calls). g.Go always
+	// returns nil below; SetLimit is used purely as a bounded worker pool,
+	// not for errgroup's own first-error-cancels-everything semantics.
+	var g errgroup.Group
+	g.SetLimit(maxConcurrentSummaryListCalls)
+	var failedListCalls int32
+	trackErr := func(err error) {
+		if err != nil {
+			atomic.AddInt32(&failedListCalls, 1)
+		}
+	}
 
 	var pods *corev1.PodList
 	var deployments *appsv1.DeploymentList
@@ -1027,38 +1119,187 @@ func (h *Handler) buildClusterSummary(ctx context.Context, r *http.Request) (*mo
 	var mutatingWebhooks *admissionregistrationv1.MutatingWebhookConfigurationList
 	var validatingWebhooks *admissionregistrationv1.ValidatingWebhookConfigurationList
 
-	wg.Add(30)
-	go func() { defer wg.Done(); pods, _ = client.Clientset.CoreV1().Pods("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); deployments, _ = client.Clientset.AppsV1().Deployments("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); services, _ = client.Clientset.CoreV1().Services("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); statefulsets, _ = client.Clientset.AppsV1().StatefulSets("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); replicasets, _ = client.Clientset.AppsV1().ReplicaSets("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); daemonsets, _ = client.Clientset.AppsV1().DaemonSets("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); jobs, _ = client.Clientset.BatchV1().Jobs("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); cronjobs, _ = client.Clientset.BatchV1().CronJobs("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); ingresses, _ = client.Clientset.NetworkingV1().Ingresses("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); ingressClasses, _ = client.Clientset.NetworkingV1().IngressClasses().List(ctx, listOpts) }()
-	go func() { defer wg.Done(); endpoints, _ = client.Clientset.CoreV1().Endpoints("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); endpointSlices, _ = client.Clientset.DiscoveryV1().EndpointSlices("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); networkPolicies, _ = client.Clientset.NetworkingV1().NetworkPolicies("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); configmaps, _ = client.Clientset.CoreV1().ConfigMaps("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); secrets, _ = client.Clientset.CoreV1().Secrets("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); pvs, _ = client.Clientset.CoreV1().PersistentVolumes().List(ctx, listOpts) }()
-	go func() { defer wg.Done(); pvcs, _ = client.Clientset.CoreV1().PersistentVolumeClaims("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); storageClasses, _ = client.Clientset.StorageV1().StorageClasses().List(ctx, listOpts) }()
-	go func() { defer wg.Done(); serviceAccounts, _ = client.Clientset.CoreV1().ServiceAccounts("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); roles, _ = client.Clientset.RbacV1().Roles("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); clusterRoles, _ = client.Clientset.RbacV1().ClusterRoles().List(ctx, listOpts) }()
-	go func() { defer wg.Done(); roleBindings, _ = client.Clientset.RbacV1().RoleBindings("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); clusterRoleBindings, _ = client.Clientset.RbacV1().ClusterRoleBindings().List(ctx, listOpts) }()
-	go func() { defer wg.Done(); hpas, _ = client.Clientset.AutoscalingV2().HorizontalPodAutoscalers("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); limitRanges, _ = client.Clientset.CoreV1().LimitRanges("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); resourceQuotas, _ = client.Clientset.CoreV1().ResourceQuotas("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); pdbs, _ = client.Clientset.PolicyV1().PodDisruptionBudgets("").List(ctx, listOpts) }()
-	go func() { defer wg.Done(); priorityClasses, _ = client.Clientset.SchedulingV1().PriorityClasses().List(ctx, listOpts) }()
-	go func() { defer wg.Done(); mutatingWebhooks, _ = client.Clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().List(ctx, listOpts) }()
-	go func() { defer wg.Done(); validatingWebhooks, _ = client.Clientset.AdmissionregistrationV1().ValidatingWebhookConfigurations().List(ctx, listOpts) }()
-	wg.Wait()
+	g.Go(func() error {
+		var err error
+		pods, err = client.Clientset.CoreV1().Pods("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		deployments, err = client.Clientset.AppsV1().Deployments("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		services, err = client.Clientset.CoreV1().Services("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		statefulsets, err = client.Clientset.AppsV1().StatefulSets("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		replicasets, err = client.Clientset.AppsV1().ReplicaSets("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		daemonsets, err = client.Clientset.AppsV1().DaemonSets("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		jobs, err = client.Clientset.BatchV1().Jobs("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		cronjobs, err = client.Clientset.BatchV1().CronJobs("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		ingresses, err = client.Clientset.NetworkingV1().Ingresses("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		ingressClasses, err = client.Clientset.NetworkingV1().IngressClasses().List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		endpoints, err = client.Clientset.CoreV1().Endpoints("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		endpointSlices, err = client.Clientset.DiscoveryV1().EndpointSlices("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		networkPolicies, err = client.Clientset.NetworkingV1().NetworkPolicies("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		configmaps, err = client.Clientset.CoreV1().ConfigMaps("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		secrets, err = client.Clientset.CoreV1().Secrets("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		pvs, err = client.Clientset.CoreV1().PersistentVolumes().List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		pvcs, err = client.Clientset.CoreV1().PersistentVolumeClaims("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		storageClasses, err = client.Clientset.StorageV1().StorageClasses().List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		serviceAccounts, err = client.Clientset.CoreV1().ServiceAccounts("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		roles, err = client.Clientset.RbacV1().Roles("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		clusterRoles, err = client.Clientset.RbacV1().ClusterRoles().List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		roleBindings, err = client.Clientset.RbacV1().RoleBindings("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		clusterRoleBindings, err = client.Clientset.RbacV1().ClusterRoleBindings().List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		hpas, err = client.Clientset.AutoscalingV2().HorizontalPodAutoscalers("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		limitRanges, err = client.Clientset.CoreV1().LimitRanges("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		resourceQuotas, err = client.Clientset.CoreV1().ResourceQuotas("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		pdbs, err = client.Clientset.PolicyV1().PodDisruptionBudgets("").List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		priorityClasses, err = client.Clientset.SchedulingV1().PriorityClasses().List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		mutatingWebhooks, err = client.Clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		validatingWebhooks, err = client.Clientset.AdmissionregistrationV1().ValidatingWebhookConfigurations().List(ctx, listOpts)
+		trackErr(err)
+		return nil
+	})
+	_ = g.Wait() // always nil — see note above; failures are tracked via failedListCalls, not errgroup's own error path
 
 	// Nil-safe count helper
 	safeCount := func(items interface{}) int {
@@ -1071,7 +1312,10 @@ func (h *Handler) buildClusterSummary(ctx context.Context, r *http.Request) (*mo
 	_ = safeCount // suppress unused
 
 	// Compute counts — nil-safe
-	podCount := 0; if pods != nil { podCount = len(pods.Items) }
+	podCount := 0
+	if pods != nil {
+		podCount = len(pods.Items)
+	}
 	// Pod status breakdown
 	podStatus := models.OverviewPodStatus{}
 	if pods != nil {
@@ -1091,66 +1335,300 @@ func (h *Handler) buildClusterSummary(ctx context.Context, r *http.Request) (*mo
 			}
 		}
 	}
-	deploymentCount := 0; if deployments != nil { deploymentCount = len(deployments.Items) }
-	serviceCount := 0; if services != nil { serviceCount = len(services.Items) }
-	statefulsetCount := 0; if statefulsets != nil { statefulsetCount = len(statefulsets.Items) }
-	replicasetCount := 0; if replicasets != nil { replicasetCount = len(replicasets.Items) }
-	daemonsetCount := 0; if daemonsets != nil { daemonsetCount = len(daemonsets.Items) }
-	jobCount := 0; if jobs != nil { jobCount = len(jobs.Items) }
-	cronjobCount := 0; if cronjobs != nil { cronjobCount = len(cronjobs.Items) }
-	ingressCount := 0; if ingresses != nil { ingressCount = len(ingresses.Items) }
-	ingressClassCount := 0; if ingressClasses != nil { ingressClassCount = len(ingressClasses.Items) }
-	endpointCount := 0; if endpoints != nil { endpointCount = len(endpoints.Items) }
-	endpointSliceCount := 0; if endpointSlices != nil { endpointSliceCount = len(endpointSlices.Items) }
-	networkPolicyCount := 0; if networkPolicies != nil { networkPolicyCount = len(networkPolicies.Items) }
-	configmapCount := 0; if configmaps != nil { configmapCount = len(configmaps.Items) }
-	secretCount := 0; if secrets != nil { secretCount = len(secrets.Items) }
-	pvCount := 0; if pvs != nil { pvCount = len(pvs.Items) }
-	pvcCount := 0; if pvcs != nil { pvcCount = len(pvcs.Items) }
-	storageClassCount := 0; if storageClasses != nil { storageClassCount = len(storageClasses.Items) }
-	serviceAccountCount := 0; if serviceAccounts != nil { serviceAccountCount = len(serviceAccounts.Items) }
-	roleCount := 0; if roles != nil { roleCount = len(roles.Items) }
-	clusterRoleCount := 0; if clusterRoles != nil { clusterRoleCount = len(clusterRoles.Items) }
-	roleBindingCount := 0; if roleBindings != nil { roleBindingCount = len(roleBindings.Items) }
-	clusterRoleBindingCount := 0; if clusterRoleBindings != nil { clusterRoleBindingCount = len(clusterRoleBindings.Items) }
-	hpaCount := 0; if hpas != nil { hpaCount = len(hpas.Items) }
-	limitRangeCount := 0; if limitRanges != nil { limitRangeCount = len(limitRanges.Items) }
-	resourceQuotaCount := 0; if resourceQuotas != nil { resourceQuotaCount = len(resourceQuotas.Items) }
-	pdbCount := 0; if pdbs != nil { pdbCount = len(pdbs.Items) }
-	priorityClassCount := 0; if priorityClasses != nil { priorityClassCount = len(priorityClasses.Items) }
-	mutatingWebhookCount := 0; if mutatingWebhooks != nil { mutatingWebhookCount = len(mutatingWebhooks.Items) }
-	validatingWebhookCount := 0; if validatingWebhooks != nil { validatingWebhookCount = len(validatingWebhooks.Items) }
+	deploymentCount := 0
+	if deployments != nil {
+		deploymentCount = len(deployments.Items)
+	}
+	serviceCount := 0
+	if services != nil {
+		serviceCount = len(services.Items)
+	}
+	statefulsetCount := 0
+	if statefulsets != nil {
+		statefulsetCount = len(statefulsets.Items)
+	}
+	replicasetCount := 0
+	if replicasets != nil {
+		replicasetCount = len(replicasets.Items)
+	}
+	daemonsetCount := 0
+	if daemonsets != nil {
+		daemonsetCount = len(daemonsets.Items)
+	}
+	jobCount := 0
+	if jobs != nil {
+		jobCount = len(jobs.Items)
+	}
+	cronjobCount := 0
+	if cronjobs != nil {
+		cronjobCount = len(cronjobs.Items)
+	}
+	ingressCount := 0
+	if ingresses != nil {
+		ingressCount = len(ingresses.Items)
+	}
+	ingressClassCount := 0
+	if ingressClasses != nil {
+		ingressClassCount = len(ingressClasses.Items)
+	}
+	endpointCount := 0
+	if endpoints != nil {
+		endpointCount = len(endpoints.Items)
+	}
+	endpointSliceCount := 0
+	if endpointSlices != nil {
+		endpointSliceCount = len(endpointSlices.Items)
+	}
+	networkPolicyCount := 0
+	if networkPolicies != nil {
+		networkPolicyCount = len(networkPolicies.Items)
+	}
+	configmapCount := 0
+	if configmaps != nil {
+		configmapCount = len(configmaps.Items)
+	}
+	secretCount := 0
+	if secrets != nil {
+		secretCount = len(secrets.Items)
+	}
+	pvCount := 0
+	if pvs != nil {
+		pvCount = len(pvs.Items)
+	}
+	pvcCount := 0
+	if pvcs != nil {
+		pvcCount = len(pvcs.Items)
+	}
+	storageClassCount := 0
+	if storageClasses != nil {
+		storageClassCount = len(storageClasses.Items)
+	}
+	serviceAccountCount := 0
+	if serviceAccounts != nil {
+		serviceAccountCount = len(serviceAccounts.Items)
+	}
+	roleCount := 0
+	if roles != nil {
+		roleCount = len(roles.Items)
+	}
+	clusterRoleCount := 0
+	if clusterRoles != nil {
+		clusterRoleCount = len(clusterRoles.Items)
+	}
+	roleBindingCount := 0
+	if roleBindings != nil {
+		roleBindingCount = len(roleBindings.Items)
+	}
+	clusterRoleBindingCount := 0
+	if clusterRoleBindings != nil {
+		clusterRoleBindingCount = len(clusterRoleBindings.Items)
+	}
+	hpaCount := 0
+	if hpas != nil {
+		hpaCount = len(hpas.Items)
+	}
+	limitRangeCount := 0
+	if limitRanges != nil {
+		limitRangeCount = len(limitRanges.Items)
+	}
+	resourceQuotaCount := 0
+	if resourceQuotas != nil {
+		resourceQuotaCount = len(resourceQuotas.Items)
+	}
+	pdbCount := 0
+	if pdbs != nil {
+		pdbCount = len(pdbs.Items)
+	}
+	priorityClassCount := 0
+	if priorityClasses != nil {
+		priorityClassCount = len(priorityClasses.Items)
+	}
+	mutatingWebhookCount := 0
+	if mutatingWebhooks != nil {
+		mutatingWebhookCount = len(mutatingWebhooks.Items)
+	}
+	validatingWebhookCount := 0
+	if validatingWebhooks != nil {
+		validatingWebhookCount = len(validatingWebhooks.Items)
+	}
 
 	// Project namespace filtering for namespaced resources
 	if projectNSSet != nil {
-		podCount = 0; podStatus = models.OverviewPodStatus{}
+		podCount = 0
+		podStatus = models.OverviewPodStatus{}
 		for _, p := range pods.Items {
-			if _, ok := projectNSSet[p.Namespace]; !ok { continue }
+			if _, ok := projectNSSet[p.Namespace]; !ok {
+				continue
+			}
 			podCount++
-			switch p.Status.Phase { case "Running": podStatus.Running++; case "Pending": podStatus.Pending++; case "Failed": podStatus.Failed++; case "Succeeded": podStatus.Succeeded++ }
-			for _, cs := range p.Status.ContainerStatuses { podStatus.TotalRestarts += int(cs.RestartCount) }
+			switch p.Status.Phase {
+			case "Running":
+				podStatus.Running++
+			case "Pending":
+				podStatus.Pending++
+			case "Failed":
+				podStatus.Failed++
+			case "Succeeded":
+				podStatus.Succeeded++
+			}
+			for _, cs := range p.Status.ContainerStatuses {
+				podStatus.TotalRestarts += int(cs.RestartCount)
+			}
 		}
-		deploymentCount = 0; for _, d := range deployments.Items { if _, ok := projectNSSet[d.Namespace]; ok { deploymentCount++ } }
-		serviceCount = 0; for _, s := range services.Items { if _, ok := projectNSSet[s.Namespace]; ok { serviceCount++ } }
-		statefulsetCount = 0; for _, sts := range statefulsets.Items { if _, ok := projectNSSet[sts.Namespace]; ok { statefulsetCount++ } }
-		replicasetCount = 0; for _, rs := range replicasets.Items { if _, ok := projectNSSet[rs.Namespace]; ok { replicasetCount++ } }
-		daemonsetCount = 0; for _, ds := range daemonsets.Items { if _, ok := projectNSSet[ds.Namespace]; ok { daemonsetCount++ } }
-		jobCount = 0; for _, j := range jobs.Items { if _, ok := projectNSSet[j.Namespace]; ok { jobCount++ } }
-		cronjobCount = 0; for _, cj := range cronjobs.Items { if _, ok := projectNSSet[cj.Namespace]; ok { cronjobCount++ } }
-		ingressCount = 0; if ingresses != nil { for _, i := range ingresses.Items { if _, ok := projectNSSet[i.Namespace]; ok { ingressCount++ } } }
-		endpointCount = 0; if endpoints != nil { for _, e := range endpoints.Items { if _, ok := projectNSSet[e.Namespace]; ok { endpointCount++ } } }
-		endpointSliceCount = 0; if endpointSlices != nil { for _, e := range endpointSlices.Items { if _, ok := projectNSSet[e.Namespace]; ok { endpointSliceCount++ } } }
-		networkPolicyCount = 0; if networkPolicies != nil { for _, n := range networkPolicies.Items { if _, ok := projectNSSet[n.Namespace]; ok { networkPolicyCount++ } } }
-		configmapCount = 0; if configmaps != nil { for _, c := range configmaps.Items { if _, ok := projectNSSet[c.Namespace]; ok { configmapCount++ } } }
-		secretCount = 0; if secrets != nil { for _, s := range secrets.Items { if _, ok := projectNSSet[s.Namespace]; ok { secretCount++ } } }
-		pvcCount = 0; if pvcs != nil { for _, p := range pvcs.Items { if _, ok := projectNSSet[p.Namespace]; ok { pvcCount++ } } }
-		serviceAccountCount = 0; if serviceAccounts != nil { for _, s := range serviceAccounts.Items { if _, ok := projectNSSet[s.Namespace]; ok { serviceAccountCount++ } } }
-		roleCount = 0; if roles != nil { for _, ro := range roles.Items { if _, ok := projectNSSet[ro.Namespace]; ok { roleCount++ } } }
-		roleBindingCount = 0; if roleBindings != nil { for _, rb := range roleBindings.Items { if _, ok := projectNSSet[rb.Namespace]; ok { roleBindingCount++ } } }
-		hpaCount = 0; if hpas != nil { for _, h := range hpas.Items { if _, ok := projectNSSet[h.Namespace]; ok { hpaCount++ } } }
-		limitRangeCount = 0; if limitRanges != nil { for _, l := range limitRanges.Items { if _, ok := projectNSSet[l.Namespace]; ok { limitRangeCount++ } } }
-		resourceQuotaCount = 0; if resourceQuotas != nil { for _, rq := range resourceQuotas.Items { if _, ok := projectNSSet[rq.Namespace]; ok { resourceQuotaCount++ } } }
-		pdbCount = 0; if pdbs != nil { for _, p := range pdbs.Items { if _, ok := projectNSSet[p.Namespace]; ok { pdbCount++ } } }
+		deploymentCount = 0
+		for _, d := range deployments.Items {
+			if _, ok := projectNSSet[d.Namespace]; ok {
+				deploymentCount++
+			}
+		}
+		serviceCount = 0
+		for _, s := range services.Items {
+			if _, ok := projectNSSet[s.Namespace]; ok {
+				serviceCount++
+			}
+		}
+		statefulsetCount = 0
+		for _, sts := range statefulsets.Items {
+			if _, ok := projectNSSet[sts.Namespace]; ok {
+				statefulsetCount++
+			}
+		}
+		replicasetCount = 0
+		for _, rs := range replicasets.Items {
+			if _, ok := projectNSSet[rs.Namespace]; ok {
+				replicasetCount++
+			}
+		}
+		daemonsetCount = 0
+		for _, ds := range daemonsets.Items {
+			if _, ok := projectNSSet[ds.Namespace]; ok {
+				daemonsetCount++
+			}
+		}
+		jobCount = 0
+		for _, j := range jobs.Items {
+			if _, ok := projectNSSet[j.Namespace]; ok {
+				jobCount++
+			}
+		}
+		cronjobCount = 0
+		for _, cj := range cronjobs.Items {
+			if _, ok := projectNSSet[cj.Namespace]; ok {
+				cronjobCount++
+			}
+		}
+		ingressCount = 0
+		if ingresses != nil {
+			for _, i := range ingresses.Items {
+				if _, ok := projectNSSet[i.Namespace]; ok {
+					ingressCount++
+				}
+			}
+		}
+		endpointCount = 0
+		if endpoints != nil {
+			for _, e := range endpoints.Items {
+				if _, ok := projectNSSet[e.Namespace]; ok {
+					endpointCount++
+				}
+			}
+		}
+		endpointSliceCount = 0
+		if endpointSlices != nil {
+			for _, e := range endpointSlices.Items {
+				if _, ok := projectNSSet[e.Namespace]; ok {
+					endpointSliceCount++
+				}
+			}
+		}
+		networkPolicyCount = 0
+		if networkPolicies != nil {
+			for _, n := range networkPolicies.Items {
+				if _, ok := projectNSSet[n.Namespace]; ok {
+					networkPolicyCount++
+				}
+			}
+		}
+		configmapCount = 0
+		if configmaps != nil {
+			for _, c := range configmaps.Items {
+				if _, ok := projectNSSet[c.Namespace]; ok {
+					configmapCount++
+				}
+			}
+		}
+		secretCount = 0
+		if secrets != nil {
+			for _, s := range secrets.Items {
+				if _, ok := projectNSSet[s.Namespace]; ok {
+					secretCount++
+				}
+			}
+		}
+		pvcCount = 0
+		if pvcs != nil {
+			for _, p := range pvcs.Items {
+				if _, ok := projectNSSet[p.Namespace]; ok {
+					pvcCount++
+				}
+			}
+		}
+		serviceAccountCount = 0
+		if serviceAccounts != nil {
+			for _, s := range serviceAccounts.Items {
+				if _, ok := projectNSSet[s.Namespace]; ok {
+					serviceAccountCount++
+				}
+			}
+		}
+		roleCount = 0
+		if roles != nil {
+			for _, ro := range roles.Items {
+				if _, ok := projectNSSet[ro.Namespace]; ok {
+					roleCount++
+				}
+			}
+		}
+		roleBindingCount = 0
+		if roleBindings != nil {
+			for _, rb := range roleBindings.Items {
+				if _, ok := projectNSSet[rb.Namespace]; ok {
+					roleBindingCount++
+				}
+			}
+		}
+		hpaCount = 0
+		if hpas != nil {
+			for _, h := range hpas.Items {
+				if _, ok := projectNSSet[h.Namespace]; ok {
+					hpaCount++
+				}
+			}
+		}
+		limitRangeCount = 0
+		if limitRanges != nil {
+			for _, l := range limitRanges.Items {
+				if _, ok := projectNSSet[l.Namespace]; ok {
+					limitRangeCount++
+				}
+			}
+		}
+		resourceQuotaCount = 0
+		if resourceQuotas != nil {
+			for _, rq := range resourceQuotas.Items {
+				if _, ok := projectNSSet[rq.Namespace]; ok {
+					resourceQuotaCount++
+				}
+			}
+		}
+		pdbCount = 0
+		if pdbs != nil {
+			for _, p := range pdbs.Items {
+				if _, ok := projectNSSet[p.Namespace]; ok {
+					pdbCount++
+				}
+			}
+		}
 		// Cluster-scoped resources (PVs, StorageClasses, ClusterRoles, etc.) are NOT project-filtered
 	}
 
@@ -1205,6 +1683,20 @@ func (h *Handler) buildClusterSummary(ctx context.Context, r *http.Request) (*mo
 		ValidatingWebhookConfigCount:  validatingWebhookCount,
 
 		Reachable: true,
+	}
+	// Phase I-B: surface partial-data fetches instead of silently reporting
+	// 0 for a resource type that actually failed to load (vs. a cluster that
+	// genuinely has none). Additive only — does not change HealthStatus
+	// itself, since downgrading health based on fetch failures alone is a
+	// larger behavioral decision this pass doesn't have the evidence to
+	// make safely; see docs/FLEET-PERFORMANCE-IMPLEMENTATION.md.
+	if n := atomic.LoadInt32(&failedListCalls); n > 0 {
+		note := fmt.Sprintf("%d of 30 resource-count queries failed; affected counts may read as 0", n)
+		if summary.HealthReason == "" {
+			summary.HealthReason = note
+		} else {
+			summary.HealthReason = summary.HealthReason + " | " + note
+		}
 	}
 	return summary, nil
 }
@@ -1327,9 +1819,24 @@ func (h *Handler) GetTopology(w http.ResponseWriter, r *http.Request) {
 	// BE-SCALE-002: Support force_refresh query param to bypass cache
 	forceRefresh := r.URL.Query().Get("force_refresh") == "true"
 
-	maxNodes := 0
+	// V1 topology bounded-by-default (Phase 2, docs/TOPOLOGY-SCALE-INVESTIGATION.md):
+	// this endpoint used to default maxNodes to 0 ("no limit"), unlike
+	// GetTopologyV2 which has always hard-capped at MaxTopologyNodes (500) as
+	// a safety net regardless of config. At ~2,248 pods this produced a
+	// 4,888-node / 8.1MB / 16.27s response — live-reproduced. No current
+	// frontend caller uses this route (confirmed by repo-wide grep); the only
+	// other caller (internal/api/grpc/service.go's GetTopologyGraph) had the
+	// identical unbounded default and is fixed the same way. maxNodes=0 (no
+	// limit) remains available via the explicit ?max_nodes= override below —
+	// this is "remain available but bounded by default," not a removal.
+	maxNodes := MaxTopologyNodes
 	if h.cfg != nil && h.cfg.TopologyMaxNodes > 0 {
 		maxNodes = h.cfg.TopologyMaxNodes
+	}
+	if mn := r.URL.Query().Get("max_nodes"); mn != "" {
+		if parsed, err := strconv.Atoi(mn); err == nil && parsed >= 0 {
+			maxNodes = parsed // explicit opt-in; 0 = caller explicitly wants no limit
+		}
 	}
 
 	timeoutSec := 30
@@ -1346,7 +1853,7 @@ func (h *Handler) GetTopology(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			respondError(w, http.StatusServiceUnavailable, "Topology build timed out")
+			respondTimeout(w, r, http.StatusServiceUnavailable, "", "GetTopology", clusterID, "Topology build timed out")
 			return
 		}
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -1442,6 +1949,16 @@ func (h *Handler) GetTopologyV2(w http.ResponseWriter, r *http.Request) {
 	// Parse expand parameter
 	expandNodeID := r.URL.Query().Get("expand")
 
+	// VALID-07 (docs/TOPOLOGY-SCALE-INVESTIGATION.md): V1's GetTopology has
+	// always honored this; V2 never parsed it at all, so the cache lookup
+	// below ran unconditionally — two consecutive ?force_refresh=true
+	// requests returned byte-identical cached data, live-reproduced (~25ms
+	// each, far below a genuine ~150-350ms rebuild). Same name/semantics as
+	// V1: bypasses the cache GET only; the fresh result still populates the
+	// cache afterward (unchanged below), so a subsequent normal request
+	// benefits from it instead of forcing a third build.
+	forceRefresh := r.URL.Query().Get("force_refresh") == "true"
+
 	opts := topologyv2.Options{
 		ClusterID:   clusterID,
 		ClusterName: clusterName,
@@ -1469,14 +1986,14 @@ func (h *Handler) GetTopologyV2(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var resp *topologyv2.TopologyResponse
-	if cached, ok := topologyCacheGet(cacheKey); ok {
+	if cached, ok := topologyCacheGet(cacheKey); ok && !forceRefresh {
 		resp = cached
 	} else {
-		// Cache miss — build topology
+		// Cache miss (or forced) — build topology
 		built, buildErr := topologyv2builder.BuildTopology(ctx, opts, client)
 		if buildErr != nil {
 			if errors.Is(buildErr, context.DeadlineExceeded) {
-				respondError(w, http.StatusServiceUnavailable, "Topology build timed out")
+				respondTimeout(w, r, http.StatusServiceUnavailable, "", "GetTopologyV2", clusterID, "Topology build timed out")
 				return
 			}
 			respondError(w, http.StatusInternalServerError, buildErr.Error())
@@ -1594,7 +2111,7 @@ func (h *Handler) GetTopologyV2Traffic(w http.ResponseWriter, r *http.Request) {
 		built, buildErr := topologyv2builder.BuildTopology(ctx, opts, client)
 		if buildErr != nil {
 			if errors.Is(buildErr, context.DeadlineExceeded) {
-				respondError(w, http.StatusServiceUnavailable, "Topology build timed out")
+				respondTimeout(w, r, http.StatusServiceUnavailable, "", "GetTopologyV2Traffic", clusterID, "Topology build timed out")
 				return
 			}
 			respondError(w, http.StatusInternalServerError, buildErr.Error())
@@ -1776,7 +2293,49 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 	if cached, ok := topologyCacheGet(resCacheKey); ok {
 		v2Resp = cached
 	} else {
-		v2Resp, buildErr = topologyv2builder.BuildTopology(ctx, v2Opts, client)
+		// BLASTRADIUS-1 (docs/PRODUCTION-RELIABILITY-AUDIT.md): if this
+		// cluster's ClusterGraphEngine is already running and has completed
+		// at least one rebuild, reuse its informer-cached resources for the
+		// types it tracks instead of re-listing them live here. getGraphEngine
+		// is the read-only accessor (RLock only, no lazy-start) so this can
+		// never contend with or trigger BLASTRADIUS-3's lock. Status().Ready
+		// guards against reading the cache before its initial sync, which
+		// would otherwise look like (but not be) an empty cluster.
+		var seed *topologyv2.ResourceBundle
+		if engine := h.getGraphEngine(clusterID); engine != nil && engine.Status().Ready {
+			if res := engine.Resources(); res != nil {
+				seed = &topologyv2.ResourceBundle{
+					Pods:            res.Pods,
+					Deployments:     res.Deployments,
+					ReplicaSets:     res.ReplicaSets,
+					StatefulSets:    res.StatefulSets,
+					DaemonSets:      res.DaemonSets,
+					Jobs:            res.Jobs,
+					CronJobs:        res.CronJobs,
+					Services:        res.Services,
+					Endpoints:       res.Endpoints,
+					ConfigMaps:      res.ConfigMaps,
+					Secrets:         res.Secrets,
+					ServiceAccounts: res.ServiceAccounts,
+					PVCs:            res.PVCs,
+					Ingresses:       res.Ingresses,
+					NetworkPolicies: res.NetworkPolicies,
+					PDBs:            res.PDBs,
+				}
+			}
+		}
+		var bundle *topologyv2.ResourceBundle
+		var collectErr error
+		if seed != nil {
+			bundle, collectErr = topologyv2.CollectRemainderFromClient(ctx, client, v2Opts.Namespace, seed)
+		} else {
+			bundle, collectErr = topologyv2.CollectFromClient(ctx, client, v2Opts.Namespace)
+		}
+		if collectErr != nil {
+			buildErr = collectErr
+		} else {
+			v2Resp, buildErr = topologyv2builder.BuildGraph(ctx, v2Opts, bundle)
+		}
 		if buildErr == nil && v2Resp != nil && len(v2Resp.Nodes) > 0 {
 			// Score all nodes on the FULL graph before caching.
 			// Scores are computed once and carried through BFS filtering via node.Extra.
@@ -1824,7 +2383,7 @@ func (h *Handler) GetResourceTopology(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if buildErr != nil && errors.Is(buildErr, context.DeadlineExceeded) {
-		respondError(w, http.StatusServiceUnavailable, "Topology build timed out")
+		respondTimeout(w, r, http.StatusServiceUnavailable, "", "GetResourceTopology", clusterID, "Topology build timed out")
 		return
 	}
 
@@ -1927,7 +2486,7 @@ func (h *Handler) GetCriticality(w http.ResponseWriter, r *http.Request) {
 		built, buildErr := topologyv2builder.BuildTopology(ctx, opts, client)
 		if buildErr != nil {
 			if errors.Is(buildErr, context.DeadlineExceeded) {
-				respondError(w, http.StatusServiceUnavailable, "Topology build timed out")
+				respondTimeout(w, r, http.StatusServiceUnavailable, "", "GetCriticality", clusterID, "Topology build timed out")
 				return
 			}
 			respondError(w, http.StatusInternalServerError, buildErr.Error())

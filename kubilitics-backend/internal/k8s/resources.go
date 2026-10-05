@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -59,6 +60,7 @@ func pluralizeKind(s string) string {
 // BE-OBS-001: Instrumented with OpenTelemetry tracing.
 // BE-SCALE-001: Uses circuit breaker to prevent cascading failures.
 func (c *Client) ListResources(ctx context.Context, kind, namespace string, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	start := time.Now()
 	ctx, span := tracing.StartSpanWithAttributes(ctx, "k8s.list_resources",
 		attribute.String("k8s.resource.kind", kind),
 		attribute.String("k8s.resource.namespace", namespace),
@@ -93,7 +95,7 @@ func (c *Client) ListResources(ctx context.Context, kind, namespace string, opts
 		return fnErr
 	})
 
-	c.updateHealth(err)
+	c.updateHealth(err, time.Since(start))
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -106,6 +108,7 @@ func (c *Client) ListResources(ctx context.Context, kind, namespace string, opts
 // GetResource returns a single resource by kind, namespace, and name (with timeout, retry, and circuit breaker).
 // BE-SCALE-001: Uses circuit breaker to prevent cascading failures.
 func (c *Client) GetResource(ctx context.Context, kind, namespace, name string) (*unstructured.Unstructured, error) {
+	start := time.Now()
 	if err := c.waitRateLimit(ctx); err != nil {
 		return nil, err
 	}
@@ -130,13 +133,14 @@ func (c *Client) GetResource(ctx context.Context, kind, namespace, name string) 
 		return fnErr
 	})
 
-	c.updateHealth(err)
+	c.updateHealth(err, time.Since(start))
 	return result, err
 }
 
 // DeleteResource deletes a single resource by kind, namespace, and name (with timeout, retry, and circuit breaker).
 // BE-SCALE-001: Uses circuit breaker to prevent cascading failures.
 func (c *Client) DeleteResource(ctx context.Context, kind, namespace, name string, opts metav1.DeleteOptions) error {
+	start := time.Now()
 	if err := c.waitRateLimit(ctx); err != nil {
 		return err
 	}
@@ -158,13 +162,14 @@ func (c *Client) DeleteResource(ctx context.Context, kind, namespace, name strin
 		})
 	})
 
-	c.updateHealth(err)
+	c.updateHealth(err, time.Since(start))
 	return err
 }
 
 // PatchResource patches a single resource by kind, namespace, and name using JSON merge patch.
 // BE-SCALE-001: Uses circuit breaker to prevent cascading failures.
 func (c *Client) PatchResource(ctx context.Context, kind, namespace, name string, patch []byte) (*unstructured.Unstructured, error) {
+	start := time.Now()
 	if err := c.waitRateLimit(ctx); err != nil {
 		return nil, err
 	}
@@ -189,7 +194,7 @@ func (c *Client) PatchResource(ctx context.Context, kind, namespace, name string
 		return fnErr
 	})
 
-	c.updateHealth(err)
+	c.updateHealth(err, time.Since(start))
 	return result, err
 }
 

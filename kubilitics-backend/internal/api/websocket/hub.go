@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -154,9 +155,28 @@ func (h *Hub) SetTopologyInvalidator(fn func(clusterID, namespace string)) {
 	h.invalidateTopology = fn
 }
 
-// BroadcastResourceEvent broadcasts a resource event to all clients. If clusterID is non-empty and a topology
-// invalidator is set, the cache for that scope is invalidated (C1.3).
+// ErrMissingClusterID is returned by BroadcastResourceEvent when called with
+// an empty clusterID. CONTAM-1 (docs/PRODUCTION-RELIABILITY-AUDIT.md, Phase
+// 11 docs/PRODUCTION-HARDENING-ROADMAP.md): the Hub's per-cluster
+// subscription filter (see Run()'s broadcast case) only engages when
+// msg.clusterID is non-empty — a resource event broadcast with no cluster
+// identity previously reached every connected client regardless of their
+// subscription, silently bypassing cluster isolation entirely (fail open).
+// Resource events are inherently cluster-scoped data; refusing to enqueue
+// one with no identity (fail closed) is strictly safer than guessing or
+// broadcasting unscoped, and callers can now cheaply enforce it was given
+// identity instead of failing much later in a security-relevant way.
+var ErrMissingClusterID = errors.New("websocket: refusing to broadcast a resource event with no cluster identity (fail-closed)")
+
+// BroadcastResourceEvent broadcasts a resource event to clients subscribed to
+// clusterID. If clusterID is non-empty and a topology invalidator is set,
+// the cache for that scope is invalidated (C1.3). clusterID MUST be
+// non-empty — see ErrMissingClusterID.
 func (h *Hub) BroadcastResourceEvent(clusterID, namespace, eventType string, resourceType string, obj interface{}) error {
+	if clusterID == "" {
+		return ErrMissingClusterID
+	}
+
 	h.mu.RLock()
 	inv := h.invalidateTopology
 	h.mu.RUnlock()

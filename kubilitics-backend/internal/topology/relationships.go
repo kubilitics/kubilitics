@@ -689,8 +689,20 @@ func (ri *RelationshipInferencer) inferStorageRelationships(ctx context.Context)
 			storageClassName, _ = extra["storageClassName"].(string)
 		}
 
-		// Fall back to live K8s API if available and extra didn't provide data
-		if (volumeName == "" || storageClassName == "") && ri.engine != nil && ri.engine.client != nil {
+		// Fall back to a live K8s API Get ONLY when discovery never recorded
+		// extra data for this node at all (extra == nil) — e.g. test-mode
+		// graphs built without going through discoverPersistentVolumeClaims.
+		// The prior condition re-fetched whenever EITHER field was empty,
+		// which is also the normal, legitimate state for any PVC that has
+		// no bound PV yet (volumeName is correctly "" for a Pending PVC) —
+		// so it fired on every single such PVC, every request, forever.
+		// Phase 2 (docs/TOPOLOGY-SCALE-INVESTIGATION.md): with 75 PVCs this
+		// Get-per-PVC fallback, throttled by client-go's default QPS=5/
+		// Burst=10 limiter (no custom QPS/Burst configured anywhere in
+		// internal/k8s/client.go), was the entire 16-19s GetTopology (V1)
+		// bottleneck — not graph size, not discovery, not relationship
+		// inference's other 10 sub-functions (each sub-millisecond).
+		if extra == nil && ri.engine != nil && ri.engine.client != nil {
 			k8sPVC, err := ri.engine.client.Clientset.CoreV1().PersistentVolumeClaims(pvc.Namespace).Get(ctx, pvc.Name, metav1.GetOptions{})
 			if err == nil {
 				if volumeName == "" {
@@ -740,7 +752,9 @@ func (ri *RelationshipInferencer) inferStorageRelationships(ctx context.Context)
 			storageClassName, _ = extra["storageClassName"].(string)
 		}
 
-		if storageClassName == "" && ri.engine != nil && ri.engine.client != nil {
+		// Same extra==nil fix as the PVC loop above — a PV legitimately
+		// having no storage class is not "not yet discovered."
+		if extra == nil && ri.engine != nil && ri.engine.client != nil {
 			k8sPV, err := ri.engine.client.Clientset.CoreV1().PersistentVolumes().Get(ctx, pv.Name, metav1.GetOptions{})
 			if err == nil {
 				storageClassName = k8sPV.Spec.StorageClassName

@@ -20,7 +20,21 @@ type mockClusterRepoForValidation struct {
 }
 
 func (m *mockClusterRepoForValidation) List(ctx context.Context) ([]*models.Cluster, error) {
-	return m.list, nil
+	// Return a defensive copy: production's real SQLiteRepository.List()
+	// deserializes fresh *models.Cluster instances from the DB on every
+	// call, so ListClusters' in-place enrichment (status/server URL/etc.)
+	// is always safe there. This mock previously returned the same
+	// slice/pointers on every call, which is harmless for sequential tests
+	// but creates a real, detectable data race under concurrent List()
+	// calls (confirmed via TestVALID02_ConcurrentClusterIsolation) despite
+	// the production code path being safe. Copying here makes the mock
+	// match production's actual data-ownership semantics.
+	out := make([]*models.Cluster, len(m.list))
+	for i, c := range m.list {
+		cp := *c
+		out[i] = &cp
+	}
+	return out, nil
 }
 
 func (m *mockClusterRepoForValidation) Get(ctx context.Context, id string) (*models.Cluster, error) {

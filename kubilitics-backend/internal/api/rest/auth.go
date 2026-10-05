@@ -1862,9 +1862,12 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 				CreatedAt: time.Now(),
 			}
 			if err := h.repo.CreatePasswordResetToken(ctx, resetToken); err == nil {
-				// In production: send email with reset link containing tokenPlaintext
-				// For now, log it (in production, never log tokens)
-				log.Printf("[password-reset] Token for user %s: %s (expires in 1 hour)", user.Username, tokenPlaintext)
+				// VALID-03 (docs/VALID-03-INVESTIGATION.md): tokenPlaintext must never be
+				// logged or otherwise exposed — it is a live, bearer-style credential
+				// sufficient on its own to reset this user's password. Email delivery
+				// (the only channel through which a caller should ever receive it) is
+				// not yet implemented; the token is only ever persisted as a hash below.
+				// The audit trail intentionally carries no token material.
 				h.logAuthEvent(ctx, "password_reset_requested", user.Username, ip, r.Header.Get("User-Agent"), &user.ID, "")
 			}
 		}

@@ -704,6 +704,70 @@ func TestHandler_GetClusterSummary_Success(t *testing.T) {
 	}
 }
 
+// COUNTS-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): the audit found this
+// endpoint already correctly cluster-scoped (each cluster resolves its own
+// client via getClientFromRequest, keyed by the resolved cluster ID) but
+// without an automated test proving cluster A's data can never appear under
+// cluster B. Locking that in per the Phase 3 roadmap instruction.
+func TestHandler_GetClusterSummary_ClusterIsolation(t *testing.T) {
+	handler, mockSvc := setupClusterHandlerTest(t)
+
+	clusterA := uuid.New().String()
+	clusterB := uuid.New().String()
+	mockSvc.clusterMap[clusterA] = &models.Cluster{ID: clusterA, Name: "cluster-a", Context: "ctx-a", Status: "connected"}
+	mockSvc.clusterMap[clusterB] = &models.Cluster{ID: clusterB, Name: "cluster-b", Context: "ctx-b", Status: "connected"}
+	mockSvc.clusters = []*models.Cluster{mockSvc.clusterMap[clusterA], mockSvc.clusterMap[clusterB]}
+
+	// Deliberately different counts per cluster so contamination would be
+	// detectable — if A's client/counts leaked onto B's response (or vice
+	// versa), the assertions below would catch it.
+	mockSvc.clientMap[clusterA] = makeMockClientWithCounts(3, 5)
+	mockSvc.clientMap[clusterB] = makeMockClientWithCounts(7, 11)
+
+	router := mux.NewRouter()
+	api := router.PathPrefix("/api/v1").Subrouter()
+	SetupRoutes(api, handler)
+
+	fetch := func(clusterID string) *models.ClusterSummary {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters/"+clusterID+"/summary", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("cluster %s: expected status 200, got %d: %s", clusterID, rec.Code, rec.Body.String())
+		}
+		var envelope struct {
+			Data *models.ClusterSummary `json:"data"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&envelope); err != nil {
+			t.Fatalf("cluster %s: failed to decode response: %v", clusterID, err)
+		}
+		return envelope.Data
+	}
+
+	summaryA := fetch(clusterA)
+	summaryB := fetch(clusterB)
+
+	if summaryA.NodeCount != 3 {
+		t.Errorf("cluster A: expected NodeCount=3, got %d — cluster B's data may have leaked in", summaryA.NodeCount)
+	}
+	if summaryB.NodeCount != 7 {
+		t.Errorf("cluster B: expected NodeCount=7, got %d — cluster A's data may have leaked in", summaryB.NodeCount)
+	}
+	if summaryA.NamespaceCount != 5 {
+		t.Errorf("cluster A: expected NamespaceCount=5, got %d", summaryA.NamespaceCount)
+	}
+	if summaryB.NamespaceCount != 11 {
+		t.Errorf("cluster B: expected NamespaceCount=11, got %d", summaryB.NamespaceCount)
+	}
+
+	// Re-fetch A again after B to rule out any shared/cached state from the
+	// LRU keyed incorrectly across clusters.
+	summaryA2 := fetch(clusterA)
+	if summaryA2.NodeCount != 3 {
+		t.Errorf("cluster A (re-fetched after B): expected NodeCount=3, got %d", summaryA2.NodeCount)
+	}
+}
+
 // Test GetClusterOverview endpoint
 func TestHandler_GetClusterOverview_Success(t *testing.T) {
 	handler, mockSvc := setupClusterHandlerTest(t)

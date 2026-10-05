@@ -21,6 +21,21 @@ export interface HealthScore {
   };
   details: string[];
   insight: string;
+  /**
+   * UX-1 (docs/PRODUCTION-HARDENING-ROADMAP.md, Phase 7): this hook
+   * previously had no loading/error signal at all — it always returns a
+   * concrete score (even a default "0, grade F, critical" before any
+   * cluster is connected), so a consumer like ClusterHealthWidget couldn't
+   * tell "genuinely unhealthy" apart from "no data has arrived yet," and
+   * rendered the same alarming score either way. True only while every
+   * viable data source (backend overview, or the direct-K8s pods/nodes
+   * fallback) has no data yet.
+   */
+  isLoading: boolean;
+  /** True only when every viable data source has failed outright — a
+   * partial failure still yields a valid degraded-but-real score via the
+   * existing overview→direct-K8s fallback chain, so that case is NOT an error. */
+  isError: boolean;
 }
 
 function isNodeReady(node: { status?: { conditions?: Array<{ type: string; status: string }> } }): boolean {
@@ -67,7 +82,18 @@ export function useHealthScore(): HealthScore {
     staleTime: 60_000,
   });
 
-  return useMemo(() => {
+  const isLoading = !!activeCluster
+    && (isBackendConfigured && overviewQuery.isLoading && !overviewQuery.data)
+    && (podsList.isLoading && !podsList.data)
+    && (nodesList.isLoading && !nodesList.data);
+
+  const isError = !!activeCluster
+    && isBackendConfigured
+    && overviewQuery.isError
+    && podsList.isError
+    && nodesList.isError;
+
+  const core = useMemo(() => {
     if (!activeCluster) {
       return {
         score: 0,
@@ -205,4 +231,6 @@ export function useHealthScore(): HealthScore {
     nodesList.data?.items,
     eventsQuery.data,
   ]);
+
+  return { ...core, isLoading, isError };
 }
