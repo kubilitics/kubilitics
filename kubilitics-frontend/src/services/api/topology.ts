@@ -2,7 +2,7 @@
  * Topology endpoints (getTopology, getResourceTopology, getTopologyV2, getTopologyExportDrawio).
  */
 import { adaptTopologyGraph, validateTopologyGraph } from '@/topology/graph';
-import { backendRequest } from './client';
+import { backendRequest, type BackendRequestInit } from './client';
 import type { TopologyGraph } from './types';
 
 /**
@@ -12,7 +12,11 @@ import type { TopologyGraph } from './types';
 export async function getTopology(
   baseUrl: string,
   clusterId: string,
-  params?: { namespace?: string; resource_types?: string[]; depth?: number }
+  params?: { namespace?: string; resource_types?: string[]; depth?: number },
+  // TOPOLOGY-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): forwarded so the caller's
+  // timeout/cancellation actually reaches the fetch, instead of a separate
+  // Promise.race that gives up client-side without stopping backend work.
+  init?: BackendRequestInit
 ): Promise<TopologyGraph> {
   const search = new URLSearchParams();
   if (params?.namespace) search.set('namespace', params.namespace);
@@ -23,7 +27,11 @@ export async function getTopology(
   const path = `clusters/${encodeURIComponent(clusterId)}/topology${query ? `?${query}` : ''}`;
 
   try {
-    const result = await backendRequest<unknown>(baseUrl, path);
+    // Only pass a 3rd `init` arg when actually provided, preserving the exact
+    // 2-arg call shape (and existing call-site tests) otherwise.
+    const result = init
+      ? await backendRequest<unknown>(baseUrl, path, init)
+      : await backendRequest<unknown>(baseUrl, path);
 
     if (!result) {
       throw new Error('Empty response from topology API');

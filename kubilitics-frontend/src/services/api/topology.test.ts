@@ -142,6 +142,36 @@ describe('getTopology', () => {
     await expect(getTopology(BASE, CLUSTER)).rejects.toThrow('Backend down');
     consoleSpy.mockRestore();
   });
+
+  // TOPOLOGY-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): the caller's timeoutMs/
+  // signal must reach backendRequest, so giving up client-side actually cancels
+  // the in-flight request instead of a separate Promise.race that left the
+  // backend working after the UI gave up.
+  it('forwards an init (timeoutMs/signal) to backendRequest when provided', async () => {
+    mockBackendRequest.mockResolvedValue(rawGraph);
+    mockAdaptTopologyGraph.mockReturnValue(transformedGraph);
+    const controller = new AbortController();
+
+    await getTopology(BASE, CLUSTER, { depth: 1 }, { timeoutMs: 35_000, signal: controller.signal });
+
+    expect(mockBackendRequest).toHaveBeenCalledWith(
+      BASE,
+      'clusters/cluster-1/topology?depth=1',
+      { timeoutMs: 35_000, signal: controller.signal }
+    );
+  });
+
+  it('does not pass a 3rd arg to backendRequest when no init is given (unchanged call shape)', async () => {
+    mockBackendRequest.mockResolvedValue(rawGraph);
+    mockAdaptTopologyGraph.mockReturnValue(transformedGraph);
+
+    await getTopology(BASE, CLUSTER);
+
+    expect(mockBackendRequest).toHaveBeenCalledWith(
+      BASE,
+      'clusters/cluster-1/topology'
+    );
+  });
 });
 
 describe('getResourceTopology', () => {

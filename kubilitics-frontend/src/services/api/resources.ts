@@ -48,6 +48,13 @@ export interface ResourceListParams {
   sortOrder?: 'asc' | 'desc';
   /** Offset-based pagination offset (0-indexed). Requires informer cache. */
   offset?: number;
+  /**
+   * LOADING-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): React Query's per-query
+   * cancellation signal, forwarded to backendRequest so an unmounted/stale query
+   * actually cancels its in-flight fetch instead of being silently ignored.
+   * Not a URL parameter — never serialized into the query string.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -78,7 +85,11 @@ export async function listResources(
   const query = search.toString();
   const path = `clusters/${encodeURIComponent(clusterId)}/resources/${encodeURIComponent(kind)}${query ? `?${query}` : ''}`;
   try {
-    return await backendRequest<BackendResourceListResponse>(baseUrl, path);
+    // Only pass a 3rd `init` arg when a signal is actually present, preserving
+    // the exact 2-arg call shape (and existing call-site tests) otherwise.
+    return params?.signal
+      ? await backendRequest<BackendResourceListResponse>(baseUrl, path, { signal: params.signal })
+      : await backendRequest<BackendResourceListResponse>(baseUrl, path);
   } catch (err) {
     // When a CRD/resource type doesn't exist in the cluster the backend returns 404.
     // Return an empty list instead of throwing so callers don't flood the console with errors.
@@ -98,11 +109,15 @@ export async function getResource(
   clusterId: string,
   kind: string,
   namespace: string,
-  name: string
+  name: string,
+  // LOADING-2: forwarded React Query cancellation signal — see ResourceListParams.signal.
+  signal?: AbortSignal
 ): Promise<Record<string, unknown>> {
   const ns = namespace === '' ? '-' : namespace;
   const path = `clusters/${encodeURIComponent(clusterId)}/resources/${encodeURIComponent(kind)}/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`;
-  return backendRequest<Record<string, unknown>>(baseUrl, path);
+  return signal
+    ? backendRequest<Record<string, unknown>>(baseUrl, path, { signal })
+    : backendRequest<Record<string, unknown>>(baseUrl, path);
 }
 
 /**

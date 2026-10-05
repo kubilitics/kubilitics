@@ -59,22 +59,24 @@ export function useClusterTopology({
         throw new Error('Cluster not selected');
       }
 
-      // 8-second timeout — prevents infinite loading spinners
-      const FETCH_TIMEOUT_MS = 8_000;
-      const timeout = new Promise<never>((_, reject) => {
-        setTimeout(
-          () => reject(new Error('Request timed out — the backend took too long to respond')),
-          FETCH_TIMEOUT_MS,
-        );
-      });
+      // TOPOLOGY-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): the previous 8s
+      // Promise.race timeout was SHORTER than the backend's own topology build
+      // budget (topology_timeout_sec, default 30s in kubilitics-backend/internal/
+      // config/config.go) and didn't actually cancel the in-flight fetch when it
+      // fired — the backend kept building the graph after the UI had already
+      // given up, and the next attempt could never succeed on any cluster whose
+      // build legitimately takes 8-30s. CLIENT_TOPOLOGY_TIMEOUT_MS must stay
+      // above the backend's configured ceiling (with margin for network latency);
+      // it's enforced inside backendRequest via a real AbortController, so giving
+      // up client-side now actually stops the backend request too.
+      const CLIENT_TOPOLOGY_TIMEOUT_MS = 35_000;
 
-      const result = await Promise.race([
-        getTopology(effectiveBaseUrl, clusterId, {
-          namespace: namespaceParam,
-          depth,
-        }),
-        timeout,
-      ]);
+      const result = await getTopology(
+        effectiveBaseUrl,
+        clusterId,
+        { namespace: namespaceParam, depth },
+        { timeoutMs: CLIENT_TOPOLOGY_TIMEOUT_MS }
+      );
 
       if (!result) {
         throw new Error('Empty response from topology API');

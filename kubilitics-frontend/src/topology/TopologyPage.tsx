@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { useBackendConfigStore } from "@/stores/backendConfigStore";
 import { useActiveCluster } from '@/stores/clusterPresenceStore';
 
@@ -142,7 +143,7 @@ export function TopologyPage() {
   }), [viewMode, selectedNamespaces, clusterName]);
 
   // Data fetching — pass selected namespaces for filtering
-  const { topology, allNamespaces, allKinds, allEdgeCategories, isLoading, isFetching, isError, error, refetch, truncated, truncatedTotal, totalUnfiltered } = useTopologyData({
+  const { topology, allNamespaces, allNamespacesError, allKinds, allEdgeCategories, isLoading, isFetching, isError, error, refetch, truncated, truncatedTotal, totalUnfiltered } = useTopologyData({
     clusterId,
     viewMode,
     depth,
@@ -152,6 +153,22 @@ export function TopologyPage() {
     resource: viewMode === "resource" ? resource : undefined,
     enabled: !!clusterId,
   });
+
+  // VALID-06: namespace enumeration is now a real, independent request (see
+  // useTopologyData) — it can fail on its own, separately from the topology
+  // graph request. Surface that rather than letting the namespace filter
+  // just silently appear empty with no explanation.
+  const namespaceErrorNotifiedRef = useRef(false);
+  useEffect(() => {
+    if (allNamespacesError && !namespaceErrorNotifiedRef.current) {
+      namespaceErrorNotifiedRef.current = true;
+      toast.error("Couldn't load namespace list", {
+        description: "The namespace filter may be incomplete. Try refreshing.",
+      });
+    } else if (!allNamespacesError) {
+      namespaceErrorNotifiedRef.current = false;
+    }
+  }, [allNamespacesError]);
 
   // Auto-select "default" namespace on first data load.
   // If the cluster doesn't have a "default" namespace, pick the first user namespace.

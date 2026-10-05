@@ -146,6 +146,33 @@ describe('listResources', () => {
 
     await expect(listResources(BASE, CLUSTER, 'pods')).rejects.toThrow('Network failure');
   });
+
+  // LOADING-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): the cancellation signal
+  // React Query passes into queryFn must reach backendRequest, or an
+  // unmounted/stale query never actually cancels its in-flight fetch.
+  it('forwards an AbortSignal to backendRequest when provided', async () => {
+    mockBackendRequest.mockResolvedValue(listResponse);
+    const controller = new AbortController();
+
+    await listResources(BASE, CLUSTER, 'pods', { signal: controller.signal });
+
+    expect(mockBackendRequest).toHaveBeenCalledWith(
+      BASE,
+      'clusters/cluster-1/resources/pods',
+      { signal: controller.signal }
+    );
+  });
+
+  it('does not pass a 3rd arg to backendRequest when no signal is given (unchanged call shape)', async () => {
+    mockBackendRequest.mockResolvedValue(listResponse);
+
+    await listResources(BASE, CLUSTER, 'pods', { namespace: 'default' });
+
+    expect(mockBackendRequest).toHaveBeenCalledWith(
+      BASE,
+      'clusters/cluster-1/resources/pods?namespace=default'
+    );
+  });
 });
 
 describe('getResource', () => {
@@ -182,6 +209,20 @@ describe('getResource', () => {
     expect(mockBackendRequest).toHaveBeenCalledWith(
       BASE,
       'clusters/cluster-1/resources/custom%2Fkind/my%20ns/my%20name'
+    );
+  });
+
+  // LOADING-2: same cancellation-signal forwarding requirement as listResources.
+  it('forwards an AbortSignal to backendRequest when provided', async () => {
+    mockBackendRequest.mockResolvedValue({});
+    const controller = new AbortController();
+
+    await getResource(BASE, CLUSTER, 'pods', 'default', 'my-pod', controller.signal);
+
+    expect(mockBackendRequest).toHaveBeenCalledWith(
+      BASE,
+      'clusters/cluster-1/resources/pods/default/my-pod',
+      { signal: controller.signal }
     );
   });
 });
