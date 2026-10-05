@@ -51,6 +51,10 @@ interface MergedCluster {
   connectedAt?: string;
   kubeconfigPath?: string;
   provider?: string;
+  /** HEALTH-2: when reachability was last actually checked, for the
+   *  reachability dot's tooltip — makes staleness visible instead of an
+   *  unqualified boolean. */
+  lastCheckedAt?: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -109,6 +113,7 @@ function mergeClusters(
       connectedAt: connectedAtMap.get(k) ?? prev?.connectedAt,
       kubeconfigPath: r.kubeconfig_path ?? prev?.kubeconfigPath,
       provider: normalizeProvider(r.provider) ?? prev?.provider ?? inferProviderFromName(r.identity.name),
+      lastCheckedAt: r.last_checked_at ?? prev?.lastCheckedAt,
     });
   }
   return Array.from(byKey.values());
@@ -131,10 +136,32 @@ function reachabilityDotClass(r: Reachability): string {
   return 'bg-muted-foreground/40';
 }
 
-function reachabilityTitle(r: Reachability): string {
-  if (r === 'reachable') return 'Reachable';
-  if (r === 'unreachable') return 'Unreachable';
-  return 'Unknown';
+// UX-2 (docs/PRODUCTION-HARDENING-ROADMAP.md, Phase 7): the reachability
+// check's age was previously only visible on hover (reachabilityTitle).
+// Staleness past 60s — the same threshold DataFreshnessIndicator already
+// uses elsewhere — now also gets an always-visible amber ring on the dot
+// itself, matching the amber "stale" convention introduced on Fleet's
+// cluster cards, so the three places the roadmap names (Fleet, cluster
+// picker, sidebar) agree on what "stale" looks like without requiring a hover.
+function isReachabilityStale(lastCheckedAt?: string): boolean {
+  if (!lastCheckedAt) return false;
+  const checkedMs = Date.parse(lastCheckedAt);
+  if (Number.isNaN(checkedMs)) return false;
+  return Date.now() - checkedMs > 60_000;
+}
+
+// HEALTH-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): append a staleness hint
+// when available, so the dot's meaning doesn't collapse to an unqualified
+// boolean — "Reachable" alone can't distinguish "checked 2s ago" from
+// "checked 10 minutes ago."
+function reachabilityTitle(r: Reachability, lastCheckedAt?: string): string {
+  const base = r === 'reachable' ? 'Reachable' : r === 'unreachable' ? 'Unreachable' : 'Unknown';
+  if (!lastCheckedAt) return base;
+  const checkedMs = Date.parse(lastCheckedAt);
+  if (Number.isNaN(checkedMs)) return base;
+  const ageSec = Math.max(0, Math.round((Date.now() - checkedMs) / 1000));
+  const ageLabel = ageSec < 60 ? `${ageSec}s ago` : `${Math.round(ageSec / 60)}m ago`;
+  return `${base} — checked ${ageLabel}`;
 }
 
 function sourceBadgeLabel(s: DiscoveredCluster['source']): string {
@@ -423,8 +450,12 @@ export function ClusterPickerPage() {
                         }
                       </div>
                       <span
-                        className={cn('absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background', reachabilityDotClass(c.reachability))}
-                        title={reachabilityTitle(c.reachability)}
+                        className={cn(
+                          'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background',
+                          reachabilityDotClass(c.reachability),
+                          isReachabilityStale(c.lastCheckedAt) && 'ring-2 ring-amber-400 dark:ring-amber-500 ring-offset-1 ring-offset-background',
+                        )}
+                        title={reachabilityTitle(c.reachability, c.lastCheckedAt)}
                       />
                     </div>
 

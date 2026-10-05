@@ -300,6 +300,94 @@ describe('backendRequest', () => {
     // Circuit remains closed — only network errors open it
     expect(isBackendCircuitOpen()).toBe(false);
   });
+
+  // LOADING-1 (docs/PRODUCTION-RELIABILITY-AUDIT.md): backendRequest previously
+  // called fetch() with no signal at all, so a hung backend left the promise
+  // pending forever — no error, no retry, infinite spinner. These tests prove
+  // the request is now bounded.
+  describe('LOADING-1: request timeout', () => {
+    it('passes an AbortSignal to fetch on every call', async () => {
+      globalThis.fetch = mockFetchResponse({ ok: true });
+      await backendRequest('http://localhost:8190', 'clusters');
+      const callInit = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(callInit.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('converts a fired AbortSignal.timeout into an actionable BackendApiError, not a raw DOMException', async () => {
+      // Simulates what fetch() throws once our internal default-timeout signal fires —
+      // exercised directly (rather than waiting out the real 20s deadline) so the test
+      // stays fast while still proving the exact catch-block conversion the fix added.
+      globalThis.fetch = vi.fn().mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError'));
+
+      await expect(
+        backendRequest('http://localhost:8190', 'clusters')
+      ).rejects.toThrow(BackendApiError);
+
+      try {
+        await backendRequest('http://localhost:8190', 'clusters');
+      } catch (e: unknown) {
+        expect(e).toBeInstanceOf(BackendApiError);
+        expect((e as BackendApiError).message).toMatch(/timed out/i);
+      }
+
+      // A single request's timeout must NOT open the circuit breaker — that would
+      // incorrectly degrade unrelated requests to other clusters/endpoints.
+      expect(isBackendCircuitOpen()).toBe(false);
+    });
+
+    it('bounds a genuinely-hanging request (never resolves on its own) once its signal is aborted', async () => {
+      // fetch mock that mimics real browser/Node fetch semantics: the returned
+      // promise never settles by itself (the "hung backend" case LOADING-1
+      // describes), but DOES reject once the signal passed to it aborts.
+      globalThis.fetch = vi.fn((_url: string, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) return; // would hang forever — the pre-fix behavior
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener('abort', () => reject(signal.reason));
+        });
+      });
+
+      // A short caller-supplied deadline stands in for waiting out the real 20s
+      // default so the test stays fast; it exercises the same requestSignal()
+      // combination (AbortSignal.any) that the internal default timeout uses.
+      const shortDeadline = AbortSignal.timeout(30);
+
+      await expect(
+        backendRequest('http://localhost:8190', 'clusters', { signal: shortDeadline })
+      ).rejects.toThrow(BackendApiError);
+    }, 2000);
+
+    // TOPOLOGY-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): an operation with a
+    // known longer natural duration (e.g. topology) must be able to override
+    // DEFAULT_REQUEST_TIMEOUT_MS instead of being capped by it.
+    it('honors a per-call timeoutMs override instead of the 20s default', async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError'));
+
+      try {
+        await backendRequest('http://localhost:8190', 'clusters', { timeoutMs: 35_000 });
+        throw new Error('expected backendRequest to throw');
+      } catch (e: unknown) {
+        expect(e).toBeInstanceOf(BackendApiError);
+        expect((e as BackendApiError).message).toMatch(/timed out after 35s/);
+      }
+    });
+
+    it('defaults to 20s when no timeoutMs override is given', async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError'));
+
+      try {
+        await backendRequest('http://localhost:8190', 'clusters');
+        throw new Error('expected backendRequest to throw');
+      } catch (e: unknown) {
+        expect(e).toBeInstanceOf(BackendApiError);
+        expect((e as BackendApiError).message).toMatch(/timed out after 20s/);
+      }
+    });
+  });
 });
 
 // ============================================================================
@@ -342,6 +430,27 @@ describe('backendRequestText', () => {
     ).rejects.toThrow(BackendApiError);
 
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  // LOADING-1 (docs/PRODUCTION-RELIABILITY-AUDIT.md): backendRequestText shares
+  // the same previously-missing timeout as backendRequest.
+  describe('LOADING-1: request timeout', () => {
+    it('passes an AbortSignal to fetch and converts a fired timeout into a BackendApiError', async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError'));
+
+      await expect(
+        backendRequestText('http://localhost:8190', 'clusters/c1/yaml')
+      ).rejects.toThrow(BackendApiError);
+
+      try {
+        await backendRequestText('http://localhost:8190', 'clusters/c1/yaml');
+      } catch (e: unknown) {
+        expect(e).toBeInstanceOf(BackendApiError);
+        expect((e as BackendApiError).message).toMatch(/timed out/i);
+      }
+
+      expect(isBackendCircuitOpen()).toBe(false);
+    });
   });
 });
 

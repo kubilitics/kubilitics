@@ -61,6 +61,13 @@ export interface RegisteredCluster extends DiscoveredCluster {
   reachable: boolean;
   /** Required on RegisteredCluster: a registered entry always has a UUID. */
   session_id: string;
+  /** HEALTH-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): ISO-8601 timestamp of the
+   *  most recent reachability check (success or failure), empty if never checked. */
+  last_checked_at?: string;
+  /** ISO-8601 timestamp of the most recent successful check, empty if never successful. */
+  last_success_at?: string;
+  /** Error message from the most recent failed check, empty if the last check succeeded. */
+  last_error?: string;
 }
 
 export interface ConnectedCluster extends RegisteredCluster {

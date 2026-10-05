@@ -244,11 +244,14 @@ export function useK8sResourceList<T extends KubernetesResource>(
       ? ['backend', 'resources', clusterId, activeProjectId ?? 'no-project', resourceType, namespace, projectNamespacesParam?.join(',') ?? '', limit ?? '', fieldSelector ?? '', labelSelector ?? '']
       : ['k8s', resourceType, namespace, fieldSelector ?? '', labelSelector ?? ''],
     queryFn: useBackend
-      ? async () => {
+      ? async ({ signal }) => {
         const listParams: Parameters<typeof listResources>[3] = {
           ...(limit != null && limit > 0 ? { limit } : {}),
           ...(fieldSelector ? { fieldSelector } : {}),
           ...(labelSelector ? { labelSelector } : {}),
+          // LOADING-2: forward React Query's cancellation signal so a stale/
+          // unmounted query actually cancels its in-flight fetch.
+          signal,
         };
         if (!isClusterScoped) {
           // When the caller explicitly passes a namespace (detail pages,
@@ -636,7 +639,8 @@ export function useK8sResource<T extends KubernetesResource>(
   return useQuery({
     queryKey: useBackend ? ['backend', 'resource', clusterId, resourceType, namespace, name] : ['k8s', resourceType, namespace, name],
     queryFn: useBackend
-      ? () => getResource(backendBaseUrl, clusterId!, resourceType, nsForBackend, name) as Promise<T>
+      // LOADING-2: forward React Query's cancellation signal.
+      ? ({ signal }) => getResource(backendBaseUrl, clusterId!, resourceType, nsForBackend, name, signal) as Promise<T>
       : () => k8sRequest<T>(path, {}, config),
     enabled: !isDemo && (useBackend ? true : config.isConnected) && !!name && (options?.enabled !== false),
     staleTime: options?.staleTime ?? 5_000,

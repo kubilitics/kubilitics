@@ -59,6 +59,68 @@ export function isNetworkError(e: unknown): boolean {
   return false;
 }
 
+// ── Request timeout ──────────────────────────────────────────────────────────
+//
+// LOADING-1 (docs/PRODUCTION-RELIABILITY-AUDIT.md): backendRequest/backendRequestText
+// previously called fetch() with no signal at all, so a hung backend handler left
+// the returned promise pending forever — no error, no retry, infinite spinner.
+//
+// This is a safety-net default, not the primary UX mechanism for any specific slow
+// operation. 20s comfortably covers every known request shape in this app (resource
+// list/detail, overview, metrics) while still giving a definite, actionable upper
+// bound instead of none. A caller with a genuinely longer natural duration (e.g.
+// topology, whose backend budget is configurable and can exceed 20s — see
+// BackendRequestInit.timeoutMs below) overrides this default rather than racing
+// a second, shorter timeout against it.
+const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
+
+/** RequestInit, plus an optional per-call override of DEFAULT_REQUEST_TIMEOUT_MS
+ * for operations with a known longer (or shorter) natural duration than the
+ * generic default — e.g. topology's build budget. See TOPOLOGY-2
+ * (docs/PRODUCTION-RELIABILITY-AUDIT.md). */
+export interface BackendRequestInit extends RequestInit {
+  timeoutMs?: number;
+}
+
+/**
+ * Build the AbortSignal passed to fetch(): our own timeout, combined with the
+ * caller's signal (e.g. React Query's per-query cancellation signal) when provided,
+ * so neither cancellation path is lost.
+ *
+ * Deliberately implemented with addEventListener rather than AbortSignal.any() —
+ * AbortSignal.any() is missing from jsdom's AbortSignal polyfill (used by this
+ * project's test environment) and its support in the Tauri desktop webview across
+ * all target OS/webview versions is not something this phase can verify — the
+ * manual combinator below has been supported everywhere AbortController exists.
+ */
+function requestSignal(callerSignal?: AbortSignal | null, timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  if (!callerSignal) {
+    return timeoutSignal;
+  }
+
+  const combined = new AbortController();
+  const abortWith = (signal: AbortSignal) => {
+    if (!combined.signal.aborted) {
+      combined.abort(signal.reason);
+    }
+  };
+  if (callerSignal.aborted) {
+    combined.abort(callerSignal.reason);
+  } else if (timeoutSignal.aborted) {
+    combined.abort(timeoutSignal.reason);
+  } else {
+    callerSignal.addEventListener('abort', () => abortWith(callerSignal), { once: true });
+    timeoutSignal.addEventListener('abort', () => abortWith(timeoutSignal), { once: true });
+  }
+  return combined.signal;
+}
+
+/** True if `e` is the DOMException AbortSignal.timeout() throws when its deadline fires. */
+function isRequestTimeout(e: unknown): boolean {
+  return e instanceof DOMException && e.name === 'TimeoutError';
+}
+
 /** Check if error is CORS-related. CORS errors should NOT open circuit breaker. */
 export function isCORSError(e: unknown): boolean {
   if (e instanceof TypeError) {
@@ -156,7 +218,7 @@ export class BackendApiError extends Error {
 export async function backendRequest<T>(
   baseUrl: string,
   path: string,
-  init?: RequestInit
+  init?: BackendRequestInit
 ): Promise<T> {
   const clusterId = extractClusterIdFromPath(path);
 
@@ -193,13 +255,28 @@ export async function backendRequest<T>(
   }
   // Web mode: No login — no Authorization header. When auth_mode=required, re-add token injection.
 
+  const effectiveTimeoutMs = init?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+
   let response: Response;
   try {
     response = await fetch(url, {
       ...init,
       headers,
+      signal: requestSignal(init?.signal, effectiveTimeoutMs),
     });
   } catch (e) {
+    // LOADING-1: a timeout from our own default deadline is not backend unavailability —
+    // it's one slow/hung request. Surface it as an actionable, clearly-labeled error instead
+    // of the raw DOMException, but deliberately do NOT open the circuit breaker for it (a single
+    // slow request must not degrade unrelated requests to other clusters or endpoints).
+    if (isRequestTimeout(e)) {
+      throw new BackendApiError(
+        `Request timed out after ${effectiveTimeoutMs / 1000}s: ${path}`,
+        0,
+        undefined
+      );
+    }
+
     // BA-3: Circuit breaker ONLY opens on network-level errors (ECONNREFUSED, Failed to fetch, timeout).
     // CORS errors are configuration issues, not backend unavailability - don't open circuit.
     // HTTP 4xx (404, 401, 403) and 5xx responses must NOT open the circuit — these are application-level
@@ -281,7 +358,7 @@ export async function backendRequest<T>(
 export async function backendRequestText(
   baseUrl: string,
   path: string,
-  init?: RequestInit
+  init?: BackendRequestInit
 ): Promise<string> {
   const clusterId = extractClusterIdFromPath(path);
 
@@ -311,10 +388,19 @@ export async function backendRequestText(
     }
   }
 
+  const effectiveTimeoutMs = init?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+
   let response: Response;
   try {
-    response = await fetch(url, { ...init, headers });
+    response = await fetch(url, { ...init, headers, signal: requestSignal(init?.signal, effectiveTimeoutMs) });
   } catch (e) {
+    if (isRequestTimeout(e)) {
+      throw new BackendApiError(
+        `Request timed out after ${effectiveTimeoutMs / 1000}s: ${path}`,
+        0,
+        undefined
+      );
+    }
     if (isNetworkError(e) && !isCORSError(e) && backendEverReady) {
       markBackendUnavailable(clusterId);
     }

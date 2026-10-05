@@ -59,6 +59,7 @@ import { calculateAge, type KubernetesResource } from '@/hooks/useKubernetes';
 import { useMetricsSummary } from '@/hooks/useMetricsSummary';
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
+import { parseK8sCpuToMillicores, parseK8sQuantityToBytes } from '@/lib/k8sQuantity';
 import { useTrackRecentResource } from '@/hooks/useTrackRecentResource';
 import { useBackendConfigStore, getEffectiveBackendBaseUrl } from '@/stores/backendConfigStore';
 import { cn } from '@/lib/utils';
@@ -146,29 +147,16 @@ function TerminalAndFiles({
   );
 }
 
+// METRICS-2 (docs/PRODUCTION-RELIABILITY-AUDIT.md): delegates to the
+// canonical parser instead of a local reimplementation that silently
+// returned 0 for invalid input.
 function parseCPUToMillicores(s: string): number {
-  if (!s || s === '-') return 0;
-  const v = parseFloat(s.replace(/[nmuµ]$/i, '').trim());
-  if (Number.isNaN(v)) return 0;
-  if (s.endsWith('n')) return v / 1e6;
-  if (s.endsWith('u') || s.endsWith('µ')) return v / 1000;
-  if (s.endsWith('m')) return v;
-  return v * 1000;
+  return parseK8sCpuToMillicores(s) ?? 0;
 }
 
 function parseMemoryToBytes(s: string): number {
   if (!s || s === '-') return 0;
-  const num = parseFloat(s.replace(/[KMGT]i?$/i, '').trim());
-  if (Number.isNaN(num)) return 0;
-  if (s.endsWith('Ki')) return num * 1024;
-  if (s.endsWith('Mi')) return num * 1024 * 1024;
-  if (s.endsWith('Gi')) return num * 1024 * 1024 * 1024;
-  if (s.endsWith('Ti')) return num * 1024 * 1024 * 1024 * 1024;
-  if (s.endsWith('K')) return num * 1000;
-  if (s.endsWith('M')) return num * 1000 * 1000;
-  if (s.endsWith('G')) return num * 1000 * 1000 * 1000;
-  if (s.endsWith('T')) return num * 1000 * 1000 * 1000 * 1000;
-  return num;
+  return parseK8sQuantityToBytes(s) ?? 0;
 }
 
 interface PodResource extends KubernetesResource {
