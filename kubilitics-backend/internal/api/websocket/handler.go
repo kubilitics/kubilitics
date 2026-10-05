@@ -24,6 +24,23 @@ type Handler struct {
 	cfg            *config.Config
 	repo           *repository.SQLiteRepository
 	upgrader       websocket.Upgrader
+	// clusterID is the authoritative identity of the cluster this Handler's
+	// informerMgr belongs to (each Handler/InformerManager pair is meant to
+	// be per-cluster — see NewHandler's informerMgr comment). CONTAM-1
+	// (docs/PRODUCTION-RELIABILITY-AUDIT.md, Phase 11
+	// docs/PRODUCTION-HARDENING-ROADMAP.md): SetupInformerHandlers previously
+	// hardcoded an empty clusterID on every broadcast because this identity
+	// was never threaded through anywhere. Set via SetClusterID, the same
+	// setter pattern internal/k8s.Client.SetClusterID already uses.
+	clusterID string
+}
+
+// SetClusterID sets the authoritative cluster identity this handler's
+// informer-sourced broadcasts belong to. Must be called (with the real
+// cluster ID) before SetupInformerHandlers for broadcasts to carry correct
+// scoping — see CONTAM-1.
+func (h *Handler) SetClusterID(clusterID string) {
+	h.clusterID = clusterID
 }
 
 // NewHandler creates a new WebSocket handler
@@ -225,8 +242,12 @@ func (h *Handler) SetupInformerHandlers() {
 	for _, resourceType := range resourceTypes {
 		rt := resourceType // Capture for closure
 		h.informerMgr.RegisterHandler(rt, func(eventType string, obj interface{}) {
-			// clusterID/namespace can be passed when informers are per-cluster (invokes topology cache invalidation)
-			if err := h.hub.BroadcastResourceEvent("", "", eventType, rt, obj); err != nil {
+			// CONTAM-1: h.clusterID (set via SetClusterID) is this handler's
+			// informerMgr's real originating cluster — no longer hardcoded
+			// empty. BroadcastResourceEvent itself now refuses to broadcast
+			// (fails closed) if this is ever empty, so a caller that forgets
+			// to call SetClusterID cannot silently leak events unscoped.
+			if err := h.hub.BroadcastResourceEvent(h.clusterID, "", eventType, rt, obj); err != nil {
 				log.Printf("Failed to broadcast %s event for %s: %v", eventType, rt, err)
 			}
 		})
