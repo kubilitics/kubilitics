@@ -286,13 +286,24 @@ func (m *mockClusterRepo) Create(ctx context.Context, cluster *models.Cluster) e
 func (m *mockClusterRepo) Get(ctx context.Context, id string) (*models.Cluster, error) {
 	if m.get != nil {
 		if c, ok := m.get[id]; ok {
-			return c, nil
+			cp := *c
+			return &cp, nil
 		}
 	}
 	return nil, nil
 }
 func (m *mockClusterRepo) List(ctx context.Context) ([]*models.Cluster, error) {
-	return m.list, nil
+	// Return copies, matching SQLiteRepository.listClusters, which scans a fresh
+	// struct per row every call. Returning the same shared pointers here (unlike
+	// real production repos) let a background reconnect goroutine and a
+	// synchronous request handler mutate the same *models.Cluster concurrently —
+	// a race that is a test-double artifact, not reachable with the real repo.
+	out := make([]*models.Cluster, len(m.list))
+	for i, c := range m.list {
+		cp := *c
+		out[i] = &cp
+	}
+	return out, nil
 }
 func (m *mockClusterRepo) Update(ctx context.Context, cluster *models.Cluster) error { return nil }
 func (m *mockClusterRepo) Delete(ctx context.Context, id string) error               { return nil }

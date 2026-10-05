@@ -346,6 +346,18 @@ func (e *ClusterGraphEngine) collectResources() *ClusterResources {
 	return res
 }
 
+// Resources returns the engine's current resource set read directly from its
+// informer Lister caches — no live K8s API calls. Used by BLASTRADIUS-1 (see
+// internal/api/rest/handler.go's GetResourceTopology) to let the topology v2
+// bundle reuse this engine's already-synced cache for the resource types it
+// tracks, instead of re-fetching them live on every topology cache miss.
+// Callers MUST check Status().Ready first — before the informer caches have
+// completed their initial sync, this returns an empty (not partial-cluster)
+// result indistinguishable from a genuinely empty cluster.
+func (e *ClusterGraphEngine) Resources() *ClusterResources {
+	return e.collectResources()
+}
+
 // Snapshot returns the current graph snapshot via a lock-free atomic load.
 func (e *ClusterGraphEngine) Snapshot() *GraphSnapshot {
 	return e.snapshot.Load().(*GraphSnapshot)

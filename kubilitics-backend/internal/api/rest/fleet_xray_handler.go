@@ -50,14 +50,10 @@ func (h *Handler) FleetXRayDashboard(w http.ResponseWriter, r *http.Request) {
 		fleet.ClusterMetrics
 	}
 
-	// Snapshot the map under a read lock so we don't hold the lock while
-	// calling Snapshot() (which may be slow / block on engine internals).
-	h.graphEnginesMu.RLock()
-	engines := make(map[string]*graph.ClusterGraphEngine, len(h.graphEngines))
-	for k, v := range h.graphEngines {
-		engines[k] = v
+	engines := map[string]*graph.ClusterGraphEngine{}
+	if h.graphEngineMgr != nil {
+		engines = h.graphEngineMgr.ActiveEngines()
 	}
-	h.graphEnginesMu.RUnlock()
 
 	var entries []dashboardEntry
 	for clusterID, engine := range engines {
@@ -276,14 +272,10 @@ func (h *Handler) FleetXRayTemplateScores(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Snapshot the map under a read lock so we don't hold the lock while
-	// calling Snapshot() on each engine.
-	h.graphEnginesMu.RLock()
-	enginesForScoring := make(map[string]*graph.ClusterGraphEngine, len(h.graphEngines))
-	for k, v := range h.graphEngines {
-		enginesForScoring[k] = v
+	enginesForScoring := map[string]*graph.ClusterGraphEngine{}
+	if h.graphEngineMgr != nil {
+		enginesForScoring = h.graphEngineMgr.ActiveEngines()
 	}
-	h.graphEnginesMu.RUnlock()
 
 	var scores []*fleet.TemplateScore
 	for clusterID, engine := range enginesForScoring {

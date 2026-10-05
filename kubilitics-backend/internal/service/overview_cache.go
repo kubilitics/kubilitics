@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/kubilitics/kubilitics-backend/internal/healthscore"
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
@@ -114,7 +116,92 @@ func (c *OverviewCache) StartClusterCache(ctx context.Context, clusterID string,
 		}
 	}()
 
+	// COUNTS-1: periodic self-heal. updatePodStatus's incremental tracking is
+	// O(1) per event (needed — recomputing the full phase breakdown from the
+	// store on every single event would reintroduce the O(n)-per-event cost
+	// this design deliberately avoided), but any incremental counter can in
+	// principle drift from the canonical informer store through event-delivery
+	// edge cases beyond the specific tombstone case fixed above (e.g. a missed
+	// event during a reflector relist). Reconciling from the store periodically
+	// — at the same cadence as the informer factory's own resync period
+	// (podReconcileInterval, matching NewInformerManager's 5*time.Minute) —
+	// bounds any such drift without paying a per-event cost.
+	stopCh := make(chan struct{})
+	c.mu.Lock()
+	c.stopChs[clusterID] = stopCh
+	c.mu.Unlock()
+	go c.runPodCountReconciliation(clusterID, stopCh)
+
 	return nil
+}
+
+// podReconcileInterval matches the informer factory's own resync period
+// (see NewInformerManager) so reconciliation never runs more often than the
+// underlying cache itself is refreshed.
+const podReconcileInterval = 5 * time.Minute
+
+// runPodCountReconciliation periodically recomputes pod counts/phases from
+// the canonical informer store, self-healing any drift in the incremental
+// counter updatePodStatus maintains. Exits when stopCh closes (cluster
+// removed/cache stopped).
+func (c *OverviewCache) runPodCountReconciliation(clusterID string, stopCh <-chan struct{}) {
+	ticker := time.NewTicker(podReconcileInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+			c.reconcilePodCountsFromStore(clusterID)
+		}
+	}
+}
+
+// reconcilePodCountsFromStore rebuilds Counts.Pods, the Running/Pending/
+// Succeeded/Failed breakdown, and the podPhases tracking map directly from
+// the informer's Pod store — the canonical source of truth — overwriting
+// whatever the incremental counters currently say. A no-op if the cluster's
+// cache has since been stopped.
+func (c *OverviewCache) reconcilePodCountsFromStore(clusterID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	ov, ok := c.overviews[clusterID]
+	if !ok {
+		return
+	}
+	im, ok := c.informers[clusterID]
+	if !ok {
+		return
+	}
+	store := im.GetStore("Pod")
+	if store == nil {
+		return
+	}
+
+	phases := make(map[string]corev1.PodPhase)
+	ps := models.OverviewPodStatus{
+		TotalRestarts:    ov.PodStatus.TotalRestarts,
+		CrashLoopBackOff: ov.PodStatus.CrashLoopBackOff,
+		OOMKilled:        ov.PodStatus.OOMKilled,
+	}
+	count := 0
+	for _, obj := range store.List() {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			continue
+		}
+		count++
+		phases[string(pod.UID)] = pod.Status.Phase
+		incrementPhaseCounter(&ps, pod.Status.Phase)
+	}
+
+	ov.Counts.Pods = count
+	ov.PodStatus.Running = ps.Running
+	ov.PodStatus.Pending = ps.Pending
+	ov.PodStatus.Succeeded = ps.Succeeded
+	ov.PodStatus.Failed = ps.Failed
+	c.podPhases[clusterID] = phases
 }
 
 // GetInformerManager returns the InformerManager for a cluster, or nil if not
@@ -135,6 +222,10 @@ func (c *OverviewCache) StopClusterCache(clusterID string) {
 		delete(c.informers, clusterID)
 		delete(c.overviews, clusterID)
 		delete(c.podPhases, clusterID)
+	}
+	if stopCh, exists := c.stopChs[clusterID]; exists {
+		close(stopCh)
+		delete(c.stopChs, clusterID)
 	}
 }
 
@@ -289,6 +380,12 @@ func incrementPhaseCounter(ps *models.OverviewPodStatus, phase corev1.PodPhase) 
 // updatePodStatus performs O(1) incremental pod status updates using per-pod phase tracking.
 // Instead of re-listing all pods on every event, it tracks each pod's last known phase
 // and adjusts counters incrementally.
+//
+// COUNTS-1 (docs/PRODUCTION-RELIABILITY-AUDIT.md): client-go's DeleteFunc can
+// legitimately deliver a cache.DeletedFinalStateUnknown wrapper (not a raw
+// *corev1.Pod) when a delete is inferred from a relist rather than observed
+// directly on the watch. Previously the type assertion below failed silently
+// for that case and returned before decrementing — the counter only ever grew.
 func (c *OverviewCache) updatePodStatus(clusterID string, eventType string, obj interface{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -296,6 +393,10 @@ func (c *OverviewCache) updatePodStatus(clusterID string, eventType string, obj 
 	ov, ok := c.overviews[clusterID]
 	if !ok {
 		return
+	}
+
+	if tombstone, isTombstone := obj.(cache.DeletedFinalStateUnknown); isTombstone {
+		obj = tombstone.Obj
 	}
 
 	pod, ok := obj.(*corev1.Pod)
