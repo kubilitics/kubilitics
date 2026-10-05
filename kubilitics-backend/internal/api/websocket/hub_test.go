@@ -82,14 +82,30 @@ func TestHubBroadcastResourceEvent(t *testing.T) {
 	hub := NewHub(ctx)
 	go hub.Run()
 	defer hub.Stop()
-	
+
 	resource := map[string]interface{}{
 		"name": "nginx-pod",
 		"namespace": "default",
 	}
-	
-	err := hub.BroadcastResourceEvent("", "", "ADDED", "Pod", resource)
+
+	err := hub.BroadcastResourceEvent("cluster-a", "default", "ADDED", "Pod", resource)
 	assert.NoError(t, err)
+}
+
+// CONTAM-1 (docs/PRODUCTION-RELIABILITY-AUDIT.md, Phase 11
+// docs/PRODUCTION-HARDENING-ROADMAP.md): a resource event broadcast with no
+// cluster identity previously succeeded silently and reached every client
+// regardless of subscription (fail open). BroadcastResourceEvent now
+// refuses it outright (fail closed) rather than enqueueing an
+// unattributable, unscoped event.
+func TestHubBroadcastResourceEvent_EmptyClusterIDFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	hub := NewHub(ctx)
+	go hub.Run()
+	defer hub.Stop()
+
+	err := hub.BroadcastResourceEvent("", "", "ADDED", "Pod", map[string]interface{}{"name": "x"})
+	assert.ErrorIs(t, err, ErrMissingClusterID)
 }
 
 func TestHubBroadcastTopologyUpdate(t *testing.T) {
