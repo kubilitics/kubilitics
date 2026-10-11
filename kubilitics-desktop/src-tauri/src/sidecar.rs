@@ -993,7 +993,21 @@ pub fn start_brain(app_handle: &AppHandle) -> Result<Arc<BrainManager>, Box<dyn 
     });
     // Phase 1.3: started exactly once here, not inside start()/restart() —
     // see the doc comment on start_health_monitor for why.
-    BrainManager::start_health_monitor(manager.clone());
+    //
+    // SECURITY/CRASH FIX (found via real-artifact validation, 2026-10-11):
+    // start_brain() is a plain sync fn (not async), called directly from
+    // app setup with no Tokio runtime active on the calling thread. A bare
+    // call here panicked immediately — "there is no reactor running" — the
+    // instant start_health_monitor's own tokio::spawn ran, aborting the
+    // whole app on every launch. BackendManager's equivalent call
+    // (sidecar.rs:254) doesn't hit this because it's made from inside an
+    // async fn already running on the runtime; start_brain() has no such
+    // context, so it must explicitly enter one via tauri::async_runtime::spawn
+    // the same way the manager_clone.start() call just above does.
+    let monitor_manager = manager.clone();
+    tauri::async_runtime::spawn(async move {
+        BrainManager::start_health_monitor(monitor_manager);
+    });
     Ok(manager)
 }
 
