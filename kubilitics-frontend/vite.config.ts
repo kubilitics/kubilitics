@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import { visualizer } from "rollup-plugin-visualizer";
 import path from "path";
 import { readFileSync } from "fs";
+import { cpus } from "os";
 
 const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 
@@ -78,6 +79,18 @@ export default defineConfig(({ mode }) => ({
     exclude: ['e2e/**', 'node_modules/**'],
     environment: 'jsdom',
     setupFiles: ['./src/test-setup.ts'],
+    // Default pool parallelism (one fork per CPU core) oversubscribes real
+    // hardware once you account for jsdom + V8 isolate overhead per fork —
+    // on a 10-core machine this intermittently pushed a few tests'
+    // beforeEach (a dynamic page-component import) past vitest's 10s
+    // default hookTimeout under full-suite load, while the exact same
+    // tests pass in well under a second in isolation or scoped runs. Not
+    // a test-logic bug — confirmed by running the failing tests alone
+    // repeatedly with zero failures. Capping fork count reduces the
+    // contention; the hookTimeout bump below is the actual backstop
+    // (20s is still a tight bound against real work that takes <1s).
+    hookTimeout: 20000,
+    maxWorkers: Math.max(2, Math.floor((cpus()?.length ?? 4) / 2)),
   },
   server: {
     host: "::",
