@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/react';
 import { v4 as uuidv4 } from 'uuid';
+import { isTauri } from './tauri';
 
 /**
  * Interface for error context data
@@ -72,6 +73,8 @@ class ErrorTrackerService {
     };
     private isInitialized = false;
     private sentryEnabled = false;
+    /** DSN read at init() time; Sentry.init() itself is deferred until consent is known. */
+    private sentryDsn = '';
 
     /** Circular ring buffer of recent errors. */
     private ringBuffer: ErrorEntry[] = [];
@@ -108,25 +111,13 @@ class ErrorTrackerService {
             // import.meta may not exist in test environments; ignore.
         }
 
-        // Initialize Sentry if DSN is configured
+        // Sentry participates in the same analytics-consent opt-in as the
+        // AnalyticsConsentDialog (persisted via the Tauri `set_analytics_consent`
+        // command) — it must NOT turn on just because a DSN was baked into the
+        // build. Defer the actual Sentry.init() until consent is known/granted.
+        this.sentryDsn = sentryDsn;
         if (sentryDsn) {
-            const isTauri = typeof __VITE_IS_TAURI_BUILD__ !== 'undefined' && __VITE_IS_TAURI_BUILD__;
-            Sentry.init({
-                dsn: sentryDsn,
-                release: `kubilitics@${getAppVersion()}`,
-                environment: import.meta.env?.MODE ?? 'production',
-                integrations: [
-                    Sentry.browserTracingIntegration(),
-                ],
-                tracesSampleRate: 0.1,
-                // Don't send PII by default
-                sendDefaultPii: false,
-                // Tag the platform
-                initialScope: {
-                    tags: { platform: isTauri ? 'desktop' : 'browser' },
-                },
-            });
-            this.sentryEnabled = true;
+            void this.initSentryIfConsented();
         }
 
         // Expose the ring buffer on the window for debugging / support.
@@ -150,6 +141,62 @@ class ErrorTrackerService {
                 },
             });
         });
+    }
+
+    /**
+     * Checks the persisted analytics-consent flag (Tauri `has_analytics_consent_been_asked`
+     * / `get_analytics_consent` commands — the same ones AnalyticsConsentDialog and the
+     * Settings page use) and starts Sentry only if consent was already granted.
+     * If consent hasn't been asked yet, Sentry stays off until `notifyConsentGranted()`
+     * is called (wired up where the dialog resolves).
+     */
+    private async initSentryIfConsented(): Promise<void> {
+        if (!isTauri()) {
+            // No persisted consent surface outside the desktop app build — do not
+            // auto-enable Sentry without an explicit opt-in to check against.
+            return;
+        }
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const hasBeenAsked = await invoke<boolean>('has_analytics_consent_been_asked');
+            if (!hasBeenAsked) return;
+            const consent = await invoke<boolean>('get_analytics_consent');
+            if (consent) {
+                this.startSentry();
+            }
+        } catch (error) {
+            console.error('[ErrorTracker] Failed to check analytics consent for Sentry init:', error);
+        }
+    }
+
+    /**
+     * Called when the user accepts the analytics-consent dialog (after app start).
+     * No-op if Sentry is already running or no DSN was configured.
+     */
+    public notifyConsentGranted(): void {
+        this.startSentry();
+    }
+
+    /** Actually initialize Sentry. Idempotent; safe to call multiple times. */
+    private startSentry(): void {
+        if (this.sentryEnabled || !this.sentryDsn) return;
+        const isTauriBuild = typeof __VITE_IS_TAURI_BUILD__ !== 'undefined' && __VITE_IS_TAURI_BUILD__;
+        Sentry.init({
+            dsn: this.sentryDsn,
+            release: `kubilitics@${getAppVersion()}`,
+            environment: import.meta.env?.MODE ?? 'production',
+            integrations: [
+                Sentry.browserTracingIntegration(),
+            ],
+            tracesSampleRate: 0.1,
+            // Don't send PII by default
+            sendDefaultPii: false,
+            // Tag the platform
+            initialScope: {
+                tags: { platform: isTauriBuild ? 'desktop' : 'browser' },
+            },
+        });
+        this.sentryEnabled = true;
     }
 
     // ── Context setters ────────────────────────────────────────────────
