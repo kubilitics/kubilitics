@@ -184,7 +184,9 @@ func TestBuildSnapshot_FailurePathUsesRealEdgeTypes(t *testing.T) {
 	podKey := refKey(models.ResourceRef{Kind: "Pod", Namespace: "default", Name: "web-abc"})
 	svcKey := refKey(models.ResourceRef{Kind: "Service", Namespace: "default", Name: "web-svc"})
 
-	hops := snap.buildFailurePath(podKey, svcKey)
+	parents := bfsParents(snap.Reverse, podKey)
+	path := pathFromParents(parents, podKey, svcKey)
+	hops := snap.hopsFromPath(path)
 	if len(hops) == 0 {
 		t.Fatal("expected a non-empty failure path from Pod to Service")
 	}

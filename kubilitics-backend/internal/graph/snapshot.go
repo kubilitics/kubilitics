@@ -151,50 +151,14 @@ func bfsWalkWithDepth(adj map[string]map[string]bool, startKey string) map[strin
 	return depth
 }
 
-// shortestPath returns the BFS shortest path from src to dst as a slice of keys,
-// including both src and dst. Returns nil if no path exists.
-func shortestPath(adj map[string]map[string]bool, src, dst string) []string {
-	if src == dst {
-		return []string{src}
-	}
-
-	parent := map[string]string{src: ""}
-	queue := []string{src}
-
-	for len(queue) > 0 {
-		curr := queue[0]
-		queue = queue[1:]
-		for neighbor := range adj[curr] {
-			if _, seen := parent[neighbor]; !seen {
-				parent[neighbor] = curr
-				if neighbor == dst {
-					// reconstruct
-					path := []string{dst}
-					for at := dst; at != src; at = parent[at] {
-						path = append(path, parent[at])
-					}
-					// reverse
-					for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
-						path[i], path[j] = path[j], path[i]
-					}
-					return path
-				}
-				queue = append(queue, neighbor)
-			}
-		}
-	}
-
-	return nil
-}
-
 // bfsParents runs a single BFS from startKey over adj and returns a parent
 // map (child key -> parent key) for every node reachable from startKey.
 // Reconstructing the shortest path to ANY number of destinations from this
-// one map is O(path length) per destination, versus re-running shortestPath
-// (a fresh BFS) per destination — the dominant cost in a blast-radius query
-// that builds a FailurePath for every affected node (computeSingleResourceBlast
-// previously called buildFailurePath, and therefore shortestPath, once per
-// affected node: O(affectedNodes * (V+E)) instead of O(V+E) total).
+// one map is O(path length) per destination, versus running a fresh BFS
+// per destination — the dominant cost in a blast-radius query that builds
+// a FailurePath for every affected node (computeSingleResourceBlast used
+// to re-run a fresh per-pair BFS once per affected node:
+// O(affectedNodes * (V+E)) instead of O(V+E) total).
 func bfsParents(adj map[string]map[string]bool, startKey string) map[string]string {
 	parent := map[string]string{startKey: ""}
 	queue := []string{startKey}
@@ -231,8 +195,8 @@ func pathFromParents(parents map[string]string, src, dst string) []string {
 }
 
 // hopsFromPath builds the PathHop slice for an already-computed path (as
-// returned by shortestPath or pathFromParents), shared by buildFailurePath
-// and the bulk per-affected-node reconstruction in computeSingleResourceBlast.
+// returned by pathFromParents), used by the bulk per-affected-node
+// reconstruction in computeSingleResourceBlast.
 func (s *GraphSnapshot) hopsFromPath(path []string) []models.PathHop {
 	if len(path) < 2 {
 		return nil
@@ -271,16 +235,6 @@ func (s *GraphSnapshot) edgeType(fromKey, toKey string) string {
 		}
 	}
 	return "dependency"
-}
-
-// buildFailurePath constructs the failure propagation chain from targetKey to affectedKey
-// by finding the shortest path in the Reverse adjacency and building PathHops.
-// Used for single-pair lookups; computeSingleResourceBlast's per-affected-node
-// loop uses bfsParents + pathFromParents instead to share one BFS across all
-// affected nodes rather than re-running this per node.
-func (s *GraphSnapshot) buildFailurePath(targetKey, affectedKey string) []models.PathHop {
-	path := shortestPath(s.Reverse, targetKey, affectedKey)
-	return s.hopsFromPath(path)
 }
 
 // ComputeBlastRadius performs the full blast-radius analysis for a target resource.
