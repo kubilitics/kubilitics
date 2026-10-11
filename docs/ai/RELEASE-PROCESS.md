@@ -3,10 +3,10 @@
 ## Current state (keep this line updated)
 
 ```
-CURRENT PUBLISHED RELEASE: v1.2.3 (2026-10-06, origin only — NOT synced to
-  upstream yet; upstream (kubilitics/kubilitics) is still at v1.2.2, per the
-  org repo sync policy of asking before syncing upstream)
-NEXT RELEASE: v1.2.4 (patch) — do not jump to v1.3.0 without an explicit,
+CURRENT PUBLISHED RELEASE: v1.2.4 (2026-10-11, published on BOTH
+  vellankikoti/kubilitics and kubilitics/kubilitics — upstream was synced
+  to origin's main and both repos' release.yml ran green independently)
+NEXT RELEASE: v1.2.5 (patch) — do not jump to v1.3.0 without an explicit,
   genuinely-new-capability reason approved by the project owner.
 ```
 
