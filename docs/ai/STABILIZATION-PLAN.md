@@ -12,6 +12,36 @@ Organized into phases by urgency. **Phase 0 items are live, exploitable
 issues in shipped code — they warrant attention independent of how the
 rest of this plan gets sequenced.**
 
+## Status (2026-10-11): all 5 phases closed
+
+Verified directly against code on `feat/stability`, not inferred from
+prior "done" claims in this doc or chat history:
+
+- **Phase 0 (security)**: all 5 items fixed — `IsSecretKind` is
+  case-insensitive, Events/OTel routes wrapped with RBAC, file browser
+  raised to `RoleOperator`, scanner denies-by-default on nil claims,
+  `ScheduleHandler` is wired behind `wrapWithRBAC` (no more dead
+  self-registering `RegisterRoutes`).
+- **Phase 1 (desktop stability)**: all 3 items fixed — `restart_count`
+  resets on successful restart, the main banner's "Reconnect" falls
+  back to `invoke('restart_sidecar')`, `BrainManager` has its own
+  health-monitor loop mirroring `BackendManager`'s.
+- **Phase 2 (test coverage)**: items 1–5 all have real coverage.
+  Items 1 (`resources.go`) and 2 (`auth.go`) were flagged "zero test
+  file" below but that was stale — both are covered (`auth.go` across
+  `auth_login_test.go`/`auth_mfa_login_test.go`/
+  `auth_password_policy_test.go`/etc.; `resources.go` across
+  `resources_mutation_test.go` + `resources_test.go`, the latter added
+  2026-10-11 to close the remaining multi-kind/RBAC/unknown-kind gaps).
+  Items 3–5 (e2e destructive action, shared-hook tests, Pods/Deployments
+  component tests) were already done. Item 6's raw coverage-% numbers
+  below are stale (measured pre-fix); current `internal/api/rest`
+  coverage is 33.0%.
+- **Phase 3 (scale/perf)**: items 1–2 done (see inline markers below);
+  items 3–4 are confirmed non-issues, not action items.
+- **Phase 4 (deferred informer-cache work)**: closed — see
+  `docs/ai/KNOWN-ISSUES.md`'s informer-cache coverage section.
+
 ---
 
 ## Phase 0 — Security: fix before anything else ships
