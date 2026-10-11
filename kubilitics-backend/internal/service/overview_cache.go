@@ -16,6 +16,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/healthscore"
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 )
 
 // maxListenersPerCluster is the upper bound on concurrent overview stream
@@ -226,7 +227,7 @@ func (c *OverviewCache) StartClusterCache(ctx context.Context, clusterID string,
 	entry.mu.Lock()
 	entry.stopCh = stopCh
 	entry.mu.Unlock()
-	go c.runPodCountReconciliation(clusterID, stopCh)
+	safego.Go("overview-cache-pod-count-reconciliation", func() { c.runPodCountReconciliation(clusterID, stopCh) })
 
 	return nil
 }

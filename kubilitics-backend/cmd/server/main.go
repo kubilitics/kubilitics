@@ -53,6 +53,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/kubeconfigwatch"
 	"github.com/kubilitics/kubilitics-backend/internal/metrics"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/topologycache"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/tracing"
 	"github.com/kubilitics/kubilitics-backend/internal/repository"
@@ -464,11 +465,11 @@ func main() {
 		// unavailable) rather than silently registering zero clusters on a
 		// transient read error — this is a real edge case caught during Phase 4's
 		// own startup measurement (docs/PRODUCTION-HARDENING-EXECUTION.md).
-		go func() {
+		safego.Go("startup-load-clusters-from-repo", func() {
 			if err := clusterService.LoadClustersFromRepo(ctx); err != nil {
 				log.Warn("Failed to load clusters from repo", "error", err)
 			}
-		}()
+		})
 	} else if cfg.KubeconfigAutoLoad {
 		// DB is empty (first run) — auto-load from the default kubeconfig.
 		// Runs synchronously: this is a one-time, first-run-only path (not the
@@ -831,7 +832,7 @@ func main() {
 	// interval rather than whatever the last page view happened to leave
 	// cached. A cluster that goes offline between page views now still gets
 	// re-checked and shows stale/unreachable within this interval.
-	go func() {
+	safego.Go("presence-periodic-refresh", func() {
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
 		for range t.C {
@@ -840,7 +841,7 @@ func main() {
 			refreshCancel()
 			_ = refreshDiscoveryBounded(discoveryMgr)
 		}
-	}()
+	})
 
 	// actualPort is set after we bind; health handler includes it for discovery (e.g. desktop)
 	var actualPort int
@@ -934,7 +935,7 @@ func main() {
 	otel.SetupOTLPStandardRoute(router, otelHandler) // Standard OTLP endpoint: POST /v1/traces
 
 	// Start span pruning goroutine (7 day retention)
-	go func() {
+	safego.Go("otel-span-pruning", func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 		for {
@@ -950,7 +951,7 @@ func main() {
 				return
 			}
 		}
-	}()
+	})
 
 	// Events Intelligence pipeline (register BEFORE rest.SetupRoutes which sets NotFoundHandler)
 	eventsDB := sqlx.NewDb(repo.DB(), "sqlite3")
@@ -1102,7 +1103,7 @@ func main() {
 	})
 
 	// Start events pipelines for ALL connected clusters (not just the first one).
-	go func() {
+	safego.Go("events-pipeline-startup", func() {
 		time.Sleep(10 * time.Second) // wait for cluster connections to establish
 		clusters, err := clusterService.ListClusters(ctx)
 		if err != nil {
@@ -1131,7 +1132,7 @@ func main() {
 			pipelineManager.StartLogCollector(logsService, client.Clientset, cl.ID)
 			log.Info("Started log collector", "cluster", cl.Name, "id", cl.ID)
 		}
-	}()
+	})
 
 	// WebSocket routes
 	wsHandler := websocket.NewHandler(ctx, wsHub, nil, cfg, repo) // informerMgr will be set per cluster
@@ -1291,14 +1292,14 @@ func main() {
 
 	// Start LMC after server is ready (Part 4)
 	if lmc != nil {
-		go func() {
+		safego.Go("lmc-start", func() {
 			if err := lmc.Start(ctx); err != nil {
 				log.Warn("LMC start failed", "error", err)
 			}
-		}()
+		})
 	}
 	// Start HTTP server in goroutine
-	go func() {
+	safego.Go("http-server-listen", func() {
 		log.Info("Server starting",
 			"version", version.Version,
 			"protocol", protocol,
@@ -1322,7 +1323,7 @@ func main() {
 			log.Error("Server failed", "error", err)
 			os.Exit(1)
 		}
-	}()
+	})
 
 	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)

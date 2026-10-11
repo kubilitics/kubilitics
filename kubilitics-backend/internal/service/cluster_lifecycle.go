@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 )
 
 // ClusterLifecycleManager implements the hybrid informer lifecycle
@@ -105,7 +106,7 @@ func NewClusterLifecycleManager(cache *OverviewCache, idleTTL time.Duration) *Cl
 		stopSweep:     make(chan struct{}),
 		sweepDone:     make(chan struct{}),
 	}
-	go m.runSweep()
+	safego.Go("cluster-lifecycle-sweep", m.runSweep)
 	return m
 }
 

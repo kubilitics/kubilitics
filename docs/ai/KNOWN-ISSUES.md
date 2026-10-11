@@ -211,3 +211,15 @@ cache or another aux kind. Regression tests:
   clean, confirmed via full adversarial pass, not unexamined.
 - Concurrency audit (data races, unprotected shared state) — clean,
   confirmed via full trace of every goroutine-touching lifecycle manager.
+- Goroutine panic recovery (2026-10): the v1.2.3-era claim that "all 26
+  backend goroutines carry `defer recover()`" (previously stated in
+  `docs/ai/ARCHITECTURE.md`) was stale/false — a fresh audit found ~40
+  production goroutines with zero panic recovery, where an unrecovered
+  panic in any one of them would crash the entire backend process for
+  every connected cluster/session. Fixed by centralizing recovery in
+  `kubilitics-backend/internal/pkg/safego` (`safego.Go` /
+  `safego.GoContext`) and converting every bare `go func(){}()` / `go
+  x.Method(...)` production launch site to go through it. See
+  `docs/ai/ARCHITECTURE.md`'s goroutine-panic-recovery entry for the
+  current state and how this is now mechanically checkable (CI grep for
+  bare `go func(` / `go \w+\.\w+\(` outside `safego.go`/`_test.go`).

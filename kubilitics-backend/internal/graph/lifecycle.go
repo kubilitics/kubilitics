@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -79,7 +80,7 @@ func NewEngineLifecycleManager(idleTTL time.Duration, onRebuild func(clusterID s
 		stopSweep:     make(chan struct{}),
 		sweepDone:     make(chan struct{}),
 	}
-	go m.runSweep()
+	safego.Go("graph-engine-lifecycle-sweep", m.runSweep)
 	return m
 }
 

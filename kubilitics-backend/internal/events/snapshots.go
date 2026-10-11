@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 )
 
 // SnapshotManager captures periodic cluster state.
@@ -31,7 +33,7 @@ func (sm *SnapshotManager) Start(ctx context.Context, interval time.Duration) {
 		interval = 5 * time.Minute
 	}
 
-	go func() {
+	safego.Go("events-snapshot-manager-loop", func() {
 		// Take an initial snapshot immediately.
 		if err := sm.TakeSnapshot(ctx); err != nil {
 			log.Printf("events/snapshots: initial snapshot failed: %v", err)
@@ -52,7 +54,7 @@ func (sm *SnapshotManager) Start(ctx context.Context, interval time.Duration) {
 				}
 			}
 		}
-	}()
+	})
 }
 
 // Stop stops the snapshot manager. Safe to call multiple times.

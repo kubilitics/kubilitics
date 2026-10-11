@@ -30,7 +30,7 @@ func resolveDeploymentRefs(ctx context.Context, client *k8s.Client, namespace st
 	if len(rsNames) == 0 {
 		return nil
 	}
-	rsList, err := client.Clientset.AppsV1().ReplicaSets(namespace).List(ctx, metav1.ListOptions{})
+	rsList, err := client.Clientset.AppsV1().ReplicaSets(namespace).List(ctx, metav1.ListOptions{Limit: 5000})
 	if err != nil {
 		return nil
 	}

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/kubilitics/kubilitics-backend/internal/cluster/identity"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 )
 
 // StoredCluster is the minimum shape from the cluster DB that this
@@ -70,7 +71,7 @@ func (s *ManualSource) Watch(ctx context.Context) (<-chan DiscoveryEvent, error)
 	s.mu.Lock()
 	s.subs = append(s.subs, ch)
 	s.mu.Unlock()
-	go func() {
+	safego.Go("discovery-manual-source-watch-cleanup", func() {
 		<-ctx.Done()
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -81,7 +82,7 @@ func (s *ManualSource) Watch(ctx context.Context) (<-chan DiscoveryEvent, error)
 				break
 			}
 		}
-	}()
+	})
 	return ch, nil
 }
 

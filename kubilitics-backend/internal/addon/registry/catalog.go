@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/repository"
 )
 
@@ -328,9 +329,9 @@ func (r *Registry) ListCatalogPaginated(ctx context.Context, search string, limi
 // StartArtifactHubSync runs SyncArtifactHub in a background goroutine so the
 // catalog is populated with Artifact Hub packages (tier=COMMUNITY) without blocking startup.
 func (r *Registry) StartArtifactHubSync(ctx context.Context) {
-	go func() {
+	safego.Go("addon-registry-artifact-hub-sync", func() {
 		if err := SyncArtifactHub(ctx, r.repo, r.ahClient, r.logger); err != nil {
 			r.logger.Warn("artifact hub sync failed", "error", err)
 		}
-	}()
+	})
 }

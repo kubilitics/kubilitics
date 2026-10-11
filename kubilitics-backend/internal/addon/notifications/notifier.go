@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 )
 
 // Notifier delivers NotifyEvent payloads to all enabled channels that have subscribed
@@ -46,7 +47,7 @@ func (n *Notifier) Notify(ev models.NotifyEvent) {
 	if ev.OccurredAt == "" {
 		ev.OccurredAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	go n.deliver(ev)
+	safego.Go("addon-notification-deliver", func() { n.deliver(ev) })
 }
 
 // deliver is the internal synchronous delivery routine, called from a goroutine.

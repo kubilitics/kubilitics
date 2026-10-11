@@ -10,6 +10,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/kubilitics/kubilitics-backend/internal/cluster/identity"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -81,7 +82,7 @@ func (s *KubeconfigFileSource) Watch(ctx context.Context) (<-chan DiscoveryEvent
 	}
 
 	out := make(chan DiscoveryEvent, 32)
-	go func() {
+	safego.Go("discovery-kubeconfig-source-watch", func() {
 		defer close(out)
 		defer func() { _ = w.Close() }()
 
@@ -131,7 +132,7 @@ func (s *KubeconfigFileSource) Watch(ctx context.Context) (<-chan DiscoveryEvent
 				log.Printf("kubeconfig watcher: %v", err)
 			}
 		}
-	}()
+	})
 	return out, nil
 }
 

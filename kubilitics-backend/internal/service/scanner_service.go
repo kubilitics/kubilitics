@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/repository"
 	"github.com/kubilitics/kubilitics-backend/internal/scanner"
 	"github.com/kubilitics/kubilitics-backend/internal/scanner/adapters"
@@ -89,13 +90,15 @@ func (s *scannerServiceImpl) StartScan(ctx context.Context, targetType, targetPa
 	}
 
 	// Execute scan asynchronously
-	go s.executeScan(run.ID, scanner.ScanConfig{
-		Target: scanner.ScanTarget{
-			Type: scanner.TargetType(targetType),
-			Path: targetPath,
-		},
-		Scanners: scannerNames,
-		Timeout:  5 * time.Minute,
+	safego.Go("scanner-service-execute-scan", func() {
+		s.executeScan(run.ID, scanner.ScanConfig{
+			Target: scanner.ScanTarget{
+				Type: scanner.TargetType(targetType),
+				Path: targetPath,
+			},
+			Scanners: scannerNames,
+			Timeout:  5 * time.Minute,
+		})
 	})
 
 	return run, nil

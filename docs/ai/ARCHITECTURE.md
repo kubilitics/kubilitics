@@ -47,10 +47,28 @@ repos**, not in this monorepo — integrated via gRPC/HTTP client code in
 - `internal/topology/` (v1) and `internal/topology/v2/` — resource
   relationship graph building. v2's `collector_k8s.go` has a
   `paginatedCollect[]` generic used across most resource-kind collectors.
-- All 26 backend goroutines (`go func(){}()`) carry `defer recover()` as
-  of v1.2.3 — **if you add a new one, it needs this too**, the pattern is
-  `defer func() { if r := recover(); r != nil { slog.Default().Error(...)
-  } }()` as the *first* defer in the goroutine body.
+- Goroutine panic recovery is centralized in `internal/pkg/safego`
+  (`safego.Go(name, fn)` / `safego.GoContext(ctx, name, fn)`). The prior
+  claim here ("all 26 backend goroutines carry `defer recover()` as of
+  v1.2.3") was stale/false — a 2026-10 audit found ~40 of the backend's
+  production goroutines had no panic recovery at all, which meant an
+  unrecovered panic in any one of them crashed the entire backend process
+  for every connected cluster/session, not just the one request/loop.
+  That audit converted every bare `go func() {...}()` / `go x.Method(...)`
+  launch site in production code (cmd/server/main.go, cluster discovery,
+  addon lifecycle/registry, AI chat, gRPC server, blast-radius watchdog,
+  events pipeline/collector/manager/snapshots, auth OIDC/SAML cleanup
+  loops, graph/cluster lifecycle sweeps, websocket client pumps, scanner/
+  rollout/report-scheduler/fleet-summary background jobs) to launch
+  through `safego.Go`/`safego.GoContext` instead — **if you add a new
+  goroutine, use `safego.Go("descriptive-name", func() { ... })` rather
+  than a bare `go`**. This is mechanically checkable going forward: a CI
+  grep for bare `go func(` or `go \w+\.\w+\(` outside `safego.go` and
+  `_test.go` files should find nothing in production code (a handful of
+  pre-existing sites already had their own hand-rolled
+  `defer recover()` — e.g. `internal/k8s/informer.go`'s
+  `retrySyncInBackground` — and were left as-is rather than forced
+  through a redundant wrapper).
 - DB layer: `internal/repository/` — both SQLite and Postgres backends
   behind the same interface; check both when fixing a repository bug (a
   real bug this session existed identically in both implementations).

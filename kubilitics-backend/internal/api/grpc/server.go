@@ -16,6 +16,7 @@ import (
 
 	v1 "github.com/kubilitics/kubilitics-backend/api/grpc/v1"
 	"github.com/kubilitics/kubilitics-backend/internal/config"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/service"
 )
 
@@ -107,11 +108,11 @@ func (s *Server) Start(ctx context.Context) error {
 
 	s.log.Info("gRPC server starting", "address", listener.Addr().String(), "port", s.port)
 
-	go func() {
+	safego.Go("grpc-server-serve", func() {
 		if err := s.server.Serve(listener); err != nil {
 			s.log.Error("gRPC server failed", "error", err)
 		}
-	}()
+	})
 
 	return nil
 }
@@ -129,10 +130,10 @@ func (s *Server) Stop() {
 
 	// Graceful stop with timeout
 	stopped := make(chan struct{})
-	go func() {
+	safego.Go("grpc-server-graceful-stop", func() {
 		s.server.GracefulStop()
 		close(stopped)
-	}()
+	})
 
 	select {
 	case <-stopped:

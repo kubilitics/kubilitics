@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kubilitics/kubilitics-backend/internal/graph"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 )
 
 // FleetRepository is the interface for persisting fleet health records.
@@ -57,7 +58,7 @@ func NewSummaryJob(
 // Start begins the periodic aggregation loop. It runs until Stop() is called
 // or the context is cancelled. The first tick fires immediately.
 func (j *SummaryJob) Start(ctx context.Context) {
-	go j.run(ctx)
+	safego.Go("fleet-summary-job-run", func() { j.run(ctx) })
 }
 
 // Stop signals the background loop to exit.

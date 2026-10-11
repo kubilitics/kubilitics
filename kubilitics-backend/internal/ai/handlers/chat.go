@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kubilitics/kubilitics-backend/internal/ai/proxy"
 	"github.com/kubilitics/kubilitics-backend/internal/ai/types"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/tracing"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -96,7 +97,7 @@ func (h *Handlers) GetChat(w http.ResponseWriter, r *http.Request) {
 
 	// server -> client pump
 	done := make(chan struct{})
-	go func() {
+	safego.Go("ai-chat-ws-server-to-client-pump", func() {
 		defer close(done)
 		for {
 			ev, recvErr := stream.Recv()
@@ -127,7 +128,7 @@ func (h *Handlers) GetChat(w http.ResponseWriter, r *http.Request) {
 			payload, _ := json.Marshal(assistantEventPayload(ev))
 			_ = conn.WriteJSON(wsFrame{Type: assistantEventType(ev), Payload: payload})
 		}
-	}()
+	})
 
 	// client -> server pump
 	for {

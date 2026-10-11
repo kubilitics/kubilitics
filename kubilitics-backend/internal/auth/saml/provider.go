@@ -19,6 +19,7 @@ import (
 	"github.com/crewjam/saml/samlsp"
 	"github.com/kubilitics/kubilitics-backend/internal/config"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/repository"
 )
 
@@ -139,7 +140,7 @@ func NewProvider(ctx context.Context, cfg *config.Config, repo *repository.SQLit
 	}
 
 	// Cleanup expired requests every 10 minutes
-	go p.cleanupRequests()
+	safego.Go("saml-provider-cleanup-requests", p.cleanupRequests)
 
 	return p, nil
 }

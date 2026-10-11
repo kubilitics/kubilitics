@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/service"
 	"k8s.io/client-go/kubernetes"
 )
@@ -192,13 +193,13 @@ func (p *Pipeline) Start(clientset kubernetes.Interface, clusterID string) error
 	p.snapshots.Start(p.ctx, 5*time.Minute)
 
 	// Main event processing goroutine.
-	go p.processEvents()
+	safego.Go("events-pipeline-process-events", p.processEvents)
 
 	// Background: resolve stale incidents every 60s.
-	go p.incidentResolutionLoop()
+	safego.Go("events-pipeline-incident-resolution-loop", p.incidentResolutionLoop)
 
 	// Background: retention pruning every hour.
-	go p.retentionLoop()
+	safego.Go("events-pipeline-retention-loop", p.retentionLoop)
 
 	log.Printf("[events/pipeline] started for cluster %s", clusterID)
 	return nil

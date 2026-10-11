@@ -12,6 +12,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/graph"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
 
@@ -40,10 +41,15 @@ func computeBlastRadiusWithTimeout(ctx context.Context, snap *graph.GraphSnapsho
 		err    error
 	}
 	done := make(chan outcome, 1)
-	go func() {
+	// Wrapped in safego.Go purely for panic recovery — this goroutine is
+	// intentionally still a fire-and-forget watchdog target (see the
+	// blastRadiusComputeTimeout doc comment above): we don't true-cancel it,
+	// we just stop waiting on it. An unrecovered panic here would otherwise
+	// crash the whole backend process even though the caller already gave up.
+	safego.Go("blast-radius-compute-watchdog", func() {
 		result, err := snap.ComputeBlastRadiusWithMode(target, failureMode)
 		done <- outcome{result: result, err: err}
-	}()
+	})
 	select {
 	case o := <-done:
 		return o.result, o.err

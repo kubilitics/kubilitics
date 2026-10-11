@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kubilitics/kubilitics-backend/internal/cluster/presence"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 )
 
 // ReachabilityStatus is a point-in-time reachability check result for one
@@ -196,13 +197,13 @@ func (m *Manager) Events(ctx context.Context) <-chan DiscoveryEvent {
 			continue // source doesn't support watch
 		}
 		wg.Add(1)
-		go func(c <-chan DiscoveryEvent) {
+		safego.Go("discovery-manager-source-event-fanin", func() {
 			defer wg.Done()
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				case ev, ok := <-c:
+				case ev, ok := <-ch:
 					if !ok {
 						return
 					}
@@ -214,11 +215,11 @@ func (m *Manager) Events(ctx context.Context) <-chan DiscoveryEvent {
 					}
 				}
 			}
-		}(ch)
+		})
 	}
-	go func() {
+	safego.Go("discovery-manager-events-close", func() {
 		wg.Wait()
 		close(out)
-	}()
+	})
 	return out
 }
