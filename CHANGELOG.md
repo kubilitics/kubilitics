@@ -7,6 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [UNRELEASED]
 
+## [1.2.3] - 2026-10-06
+
+### Documentation
+
+- UI reliability audit findings and release plan (Oct 2026) by @vellankikoti ([5cda11c](https://github.com/vellankikoti/kubilitics/commit/5cda11ce09394248e7c9133c93d93bde76751057))
+- Round 2 audit findings + grounded Headlamp comparison by @vellankikoti ([9bad44f](https://github.com/vellankikoti/kubilitics/commit/9bad44f2b59e41575ce3bcbc53078782052de929))
+- Issue-count accounting toward the 50-per-release bar (46/50) by @vellankikoti ([1eb4d18](https://github.com/vellankikoti/kubilitics/commit/1eb4d18815eacfc3da77caea70c64f07117e2f33))
+- 50-issue floor reached for this release by @vellankikoti ([caa9ca9](https://github.com/vellankikoti/kubilitics/commit/caa9ca9f1492b9e39ca4f798c2f4b03de11b59bb))
+- V1.2.3 real-artifact validation report by @vellankikoti ([887b40f](https://github.com/vellankikoti/kubilitics/commit/887b40f1689ce884e497ea57e0f261a259d00892))
+
+### Fixed
+
+- Surface silent data-fetch failures instead of rendering 0 by @vellankikoti ([e3109db](https://github.com/vellankikoti/kubilitics/commit/e3109db44bfa1ad2a2d41a19d49c499c2c36f09b))
+- Harden array-spread sites against non-array API data ("X is not iterable") by @vellankikoti ([88f755b](https://github.com/vellankikoti/kubilitics/commit/88f755bd8b4c13e96878ad0edc1d4dc3753809c8))
+- Batch 2 — dashboard health score, simulation/health-issue crashes, 4 more silent-failure hooks by @vellankikoti ([bb1b60b](https://github.com/vellankikoti/kubilitics/commit/bb1b60b79aa2b80b9e8f2bd3d658cedd23d28266))
+- Panic recovery on all 18 unprotected goroutines + silent-failure fixes by @vellankikoti ([68dec4a](https://github.com/vellankikoti/kubilitics/commit/68dec4a6bc90118c66df3e5f7d154fd572cf494d))
+- Batch 3 — 4 Dashboard widgets silently showed 0/stable on fetch failure by @vellankikoti ([5382875](https://github.com/vellankikoti/kubilitics/commit/53828751890c844133907d426326da1ebc19eed7))
+- Round 2 batch 1 — pod status, metrics, project dialogs by @vellankikoti ([6cc8458](https://github.com/vellankikoti/kubilitics/commit/6cc84585fd2861791501d666365c08dd41965317))
+- Round 2 batch 2 — 8 more goroutine panic sites + audit-event logging by @vellankikoti ([4784894](https://github.com/vellankikoti/kubilitics/commit/4784894d8cd91f26658cad549c9ea9d392cb7f7e))
+- Harden clusterPresenceStore against non-array snapshot fields by @vellankikoti ([12a4860](https://github.com/vellankikoti/kubilitics/commit/12a4860e1327b1d1ceb94291e618bf7b177ec7c8))
+- Round 2 batch 3 — scanner panic recovery + 3 silent-failure fixes by @vellankikoti ([3238253](https://github.com/vellankikoti/kubilitics/commit/3238253ffb2b5f2cd6e4e99795aea902f698b86d))
+- Goroutine + HTTP connection leaks on client disconnect / retry by @vellankikoti ([45da7de](https://github.com/vellankikoti/kubilitics/commit/45da7dedbf1e4166702bcf44062e1e7e05bdb060))
+- Scope keepPreviousData to the same cluster (cluster-switch race) by @vellankikoti ([d571816](https://github.com/vellankikoti/kubilitics/commit/d571816469ebde7ac566b3a3e5235ea01d1c5389))
+- Bound workloads.go's live-API pods fallback to 5000 by @vellankikoti ([1359d62](https://github.com/vellankikoti/kubilitics/commit/1359d6256f1bdc71f8d30100f9ed1e5796c1af37))
+- Suppress staticcheck SA1019 for intentional corev1.Endpoints usage by @vellankikoti ([7a441f3](https://github.com/vellankikoti/kubilitics/commit/7a441f301225ca1b3c4c3c521fc9bb8bb0fa1f8a))
+
+## [1.2.2] - 2026-10-05
+
+### Added
+
+- Phase 1 complete — tool catalog with 127 tools audited by @vellankikoti ([5b5b5c0](https://github.com/vellankikoti/kubilitics/commit/5b5b5c01da0d3081ed863ed4285fc498d8ca1725))
+- Certification engine — grade all 157 tools, gate destructive execution by @vellankikoti ([fe5673d](https://github.com/vellankikoti/kubilitics/commit/fe5673d034fc1998f66b29df5dc4e48133bab7d8))
+- Execution layer hardening — idempotency, timeouts, envelope, 92% coverage by @vellankikoti ([3950ee1](https://github.com/vellankikoti/kubilitics/commit/3950ee1a8f40ef4d8bc740fc109820a37d89b57d))
+- AI guardrails — redaction, injection scanner, tool call budget by @vellankikoti ([9e782e5](https://github.com/vellankikoti/kubilitics/commit/9e782e552acc34a8dec2b1cf06c40e0a0bd32dd2))
+- Observability endpoints, Prometheus metrics, dynamic guardrail config by @vellankikoti ([12e140d](https://github.com/vellankikoti/kubilitics/commit/12e140de1db3343cd3576938cde2dd5b48d9e9ac))
+- Hardening benchmark suite — 20 benchmarks across all safety layers by @vellankikoti ([c3069a8](https://github.com/vellankikoti/kubilitics/commit/c3069a882f6c27c47100cae79ac10f6f18d06ee0))
+- 157-tool MCP safety stack — cert gate, guardrails, observability, benchmarks by @vellankikoti ([24d8b2d](https://github.com/vellankikoti/kubilitics/commit/24d8b2d763c4869f1dd161532aa4e0321c47b92b))
+- Add lazy cluster and engine lifecycle management by @vellankikoti ([b37c373](https://github.com/vellankikoti/kubilitics/commit/b37c3739662b1c350381a55b7b3b53daadfd24ae))
+
+### Documentation
+
+- Promote desktop app to primary install path by @vellankikoti ([573ae38](https://github.com/vellankikoti/kubilitics/commit/573ae383b0229b444eb24fd2780aa02e250902fe))
+- Fix Windows install + add verified AI tools cheatsheet by @vellankikoti ([104ac35](https://github.com/vellankikoti/kubilitics/commit/104ac35b546f592d3fff4366e6fcdbcf64e54dc7))
+- Color logo, SVG architecture diagram, 8-screen app showcase by @vellankikoti ([a61de75](https://github.com/vellankikoti/kubilitics/commit/a61de759cd950c43a156e7b51ed491da11f400a9))
+- Fix app-screens link to render via htmlpreview.github.io by @vellankikoti ([972c283](https://github.com/vellankikoti/kubilitics/commit/972c283b9acbf78a177218c8d650255483329f41))
+- Replace fake mockups with 8 real app screenshots by @vellankikoti ([70e33cd](https://github.com/vellankikoti/kubilitics/commit/70e33cd82044f4af5260dba9e55c5438a76fe2a9))
+- 157-tool MCP reference with validation status and example usage by @vellankikoti ([a8d10be](https://github.com/vellankikoti/kubilitics/commit/a8d10be9ff78ee6ee3e3d7caf5ec6902e431ea6f))
+- Add vision, architecture diagrams, and per-tool user query examples by @vellankikoti ([3d9fca1](https://github.com/vellankikoti/kubilitics/commit/3d9fca1ec4a62746ce52fefb7fa99fb43a2d1973))
+- Add critical gap-analysis report for terminal feature by @vellankikoti ([5fe238b](https://github.com/vellankikoti/kubilitics/commit/5fe238bb5cc41a6ec450229bf4772991826eff0b))
+- Add cluster-terminal rebuild spec by @vellankikoti ([50e8e62](https://github.com/vellankikoti/kubilitics/commit/50e8e62dc1332e4aff540b1004b020c36fef90d3))
+- Record commit SHA in v1.2.1 release report by @vellankikoti ([5e22555](https://github.com/vellankikoti/kubilitics/commit/5e2255506133b777a3b64de71ee0ba867abb899d))
+- R2 — 10K topology correctness & VALID-07 re-verification by @vellankikoti ([a996080](https://github.com/vellankikoti/kubilitics/commit/a99608074c67cd58e05c8f824347c63169b04e44))
+- Record commit SHA in v1.2.2 release report by @vellankikoti ([029fd50](https://github.com/vellankikoti/kubilitics/commit/029fd506cdca16198d969c11205c2e007bfdcd9e))
+- R3 — 10K lifecycle/informer stability re-verification by @vellankikoti ([21eefe8](https://github.com/vellankikoti/kubilitics/commit/21eefe8b08be452f7ed7a7e4df431cb28306ff1a))
+- Record commit SHA in v1.2.3 release report by @vellankikoti ([08c8a9b](https://github.com/vellankikoti/kubilitics/commit/08c8a9be5ab244a596e28b5369ffbb40a2db226f))
+- Record commit SHA in v1.3.0 release report by @vellankikoti ([706a4fa](https://github.com/vellankikoti/kubilitics/commit/706a4fa7ecba2f906547bba4e963b971aa493999))
+- V1.3.0 acceptance cycle — STABLE LOCAL RELEASE by @vellankikoti ([8205f95](https://github.com/vellankikoti/kubilitics/commit/8205f95494ce5c3b9ef3ad7059914f7c9dba3651))
+- Investigation and implementation records for v1.2.1 by @vellankikoti ([63221dd](https://github.com/vellankikoti/kubilitics/commit/63221dd2f39d2f644530c6ac35e94f3aad64fc89))
+- V1.2.1 consolidated release report by @vellankikoti ([f51fa13](https://github.com/vellankikoti/kubilitics/commit/f51fa130397f7e18cac8376f687f2a537551c369))
+
+### Fixed
+
+- List_problems rejects 'all' filter and stops stealing 'list pods' by @vellankikoti ([1ddfecb](https://github.com/vellankikoti/kubilitics/commit/1ddfecba859759a7048f053eb8885021e4fcbd82))
+- Pass GITHUB_TOKEN to git-cliff so it can fetch commit metadata by @vellankikoti ([93604d2](https://github.com/vellankikoti/kubilitics/commit/93604d2808c417f983de3866e2852063a4716aeb))
+- Suppress no-control-regex on ANSI strip regex in logParser by @vellankikoti ([117525f](https://github.com/vellankikoti/kubilitics/commit/117525fc0c4ce6ba7f4b7dd1d8e4887fa08e217c))
+- Migrate golangci-lint to v2.12.2 + v2 config schema by @vellankikoti ([340ed6b](https://github.com/vellankikoti/kubilitics/commit/340ed6b206b112a24919f291e3f9c62a9783c671))
+- Remove gosimple linter (merged into staticcheck in golangci-lint v2) by @vellankikoti ([b2c459c](https://github.com/vellankikoti/kubilitics/commit/b2c459c5ceefa527c3f7a3e861dd7a8a67b7e87c))
+- Scope staticcheck to SA*+S1* only — exclude new QF*/ST* in v2 by @vellankikoti ([f8da17e](https://github.com/vellankikoti/kubilitics/commit/f8da17e7b9deb4bd15f86ee8910d995fae19e4f6))
+- Budget config, fanOut recovery, load-test correctness by @vellankikoti ([59dd5a5](https://github.com/vellankikoti/kubilitics/commit/59dd5a58f8c4051033c92ca4fa34a72f013352ca))
+- Resolve 179 GitHub Security alerts — CVE upgrades + code fixes by @vellankikoti ([13c6e82](https://github.com/vellankikoti/kubilitics/commit/13c6e8270198473358b1d35c385cbd812a67e556))
+- Suppress 4 remaining semgrep responsewriter alerts in brain/server.go by @vellankikoti ([f5a113b](https://github.com/vellankikoti/kubilitics/commit/f5a113b1129e533d6b1b13485baf1c4ef964e426))
+- Permanently fix all 89 scanner findings — code changes, not suppressions by @vellankikoti ([a5ee040](https://github.com/vellankikoti/kubilitics/commit/a5ee040c5fa34e2759fef5243feb52d48359c306))
+- Surface missing default StorageClass instead of a silent stuck pod by @vellankikoti ([5280be5](https://github.com/vellankikoti/kubilitics/commit/5280be54137e7f84c3e809dc7f0bc8d592598b2d))
+- Auto-fallback to emptyDir when no default StorageClass exists by @vellankikoti ([8612cad](https://github.com/vellankikoti/kubilitics/commit/8612cada3cffb62c8ea62cfc2de861115e5118f2))
+- Optimize paginated cache conversion for 10K-scale concurrency by @vellankikoti ([d28a1d9](https://github.com/vellankikoti/kubilitics/commit/d28a1d9a5be796327a2814c23726113d9b9a687f))
+- Eliminate N+1 fan-out and bound multi-cluster concurrency by @vellankikoti ([ffeb650](https://github.com/vellankikoti/kubilitics/commit/ffeb650d90ebbccd4de2555c5fa18e7750ca0008))
+- Correct storage N+1, bound node counts, fix V2 force-refresh by @vellankikoti ([eb8f775](https://github.com/vellankikoti/kubilitics/commit/eb8f775d8f3b7c2a46cec2161bd973af74304285))
+- Bound blocking I/O, fix cross-cluster WebSocket isolation by @vellankikoti ([0a7761a](https://github.com/vellankikoti/kubilitics/commit/0a7761a09f2565373dcaadd7e7153e196890a444))
+- Cluster connect flow, resource quantity parsing, health display by @vellankikoti ([b049c5a](https://github.com/vellankikoti/kubilitics/commit/b049c5a0886ca0757c6a5b4c3ca8f6406d62ae13))
+- Pin cosign-installer to v3 (v4 does not exist) by @vellankikoti ([a1cff6b](https://github.com/vellankikoti/kubilitics/commit/a1cff6b967b1bcd3e5267f74694758773d60d154))
+
+### Misc
+
+- Bump all GitHub Actions to latest stable versions by @vellankikoti ([c7d4f83](https://github.com/vellankikoti/kubilitics/commit/c7d4f83a1e9ac43cfdc35cb64dea5ac17936ae8f))
+- Ignore certify-tools binary by @vellankikoti ([2e06855](https://github.com/vellankikoti/kubilitics/commit/2e06855a02f53b787afe6c0cc7c740fb8e2f3f23))
+
+### Tests
+
+- Live tool validation harness — 148/148 tools PASS by @vellankikoti ([6a2ddd2](https://github.com/vellankikoti/kubilitics/commit/6a2ddd2e1d915e3ca92d090452b5fe7dfb85b606))
+- Tool test harness — contracts, chaos, load, e2e + observation coverage boost by @vellankikoti ([7840344](https://github.com/vellankikoti/kubilitics/commit/78403444d34aa81c462132c45fd0098486ef9ac1))
+
 ## [1.4.0] - 2026-05-21
 
 ### Fixed
@@ -18,6 +109,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - Releases v1.3.0, v1.3.1, v1.3.2 deprecated and removed — v1.4.0 supersedes all three with the above stability fixes.
+
+## [1.2.0] - 2026-05-22
+
+### Documentation
+
+- Record Session 2 root cause — allow-unsigned-executable-memory blocked on macOS 26 by @vellankikoti ([48106f3](https://github.com/vellankikoti/kubilitics/commit/48106f34f6077b84197dcc96be843adb772fec2d))
+
+### Fixed
+
+- Harden macOS signing pipeline — restore inside-out codesign, fix CLI version by @vellankikoti ([36211ec](https://github.com/vellankikoti/kubilitics/commit/36211ec91c2b93581ad557857ac79aff5324f9ab))
+- Rewrite Carbon.framework → HIToolbox for macOS 26 launch by @vellankikoti ([46a4692](https://github.com/vellankikoti/kubilitics/commit/46a4692bfc056aeb1e9b3ad196099b84508f1fc9))
+- Carbon→HIToolbox rewrite for macOS 26 (Tahoe) compatibility by @vellankikoti ([2e3667f](https://github.com/vellankikoti/kubilitics/commit/2e3667fb30d8dc8c65bd9c648b20ed75a3126db6))
+- Remove allow-unsigned-executable-memory — blocked on macOS 26 by @vellankikoti ([9169303](https://github.com/vellankikoti/kubilitics/commit/9169303ff4c5da2b5a7f0ed99cfeb91412e970fa))
+- Remove allow-unsigned-executable-memory — blocked on macOS 26 by @vellankikoti ([b91d62a](https://github.com/vellankikoti/kubilitics/commit/b91d62ac8efa3f631807afd759918b83d159c914))
+- Remove keychain-access-groups — blocks macOS 26 launch by @vellankikoti ([f9195f1](https://github.com/vellankikoti/kubilitics/commit/f9195f1e413c52581adc7551bd1d982157327640))
+- Correct resource count + remove macOS keychain ACL prompt by @vellankikoti ([f2f961d](https://github.com/vellankikoti/kubilitics/commit/f2f961d610abe06278844d56c9fe2f6ad0209d8c))
 
 ## [1.3.0] - 2026-05-18
 
