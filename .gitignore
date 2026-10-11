@@ -181,7 +181,11 @@ project-docs/
 !CONTRIBUTING.md
 !SECURITY.md
 !NOTICE
-!KNOWN_ISSUES.md
+!CODE_OF_CONDUCT.md
+# KNOWN_ISSUES.md at root (not allowlisted here on purpose) was a stale
+# duplicate of docs/ai/KNOWN-ISSUES.md, removed in the pre-OSS-release
+# history cleanup (2026-10-11) — the canonical copy lives under docs/ai/,
+# already allowlisted below via !docs/**/*.md.
 
 # Stray local build artifacts (native binaries without a sanctioned path)
 /server_v*
@@ -231,3 +235,9 @@ kubilitics-backend/test_output.txt
 # Stub binaries used by manual smoke tests
 kubilitics-backend/internal/ai/aiclient/testdata/stub-kubilitics-ai/stub-kubilitics-ai
 brain/certify-tools
+
+# ── Generated artifacts that don't belong in source control ────────────────
+# catalog.json is `go run ./brain/cmd/tool-catalog`'s default output path —
+# a build artifact, not hand-authored source. Removed from history in the
+# pre-OSS-release cleanup (2026-10-11); regenerate it, don't commit it.
+/catalog.json
