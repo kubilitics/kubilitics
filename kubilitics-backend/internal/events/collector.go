@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -63,7 +65,7 @@ func (c *Collector) Start(clientset kubernetes.Interface, clusterID string) erro
 	factory.Start(c.stopCh)
 
 	// Wait for cache sync with timeout
-	go func() {
+	safego.Go("events-collector-wait-for-cache-sync", func() {
 		synced := factory.WaitForCacheSync(c.stopCh)
 		allSynced := true
 		for _, s := range synced {
@@ -77,7 +79,7 @@ func (c *Collector) Start(clientset kubernetes.Interface, clusterID string) erro
 		} else {
 			log.Printf("[events/collector] K8s events informer sync FAILED for cluster %s (will keep retrying)", clusterID)
 		}
-	}()
+	})
 
 	log.Printf("[events/collector] started watching K8s events for cluster %s", clusterID)
 	return nil

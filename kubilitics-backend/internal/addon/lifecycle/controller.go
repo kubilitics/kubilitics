@@ -11,6 +11,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/addon/helm"
 	"github.com/kubilitics/kubilitics-backend/internal/addon/registry"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/repository"
 	"github.com/kubilitics/kubilitics-backend/internal/service"
 	"k8s.io/client-go/discovery/cached/memory"
@@ -97,7 +98,7 @@ func (c *LifecycleController) Start(ctx context.Context) error {
 		for _, cluster := range clusters {
 			_ = c.RegisterCluster(cluster.ID)
 		}
-		go c.tickerLoop()
+		safego.Go("addon-lifecycle-ticker-loop", c.tickerLoop)
 	})
 	return err
 }
@@ -162,10 +163,11 @@ func (c *LifecycleController) RegisterCluster(clusterID string) error {
 		// wg.Add must be called before the goroutine starts to avoid a race with
 		// DeregisterCluster calling wg.Wait() before Add() executes.
 		mon.wg.Add(1)
-		go func(h *HealthMonitor, m *clusterMonitor) {
+		h, m := hm, mon
+		safego.Go("addon-lifecycle-health-monitor-start", func() {
 			defer m.wg.Done()
 			_ = h.Start(clusterCtx, c)
-		}(hm, mon)
+		})
 	}
 	c.clusterMonitors.Store(clusterID, mon)
 	return nil

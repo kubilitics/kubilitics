@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/service"
 	"k8s.io/client-go/kubernetes"
 )
@@ -234,7 +235,8 @@ func (m *PipelineManager) Subscribe() <-chan *WideEvent {
 	for _, p := range m.pipelines {
 		pCh := p.Subscribe()
 		wg.Add(1)
-		go func(src <-chan *WideEvent) {
+		src := pCh
+		safego.Go("events-manager-subscriber-fanin", func() {
 			defer wg.Done()
 			var dropped atomic.Int64
 			for evt := range src {
@@ -249,14 +251,14 @@ func (m *PipelineManager) Subscribe() <-chan *WideEvent {
 					}
 				}
 			}
-		}(pCh)
+		})
 	}
 
 	// Close merged channel when all sources are done.
-	go func() {
+	safego.Go("events-manager-subscribe-close", func() {
 		wg.Wait()
 		close(merged)
-	}()
+	})
 
 	if len(m.pipelines) == 0 {
 		log.Printf("[events/manager] Subscribe called with no running pipelines")

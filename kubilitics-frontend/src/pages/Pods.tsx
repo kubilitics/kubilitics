@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useClusterSummaryWithProject } from '@/hooks/useClusterSummary';
 import { useNamespacesFromCluster } from '@/hooks/useNamespacesFromCluster';
+import { useNamespaceFilter } from '@/hooks/useNamespaceFilter';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageLayout } from '@/components/layout/PageLayout';
 import {
@@ -241,7 +242,10 @@ export default function Pods() {
  const [searchParams, setSearchParams] = useSearchParams();
  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') ?? '');
  const debouncedSearch = useDebouncedValue(searchQuery, 250);
- const [selectedNamespaces, setSelectedNamespaces] = useState<Set<string>>(new Set());
+ // Standard list-page namespace-filter pattern (src/hooks/useNamespaceFilter.ts) —
+ // multi-select, URL-persisted so it survives navigating away (e.g. opening a
+ // pod's detail page) and back.
+ const [selectedNamespaces, setSelectedNamespaces] = useNamespaceFilter();
  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; pod: Pod | null; bulk?: boolean }>({ open: false, pod: null });
  const [portForwardDialog, setPortForwardDialog] = useState<{ open: boolean; pod: Pod | null }>({ open: false, pod: null });
  const [showCreateWizard, setShowCreateWizard] = useState(false);
@@ -260,7 +264,8 @@ export default function Pods() {
  // Status phase filter — drives server-side fieldSelector so pagination works with status cards
  const [statusPhaseFilter, setStatusPhaseFilter] = useState<string | null>(() => searchParams.get('status'));
 
- // Persist search + status filter to URL so navigating away/back preserves them
+ // Persist search + status filter to URL so navigating away/back preserves them.
+ // Namespace filter persistence is handled independently by useNamespaceFilter above.
  useEffect(() => {
  const next = new URLSearchParams(searchParams);
  if (searchQuery) next.set('q', searchQuery); else next.delete('q');
@@ -306,7 +311,7 @@ export default function Pods() {
  const handleNamespaceChange = useCallback((ns: Set<string>) => {
    setSelectedNamespaces(ns);
    setPageIndex(0);
- }, []);
+ }, [setSelectedNamespaces]);
  const setStatusPhaseAndResetPage = useCallback((next: string | null) => {
    setStatusPhaseFilter(next);
    setPageIndex(0);
@@ -350,15 +355,6 @@ export default function Pods() {
  if (allNamespaces && allNamespaces.length > 0) return allNamespaces.sort();
  return Array.from(new Set(fullPods.map(p => p.namespace))).sort();
  }, [allNamespaces, fullPods]);
-
- // Seed namespace filter from ?namespace=<ns> on initial load so views
- // navigated from Namespace detail are scoped correctly.
- useEffect(() => {
- const nsFromQuery = searchParams.get('namespace');
- if (!nsFromQuery) return;
- if (selectedNamespaces.size > 0) return;
- setSelectedNamespaces(new Set([nsFromQuery]));
- }, [searchParams, selectedNamespaces.size]);
 
  // Calculate resource max values from pod spec (for CPU/Memory bars)
  const podResourceMaxMap = useMemo(() => {

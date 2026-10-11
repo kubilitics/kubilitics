@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
+import { ApiError } from '@/components/ui/error-state';
 import { cn } from '@/lib/utils';
 import {
   GenericResourceDetail,
@@ -770,6 +771,14 @@ function PodsTab({ resource: svc }: ResourceContext<ServiceResource>) {
     );
   }, [selectorPods, podsTabSearch]);
 
+  if (podsInNs.isError) {
+    return (
+      <SectionCard title="Pods (selector match)" icon={Server} tooltip={<p className="text-xs text-muted-foreground">Pods matching this service&apos;s selector</p>}>
+        <ApiError onRetry={() => podsInNs.refetch()} message={(podsInNs.error as Error)?.message} />
+      </SectionCard>
+    );
+  }
+
   return (
     <SectionCard title="Pods (selector match)" icon={Server} tooltip={<p className="text-xs text-muted-foreground">Pods matching this service&apos;s selector</p>}>
       <div className="space-y-3">
@@ -864,6 +873,14 @@ function NetworkPoliciesTab({ resource: svc }: ResourceContext<ServiceResource>)
     { enabled: !!namespace }
   );
   const networkPoliciesList = networkPoliciesInNs.data?.items ?? [];
+
+  if (networkPoliciesInNs.isError) {
+    return (
+      <SectionCard title="Network policies in this namespace" icon={Shield}>
+        <ApiError onRetry={() => networkPoliciesInNs.refetch()} message={(networkPoliciesInNs.error as Error)?.message} />
+      </SectionCard>
+    );
+  }
 
   return (
     <SectionCard title="Network policies in this namespace" icon={Shield}>

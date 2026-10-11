@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kubilitics/kubilitics-backend/internal/cluster/presence"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 )
 
 // ReachabilityStatus is a point-in-time reachability check result for one
@@ -107,14 +108,22 @@ func (m *Manager) Refresh(ctx context.Context) error {
 // Registered so the frontend can use session_id for cluster-scoped API
 // calls. Entries without a SessionID stay in Discovered only.
 //
-// Connected wiring (session tracking with connected_at) is future work;
-// it would come from a ConnectionManager that observes active sessions.
+// Connected is the subset of Registered the reachability checker reports
+// as currently healthy. This is not a separate session-tracking concept:
+// SetReachabilityChecker's doc comment is explicit that `Reachable` already
+// comes from ClusterService's live client registry (populated on a
+// successful connection, cleared on disconnect/removal) — i.e. "reachable"
+// and "has an active backend session" are the same underlying fact. A
+// prior version of this method left Connected hardcoded empty pending a
+// separate ConnectionManager; that was unnecessary since the data already
+// exists here.
 func (m *Manager) Snapshot() presence.Snapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	now := time.Now().Format(time.RFC3339)
 	disc := make([]presence.DiscoveredCluster, 0, len(m.discovered))
 	reg := make([]presence.RegisteredCluster, 0, len(m.discovered))
+	conn := make([]presence.ConnectedCluster, 0, len(m.discovered))
 	for _, c := range m.discovered {
 		pd := presence.DiscoveredCluster{
 			Identity:   c.Identity,
@@ -144,17 +153,41 @@ func (m *Manager) Snapshot() presence.Snapshot {
 				rc.LastError = status.LastError
 			}
 			reg = append(reg, rc)
+			if rc.Reachable {
+				connectedAt := rc.LastSuccessAt
+				if connectedAt == "" {
+					connectedAt = now
+				}
+				conn = append(conn, presence.ConnectedCluster{
+					RegisteredCluster: rc,
+					ConnectedAt:       connectedAt,
+				})
+			}
 		}
 	}
 	return presence.Snapshot{
 		Discovered: disc,
 		Registered: reg,
-		Connected:  []presence.ConnectedCluster{},
+		Connected:  conn,
 	}
 }
 
 // Events fans in all sources' Watch() channels. The manager filters out
 // events that would be duplicates of already-known identities.
+//
+// Each source's own Watch() loop (e.g. KubeconfigFileSource's fsnotify
+// handler) maintains its OWN prev/curr diff entirely separately from
+// m.discovered, which is only rebuilt by Refresh() — previously called
+// only on an explicit cluster mutation or the 60s defensive tick, never
+// in response to a raw watch event. Callers (the SSE handler, and the
+// frontend's es.onmessage) treat "an event arrived" as "go re-fetch
+// Snapshot() now" — so without refreshing here first, that immediate
+// re-fetch silently returned stale pre-change data for up to 60s. This
+// is the concrete mechanism behind "cluster recreated outside the app
+// doesn't show up." Refreshing re-enumerates every source (cheap,
+// already the steady-state cost of the periodic tick) before the event
+// is forwarded, so by the time a subscriber reacts, Snapshot() already
+// reflects it.
 func (m *Manager) Events(ctx context.Context) <-chan DiscoveryEvent {
 	out := make(chan DiscoveryEvent, 32)
 	var wg sync.WaitGroup
@@ -164,16 +197,17 @@ func (m *Manager) Events(ctx context.Context) <-chan DiscoveryEvent {
 			continue // source doesn't support watch
 		}
 		wg.Add(1)
-		go func(c <-chan DiscoveryEvent) {
+		safego.Go("discovery-manager-source-event-fanin", func() {
 			defer wg.Done()
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				case ev, ok := <-c:
+				case ev, ok := <-ch:
 					if !ok {
 						return
 					}
+					_ = m.Refresh(ctx) // see doc comment above; Refresh never actually errors today
 					select {
 					case out <- ev:
 					case <-ctx.Done():
@@ -181,11 +215,11 @@ func (m *Manager) Events(ctx context.Context) <-chan DiscoveryEvent {
 					}
 				}
 			}
-		}(ch)
+		})
 	}
-	go func() {
+	safego.Go("discovery-manager-events-close", func() {
 		wg.Wait()
 		close(out)
-	}()
+	})
 	return out
 }

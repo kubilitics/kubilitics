@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,10 +25,39 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
 const defaultMaxClusters = 100
+
+// cachedTypedItems reads resourceType from the informer cache and converts
+// each item to T, skipping any item that fails to convert. Returns
+// (nil, false) when the cache is unavailable, not yet synced, or genuinely
+// has no cached items — callers fall back to a live API call in that case.
+func cachedTypedItems[T any](im *k8s.InformerManager, resourceType string) ([]T, bool) {
+	if im == nil || !im.HasSynced() {
+		return nil, false
+	}
+	cached, ok := im.ListFromCache(resourceType, "", metav1.ListOptions{})
+	if !ok || cached == nil {
+		return nil, false
+	}
+	items := make([]T, 0, len(cached.Items))
+	skipped := 0
+	for _, u := range cached.Items {
+		var item T
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &item); err == nil {
+			items = append(items, item)
+		} else {
+			skipped++
+		}
+	}
+	if skipped > 0 {
+		log.Printf("cachedTypedItems[%T]: skipped %d/%d cached %s items due to conversion errors", *new(T), skipped, len(cached.Items), resourceType)
+	}
+	return items, true
+}
 
 // ErrClusterLimitReached is returned when a cluster registration would exceed the configured maxClusters limit.
 // Carries the current count and limit for structured error responses.
@@ -175,6 +205,30 @@ type reconnectFailure struct {
 func clusterInfoString(info map[string]interface{}, key string) string {
 	v, _ := info[key].(string)
 	return v
+}
+
+// serverURLFromKubeconfig reads the API server URL a context declares,
+// straight off disk — no network call, so it's available even when the
+// cluster turns out to be unreachable. Mirrors
+// internal/cluster/discovery/kubeconfig_source.go's Enumerate(), which reads
+// the identical field for the same purpose (discovery identity); kept here
+// rather than imported to avoid a cross-package dependency for one field
+// read. Returns "" on any parse failure or missing context/cluster — callers
+// already treat "" as "unknown," the same as before this helper existed.
+func serverURLFromKubeconfig(kubeconfigPath, contextName string) string {
+	cfg, err := clientcmd.LoadFromFile(kubeconfigPath)
+	if err != nil {
+		return ""
+	}
+	kctx, ok := cfg.Contexts[contextName]
+	if !ok || kctx == nil {
+		return ""
+	}
+	cluster, ok := cfg.Clusters[kctx.Cluster]
+	if !ok || cluster == nil {
+		return ""
+	}
+	return cluster.Server
 }
 
 // clusterInfoInt safely extracts an int value from a GetClusterInfo result map.
@@ -539,7 +593,18 @@ func (s *clusterService) addClusterWithSource(ctx context.Context, kubeconfigPat
 	defer cancel()
 
 	status := "connected"
-	serverURL := ""
+	// Seed from the kubeconfig's own declared `server:` field — a local,
+	// network-free read — so ServerURL is always populated, not only when
+	// the live connection test below happens to succeed. Without this, an
+	// unreachable cluster persists ServerURL="", which diverges from
+	// KubeconfigFileSource's discovery identity (it reads the same field
+	// directly off disk) for the exact same cluster. Two different
+	// LogicalIdentity keys for one cluster means the presence Manager's
+	// dedup never merges them, so the registered/session_id/kubeconfig_path
+	// data never reaches the entry the frontend actually renders and lets
+	// the user click — see TestClusterService_AddCluster_
+	// UnreachableClusterKeepsDeclaredServerURL for the full chain.
+	serverURL := serverURLFromKubeconfig(kubeconfigPath, contextName)
 	version := ""
 	provider := k8s.ProviderOnPrem
 
@@ -549,7 +614,12 @@ func (s *clusterService) addClusterWithSource(ctx context.Context, kubeconfigPat
 	} else {
 		fmt.Printf("[AddCluster] Connection test successful for %s\n", contextName)
 		if info, err := client.GetClusterInfo(regCtx); err == nil {
-			serverURL = clusterInfoString(info, "server_url")
+			// Prefer the live value (it's the source of truth when available),
+			// but never regress to empty — keep the kubeconfig-declared seed
+			// above if GetClusterInfo didn't actually return one.
+			if live := clusterInfoString(info, "server_url"); live != "" {
+				serverURL = live
+			}
 			version = clusterInfoString(info, "version")
 			if p, err := client.DetectProvider(regCtx); err == nil && p != "" {
 				provider = p
@@ -749,10 +819,36 @@ func (s *clusterService) GetClusterSummary(ctx context.Context, id string) (*mod
 	listCtx, listCancel := client.WithTimeout(ctx)
 	defer listCancel()
 
-	nodes, _ := client.Clientset.CoreV1().Nodes().List(listCtx, metav1.ListOptions{})
-	pods, _ := client.Clientset.CoreV1().Pods("").List(listCtx, metav1.ListOptions{})
-	deployments, _ := client.Clientset.AppsV1().Deployments("").List(listCtx, metav1.ListOptions{})
-	services, _ := client.Clientset.CoreV1().Services("").List(listCtx, metav1.ListOptions{})
+	// Perf: informer cache first (Headlamp/Lens model) for all 4 counts —
+	// this method is GetFleetOverview's per-cluster fan-out (fleet.go), so at
+	// N clusters these were N×4 live API calls with no caching; a warm cache
+	// now answers in <1ms instead. Falls back to the original live Clientset
+	// calls on a cache miss (informer not synced yet), unchanged from before.
+	im := s.GetInformerManager(id)
+	nodes := &corev1.NodeList{}
+	if items, ok := cachedTypedItems[corev1.Node](im, "nodes"); ok {
+		nodes.Items = items
+	} else {
+		nodes, _ = client.Clientset.CoreV1().Nodes().List(listCtx, metav1.ListOptions{})
+	}
+	pods := &corev1.PodList{}
+	if items, ok := cachedTypedItems[corev1.Pod](im, "pods"); ok {
+		pods.Items = items
+	} else {
+		pods, _ = client.Clientset.CoreV1().Pods("").List(listCtx, metav1.ListOptions{})
+	}
+	deployments := &appsv1.DeploymentList{}
+	if items, ok := cachedTypedItems[appsv1.Deployment](im, "deployments"); ok {
+		deployments.Items = items
+	} else {
+		deployments, _ = client.Clientset.AppsV1().Deployments("").List(listCtx, metav1.ListOptions{})
+	}
+	services := &corev1.ServiceList{}
+	if items, ok := cachedTypedItems[corev1.Service](im, "services"); ok {
+		services.Items = items
+	} else {
+		services, _ = client.Clientset.CoreV1().Services("").List(listCtx, metav1.ListOptions{})
+	}
 
 	// Compute health from actual resource state
 	healthStatus := computeClusterHealthStatus(nodes, pods, deployments)

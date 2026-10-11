@@ -187,6 +187,9 @@ func TestManager_Snapshot_FailsClosedWithoutReachabilityChecker(t *testing.T) {
 	if snap.Registered[0].Reachable {
 		t.Fatal("expected Reachable=false when no ReachabilityChecker is wired — must fail closed, not default to true")
 	}
+	if len(snap.Connected) != 0 {
+		t.Fatalf("expected Connected to stay empty when unreachable: %+v", snap.Connected)
+	}
 }
 
 // HEALTH-1/HEALTH-2: with a checker wired, Reachable and the staleness
@@ -251,6 +254,18 @@ func TestManager_Snapshot_UsesWiredReachabilityChecker_PerClusterIsolation(t *te
 	if down.LastCheckedAt == "" {
 		t.Error("uuid-down: expected LastCheckedAt to be populated even though the check failed")
 	}
+
+	// Connected must contain exactly the reachable cluster, never the down
+	// one — Connected was previously hardcoded to always be empty.
+	if len(snap.Connected) != 1 {
+		t.Fatalf("expected exactly 1 connected cluster: %+v", snap.Connected)
+	}
+	if snap.Connected[0].SessionID != "uuid-healthy" {
+		t.Errorf("expected connected cluster to be uuid-healthy, got %q", snap.Connected[0].SessionID)
+	}
+	if snap.Connected[0].ConnectedAt == "" {
+		t.Error("expected ConnectedAt to be populated for the connected cluster")
+	}
 }
 
 func TestManager_WatchFansInFromSources(t *testing.T) {
@@ -269,5 +284,54 @@ func TestManager_WatchFansInFromSources(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("event not forwarded within 500ms")
+	}
+}
+
+// TestManager_Events_RefreshesSnapshotBeforeForwarding is the regression
+// seal for the real root cause behind "cluster recreated externally
+// doesn't show up for up to 60s": a watch source's own internal
+// prev/curr diff (e.g. KubeconfigFileSource re-enumerating after an
+// fsnotify fire) is entirely separate from Manager.discovered, which only
+// gets rebuilt by Refresh() — previously triggered only by an explicit
+// cluster mutation or the 60s defensive tick, never by a raw watch event.
+// The frontend's SSE handler calls fetchSnapshot() (GET /api/v1/presence,
+// i.e. Snapshot()) the instant it receives *any* event, trusting that the
+// backend's canonical state already reflects what triggered the event.
+// If Snapshot() hasn't been refreshed yet, that immediate re-fetch
+// silently returns stale pre-change data and the UI looks like nothing
+// happened — until the next 60s tick catches up.
+func TestManager_Events_RefreshesSnapshotBeforeForwarding(t *testing.T) {
+	a := &fakeSource{clusters: nil, events: make(chan DiscoveryEvent, 4)}
+	m := NewManager([]DiscoverySource{a})
+	if err := m.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Snapshot().Discovered) != 0 {
+		t.Fatal("expected empty snapshot before the source has anything")
+	}
+
+	// Simulate what KubeconfigFileSource does: the underlying data changed
+	// (recreated cluster now enumerable) and the source emits a raw event
+	// about it — WITHOUT the Manager having been told to Refresh().
+	a.clusters = []DiscoveredCluster{
+		{Identity: identity.LogicalIdentity{Name: "recreated", ServerURL: "https://recreated"}, Source: "kubeconfig"},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	events := m.Events(ctx)
+	a.events <- DiscoveryEvent{Kind: EventAdd, Cluster: a.clusters[0]}
+
+	select {
+	case <-events:
+		// fall through to the assertion below — this mirrors exactly what
+		// the frontend does on es.onmessage: fetch the snapshot the
+		// instant an event is observed, not after some extra delay.
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("event not forwarded within 500ms")
+	}
+
+	snap := m.Snapshot()
+	if len(snap.Discovered) != 1 || snap.Discovered[0].Identity.Name != "recreated" {
+		t.Fatalf("Snapshot() was stale at the moment the event was forwarded: %+v", snap.Discovered)
 	}
 }

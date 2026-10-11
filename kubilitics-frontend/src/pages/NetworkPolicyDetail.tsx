@@ -13,6 +13,7 @@ import {
 } from '@/components/resources';
 import { useK8sResourceList, type KubernetesResource } from '@/hooks/useKubernetes';
 import { toast } from '@/components/ui/sonner';
+import { ApiError } from '@/components/ui/error-state';
 
 interface NetworkPolicyResource extends KubernetesResource {
   spec?: {
@@ -31,13 +32,14 @@ interface NetworkPolicyResource extends KubernetesResource {
 
 function useAffectedPods(namespace: string, podSelector: Record<string, string>) {
   const podsInNs = useK8sResourceList<KubernetesResource>('pods', namespace, { enabled: !!namespace });
-  return useMemo(() => {
+  const pods = useMemo(() => {
     if (!podsInNs.data?.items?.length || !Object.keys(podSelector).length) return [];
     return (podsInNs.data.items as KubernetesResource[]).filter((p) => {
       const labels = p.metadata?.labels ?? {};
       return Object.entries(podSelector).every(([k, v]) => labels[k] === v);
     });
   }, [podsInNs.data?.items, podSelector]);
+  return { pods, isError: podsInNs.isError, error: podsInNs.error, refetch: podsInNs.refetch };
 }
 
 function OverviewTab({ resource: np, age }: ResourceContext<NetworkPolicyResource>) {
@@ -156,9 +158,17 @@ function OverviewTab({ resource: np, age }: ResourceContext<NetworkPolicyResourc
 function VisualizationTab({ resource: np }: ResourceContext<NetworkPolicyResource>) {
   const namespace = np.metadata?.namespace ?? '';
   const podSelector = np.spec?.podSelector?.matchLabels ?? {};
-  const affectedPods = useAffectedPods(namespace, podSelector);
+  const { pods: affectedPods, isError, error, refetch } = useAffectedPods(namespace, podSelector);
   const ingressRules = np.spec?.ingress ?? [];
   const egressRules = np.spec?.egress ?? [];
+
+  if (isError) {
+    return (
+      <SectionCard title="Policy visualization" icon={Shield}>
+        <ApiError onRetry={() => refetch()} message={(error as Error)?.message} />
+      </SectionCard>
+    );
+  }
 
   return (
     <SectionCard title="Policy visualization" icon={Shield}>
@@ -171,7 +181,15 @@ function VisualizationTab({ resource: np }: ResourceContext<NetworkPolicyResourc
 function AffectedPodsTab({ resource: np }: ResourceContext<NetworkPolicyResource>) {
   const namespace = np.metadata?.namespace ?? '';
   const podSelector = np.spec?.podSelector?.matchLabels ?? {};
-  const affectedPods = useAffectedPods(namespace, podSelector);
+  const { pods: affectedPods, isError, error, refetch } = useAffectedPods(namespace, podSelector);
+
+  if (isError) {
+    return (
+      <SectionCard title="Affected pods" icon={Shield}>
+        <ApiError onRetry={() => refetch()} message={(error as Error)?.message} />
+      </SectionCard>
+    );
+  }
 
   return (
     <SectionCard title="Affected pods" icon={Shield}>
@@ -239,17 +257,20 @@ export default function NetworkPolicyDetail() {
         const ingressRules = np.spec?.ingress ?? [];
         const egressRules = np.spec?.egress ?? [];
 
-        // Compute affected pods count from the pre-fetched list
+        // Compute affected pods count from the pre-fetched list. On a failed
+        // fetch, surface that distinctly instead of silently showing "0" —
+        // which would read identically to a genuinely empty selector match.
         const podItems = podsInNs.data?.items ?? [];
         const affectedCount = Object.keys(podSelector).length === 0 ? 0 :
           podItems.filter((p: KubernetesResource) => {
             const labels = p.metadata?.labels ?? {};
             return Object.entries(podSelector).every(([k, v]) => labels[k] === v);
           }).length;
+        const affectedPodsValue = podsInNs.isError ? '—' : String(affectedCount);
 
         return [
           { label: 'Policy Types', value: policyTypes.join(', ') || '—', icon: Shield, iconColor: 'primary' as const },
-          { label: 'Affected Pods', value: String(affectedCount), icon: Shield, iconColor: 'info' as const },
+          { label: 'Affected Pods', value: affectedPodsValue, icon: Shield, iconColor: podsInNs.isError ? 'muted' as const : 'info' as const },
           { label: 'Ingress Rules', value: String(ingressRules.length), icon: ArrowDownToLine, iconColor: 'info' as const },
           { label: 'Egress Rules', value: String(egressRules.length), icon: ArrowUpFromLine, iconColor: 'muted' as const },
           { label: 'Namespace', value: ctx.namespace, icon: Shield, iconColor: 'muted' as const },

@@ -20,6 +20,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/addon/registry"
 	"github.com/kubilitics/kubilitics-backend/internal/addon/resolver"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/tracing"
 	"github.com/kubilitics/kubilitics-backend/internal/repository"
 	"go.opentelemetry.io/otel/attribute"
@@ -496,7 +497,9 @@ func (s *AddOnServiceImpl) ExecuteInstall(ctx context.Context, clusterID string,
 		watchCtx, cancelWatch := context.WithCancel(ctx)
 		if s.clusterService != nil {
 			if k8sClient, k8sErr := s.clusterService.GetClient(clusterID); k8sErr == nil && k8sClient != nil {
-				go streamK8sEventsToProgress(watchCtx, k8sClient.Clientset, ns, releaseName, installRunID, progressCh)
+				safego.Go("addon-install-k8s-events-stream", func() {
+					streamK8sEventsToProgress(watchCtx, k8sClient.Clientset, ns, releaseName, installRunID, progressCh)
+				})
 			}
 		}
 
@@ -1002,7 +1005,9 @@ func (s *AddOnServiceImpl) CreateRollout(
 	}
 
 	// Run the upgrade pipeline in the background so CreateRollout returns immediately.
-	go s.runRollout(rollout.ID, addonID, targetVersion, clusterIDs, canaryPercent, models.RolloutStrategy(strategy), actor)
+	safego.Go("addon-rollout-run", func() {
+		s.runRollout(rollout.ID, addonID, targetVersion, clusterIDs, canaryPercent, models.RolloutStrategy(strategy), actor)
+	})
 	return rollout, nil
 }
 

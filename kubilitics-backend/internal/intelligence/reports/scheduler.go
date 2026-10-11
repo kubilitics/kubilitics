@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 )
 
 // ReportFunc generates a resilience report for the given cluster.
@@ -158,7 +159,7 @@ func (s *Scheduler) Start(ctx context.Context, reportFn ReportFunc) {
 	s.mu.Lock()
 	s.stopCh = make(chan struct{})
 	s.mu.Unlock()
-	go s.run(ctx, reportFn)
+	safego.Go("reports-scheduler-run", func() { s.run(ctx, reportFn) })
 }
 
 // Stop stops the background scheduler loop.

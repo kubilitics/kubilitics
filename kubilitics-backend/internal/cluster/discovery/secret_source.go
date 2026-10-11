@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/kubilitics/kubilitics-backend/internal/cluster/identity"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -53,7 +54,7 @@ func (s *KubernetesSecretSource) Watch(ctx context.Context) (<-chan DiscoveryEve
 		return nil, err
 	}
 	out := make(chan DiscoveryEvent, 32)
-	go func() {
+	safego.Go("discovery-secret-source-watch", func() {
 		defer close(out)
 		for {
 			select {
@@ -91,7 +92,7 @@ func (s *KubernetesSecretSource) Watch(ctx context.Context) (<-chan DiscoveryEve
 				}
 			}
 		}
-	}()
+	})
 	return out, nil
 }
 

@@ -42,16 +42,26 @@ fn kubeconfig_write_error() -> String {
     "Failed to write kubeconfig".to_string()
 }
 
+// SECURITY (pre-OSS-release hardening pass): these commands previously took
+// an arbitrary `path: Option<String>` straight from the webview into
+// std::fs::read_to_string with zero validation — any JS running in the
+// webview (not just this app's own UI code) could call
+// invoke('read_kubeconfig', { path: '/Users/x/.ssh/id_rsa' }) and read any
+// file the OS user can read. The real frontend never passed anything but
+// `null` here; the one legitimate "custom kubeconfig path" case is already
+// handled by get_kubeconfig_path() resolving it from settings
+// (load_security_settings), not from a per-call argument. Removing the
+// parameter closes the arbitrary-read primitive without losing any feature.
 #[command]
-pub async fn read_kubeconfig(path: Option<String>) -> Result<String, String> {
-    let kubeconfig_path = get_kubeconfig_path(path).await?;
+pub async fn read_kubeconfig() -> Result<String, String> {
+    let kubeconfig_path = get_kubeconfig_path().await?;
 
     std::fs::read_to_string(kubeconfig_path).map_err(|_| kubeconfig_read_error())
 }
 
 #[command]
-pub async fn get_kubeconfig_info(path: Option<String>) -> Result<KubeconfigInfo, String> {
-    let kubeconfig_path = get_kubeconfig_path(path.clone()).await?;
+pub async fn get_kubeconfig_info() -> Result<KubeconfigInfo, String> {
+    let kubeconfig_path = get_kubeconfig_path().await?;
     let content = std::fs::read_to_string(&kubeconfig_path).map_err(|_| kubeconfig_read_error())?;
     
     let config: Value = serde_yaml::from_str(&content).map_err(|_| kubeconfig_parse_error())?;
@@ -71,7 +81,7 @@ pub async fn get_kubeconfig_info(path: Option<String>) -> Result<KubeconfigInfo,
 
 #[command]
 pub async fn switch_context(context_name: String) -> Result<(), String> {
-    let kubeconfig_path = get_kubeconfig_path(None).await?;
+    let kubeconfig_path = get_kubeconfig_path().await?;
     let content = std::fs::read_to_string(&kubeconfig_path).map_err(|_| kubeconfig_read_error())?;
     
     let mut config: Value = serde_yaml::from_str(&content).map_err(|_| kubeconfig_parse_error())?;
@@ -96,8 +106,8 @@ pub async fn switch_context(context_name: String) -> Result<(), String> {
 }
 
 #[command]
-pub async fn validate_kubeconfig(path: Option<String>) -> Result<bool, String> {
-    let kubeconfig_path = get_kubeconfig_path(path).await?;
+pub async fn validate_kubeconfig() -> Result<bool, String> {
+    let kubeconfig_path = get_kubeconfig_path().await?;
     
     if !kubeconfig_path.exists() {
         return Ok(false);
@@ -163,18 +173,32 @@ pub async fn save_topology_export(
     filename: String,
     _format: String,
 ) -> Result<String, String> {
+    // SECURITY: `filename` comes straight from the webview. PathBuf::join
+    // with an absolute path (e.g. "/Users/x/Library/LaunchAgents/evil.plist")
+    // or a "../../" relative path previously discarded exports_dir entirely,
+    // letting any JS running in the webview write attacker-controlled bytes
+    // to an arbitrary path. Strip to the basename only and reject anything
+    // that still isn't a plain filename (empty, "." / "..", or containing a
+    // path separator after stripping — which `file_name()` never produces,
+    // but reject explicitly rather than trust that implicitly).
+    let safe_name = PathBuf::from(&filename)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty() && n != "." && n != ".." && !n.contains('/') && !n.contains('\\'))
+        .ok_or_else(|| "Invalid export filename".to_string())?;
+
     let app_data_dir = get_app_data_dir().await?;
     let exports_dir = PathBuf::from(app_data_dir).join("exports");
-    
+
     if !exports_dir.exists() {
         std::fs::create_dir_all(&exports_dir)
             .map_err(|e| format!("Failed to create exports directory: {}", e))?;
     }
-    
-    let file_path = exports_dir.join(filename);
+
+    let file_path = exports_dir.join(safe_name);
     std::fs::write(&file_path, data)
         .map_err(|e| format!("Failed to write export file: {}", e))?;
-    
+
     Ok(file_path.to_string_lossy().to_string())
 }
 
@@ -714,7 +738,7 @@ pub async fn get_desktop_info() -> Result<DesktopInfo, String> {
     // use std::time::{SystemTime, UNIX_EPOCH};
     
     let app_data_dir = get_app_data_dir().await?;
-    let kubeconfig_path = get_kubeconfig_path(None).await?.to_string_lossy().to_string();
+    let kubeconfig_path = get_kubeconfig_path().await?.to_string_lossy().to_string();
     
     // Get app version from package info (would need to pass AppHandle)
     // For now, use a placeholder - this should be passed from main.rs
@@ -756,24 +780,18 @@ pub fn is_kcli_sidecar_available(app_handle: tauri::AppHandle) -> Result<bool, S
 
 // Helper functions
 
-async fn get_kubeconfig_path(path: Option<String>) -> Result<PathBuf, String> {
-    // First check if custom path is set
-    if path.is_none() {
-        if let Ok(settings) = load_security_settings().await {
-            if let Some(custom_path) = settings.kubeconfig_path {
-                return Ok(PathBuf::from(custom_path));
-            }
+async fn get_kubeconfig_path() -> Result<PathBuf, String> {
+    // A custom path is only ever set through the Settings UI (persisted via
+    // save_security_settings), never passed ad hoc per call — see the
+    // SECURITY comment on read_kubeconfig/get_kubeconfig_info above.
+    if let Ok(settings) = load_security_settings().await {
+        if let Some(custom_path) = settings.kubeconfig_path {
+            return Ok(PathBuf::from(custom_path));
         }
     }
-    
-    match path {
-        Some(p) => Ok(PathBuf::from(p)),
-        None => {
-            let home = dirs::home_dir()
-                .ok_or("Could not find home directory")?;
-            Ok(home.join(".kube").join("config"))
-        }
-    }
+
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    Ok(home.join(".kube").join("config"))
 }
 
 fn parse_contexts(config: &Value) -> Result<Vec<KubeconfigContext>, String> {

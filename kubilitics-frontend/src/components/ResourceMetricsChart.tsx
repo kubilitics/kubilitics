@@ -47,7 +47,15 @@ export function ResourceMetricsChart({
 
     const firstValue = data[0].value;
     const lastValue = data[data.length - 1].value;
-    const change = ((lastValue - firstValue) / firstValue) * 100;
+    // Guard against divide-by-zero: a zero baseline makes percentage change
+    // undefined. Treat "stayed at zero" as no change, and "rose from zero"
+    // as a full increase, rather than letting Infinity/NaN render.
+    const change =
+      firstValue === 0
+        ? lastValue === 0
+          ? 0
+          : 100
+        : ((lastValue - firstValue) / firstValue) * 100;
 
     return {
       direction: change > 5 ? 'up' : change < -5 ? 'down' : 'stable',

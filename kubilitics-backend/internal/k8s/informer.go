@@ -5,17 +5,25 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	vpaclientset "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned"
+	vpainformers "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/informers/externalversions"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
+	kubeaggregatorclientset "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset"
+	kubeaggregatorinformers "k8s.io/kube-aggregator/pkg/client/informers/externalversions"
 )
 
 // ResourceEventHandler handles resource events
@@ -29,8 +37,144 @@ type InformerManager struct {
 	factory  informers.SharedInformerFactory
 	stopCh   chan struct{}
 	handlers map[string]ResourceEventHandler
-	stores   map[string]cache.Store
-	synced   atomic.Bool // true after WaitForCacheSync succeeds
+	// client-go's generated informers (factory.Core().V1().Pods().Informer(),
+	// etc.) already register cache.Indexers{cache.NamespaceIndex:
+	// cache.MetaNamespaceIndexFunc} by default — GetIndexer() exposes that
+	// for O(1) namespace lookups via ByIndex; GetStore() would throw it away.
+	stores map[string]cache.Indexer
+	synced atomic.Bool // true after the MAIN factory's WaitForCacheSync succeeds
+	// crdFactory is a separate SharedInformerFactory for CustomResourceDefinition:
+	// apiextensions.k8s.io isn't part of kubernetes.Interface, so it needs its own
+	// clientset. nil if that clientset failed to construct — CRDs then keep using
+	// the direct API fallback, same as any other uncached kind.
+	crdFactory apiextensionsinformers.SharedInformerFactory
+	// crdSynced tracks the CRD factory's own sync state, deliberately SEPARATE from
+	// `synced` above. CustomResourceDefinition is cluster-scoped and commonly outside
+	// a restricted/viewer-style ServiceAccount's RBAC (unlike namespaced resources) —
+	// if its sync were ANDed into the same global flag as the other ~34 kinds (as it
+	// was in an earlier version of this code), one cluster lacking CRD watch/list
+	// permission would silently and permanently disable the ENTIRE cache — pods,
+	// deployments, services, everything — not just CRDs. See docs/ai/KNOWN-ISSUES.md.
+	crdSynced atomic.Bool
+
+	// apiServiceFactory is a separate SharedInformerFactory for APIService:
+	// apiregistration.k8s.io isn't part of kubernetes.Interface either, same
+	// reasoning as crdFactory above. nil if client.Config is nil or the
+	// clientset failed to construct — APIService then falls back to the
+	// direct API, same as any other uncached kind.
+	apiServiceFactory kubeaggregatorinformers.SharedInformerFactory
+	// vpaFactory is a separate SharedInformerFactory for VerticalPodAutoscaler:
+	// autoscaling.k8s.io has no typed client in client-go — it needs the VPA
+	// project's own generated clientset. Same nil-safety reasoning as
+	// apiServiceFactory above.
+	vpaFactory vpainformers.SharedInformerFactory
+	// draFactory is a SEPARATE SharedInformerFactory (built from the SAME
+	// client.Clientset as the main factory — resource.k8s.io informers are
+	// already part of kubernetes.Interface, no new dependency needed) for
+	// ResourceSlice/DeviceClass. It must stay separate from im.factory: DRA
+	// is version-skewed across Kubernetes releases (v1alpha3/v1beta1/
+	// v1beta2/v1 GA) and plenty of clusters don't serve it at all, so if its
+	// informers were registered on the main factory, a cluster that doesn't
+	// serve draVersion would permanently fail ONE informer's sync forever —
+	// which, before this separation, ANDed into mainSynced and would have
+	// silently disabled the cache-first path for pods/deployments/every
+	// other kind too. Nil if discoverDRAVersion found no servable version.
+	// See docs/ai/KNOWN-ISSUES.md.
+	draFactory informers.SharedInformerFactory
+	// draVersion is the resource.k8s.io version discoverDRAVersion picked
+	// for this cluster ("v1", "v1beta2", or "v1beta1"); empty if draFactory
+	// is nil.
+	draVersion string
+	// auxFactories generalizes the crdFactory/crdSynced pattern above for
+	// every aux factory ADDED AFTER CRD (APIService, VPA now; DRA follows the
+	// same shape later) — each tracked with its own independent sync flag,
+	// routed to by kindSynced via auxByKind, so a kind's RBAC gap can only
+	// ever disable ITS OWN aux factory's cache-first path. CRD itself keeps
+	// its original hand-written fields above rather than being migrated
+	// into this slice, to avoid touching its already-hardened, separately
+	// regression-tested isolation behavior (informer_coverage_gap_test.go).
+	auxFactories []*auxInformerFactory
+	auxByKind    map[string]*auxInformerFactory
+}
+
+// syncableFactory is the subset of a generated SharedInformerFactory's
+// interface needed to start it and track its own sync state — satisfied by
+// every k8s.io code-generated informers package (kube-aggregator today; VPA
+// and the DRA client later), letting auxInformerFactory share one
+// implementation instead of hand-duplicating crdFactory/crdSynced per kind.
+type syncableFactory interface {
+	Start(stopCh <-chan struct{})
+	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
+}
+
+// auxInformerFactory is a secondary informer factory for an API group that
+// isn't part of kubernetes.Interface, backing one or more store keys with
+// its own independent sync flag (see the crdSynced field comment for why
+// that independence matters).
+type auxInformerFactory struct {
+	name    string // for logging, e.g. "APIService"
+	factory syncableFactory
+	synced  atomic.Bool
+	kinds   map[string]bool // storeKeys backed by this factory
+}
+
+// draCandidateVersions are the resource.k8s.io versions this backend knows
+// typed informers for, in decreasing order of GA-ness. DRA has moved
+// v1alpha2 -> v1alpha3 -> v1beta1 -> v1beta2 -> v1 (GA) across Kubernetes
+// releases; v1alpha3 no longer carries ResourceSlice/DeviceClass in this
+// client-go version (narrowed to DeviceTaintRule only), so it's excluded
+// here — a cluster that old simply won't match any candidate and falls
+// back to the direct API, same as before this change.
+var draCandidateVersions = []string{"v1", "v1beta2", "v1beta1"}
+
+// clusterServesResources reports whether the connected cluster's API server
+// currently serves every named resource under the given "group/version"
+// string. Used to gate every aux informer whose API group may not be
+// installed at all (VPA, DRA) — constructing a generated clientset never
+// fails just because its CRD is missing (it's just an HTTP client for a
+// URL path), but STARTING that informer against a nonexistent resource
+// makes the reflector retry a 404 forever, spamming logs with "could not
+// find the requested resource" on every cluster that doesn't have it
+// installed — the common case for both VPA and DRA. Checking first avoids
+// ever registering an informer that can't possibly succeed.
+func clusterServesResources(client *Client, groupVersion string, resourceNames ...string) bool {
+	if client == nil || client.Clientset == nil {
+		return false
+	}
+	list, err := client.Clientset.Discovery().ServerResourcesForGroupVersion(groupVersion)
+	if err != nil || list == nil {
+		return false
+	}
+	served := make(map[string]bool, len(list.APIResources))
+	for _, r := range list.APIResources {
+		served[r.Name] = true
+	}
+	for _, name := range resourceNames {
+		if !served[name] {
+			return false
+		}
+	}
+	return true
+}
+
+// discoverDRAVersion returns the first candidate version the connected
+// cluster's API server actually serves BOTH ResourceSlice and DeviceClass
+// under, or ("", false) if none match (DRA disabled entirely, or served
+// only under a version this backend doesn't have a typed informer for).
+// Hardcoding one version (e.g. always v1) would make the informer for any
+// cluster not yet on that exact version fail to sync forever — see the
+// draFactory field comment for why that must never be allowed to leak into
+// other kinds' sync state, and docs/ai/KNOWN-ISSUES.md for the history.
+func discoverDRAVersion(client *Client) (string, bool) {
+	if client == nil || client.Clientset == nil {
+		return "", false
+	}
+	for _, v := range draCandidateVersions {
+		if clusterServesResources(client, "resource.k8s.io/"+v, "resourceslices", "deviceclasses") {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // NewInformerManager creates a new informer manager
@@ -42,13 +186,59 @@ func NewInformerManager(client *Client) *InformerManager {
 	// a safety net for missed events, not a data source.
 	factory := informers.NewSharedInformerFactory(client.Clientset, 5*time.Minute)
 
-	return &InformerManager{
-		client:   client,
-		factory:  factory,
-		stopCh:   make(chan struct{}),
-		handlers: make(map[string]ResourceEventHandler),
-		stores:   make(map[string]cache.Store),
+	im := &InformerManager{
+		client:    client,
+		factory:   factory,
+		stopCh:    make(chan struct{}),
+		handlers:  make(map[string]ResourceEventHandler),
+		stores:    make(map[string]cache.Indexer),
+		auxByKind: make(map[string]*auxInformerFactory),
 	}
+
+	// client.Config is nil for test-only clients (NewClientForTest) — apiextensionsclientset.NewForConfig
+	// panics on a nil *rest.Config rather than returning an error, so this must be checked first.
+	if client.Config != nil {
+		if crdClient, err := apiextensionsclientset.NewForConfig(client.Config); err == nil {
+			im.crdFactory = apiextensionsinformers.NewSharedInformerFactory(crdClient, 5*time.Minute)
+		} else {
+			log.Printf("informer manager: CustomResourceDefinition caching disabled (apiextensions clientset: %v); CRD reads will use the direct API fallback", err)
+		}
+
+		if asClient, err := kubeaggregatorclientset.NewForConfig(client.Config); err == nil {
+			im.apiServiceFactory = kubeaggregatorinformers.NewSharedInformerFactory(asClient, 5*time.Minute)
+		} else {
+			log.Printf("informer manager: APIService caching disabled (kube-aggregator clientset: %v); APIService reads will use the direct API fallback", err)
+		}
+
+		// Most clusters don't install the VPA CRDs at all. Building the
+		// clientset above never fails for that reason (it's just an HTTP
+		// client for a URL path) — only actually starting an informer
+		// against a resource the server doesn't have would fail, and would
+		// do so by retrying a 404 forever, spamming logs. Check first via
+		// clusterServesResources (same reasoning as DRA's version
+		// negotiation below) rather than finding out by trying.
+		if clusterServesResources(client, "autoscaling.k8s.io/v1", "verticalpodautoscalers") {
+			if vpaClient, err := vpaclientset.NewForConfig(client.Config); err == nil {
+				im.vpaFactory = vpainformers.NewSharedInformerFactory(vpaClient, 5*time.Minute)
+			} else {
+				log.Printf("informer manager: VerticalPodAutoscaler caching disabled (VPA clientset: %v); VPA reads will use the direct API fallback", err)
+			}
+		} else {
+			log.Printf("informer manager: VerticalPodAutoscaler caching disabled (cluster does not serve autoscaling.k8s.io/v1 verticalpodautoscalers — VPA likely not installed); VPA reads will use the direct API fallback")
+		}
+	}
+
+	// ResourceSlice/DeviceClass (DRA): negotiate the version this specific
+	// cluster actually serves rather than hardcoding one — see draVersion's
+	// field comment and discoverDRAVersion below.
+	if version, ok := discoverDRAVersion(client); ok {
+		im.draVersion = version
+		im.draFactory = informers.NewSharedInformerFactory(client.Clientset, 5*time.Minute)
+	} else {
+		log.Printf("informer manager: ResourceSlice/DeviceClass caching disabled (cluster does not serve resource.k8s.io under v1, v1beta2, or v1beta1); DRA reads will use the direct API fallback")
+	}
+
+	return im
 }
 
 // RegisterHandler registers an event handler for a resource type
@@ -101,8 +291,89 @@ func (im *InformerManager) Start(ctx context.Context) error {
 	// Policy resources
 	im.setupPodDisruptionBudgetInformer()
 
+	// Oct 2026 informer-cache coverage-gap kinds (docs/ai/KNOWN-ISSUES.md) —
+	// same client-go SharedInformerFactory as everything above, all stable/GA
+	// APIs, so no new sync-compatibility risk.
+	im.setupInformer("ResourceQuota", im.factory.Core().V1().ResourceQuotas().Informer())
+	im.setupInformer("LimitRange", im.factory.Core().V1().LimitRanges().Informer())
+	im.setupInformer("EndpointSlice", im.factory.Discovery().V1().EndpointSlices().Informer())
+	im.setupInformer("Lease", im.factory.Coordination().V1().Leases().Informer())
+	im.setupInformer("VolumeAttachment", im.factory.Storage().V1().VolumeAttachments().Informer())
+	im.setupInformer("MutatingWebhookConfiguration", im.factory.Admissionregistration().V1().MutatingWebhookConfigurations().Informer())
+	im.setupInformer("ValidatingWebhookConfiguration", im.factory.Admissionregistration().V1().ValidatingWebhookConfigurations().Informer())
+
+	// CustomResourceDefinition uses the separate apiextensions clientset/factory
+	// built in NewInformerManager; only registered if that clientset is available.
+	if im.crdFactory != nil {
+		im.setupInformer("CustomResourceDefinition", im.crdFactory.Apiextensions().V1().CustomResourceDefinitions().Informer())
+	}
+
+	// APIService uses its own clientset/factory (apiregistration.k8s.io isn't
+	// part of kubernetes.Interface, same reasoning as CRD above), registered
+	// via the generic auxFactories mechanism rather than duplicating
+	// crdFactory's hand-written fields. See docs/ai/KNOWN-ISSUES.md.
+	if im.apiServiceFactory != nil {
+		im.setupInformer("APIService", im.apiServiceFactory.Apiregistration().V1().APIServices().Informer())
+		aux := &auxInformerFactory{name: "APIService", factory: im.apiServiceFactory, kinds: map[string]bool{"APIService": true}}
+		im.auxFactories = append(im.auxFactories, aux)
+		im.auxByKind["APIService"] = aux
+	}
+
+	// VerticalPodAutoscaler uses its own clientset/factory (autoscaling.k8s.io
+	// has no typed client in client-go). Many clusters never install the VPA
+	// CRDs at all — in that case this informer simply never syncs (the API
+	// group/resource doesn't exist to watch), which the independent sync flag
+	// handles correctly: VPA cache-first reads stay permanently disabled on
+	// that cluster while every other kind is unaffected. See
+	// docs/ai/KNOWN-ISSUES.md.
+	if im.vpaFactory != nil {
+		im.setupInformer("VerticalPodAutoscaler", im.vpaFactory.Autoscaling().V1().VerticalPodAutoscalers().Informer())
+		aux := &auxInformerFactory{name: "VerticalPodAutoscaler", factory: im.vpaFactory, kinds: map[string]bool{"VerticalPodAutoscaler": true}}
+		im.auxFactories = append(im.auxFactories, aux)
+		im.auxByKind["VerticalPodAutoscaler"] = aux
+	}
+
+	// ResourceSlice/DeviceClass (DRA) — draFactory is only non-nil when
+	// discoverDRAVersion (in NewInformerManager) found a version this
+	// cluster actually serves both resources under. Deliberately a
+	// SEPARATE SharedInformerFactory from im.factory even though
+	// resource.k8s.io informers live in the same client-go package — see
+	// the draFactory field comment for why.
+	if im.draFactory != nil {
+		var sliceInformer, classInformer cache.SharedIndexInformer
+		switch im.draVersion {
+		case "v1":
+			sliceInformer = im.draFactory.Resource().V1().ResourceSlices().Informer()
+			classInformer = im.draFactory.Resource().V1().DeviceClasses().Informer()
+		case "v1beta2":
+			sliceInformer = im.draFactory.Resource().V1beta2().ResourceSlices().Informer()
+			classInformer = im.draFactory.Resource().V1beta2().DeviceClasses().Informer()
+		case "v1beta1":
+			sliceInformer = im.draFactory.Resource().V1beta1().ResourceSlices().Informer()
+			classInformer = im.draFactory.Resource().V1beta1().DeviceClasses().Informer()
+		}
+		if sliceInformer != nil && classInformer != nil {
+			im.setupInformer("ResourceSlice", sliceInformer)
+			im.setupInformer("DeviceClass", classInformer)
+			aux := &auxInformerFactory{
+				name:    "DRA(" + im.draVersion + ")",
+				factory: im.draFactory,
+				kinds:   map[string]bool{"ResourceSlice": true, "DeviceClass": true},
+			}
+			im.auxFactories = append(im.auxFactories, aux)
+			im.auxByKind["ResourceSlice"] = aux
+			im.auxByKind["DeviceClass"] = aux
+		}
+	}
+
 	// Start all informers
 	im.factory.Start(im.stopCh)
+	if im.crdFactory != nil {
+		im.crdFactory.Start(im.stopCh)
+	}
+	for _, aux := range im.auxFactories {
+		aux.factory.Start(im.stopCh)
+	}
 
 	// LOADING-5 (docs/PRODUCTION-RELIABILITY-AUDIT.md): WaitForCacheSync(im.stopCh)
 	// previously blocked forever if any single resource type never completed its
@@ -112,8 +383,14 @@ func (im *InformerManager) Start(ctx context.Context) error {
 	// func(){}`), never an HTTP request, but left the cluster's cache permanently
 	// "still warming up" with no actionable signal and no further retry. Bound the
 	// initial wait, then keep retrying in the background instead of giving up.
-	if im.waitForSync(initialSyncTimeout) {
+	mainSynced, crdSynced := im.waitForSync(initialSyncTimeout)
+	if mainSynced {
 		im.synced.Store(true)
+	}
+	if crdSynced {
+		im.crdSynced.Store(true)
+	}
+	if mainSynced && crdSynced {
 		return nil
 	}
 
@@ -124,8 +401,8 @@ func (im *InformerManager) Start(ctx context.Context) error {
 	default:
 	}
 
-	log.Printf("informer cache did not finish initial sync within %s; resource reads for this cluster will use the slower direct API fallback until it succeeds. Retrying in the background every %s.",
-		initialSyncTimeout, syncRetryInterval)
+	log.Printf("informer cache did not finish initial sync within %s (main synced=%t, CRD synced=%t); affected resource reads for this cluster will use the slower direct API fallback until it succeeds. Retrying in the background every %s.",
+		initialSyncTimeout, mainSynced, crdSynced, syncRetryInterval)
 	go im.retrySyncInBackground()
 	return fmt.Errorf("informer cache sync did not complete within %s; continuing to retry in background", initialSyncTimeout)
 }
@@ -141,8 +418,14 @@ const (
 
 // waitForSync blocks until every registered informer cache reports synced,
 // the manager is stopped, or timeout elapses — whichever happens first.
-// Returns true only if every cache reported synced before giving up.
-func (im *InformerManager) waitForSync(timeout time.Duration) bool {
+// Returns (mainSynced, crdSynced) independently — deliberately NOT ANDed
+// into one bool. CustomResourceDefinition is cluster-scoped and commonly
+// outside a restricted ServiceAccount's RBAC; if its factory's sync were
+// coupled to the main factory's, one cluster lacking CRD permissions would
+// permanently disable caching for pods/deployments/everything else too, not
+// just CRDs. crdSynced is always true when crdFactory is nil (nothing to
+// wait for).
+func (im *InformerManager) waitForSync(timeout time.Duration) (mainSynced, crdSynced bool) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
@@ -168,13 +451,74 @@ func (im *InformerManager) waitForSync(timeout time.Duration) bool {
 		close(giveUp)
 	}()
 
-	syncMap := im.factory.WaitForCacheSync(giveUp)
-	for _, ok := range syncMap {
-		if !ok {
-			return false
+	mainSynced = true
+	crdSynced = im.crdFactory == nil
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	checkSync := func(syncMap map[reflect.Type]bool, ok *bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		for informerType, synced := range syncMap {
+			if !synced {
+				*ok = false
+				log.Printf("informer cache sync: %s did not sync within the timeout (commonly RBAC — this service account may lack list/watch on that resource; the cache-first perf path stays permanently disabled for this specific kind on this cluster until it does)", informerType)
+			}
 		}
 	}
-	return true
+
+	// Both factories share stopCh/giveUp, so waiting on them concurrently keeps
+	// the total wait bounded by one timeout instead of two sequential ones.
+	// Every backend goroutine needs defer recover() (docs/ai/ARCHITECTURE.md) —
+	// without it, a panic inside client-go's WaitForCacheSync crashes the
+	// entire backend process, not just this cluster's warm-up.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Default().Error("panic in informer cache-sync goroutine (main factory)", "error", r)
+			}
+		}()
+		checkSync(im.factory.WaitForCacheSync(giveUp), &mainSynced)
+	}()
+	if im.crdFactory != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Default().Error("panic in informer cache-sync goroutine (CRD factory)", "error", r)
+				}
+			}()
+			checkSync(im.crdFactory.WaitForCacheSync(giveUp), &crdSynced)
+		}()
+	}
+	// Each aux factory (APIService today; VPA/DRA later) is waited on the
+	// same way as CRD above, but stores its result directly into its own
+	// atomic.Bool rather than this function's return tuple — kindSynced
+	// reads it directly via auxByKind, so a slow/RBAC-denied aux factory
+	// never blocks or is conflated with mainSynced/crdSynced.
+	for _, aux := range im.auxFactories {
+		aux := aux
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Default().Error("panic in informer cache-sync goroutine ("+aux.name+" factory)", "error", r)
+				}
+			}()
+			ok := true
+			checkSync(aux.factory.WaitForCacheSync(giveUp), &ok)
+			if ok {
+				aux.synced.Store(true)
+			}
+		}()
+	}
+	wg.Wait()
+
+	return mainSynced, crdSynced
 }
 
 // retrySyncInBackground polls (non-blocking) for sync completion every
@@ -182,41 +526,123 @@ func (im *InformerManager) waitForSync(timeout time.Duration) bool {
 // after the initial bounded wait in Start() gave up without every cache
 // having synced.
 func (im *InformerManager) retrySyncInBackground() {
+	// Every backend goroutine needs this (see docs/ai/ARCHITECTURE.md) — an
+	// unrecovered panic here previously would have crashed the entire backend
+	// process for every connected cluster, not just stopped this retry loop.
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Default().Error("panic in informer cache-sync background retry loop", "error", r)
+		}
+	}()
+
 	ticker := time.NewTicker(syncRetryInterval)
 	defer ticker.Stop()
 
 	alreadyClosed := make(chan struct{})
 	close(alreadyClosed)
 
+	// Diagnostic logging of which informer(s) are stuck (e.g. permanently
+	// RBAC-blocked) fires every 10th tick (~5min) instead of every tick, so a
+	// cluster that never finishes syncing doesn't spam the log forever.
+	tick := 0
+	const diagnosticEvery = 10
+
 	for {
 		select {
 		case <-im.stopCh:
 			return
 		case <-ticker.C:
+			tick++
 			// Non-blocking poll: an already-closed stop channel makes
 			// WaitForCacheSync return immediately with current state.
-			syncMap := im.factory.WaitForCacheSync(alreadyClosed)
-			allSynced := true
-			for _, ok := range syncMap {
-				if !ok {
-					allSynced = false
+			// main and CRD are tracked and stored independently — see the
+			// comment on crdSynced in the struct definition above for why
+			// they must not be ANDed into one flag.
+			if !im.synced.Load() {
+				mainOK := true
+				for informerType, ok := range im.factory.WaitForCacheSync(alreadyClosed) {
+					if !ok {
+						mainOK = false
+						if tick%diagnosticEvery == 0 {
+							log.Printf("informer cache sync: %s still not synced after retrying in the background — commonly RBAC; the cache-first perf path stays disabled for this kind on this cluster until it does", informerType)
+						}
+					}
+				}
+				if mainOK {
+					im.synced.Store(true)
+					log.Printf("informer cache (main) finished initial sync after retrying in the background")
+				}
+			}
+			if im.crdFactory != nil && !im.crdSynced.Load() {
+				crdOK := true
+				for informerType, ok := range im.crdFactory.WaitForCacheSync(alreadyClosed) {
+					if !ok {
+						crdOK = false
+						if tick%diagnosticEvery == 0 {
+							log.Printf("informer cache sync: %s still not synced after retrying in the background — commonly RBAC; the CRD cache stays disabled for this cluster until it does (other resource kinds are unaffected)", informerType)
+						}
+					}
+				}
+				if crdOK {
+					im.crdSynced.Store(true)
+					log.Printf("informer cache (CRD) finished initial sync after retrying in the background")
+				}
+			}
+			for _, aux := range im.auxFactories {
+				if aux.synced.Load() {
+					continue
+				}
+				ok := true
+				for informerType, synced := range aux.factory.WaitForCacheSync(alreadyClosed) {
+					if !synced {
+						ok = false
+						if tick%diagnosticEvery == 0 {
+							log.Printf("informer cache sync: %s still not synced after retrying in the background — commonly RBAC; the %s cache stays disabled for this cluster until it does (other resource kinds are unaffected)", informerType, aux.name)
+						}
+					}
+				}
+				if ok {
+					aux.synced.Store(true)
+					log.Printf("informer cache (%s) finished initial sync after retrying in the background", aux.name)
+				}
+			}
+
+			allAuxSynced := true
+			for _, aux := range im.auxFactories {
+				if !aux.synced.Load() {
+					allAuxSynced = false
 					break
 				}
 			}
-			if allSynced {
-				im.synced.Store(true)
-				log.Printf("informer cache finished initial sync after retrying in the background")
+			if im.synced.Load() && (im.crdFactory == nil || im.crdSynced.Load()) && allAuxSynced {
 				return
 			}
 		}
 	}
 }
 
-// HasSynced returns true after all informer caches have completed their
-// initial list+watch sync. Before this returns true, ListFromCache will
-// return (nil, false) to force a direct API call.
+// HasSynced returns true after the MAIN factory's informer caches have
+// completed their initial list+watch sync (~34 kinds — everything except
+// CustomResourceDefinition, which syncs via a separate factory/flag; see
+// crdSynced). Before this returns true, ListFromCache will return
+// (nil, false) for those kinds to force a direct API call.
 func (im *InformerManager) HasSynced() bool {
 	return im.synced.Load()
+}
+
+// kindSynced reports whether the specific store key's backing informer has
+// completed its initial sync — CustomResourceDefinition checks crdSynced
+// (its own, separately-tracked factory), everything else checks the main
+// HasSynced(). Deliberately per-kind rather than a single blanket check: see
+// the crdSynced field comment for why that distinction matters.
+func (im *InformerManager) kindSynced(storeKey string) bool {
+	if storeKey == "CustomResourceDefinition" {
+		return im.crdSynced.Load()
+	}
+	if aux, ok := im.auxByKind[storeKey]; ok {
+		return aux.synced.Load()
+	}
+	return im.HasSynced()
 }
 
 // resourceKindToStoreKey maps the lowercase-plural resource type used in REST URLs
@@ -249,6 +675,30 @@ var resourceKindToStoreKey = map[string]string{
 	"storageclasses":           "StorageClass",
 	"horizontalpodautoscalers": "HorizontalPodAutoscaler",
 	"poddisruptionbudgets":     "PodDisruptionBudget",
+
+	// Oct 2026 coverage-gap kinds (docs/ai/KNOWN-ISSUES.md) — see setupInformer
+	// call sites in Start() for the informers backing these.
+	"resourcequotas":                  "ResourceQuota",
+	"limitranges":                     "LimitRange",
+	"endpointslices":                  "EndpointSlice",
+	"leases":                          "Lease",
+	"volumeattachments":               "VolumeAttachment",
+	"mutatingwebhookconfigurations":   "MutatingWebhookConfiguration",
+	"validatingwebhookconfigurations": "ValidatingWebhookConfiguration",
+	"customresourcedefinitions":       "CustomResourceDefinition",
+
+	// APIService: separate kube-aggregator clientset/factory, same reasoning
+	// as CustomResourceDefinition above — see auxFactories in informer.go.
+	"apiservices": "APIService",
+
+	// VerticalPodAutoscaler: separate VPA-project clientset/factory, same
+	// auxFactories mechanism — see informer.go.
+	"verticalpodautoscalers": "VerticalPodAutoscaler",
+
+	// ResourceSlice/DeviceClass (DRA): separate version-negotiated factory
+	// (draFactory), same auxFactories mechanism — see informer.go.
+	"resourceslices": "ResourceSlice",
+	"deviceclasses":  "DeviceClass",
 }
 
 // ListFromCache reads resources from the in-memory informer cache.
@@ -262,11 +712,6 @@ var resourceKindToStoreKey = map[string]string{
 // Supports optional namespace filtering and basic limit/offset pagination.
 // Label selectors and field selectors are NOT supported — cache miss.
 func (im *InformerManager) ListFromCache(resourceType, namespace string, opts metav1.ListOptions) (*unstructured.UnstructuredList, bool) {
-	// Cannot serve from cache if informers haven't synced yet
-	if !im.HasSynced() {
-		return nil, false
-	}
-
 	// Label/field selectors require server-side filtering — cache miss
 	if opts.LabelSelector != "" || opts.FieldSelector != "" {
 		return nil, false
@@ -283,13 +728,34 @@ func (im *InformerManager) ListFromCache(resourceType, namespace string, opts me
 		return nil, false
 	}
 
-	store := im.stores[storeKey]
-	if store == nil {
+	// Cannot serve from cache if THIS kind's informer hasn't synced yet —
+	// checked per-kind, not via a single blanket flag (see kindSynced).
+	if !im.kindSynced(storeKey) {
 		return nil, false
 	}
 
-	// Read all items from the informer store (lock-free, O(n))
-	items := store.List()
+	indexer := im.stores[storeKey]
+	if indexer == nil {
+		return nil, false
+	}
+
+	// Namespace-scoped reads use the NamespaceIndex client-go's generated
+	// informers already register (cache.Indexers{cache.NamespaceIndex:
+	// cache.MetaNamespaceIndexFunc}) — O(1) bucket lookup instead of an O(n)
+	// scan of every item in the cluster to find the ones in this namespace.
+	var items []interface{}
+	if namespace != "" {
+		byNS, err := indexer.ByIndex(cache.NamespaceIndex, namespace)
+		if err != nil {
+			// Index unexpectedly missing/broken — fall back to a live call
+			// rather than silently returning an empty or wrong result.
+			return nil, false
+		}
+		items = byNS
+	} else {
+		items = indexer.List()
+	}
+
 	result := &unstructured.UnstructuredList{}
 	skipped := 0
 
@@ -300,14 +766,7 @@ func (im *InformerManager) ListFromCache(resourceType, namespace string, opts me
 			skipped++
 			continue
 		}
-		u := unstructured.Unstructured{Object: obj}
-
-		// Namespace filter
-		if namespace != "" && u.GetNamespace() != namespace {
-			continue
-		}
-
-		result.Items = append(result.Items, u)
+		result.Items = append(result.Items, unstructured.Unstructured{Object: obj})
 	}
 	if skipped > 0 {
 		log.Printf("ListFromCache: skipped %d/%d items (%s) due to conversion errors", skipped, len(items), resourceType)
@@ -319,6 +778,40 @@ func (im *InformerManager) ListFromCache(resourceType, namespace string, opts me
 	}
 
 	return result, true
+}
+
+// ListTypedFromCache is the exported, cross-package counterpart to the
+// unexported cacheItemsAs/cachedTypedItems helpers in internal/api/rest and
+// internal/service (same pattern, kept separate rather than refactored to
+// share one implementation, since those two are already shipped/tested and
+// this is for a new caller — internal/topology/v2 — that cannot import
+// their unexported helpers). Reads resourceType from the informer cache via
+// ListFromCache, converting each item to T and skipping (with a logged
+// count) any that fail to convert. Returns (nil, false) when the cache is
+// unavailable, not yet synced, or the resource type is untracked — callers
+// fall back to a live API call.
+func ListTypedFromCache[T any](im *InformerManager, resourceType, namespace string, opts metav1.ListOptions) ([]T, bool) {
+	if im == nil {
+		return nil, false
+	}
+	cached, ok := im.ListFromCache(resourceType, namespace, opts)
+	if !ok || cached == nil {
+		return nil, false
+	}
+	items := make([]T, 0, len(cached.Items))
+	skipped := 0
+	for _, u := range cached.Items {
+		var item T
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &item); err == nil {
+			items = append(items, item)
+		} else {
+			skipped++
+		}
+	}
+	if skipped > 0 {
+		log.Printf("ListTypedFromCache[%T]: skipped %d/%d cached %s items due to conversion errors", *new(T), skipped, len(cached.Items), resourceType)
+	}
+	return items, true
 }
 
 // CacheListResult holds paginated cache results with metadata.
@@ -335,24 +828,35 @@ type CacheListResult struct {
 // - offset: skip first N items (for page navigation)
 // - limit: max items to return (0 = all)
 func (im *InformerManager) ListFromCacheWithPagination(resourceType, namespace string, search string, sortBy string, sortOrder string, offset int, limit int) (*CacheListResult, bool) {
-	// Cannot serve from cache if informers haven't synced yet
-	if !im.HasSynced() {
-		return nil, false
-	}
-
 	// Map resource type to store key
 	storeKey, ok := resourceKindToStoreKey[strings.ToLower(resourceType)]
 	if !ok {
 		return nil, false
 	}
 
-	store := im.stores[storeKey]
-	if store == nil {
+	// Cannot serve from cache if THIS kind's informer hasn't synced yet —
+	// checked per-kind, not via a single blanket flag (see kindSynced).
+	if !im.kindSynced(storeKey) {
 		return nil, false
 	}
 
-	// Read all items from the informer store (lock-free, O(n))
-	rawItems := store.List()
+	indexer := im.stores[storeKey]
+	if indexer == nil {
+		return nil, false
+	}
+
+	// Namespace-scoped reads use the NamespaceIndex (see ListFromCache) for
+	// an O(1) bucket lookup instead of scanning every item in the cluster.
+	var rawItems []interface{}
+	if namespace != "" {
+		byNS, err := indexer.ByIndex(cache.NamespaceIndex, namespace)
+		if err != nil {
+			return nil, false
+		}
+		rawItems = byNS
+	} else {
+		rawItems = indexer.List()
+	}
 
 	normalizedSortBy := strings.ToLower(sortBy)
 	if normalizedSortBy == "" {
@@ -386,10 +890,7 @@ func (im *InformerManager) ListFromCacheWithPagination(resourceType, namespace s
 		}
 		u := unstructured.Unstructured{Object: obj}
 
-		// Namespace filter
-		if namespace != "" && u.GetNamespace() != namespace {
-			continue
-		}
+		// Namespace filtering already happened above via the NamespaceIndex.
 
 		// Search filter: case-insensitive substring on name or namespace
 		if searchLower != "" {
@@ -633,10 +1134,36 @@ func (im *InformerManager) GetStore(resourceType string) cache.Store {
 	return im.stores[resourceType]
 }
 
+// setupInformer wires a store + ADDED/MODIFIED/DELETED event dispatch for a
+// kind, generically. Introduced for the Oct 2026 coverage-gap kinds (below)
+// to avoid repeating the ~20-line pattern the 27 hand-written setup*Informer
+// funcs above each already have — those are left as-is rather than migrated,
+// keeping this change a pure addition.
+func (im *InformerManager) setupInformer(kind string, informer cache.SharedIndexInformer) {
+	im.stores[kind] = informer.GetIndexer()
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			if handler, ok := im.handlers[kind]; ok {
+				handler("ADDED", obj)
+			}
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			if handler, ok := im.handlers[kind]; ok {
+				handler("MODIFIED", newObj)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			if handler, ok := im.handlers[kind]; ok {
+				handler("DELETED", obj)
+			}
+		},
+	})
+}
+
 // setupPodInformer sets up Pod informer
 func (im *InformerManager) setupPodInformer() {
 	informer := im.factory.Core().V1().Pods().Informer()
-	im.stores["Pod"] = informer.GetStore()
+	im.stores["Pod"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Pod"]; ok {
@@ -659,7 +1186,7 @@ func (im *InformerManager) setupPodInformer() {
 // setupServiceInformer sets up Service informer
 func (im *InformerManager) setupServiceInformer() {
 	informer := im.factory.Core().V1().Services().Informer()
-	im.stores["Service"] = informer.GetStore()
+	im.stores["Service"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Service"]; ok {
@@ -682,7 +1209,7 @@ func (im *InformerManager) setupServiceInformer() {
 // setupDeploymentInformer sets up Deployment informer
 func (im *InformerManager) setupDeploymentInformer() {
 	informer := im.factory.Apps().V1().Deployments().Informer()
-	im.stores["Deployment"] = informer.GetStore()
+	im.stores["Deployment"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Deployment"]; ok {
@@ -705,7 +1232,7 @@ func (im *InformerManager) setupDeploymentInformer() {
 // setupReplicaSetInformer sets up ReplicaSet informer
 func (im *InformerManager) setupReplicaSetInformer() {
 	informer := im.factory.Apps().V1().ReplicaSets().Informer()
-	im.stores["ReplicaSet"] = informer.GetStore()
+	im.stores["ReplicaSet"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["ReplicaSet"]; ok {
@@ -728,7 +1255,7 @@ func (im *InformerManager) setupReplicaSetInformer() {
 // setupStatefulSetInformer sets up StatefulSet informer
 func (im *InformerManager) setupStatefulSetInformer() {
 	informer := im.factory.Apps().V1().StatefulSets().Informer()
-	im.stores["StatefulSet"] = informer.GetStore()
+	im.stores["StatefulSet"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["StatefulSet"]; ok {
@@ -751,7 +1278,7 @@ func (im *InformerManager) setupStatefulSetInformer() {
 // setupDaemonSetInformer sets up DaemonSet informer
 func (im *InformerManager) setupDaemonSetInformer() {
 	informer := im.factory.Apps().V1().DaemonSets().Informer()
-	im.stores["DaemonSet"] = informer.GetStore()
+	im.stores["DaemonSet"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["DaemonSet"]; ok {
@@ -774,7 +1301,7 @@ func (im *InformerManager) setupDaemonSetInformer() {
 // setupJobInformer sets up Job informer
 func (im *InformerManager) setupJobInformer() {
 	informer := im.factory.Batch().V1().Jobs().Informer()
-	im.stores["Job"] = informer.GetStore()
+	im.stores["Job"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Job"]; ok {
@@ -797,7 +1324,7 @@ func (im *InformerManager) setupJobInformer() {
 // setupCronJobInformer sets up CronJob informer
 func (im *InformerManager) setupCronJobInformer() {
 	informer := im.factory.Batch().V1().CronJobs().Informer()
-	im.stores["CronJob"] = informer.GetStore()
+	im.stores["CronJob"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["CronJob"]; ok {
@@ -820,7 +1347,7 @@ func (im *InformerManager) setupCronJobInformer() {
 // setupConfigMapInformer sets up ConfigMap informer
 func (im *InformerManager) setupConfigMapInformer() {
 	informer := im.factory.Core().V1().ConfigMaps().Informer()
-	im.stores["ConfigMap"] = informer.GetStore()
+	im.stores["ConfigMap"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["ConfigMap"]; ok {
@@ -843,7 +1370,7 @@ func (im *InformerManager) setupConfigMapInformer() {
 // setupSecretInformer sets up Secret informer
 func (im *InformerManager) setupSecretInformer() {
 	informer := im.factory.Core().V1().Secrets().Informer()
-	im.stores["Secret"] = informer.GetStore()
+	im.stores["Secret"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Secret"]; ok {
@@ -866,7 +1393,7 @@ func (im *InformerManager) setupSecretInformer() {
 // setupNodeInformer sets up Node informer
 func (im *InformerManager) setupNodeInformer() {
 	informer := im.factory.Core().V1().Nodes().Informer()
-	im.stores["Node"] = informer.GetStore()
+	im.stores["Node"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Node"]; ok {
@@ -889,7 +1416,7 @@ func (im *InformerManager) setupNodeInformer() {
 // setupNamespaceInformer sets up Namespace informer
 func (im *InformerManager) setupNamespaceInformer() {
 	informer := im.factory.Core().V1().Namespaces().Informer()
-	im.stores["Namespace"] = informer.GetStore()
+	im.stores["Namespace"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Namespace"]; ok {
@@ -912,7 +1439,7 @@ func (im *InformerManager) setupNamespaceInformer() {
 // setupPersistentVolumeInformer sets up PersistentVolume informer
 func (im *InformerManager) setupPersistentVolumeInformer() {
 	informer := im.factory.Core().V1().PersistentVolumes().Informer()
-	im.stores["PersistentVolume"] = informer.GetStore()
+	im.stores["PersistentVolume"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["PersistentVolume"]; ok {
@@ -935,7 +1462,7 @@ func (im *InformerManager) setupPersistentVolumeInformer() {
 // setupPersistentVolumeClaimInformer sets up PersistentVolumeClaim informer
 func (im *InformerManager) setupPersistentVolumeClaimInformer() {
 	informer := im.factory.Core().V1().PersistentVolumeClaims().Informer()
-	im.stores["PersistentVolumeClaim"] = informer.GetStore()
+	im.stores["PersistentVolumeClaim"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["PersistentVolumeClaim"]; ok {
@@ -958,7 +1485,7 @@ func (im *InformerManager) setupPersistentVolumeClaimInformer() {
 // setupServiceAccountInformer sets up ServiceAccount informer
 func (im *InformerManager) setupServiceAccountInformer() {
 	informer := im.factory.Core().V1().ServiceAccounts().Informer()
-	im.stores["ServiceAccount"] = informer.GetStore()
+	im.stores["ServiceAccount"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["ServiceAccount"]; ok {
@@ -981,7 +1508,7 @@ func (im *InformerManager) setupServiceAccountInformer() {
 // setupEndpointsInformer sets up Endpoints informer
 func (im *InformerManager) setupEndpointsInformer() {
 	informer := im.factory.Core().V1().Endpoints().Informer()
-	im.stores["Endpoints"] = informer.GetStore()
+	im.stores["Endpoints"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Endpoints"]; ok {
@@ -1004,7 +1531,7 @@ func (im *InformerManager) setupEndpointsInformer() {
 // setupEventInformer sets up Event informer
 func (im *InformerManager) setupEventInformer() {
 	informer := im.factory.Core().V1().Events().Informer()
-	im.stores["Event"] = informer.GetStore()
+	im.stores["Event"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Event"]; ok {
@@ -1027,7 +1554,7 @@ func (im *InformerManager) setupEventInformer() {
 // setupIngressInformer sets up Ingress informer
 func (im *InformerManager) setupIngressInformer() {
 	informer := im.factory.Networking().V1().Ingresses().Informer()
-	im.stores["Ingress"] = informer.GetStore()
+	im.stores["Ingress"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Ingress"]; ok {
@@ -1050,7 +1577,7 @@ func (im *InformerManager) setupIngressInformer() {
 // setupIngressClassInformer sets up IngressClass informer
 func (im *InformerManager) setupIngressClassInformer() {
 	informer := im.factory.Networking().V1().IngressClasses().Informer()
-	im.stores["IngressClass"] = informer.GetStore()
+	im.stores["IngressClass"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["IngressClass"]; ok {
@@ -1073,7 +1600,7 @@ func (im *InformerManager) setupIngressClassInformer() {
 // setupNetworkPolicyInformer sets up NetworkPolicy informer
 func (im *InformerManager) setupNetworkPolicyInformer() {
 	informer := im.factory.Networking().V1().NetworkPolicies().Informer()
-	im.stores["NetworkPolicy"] = informer.GetStore()
+	im.stores["NetworkPolicy"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["NetworkPolicy"]; ok {
@@ -1096,7 +1623,7 @@ func (im *InformerManager) setupNetworkPolicyInformer() {
 // setupRoleInformer sets up Role informer
 func (im *InformerManager) setupRoleInformer() {
 	informer := im.factory.Rbac().V1().Roles().Informer()
-	im.stores["Role"] = informer.GetStore()
+	im.stores["Role"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["Role"]; ok {
@@ -1119,7 +1646,7 @@ func (im *InformerManager) setupRoleInformer() {
 // setupRoleBindingInformer sets up RoleBinding informer
 func (im *InformerManager) setupRoleBindingInformer() {
 	informer := im.factory.Rbac().V1().RoleBindings().Informer()
-	im.stores["RoleBinding"] = informer.GetStore()
+	im.stores["RoleBinding"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["RoleBinding"]; ok {
@@ -1142,7 +1669,7 @@ func (im *InformerManager) setupRoleBindingInformer() {
 // setupClusterRoleInformer sets up ClusterRole informer
 func (im *InformerManager) setupClusterRoleInformer() {
 	informer := im.factory.Rbac().V1().ClusterRoles().Informer()
-	im.stores["ClusterRole"] = informer.GetStore()
+	im.stores["ClusterRole"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["ClusterRole"]; ok {
@@ -1165,7 +1692,7 @@ func (im *InformerManager) setupClusterRoleInformer() {
 // setupClusterRoleBindingInformer sets up ClusterRoleBinding informer
 func (im *InformerManager) setupClusterRoleBindingInformer() {
 	informer := im.factory.Rbac().V1().ClusterRoleBindings().Informer()
-	im.stores["ClusterRoleBinding"] = informer.GetStore()
+	im.stores["ClusterRoleBinding"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["ClusterRoleBinding"]; ok {
@@ -1188,7 +1715,7 @@ func (im *InformerManager) setupClusterRoleBindingInformer() {
 // setupStorageClassInformer sets up StorageClass informer
 func (im *InformerManager) setupStorageClassInformer() {
 	informer := im.factory.Storage().V1().StorageClasses().Informer()
-	im.stores["StorageClass"] = informer.GetStore()
+	im.stores["StorageClass"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["StorageClass"]; ok {
@@ -1211,7 +1738,7 @@ func (im *InformerManager) setupStorageClassInformer() {
 // setupHorizontalPodAutoscalerInformer sets up HorizontalPodAutoscaler informer
 func (im *InformerManager) setupHorizontalPodAutoscalerInformer() {
 	informer := im.factory.Autoscaling().V2().HorizontalPodAutoscalers().Informer()
-	im.stores["HorizontalPodAutoscaler"] = informer.GetStore()
+	im.stores["HorizontalPodAutoscaler"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["HorizontalPodAutoscaler"]; ok {
@@ -1234,7 +1761,7 @@ func (im *InformerManager) setupHorizontalPodAutoscalerInformer() {
 // setupPodDisruptionBudgetInformer sets up PodDisruptionBudget informer
 func (im *InformerManager) setupPodDisruptionBudgetInformer() {
 	informer := im.factory.Policy().V1().PodDisruptionBudgets().Informer()
-	im.stores["PodDisruptionBudget"] = informer.GetStore()
+	im.stores["PodDisruptionBudget"] = informer.GetIndexer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if handler, ok := im.handlers["PodDisruptionBudget"]; ok {

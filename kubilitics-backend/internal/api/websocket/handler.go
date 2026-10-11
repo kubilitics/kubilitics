@@ -13,6 +13,7 @@ import (
 	"github.com/kubilitics/kubilitics-backend/internal/config"
 	"github.com/kubilitics/kubilitics-backend/internal/k8s"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/metrics"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/repository"
 )
 
@@ -154,8 +155,8 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	h.hub.register <- client
 
 	// Start client goroutines
-	go client.WritePump()
-	go client.ReadPump()
+	safego.Go("websocket-client-write-pump", client.WritePump)
+	safego.Go("websocket-client-read-pump", client.ReadPump)
 
 	if claims != nil {
 		log.Printf("New authenticated WebSocket client connected: %s (user: %s)", clientID, claims.Username)

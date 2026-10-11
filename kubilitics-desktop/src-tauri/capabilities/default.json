@@ -15,12 +15,12 @@
                 {
                     "name": "binaries/kubilitics-backend",
                     "sidecar": true,
-                    "args": true
+                    "args": false
                 },
                 {
                     "name": "binaries/kcli",
                     "sidecar": true,
-                    "args": true
+                    "args": false
                 }
             ]
         },

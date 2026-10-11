@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/service"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -49,7 +50,7 @@ func (lc *LogCollector) SetMaxPods(n int) {
 
 // Start begins the periodic log collection goroutine.
 func (lc *LogCollector) Start(logsService service.LogsService, clientset kubernetes.Interface) {
-	go lc.run(logsService, clientset)
+	safego.Go("events-log-collector-run", func() { lc.run(logsService, clientset) })
 	log.Printf("[events/log_collector] started for cluster %s", lc.clusterID)
 }
 

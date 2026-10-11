@@ -22,6 +22,7 @@ import { useActiveCluster, setActiveClusterBySessionId } from '@/stores/clusterP
 import { getHealth, deleteCluster, getProjects, deleteProject, type BackendCluster, type BackendProject } from '@/services/backendApiClient';
 import { useClustersFromBackend } from '@/hooks/useClustersFromBackend';
 import { useActiveClusterId } from '@/hooks/useActiveClusterId';
+import { ErrorTracker } from '@/lib/errorTracker';
 import { useBackendCircuitOpen } from '@/hooks/useBackendCircuitOpen';
 import { CreateProjectDialog } from '@/components/projects/CreateProjectDialog';
 import { ProjectCard } from '@/components/projects/ProjectCard';
@@ -170,6 +171,11 @@ export default function Settings() {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('set_analytics_consent', { consent: enabled });
       setAnalyticsConsent(enabled);
+      if (enabled) {
+        // Sentry is gated on this same consent flag; start it now if a DSN
+        // was configured at build time (no-op otherwise).
+        ErrorTracker.notifyConsentGranted();
+      }
       toast.success(enabled ? 'Analytics enabled' : 'Analytics disabled');
     } catch (error) {
       toast.error(`Failed to update analytics setting: ${error}`);

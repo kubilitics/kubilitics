@@ -53,25 +53,35 @@ func TestBfsWalkWithDepth(t *testing.T) {
 	assert.False(t, hasA)
 }
 
-func TestShortestPath(t *testing.T) {
+// TestBfsParentsAndPathFromParents covers the bfsParents + pathFromParents
+// pair that replaced the old shortestPath (a fresh BFS per src/dst pair) —
+// one bfsParents call shares its result across every pathFromParents
+// reconstruction from the same src, which is what makes
+// computeSingleResourceBlast's per-affected-node path lookups O(1) each
+// instead of a fresh O(V+E) BFS per node (see snapshot.go's bfsParents doc
+// comment). Same three cases the old shortestPath test covered: a path
+// exists, no path exists, and src == dst.
+func TestBfsParentsAndPathFromParents(t *testing.T) {
 	adj := map[string]map[string]bool{
 		"A": {"B": true, "C": true},
 		"B": {"D": true},
 		"C": {"D": true},
 	}
 
-	path := shortestPath(adj, "A", "D")
+	parents := bfsParents(adj, "A")
+	path := pathFromParents(parents, "A", "D")
 	require.NotNil(t, path)
 	assert.Equal(t, "A", path[0])
 	assert.Equal(t, "D", path[len(path)-1])
 	assert.Len(t, path, 3) // A -> B/C -> D
 
-	// No path
-	path2 := shortestPath(adj, "D", "A")
+	// No path (D has no outgoing edges in this graph, so BFS from D never reaches A)
+	parentsFromD := bfsParents(adj, "D")
+	path2 := pathFromParents(parentsFromD, "D", "A")
 	assert.Nil(t, path2)
 
 	// Same node
-	path3 := shortestPath(adj, "A", "A")
+	path3 := pathFromParents(parents, "A", "A")
 	assert.Equal(t, []string{"A"}, path3)
 }
 
@@ -255,7 +265,9 @@ func TestBuildFailurePath(t *testing.T) {
 	podKey := refKey(models.ResourceRef{Kind: "Pod", Namespace: "default", Name: "web-abc-xyz"})
 	svcKey := refKey(models.ResourceRef{Kind: "Service", Namespace: "default", Name: "web-svc"})
 
-	hops := snap.buildFailurePath(podKey, svcKey)
+	parents := bfsParents(snap.Reverse, podKey)
+	path := pathFromParents(parents, podKey, svcKey)
+	hops := snap.hopsFromPath(path)
 	require.Len(t, hops, 3) // Pod->RS, RS->Dep, Dep->Svc
 	assert.Equal(t, "Pod", hops[0].From.Kind)
 	assert.Equal(t, "ReplicaSet", hops[0].To.Kind)

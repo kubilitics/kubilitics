@@ -33,6 +33,21 @@ func BuildGraph(ctx context.Context, opts v2.Options, bundle *v2.ResourceBundle)
 	// post-render enricher.
 	nodes = PropagateHealth(nodes, edges)
 
+	// Collapse pods under a shared owner into a single PodGroup node on
+	// broad views (Cluster/Namespace/Workload) — AggregatePods existed,
+	// fully tested, with zero call sites until now. Without this, every
+	// pod in the cluster became its own TopologyNode unconditionally
+	// (NodesFromBundle above), which is the root cause of Topology
+	// slowing/freezing as pod count grows: a 15k-pod cluster built and
+	// matched 15k individual pod nodes on every request before any
+	// later truncation (handler.go's MaxTopologyNodes) got a chance to
+	// act. Skipped on ViewModeResource: a user drilling into one specific
+	// resource wants to see its individual pods (e.g. which replica is
+	// unhealthy), not a collapsed summary.
+	if opts.Mode != v2.ViewModeResource {
+		nodes, edges = AggregatePods(nodes, edges)
+	}
+
 	buildMs := time.Since(start).Milliseconds()
 	clusterName := opts.ClusterName
 	if clusterName == "" {
@@ -489,25 +504,34 @@ func groupsFromBundle(b *v2.ResourceBundle) []v2.TopologyGroup {
 		}
 		seen[id] = true
 	}
+
+	// Previously each namespace re-scanned every pod/deployment/service in
+	// the WHOLE bundle looking for members — O(namespaces × total
+	// resources). Building these three namespace-keyed indexes once turns
+	// that into O(namespaces + total resources).
+	podsByNS := make(map[string][]string, len(b.Pods))
+	for i := range b.Pods {
+		ns := b.Pods[i].Namespace
+		podsByNS[ns] = append(podsByNS[ns], v2.NodeID("Pod", ns, b.Pods[i].Name))
+	}
+	deploymentsByNS := make(map[string][]string, len(b.Deployments))
+	for i := range b.Deployments {
+		ns := b.Deployments[i].Namespace
+		deploymentsByNS[ns] = append(deploymentsByNS[ns], v2.NodeID("Deployment", ns, b.Deployments[i].Name))
+	}
+	servicesByNS := make(map[string][]string, len(b.Services))
+	for i := range b.Services {
+		ns := b.Services[i].Namespace
+		servicesByNS[ns] = append(servicesByNS[ns], v2.NodeID("Service", ns, b.Services[i].Name))
+	}
+
 	var out []v2.TopologyGroup
 	for ns := range seen {
 		namespaceName := strings.TrimPrefix(ns, "group-ns-")
 		var members []string
-		for i := range b.Pods {
-			if b.Pods[i].Namespace == namespaceName {
-				members = append(members, v2.NodeID("Pod", b.Pods[i].Namespace, b.Pods[i].Name))
-			}
-		}
-		for i := range b.Deployments {
-			if b.Deployments[i].Namespace == namespaceName {
-				members = append(members, v2.NodeID("Deployment", b.Deployments[i].Namespace, b.Deployments[i].Name))
-			}
-		}
-		for i := range b.Services {
-			if b.Services[i].Namespace == namespaceName {
-				members = append(members, v2.NodeID("Service", b.Services[i].Namespace, b.Services[i].Name))
-			}
-		}
+		members = append(members, podsByNS[namespaceName]...)
+		members = append(members, deploymentsByNS[namespaceName]...)
+		members = append(members, servicesByNS[namespaceName]...)
 		out = append(out, v2.TopologyGroup{
 			ID: ns, Label: namespaceName, Type: "namespace", Members: members, Collapsed: false,
 			Style: v2.GroupStyle{BackgroundColor: "#f1f5f9", BorderColor: "#94a3b8"},

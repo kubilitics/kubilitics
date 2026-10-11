@@ -14,6 +14,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/kubilitics/kubilitics-backend/internal/config"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/repository"
 	"golang.org/x/oauth2"
 )
@@ -80,7 +81,7 @@ func NewProvider(ctx context.Context, cfg *config.Config, repo *repository.SQLit
 	}
 
 	// Cleanup expired states every 10 minutes
-	go p.cleanupStates()
+	safego.Go("oidc-provider-cleanup-states", p.cleanupStates)
 
 	return p, nil
 }

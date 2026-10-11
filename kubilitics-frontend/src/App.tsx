@@ -334,6 +334,7 @@ function ModeSelectionEntryPoint() {
 
 import { GlobalErrorBoundary, RouteErrorBoundary } from "@/components/GlobalErrorBoundary";
 import { AnalyticsConsentDialog } from "@/components/AnalyticsConsentDialog";
+import { ErrorTracker } from "@/lib/errorTracker";
 import { KubeconfigContextDialog } from "@/components/KubeconfigContextDialog";
 import { BackendStartupOverlay, BrowserStartupBanner } from "@/components/BackendStartupOverlay";
 import { BackendStatusBanner } from "@/components/layout/BackendStatusBanner";
@@ -545,6 +546,11 @@ function AnalyticsConsentWrapper({ children }: { children: React.ReactNode }) {
   const handleConsent = async (consent: boolean) => {
     setShowConsent(false);
     // P2-9: AnalyticsConsentDialog calls invoke('set_analytics_consent', { consent }) before onConsent; no need to save here.
+    if (consent) {
+      // Sentry is gated on this same consent flag — start it now that the
+      // user has opted in (it does nothing if no DSN was configured at build time).
+      ErrorTracker.notifyConsentGranted();
+    }
   };
 
   return (

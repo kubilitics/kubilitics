@@ -2,16 +2,61 @@ package rest
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 
 	"github.com/kubilitics/kubilitics-backend/internal/graph"
 	"github.com/kubilitics/kubilitics-backend/internal/models"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/logger"
+	"github.com/kubilitics/kubilitics-backend/internal/pkg/safego"
 	"github.com/kubilitics/kubilitics-backend/internal/pkg/validate"
 )
+
+// blastRadiusComputeTimeout bounds a single ComputeBlastRadiusWithMode call.
+// The computation is pure in-memory graph traversal (no I/O to cancel
+// cooperatively via ctx), so this is a watchdog, not true cancellation — the
+// goroutine below still runs to completion in the background even after we
+// give up on it. It exists as defense-in-depth alongside the algorithmic
+// fixes in internal/graph (O(1) pod/edge-type lookups, a single shared BFS
+// instead of one per affected node): those fixes mean this should now
+// essentially never fire, but a pathological case (e.g. namespace-deletion
+// against a namespace with hundreds of workloads, each re-running the full
+// per-resource computation) must still fail fast and visibly instead of
+// leaving the client waiting indefinitely — the "gets lost" symptom this
+// whole fix targets. 15s is generous relative to the now-sub-100ms typical
+// case, deliberately so this isn't a performance SLA, just an outer bound.
+const blastRadiusComputeTimeout = 15 * time.Second
+
+// computeBlastRadiusWithTimeout runs snap.ComputeBlastRadiusWithMode on its
+// own goroutine and returns ctx.Err() if it doesn't finish before ctx is
+// done. See blastRadiusComputeTimeout's doc comment for why this can't be
+// true cancellation.
+func computeBlastRadiusWithTimeout(ctx context.Context, snap *graph.GraphSnapshot, target models.ResourceRef, failureMode string) (*models.BlastRadiusResult, error) {
+	type outcome struct {
+		result *models.BlastRadiusResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	// Wrapped in safego.Go purely for panic recovery — this goroutine is
+	// intentionally still a fire-and-forget watchdog target (see the
+	// blastRadiusComputeTimeout doc comment above): we don't true-cancel it,
+	// we just stop waiting on it. An unrecovered panic here would otherwise
+	// crash the whole backend process even though the caller already gave up.
+	safego.Go("blast-radius-compute-watchdog", func() {
+		result, err := snap.ComputeBlastRadiusWithMode(target, failureMode)
+		done <- outcome{result: result, err: err}
+	})
+	select {
+	case o := <-done:
+		return o.result, o.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 // GetBlastRadius handles GET /clusters/{clusterId}/blast-radius/{namespace}/{kind}/{name}.
 // It reads from the pre-built graph engine snapshot instead of computing per-request.
@@ -63,8 +108,14 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := snap.ComputeBlastRadiusWithMode(target, failureMode)
+	ctx, cancel := context.WithTimeout(r.Context(), blastRadiusComputeTimeout)
+	defer cancel()
+	result, err := computeBlastRadiusWithTimeout(ctx, snap, target, failureMode)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			respondTimeout(w, r, http.StatusServiceUnavailable, ErrCodeTimeout, "GetBlastRadius", clusterID, "Blast radius computation timed out")
+			return
+		}
 		requestID := logger.FromContext(r.Context())
 		respondErrorWithCode(w, http.StatusNotFound, ErrCodeNotFound, err.Error(), requestID)
 		return
