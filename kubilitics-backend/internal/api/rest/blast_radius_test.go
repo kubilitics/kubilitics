@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -159,5 +160,47 @@ func TestGetOrStartGraphEngine_ConcurrentSameClusterCoalesces(t *testing.T) {
 		if engine != first {
 			t.Fatalf("expected all %d concurrent callers to receive the SAME engine instance, got a different one at call %d", n, i)
 		}
+	}
+}
+
+// TestComputeBlastRadiusWithTimeout_NormalCaseUnaffected confirms the
+// timeout wrapper is transparent on the (now typical, post-optimization)
+// fast path — same result and error as calling ComputeBlastRadiusWithMode
+// directly.
+func TestComputeBlastRadiusWithTimeout_NormalCaseUnaffected(t *testing.T) {
+	snap := graph.BuildSnapshot(&graph.ClusterResources{}, false, nil, nil)
+	target := models.ResourceRef{Kind: "Deployment", Namespace: "default", Name: "nonexistent"}
+
+	direct, directErr := snap.ComputeBlastRadiusWithMode(target, graph.FailureModeWorkloadDeletion)
+	wrapped, wrappedErr := computeBlastRadiusWithTimeout(context.Background(), snap, target, graph.FailureModeWorkloadDeletion)
+
+	if (directErr == nil) != (wrappedErr == nil) {
+		t.Fatalf("error presence mismatch: direct=%v wrapped=%v", directErr, wrappedErr)
+	}
+	if directErr != nil && wrappedErr != nil && directErr.Error() != wrappedErr.Error() {
+		t.Errorf("error message mismatch: direct=%q wrapped=%q", directErr.Error(), wrappedErr.Error())
+	}
+	if (direct == nil) != (wrapped == nil) {
+		t.Fatalf("result presence mismatch: direct=%v wrapped=%v", direct, wrapped)
+	}
+}
+
+// TestComputeBlastRadiusWithTimeout_RespectsExpiredContext proves the
+// watchdog branch actually fires: an already-expired context must return
+// context.DeadlineExceeded rather than waiting for (or silently ignoring)
+// the computation goroutine, which is the GetBlastRadius handler's cue to
+// respond with a visible timeout instead of leaving the client to "get
+// lost" waiting forever — the exact symptom this wrapper exists to prevent.
+func TestComputeBlastRadiusWithTimeout_RespectsExpiredContext(t *testing.T) {
+	snap := graph.BuildSnapshot(&graph.ClusterResources{}, false, nil, nil)
+	target := models.ResourceRef{Kind: "Deployment", Namespace: "default", Name: "nonexistent"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-ctx.Done() // guarantee the deadline has actually elapsed before calling
+
+	_, err := computeBlastRadiusWithTimeout(ctx, snap, target, graph.FailureModeWorkloadDeletion)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context.DeadlineExceeded, got %v", err)
 	}
 }
